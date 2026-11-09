@@ -24,7 +24,7 @@ Any agent on the phone can use it: agents with a terminal use the `vscreen` CLI,
 <p align="center"><img src="docs/agents.png" width="860" alt="Minis, Eta, RikkaHub and Muse all driving a forum app on the background screen through vscreen"></p>
 <p align="center"><sub>One install command: four different Android agents (Minis, Eta, RikkaHub, Muse) all connect and drive the background screen.</sub></p>
 
-<p align="center"><img src="docs/app.png" width="760" alt="Agent-VScreen home, setup, agent connection, settings and app restrictions"></p>
+<p align="center"><img src="docs/app.en.png" width="760" alt="Agent-VScreen home, language, setup, agent connection, settings, app rules and diagnostics"></p>
 <p align="center"><sub>The app: first-time setup, connecting an agent (CLI / MCP / HTTP), settings and app restrictions.</sub></p>
 
 - Version: 1.1.7 (versionCode 9) · [Download APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
