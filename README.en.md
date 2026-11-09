@@ -48,7 +48,7 @@ Any agent on the phone can use it: agents with a terminal use the `vscreen` CLI,
 
 ## More than a background screen: the scaffold around it
 
-Agent apps such as [Mika](https://github.com/wangzan101/Mika) also have a hidden background screen, but it serves their own model: other agents can only **hand Mika a task** through its CLI, Skill or MCP, and Mika's model decides how to tap and what to look at. Agent-VScreen is not that screen split out for others. It builds a whole scaffold around the background screen so that **your own agent operates it directly**, sees it clearly, keeps up with time, and knows whether each step really worked.
+Agent-VScreen is more than a virtual screen an agent can use: it builds a whole scaffold around the background screen so that your own agent operates it directly, sees it clearly, keeps up with time, and knows whether each step really worked.
 
 - **Time awareness**: while the agent works, the screen is looked at about 5 times a second and its text read about once a second, with timestamps. So every result's [Meanwhile] block tells what text appeared, disappeared or flashed from the last result until now (including the seconds the agent spent thinking or calling other tools), where the picture changed and for how long, with a contact sheet when it changed. Countdowns, loading, animations and pop-ups are not missed.
 - **Waiting and watching**: after any action add an `until` condition (text appears, text disappears, picture changes, picture is still, a pixel's color, a given app is in front) with a time limit; if it never comes, the result says so. `--stop` is watched for the whole stretch, `--watch` keeps looking after the steps. `--keep notify|wake` keeps watching after the turn ends and notifies the user or wakes the agent when the condition shows up. For realtime games, saved pause and resume steps make every stretch resume first and pause at the end, so the game becomes turn-based.
@@ -56,16 +56,6 @@ Agent apps such as [Mika](https://github.com/wangzan101/Mika) also have a hidden
 - **Every step checked**: a step that misses (until never came, the text is not in the box, focus is not where you tapped) stops the stretch there, skips the rest and describes the screen now; a missed tap lists the closest candidates.
 - **Working with others**: sessions let several agents take turns on one screen (`BUSY` says whose it is and when it frees up); `handoff in/out` takes over an app the user has open on the main screen or hands it back; the user can take over or stop the AI at any time; per-app rules (blocked or read-only) and a confirmation stop for payment buttons (`CONFIRM_REQUIRED`). Each app can also keep notes and saved step segments (`--save` / `use`) that the next launch lists.
 - **No model inside, no fight over privileges**: the phone side calls no model; the caller's model decides what the screen means. Only Shizuku is used: no wireless debugging pairing, no adb.
-
-| | Agent-VScreen | Mika |
-|---|---|---|
-| What it is | A background screen and tool layer for any agent, with no model of its own | A complete agent app with its own chat and model access |
-| How other agents use it | Operate the screen directly: command line, MCP, HTTP, Operit ToolPkg; every step is the caller's model's decision | Hand over a task through CLI, Skill or MCP; Mika's model does it on the phone and returns the result |
-| What the model gets | Four fixed blocks: Done, Meanwhile (including changes while thinking), Now (numbered elements and screenshots), Notes | Used inside Mika |
-| Reading the screen | Accessibility + on-device OCR (ML Kit, optional PP-OCRv6) | Accessibility + bundled text recognition, optional vision model |
-| Privilege | Shizuku | Wireless debugging paired once to start a built-in helper |
-
-<sub>Mika facts are from its [README](https://github.com/wangzan101/Mika), [features](https://github.com/wangzan101/Mika/blob/main/docs/features.en.md) and [computer access](https://github.com/wangzan101/Mika/blob/main/docs/computer.en.md) pages (checked 2026-11-09). They aim at different things: if you want one app that does it all, Mika is simpler; if you want the agent you already use to operate apps in the background directly, use Agent-VScreen.</sub>
 
 ## Install and set up
 
@@ -132,7 +122,6 @@ The token equals control of the phone, so the app never offers a public link.
 
 ## Docs
 
-- [docs/COMPARISON.md](docs/COMPARISON.md) (Chinese): detailed comparison with Mika, Minis, DSH Go and other phone agents.
 - [API.md](API.md) (Chinese): the full CLI, MCP and HTTP reference, sessions, watches, the floating window, remote access and known limits.
 
 ## Build from source
