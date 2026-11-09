@@ -125,6 +125,8 @@ Minis 用户：把 `VSCREEN_SHOT_DIR` 设成 `/var/minis/attachments/vscreen`，
 - 返回一段 text，以及最多 4 张 `image/jpeg`（当前截图，有变化时还有拼图），agent 的模型可以直接看图。文字里的截图路径换成了“[图N，见附图]”。
 - `isError` 在命令被拒绝或失败时为 true。
 
+Operit 的接入步骤见 [README](README.md#在-operit-中使用)。
+
 ### 2.3 HTTP（适合自己写调用代码的 agent 应用）
 
 只监听 `127.0.0.1:18765`，端口可以在 App 里改。除标注“无需令牌”的接口外，都要带令牌，三种写法任选一种：`Authorization: Bearer <令牌>`、`X-VScreen-Token: <令牌>`、`?token=<令牌>`。

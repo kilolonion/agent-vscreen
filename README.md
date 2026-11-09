@@ -73,6 +73,41 @@ vscreen help all
 
 如果首页出现 **后台运行受限**，点 **去设置**，把 Agent-VScreen 设为允许自启动、关联启动和后台活动。荣耀和华为在“应用启动管理”里改成“手动管理”。
 
+## 在 Operit 中使用
+
+下面以 Operit 为例。这不是专门为 Operit 做的适配：同一台手机上的其他安卓 agent，按“接入 agent”里的命令行、MCP 或 HTTP 方式默认安装就能用；云端或电脑上的 agent 用 Tailscale 连进来，见下一节。
+
+Operit 和 Operit 2 都能连远程 MCP，Agent-VScreen 不用装任何插件。
+
+1. 在 Agent-VScreen 里完成首次配置，确认服务在运行。
+2. 在 **接入 agent → MCP** 里复制令牌。
+3. 打开 Operit 的 MCP 管理页，点 **导入/连接 → 连接远程**，填：
+   - 名称（插件 ID）：`vscreen`
+   - 地址：`http://127.0.0.1:18765/mcp`（18765 是默认端口，在 App 里改过端口的话换成你的）
+   - 连接方式：`httpStream`
+   - Bearer Token：刚复制的令牌
+4. 保存后打开它的开关。远程插件不用点“部署”，状态变成 active 就能用。
+5. 在聊天里试一句：“用 vscreen 在虚拟屏打开设置，告诉我系统版本。”
+
+也可以用 **配置导入**，粘贴下面的 JSON 后点 **合并配置**：
+
+```json
+{
+  "mcpServers": {
+    "vscreen": {
+      "url": "http://127.0.0.1:18765/mcp",
+      "headers": { "Authorization": "Bearer <令牌>" }
+    }
+  }
+}
+```
+
+注意：
+
+- Operit 和 Agent-VScreen 要在同一台手机上。Operit 在别的设备上时，把地址换成 Tailscale 地址，见下一节。
+- Operit 自带的屏幕操作工具和 vscreen 可以共存。想让它只用副屏，在角色提示词里写：“操作其它应用时一律用 vscreen 工具，不要动主屏。”
+- 令牌等于这台手机的操作权限，不要贴进公开的角色卡、分享的配置或截图。
+
 ## 让其它设备连进来（可选，默认关闭）
 
 服务默认只监听本机的 `127.0.0.1:18765`。要从电脑或另一台手机调用，在“接入 agent”的 **让其它设备连进来** 里选 **内置 Tailscale**：不用装 Tailscale App，也不占系统 VPN，在 App 里登录一次 Tailscale 就行，只有你自己 Tailscale 网络里的设备连得进来。已经装了 Tailscale App 的也可以选 **Tailscale App**，或者用 SSH 端口转发。

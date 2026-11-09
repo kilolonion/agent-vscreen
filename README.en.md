@@ -61,6 +61,41 @@ vscreen act "tap Search; type About phone; key enter until text:About phone"
 vscreen help all
 ```
 
+## Use with Operit
+
+Operit is just an example here; nothing is tailored to it. Other Android agents on the same phone work with the default install from "Connect an agent" (command line, MCP or HTTP), and cloud or desktop agents connect over Tailscale (see the next section).
+
+Operit and Operit 2 can both connect to remote MCP servers, so Agent-VScreen needs no plugin.
+
+1. Finish the first-time setup in Agent-VScreen and make sure the service is running.
+2. Copy the token under **Connect an agent → MCP**.
+3. Open Operit's MCP management page, tap **Import/Connect → Connect remote**, and fill in:
+   - Name (plugin ID): `vscreen`
+   - URL: `http://127.0.0.1:18765/mcp` (18765 is the default port; use yours if you changed it in the app)
+   - Connection type: `httpStream`
+   - Bearer Token: the token you just copied
+4. Save and turn its switch on. Remote plugins need no "Deploy"; once the status shows active it is ready.
+5. Try in a chat: "Use vscreen to open Settings on the virtual screen and tell me the system version."
+
+You can also use **Config import**: paste the JSON below and tap **Merge config**:
+
+```json
+{
+  "mcpServers": {
+    "vscreen": {
+      "url": "http://127.0.0.1:18765/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+Notes:
+
+- Operit and Agent-VScreen must be on the same phone. If Operit runs on another device, replace the URL with the Tailscale address (see the next section).
+- Operit's own screen tools and vscreen can coexist. To keep it on the background screen only, add to the character prompt: "Always use the vscreen tool to operate other apps; never touch the main screen."
+- The token equals control of this phone: don't paste it into public character cards, shared configs or screenshots.
+
 ## Connecting from other devices (optional, off by default)
 
 The service only listens on `127.0.0.1:18765`. To call it from a computer or another phone, pick **Built-in Tailscale** under **Let other devices connect**: no Tailscale app needed and no system VPN slot taken; sign in to Tailscale once inside the app and only devices on your own tailnet can reach it. **Tailscale app** mode and SSH port forwarding also work.
