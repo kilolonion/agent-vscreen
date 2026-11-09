@@ -333,12 +333,12 @@ class MainActivity : ComponentActivity() {
         Text(t, fontSize = 12.sp, lineHeight = 18.sp, color = color, modifier = Modifier.fillMaxWidth())
 
     @Composable
-    private fun PrimaryAction(text: String, onClick: () -> Unit) =
-        Button(onClick = onClick, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+    private fun PrimaryAction(text: String, enabled: Boolean = true, onClick: () -> Unit) =
+        Button(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis) }
 
     @Composable
-    private fun SecondaryAction(text: String, onClick: () -> Unit) =
-        OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+    private fun SecondaryAction(text: String, enabled: Boolean = true, onClick: () -> Unit) =
+        OutlinedButton(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis) }
 
     @Composable
     private fun Disclosure(text: String, open: Boolean, onClick: () -> Unit) {
@@ -365,63 +365,83 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * 1.1.7: one card, top to bottom in the order the user decides: where the agent runs (and, for another device, the
+     * Tailscale setup right there), how it connects, what to copy, the token. The "where" switch is the user's choice
+     * and always shown: it used to appear only while a Tailscale address existed, so it vanished whenever the node
+     * restarted or the address poll came back empty for a moment.
+     */
     @Composable
     private fun Connect() {
-        var tab by remember { mutableIntStateOf(0) }
+        var tab by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+        var where by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
         var token by remember { mutableStateOf(ApiConfig.token) }
         var showToken by remember { mutableStateOf(false) }
         var rawOpen by remember { mutableStateOf(false) }
-        var where by remember { mutableIntStateOf(0) }
+        var mode by remember { mutableStateOf(ApiConfig.tailnetMode) }
         val ledger by com.kilon.agentvscreen.api.AgentLedger.snap.collectAsState()
         val ts by com.kilon.agentvscreen.host.Tailnet.status.collectAsState()
         var sysAddr by remember { mutableStateOf<String?>(null) }
-        LaunchedEffect(Unit) { while (true) { sysAddr = HostService.server?.tailAddress; delay(3_000) } }
-        // 1.1.7: the address an agent on another device uses (built-in node or the Tailscale app), if any.
-        val remoteHost = when (ApiConfig.tailnetMode) {
+        LaunchedEffect(Unit) { while (true) { HostService.server?.tailAddress?.let { sysAddr = it }; delay(3_000) } }
+        // The address an agent on another device uses. Kept through short gaps (node restarting, an empty poll) so
+        // what the user copies does not flip back to 127.0.0.1; dropped when the mode changes.
+        val liveHost = when (mode) {
             com.kilon.agentvscreen.host.Tailnet.Mode.BUILTIN -> ts.ip?.takeIf { ts.loggedIn }
             com.kilon.agentvscreen.host.Tailnet.Mode.SYSTEM -> sysAddr
             else -> null
         }
-        val remoteBase = remoteHost?.let { "http://$it:${ApiConfig.port}" }
-        val base = if (where == 1 && remoteBase != null) remoteBase else ApiConfig.baseUrl
+        var lastHost by remember(mode) { mutableStateOf<String?>(null) }
+        if (liveHost != null && liveHost != lastHost) lastHost = liveHost
+        val remoteBase = (liveHost ?: lastHost)?.let { "http://$it:${ApiConfig.port}" }
+        val remoteReady = where == 1 && remoteBase != null
+        val base = if (remoteReady) remoteBase!! else ApiConfig.baseUrl
+        val canCopy = where == 0 || remoteReady
+
         Block(tr("接入 agent", "Connect an agent")) {
-            Segments(listOf(tr("命令行", "Shell"), "MCP", "HTTP"), tab) { tab = it }
-            if (remoteBase != null) {
-                Segments(listOf(tr("agent 在这台手机上", "Agent on this phone"), tr("在其它设备上", "On another device")), where) { where = it }
-                if (where == 1) Hint(tr("下面复制的内容会用 Tailscale 地址 $remoteBase，那台设备要在你的 Tailscale 网络里。", "What you copy below uses the Tailscale address $remoteBase; that device must be in your Tailscale network."))
+            SubTitle(tr("1. agent 在哪", "1. Where the agent runs"))
+            Segments(listOf(tr("这台手机上", "On this phone"), tr("其它设备上（Tailscale）", "Another device (Tailscale)")), where) { where = it }
+            if (where == 0) {
+                Hint(tr("同一台手机上的 agent（Termux、Minis、Operit 等）直接连本机 127.0.0.1:${ApiConfig.port}，什么都不用设。",
+                    "Agents on this phone (Termux, Minis, Operit, ...) connect to 127.0.0.1:${ApiConfig.port} directly; nothing to set up."))
+            } else {
+                Remote(ts, remoteBase, mode) { mode = it }
             }
-            when (tab) {
-                0 -> {
-                    Hint(tr("Termux、Minis 等带终端的 agent：把下面这段话发给它（推荐）。它会装好 vscreen 命令，并把“我能在手机上后台操作应用”记进自己的长期记忆，以后的新对话里也会用。",
-                        "Agents with a terminal (Termux, Minis, ...): send them the message below (recommended). It installs the vscreen command and has the agent save \"I can operate apps on the phone in the background\" in its long-term memory, so new conversations use it too."))
-                    PrimaryAction(tr("复制给 agent 的话", "Copy message for your agent")) { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboard(base)) }
-                    Disclosure(tr("只看安装命令", "Install command only"), rawOpen) { rawOpen = !rawOpen }
-                    AnimatedVisibility(rawOpen) {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+
+            SubTitle(tr("2. 接入方式", "2. How it connects"))
+            Segments(listOf(tr("命令行", "Shell"), "MCP", "HTTP"), tab) { tab = it; rawOpen = false }
+            Hint(when (tab) {
+                0 -> tr("带终端的 agent：把“给 agent 的话”发给它。它会装好 vscreen 命令，并把“我能在手机上后台操作应用”记进自己的长期记忆，以后的新对话里也会用。",
+                    "Agents with a terminal: send them the message. It installs the vscreen command and has the agent save \"I can operate apps on the phone in the background\" in its long-term memory, so new conversations use it too.")
+                1 -> tr("支持 MCP 的 agent：发给它的话里有 MCP 配置（streamable HTTP，一个工具 vscreen，截图直接附在结果里）和要它记住的能力说明。",
+                    "Agents with MCP: the message has the MCP config (streamable HTTP, one tool vscreen, screenshots attached to results) and the ability note for it to remember.")
+                else -> tr("自己写调用代码的 agent 应用：发给它的话里有地址、令牌和能力说明。返回 JSON（text、data、images、exit、code），完整说明 GET /v1/help。",
+                    "Agent apps that write their own calls: the message has the address, token and ability note. Replies are JSON (text, data, images, exit, code); full reference at GET /v1/help.")
+            })
+            if (where == 1) Hint(
+                if (remoteReady) tr("下面复制的内容用 Tailscale 地址 $remoteBase。", "What you copy below uses the Tailscale address $remoteBase.")
+                else tr("先在上面连好 Tailscale，下面才能复制给其它设备的内容。", "Connect Tailscale above first; then you can copy what the other device needs."),
+                if (remoteReady) Palette.takeover else Palette.stopped)
+            PrimaryAction(tr("复制给 agent 的话", "Copy message for your agent"), enabled = canCopy) {
+                copy(tr("给 agent 的话", "Message for your agent"), when (tab) { 1 -> AgentGuide.onboardMcp(base); 2 -> AgentGuide.onboardHttp(base); else -> AgentGuide.onboard(base) })
+            }
+            if (tab != 2) {
+                Disclosure(if (tab == 0) tr("只看安装命令", "Install command only") else tr("只看 MCP 配置", "MCP config only"), rawOpen) { rawOpen = !rawOpen }
+                AnimatedVisibility(rawOpen && canCopy) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (tab == 0) {
                             Hint(tr("只把命令给 agent 的话，大多数 agent 装完就忘了，新对话里不知道有 vscreen。", "With only the command, most agents forget vscreen after installing it, and new conversations don't know about it."))
                             Code(ApiConfig.installLine(base)) { copy(tr("安装命令", "Install command"), ApiConfig.installLine(base)) }
-                        }
+                        } else Code(ApiConfig.mcpJson(base)) { copy(tr("MCP 配置", "MCP config"), ApiConfig.mcpJson(base)) }
                     }
                 }
-                1 -> {
-                    Hint(tr("支持 MCP 的 agent：把下面这段话发给它，里面有 MCP 配置（streamable HTTP，一个工具 vscreen，截图直接附在结果里）和要它记住的能力说明。",
-                        "Agents with MCP: send them the message below. It has the MCP config (streamable HTTP, one tool vscreen, screenshots attached to results) and the ability note for it to remember."))
-                    PrimaryAction(tr("复制给 agent 的话", "Copy message for your agent")) { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboardMcp(base)) }
-                    Disclosure(tr("只看 MCP 配置", "MCP config only"), rawOpen) { rawOpen = !rawOpen }
-                    AnimatedVisibility(rawOpen) { Code(ApiConfig.mcpJson(base)) { copy(tr("MCP 配置", "MCP config"), ApiConfig.mcpJson(base)) } }
-                }
-                else -> {
-                    Hint(tr("自己写调用代码的 agent 应用：把下面这段话发给它，里面有地址、令牌和要它记住的能力说明。返回 JSON（text、data、images、exit、code），完整说明 GET /v1/help。",
-                        "Agent apps that write their own calls: send them the message below, with the address, token and the ability note to remember. Replies are JSON (text, data, images, exit, code); full reference at GET /v1/help."))
-                    PrimaryAction(tr("复制给 agent 的话", "Copy message for your agent")) { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboardHttp(base)) }
-                }
             }
-            AgentMemoryRow(ledger)
-            Hint(tr("agent 有“自定义指令”或“记忆”设置的话，也可以把能力说明直接贴进去。", "If the agent has a custom instructions or memory setting, you can also paste the ability note there yourself."))
-            SecondaryAction(tr("复制能力说明", "Copy ability note")) {
+            SecondaryAction(tr("复制能力说明", "Copy ability note"), enabled = canCopy) {
                 copy(tr("能力说明", "Ability note"), when (tab) { 1 -> AgentGuide.memoryMcp(); 2 -> AgentGuide.memoryHttp(base); else -> AgentGuide.memory(base) })
             }
-            SubTitle(tr("令牌", "Token"))
+            Hint(tr("能力说明也可以直接贴进 agent 的“自定义指令”或“记忆”设置。", "You can also paste the ability note into the agent's custom instructions or memory setting."))
+            AgentMemoryRow(ledger)
+
+            SubTitle(tr("3. 令牌", "3. Token"))
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(start = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -434,8 +454,9 @@ class MainActivity : ComponentActivity() {
                     Icon(Icons.Filled.Refresh, tr("换一个令牌", "New token"))
                 }
             }
-            Hint(tr("令牌只给你信任的 agent：拿到它就能在副屏上操作你的应用。服务只监听本机，网页调用一律拒绝。", "Give the token only to agents you trust: with it they can operate your apps on the screen. The service listens only on this phone, and calls from web pages are always refused."))
-            Remote(ts, remoteBase)
+            Hint(if (mode == com.kilon.agentvscreen.host.Tailnet.Mode.OFF)
+                tr("令牌只给你信任的 agent：拿到它就能在副屏上操作你的应用。服务只监听本机，网页调用一律拒绝。", "Give the token only to agents you trust: with it they can operate your apps on the screen. The service listens only on this phone, and calls from web pages are always refused.")
+            else tr("令牌只给你信任的 agent：拿到它就能在副屏上操作你的应用。服务只接受本机和你 Tailscale 网络里的设备，网页调用一律拒绝。", "Give the token only to agents you trust: with it they can operate your apps on the screen. Only this phone and devices in your Tailscale network can connect, and calls from web pages are always refused."))
         }
     }
 
@@ -472,20 +493,15 @@ class MainActivity : ComponentActivity() {
 
     /** 1.1.6: other devices: off / built-in Tailscale (no app needed) / the Tailscale app on this phone. */
     @Composable
-    private fun Remote(ts: com.kilon.agentvscreen.host.Tailnet.Status, remoteBase: String?) {
-        var mode by remember { mutableStateOf(ApiConfig.tailnetMode) }
+    private fun Remote(ts: com.kilon.agentvscreen.host.Tailnet.Status, remoteBase: String?, mode: com.kilon.agentvscreen.host.Tailnet.Mode, onMode: (com.kilon.agentvscreen.host.Tailnet.Mode) -> Unit) {
         val M = com.kilon.agentvscreen.host.Tailnet.Mode.entries
-        SubTitle(tr("让其它设备连进来", "Let other devices connect"))
-        Hint(tr("默认关。打开后只有你自己 Tailscale 网络里的电脑或手机能连，走加密隧道，局域网和公网都连不到；令牌照样要。“内置”不用装 Tailscale App，“外部 App”用这台手机上已装的 Tailscale。",
-            "Off by default. When on, only computers and phones in your own Tailscale network can connect, through an encrypted tunnel; the local network and the internet cannot, and the token is still required. \"Built-in\" needs no Tailscale app; \"External app\" uses the Tailscale app already on this phone."))
+        Hint(tr("电脑、云端或另一台手机上的 agent 通过 Tailscale 连进来：只有你自己 Tailscale 网络里的设备能连，走加密隧道，局域网和公网都连不到，令牌照样要。“内置”不用装 Tailscale App，“外部 App”用这台手机上已装的 Tailscale。",
+            "Agents on a computer, in the cloud or on another phone connect through Tailscale: only devices in your own Tailscale network can, through an encrypted tunnel; the local network and the internet cannot, and the token is still required. \"Built-in\" needs no Tailscale app; \"External app\" uses the Tailscale app already on this phone."))
         Segments(listOf(tr("关", "Off"), tr("内置", "Built-in"), tr("外部 App", "External app")), M.indexOf(mode)) { i ->
             val m = M[i]
-            mode = m; ApiConfig.tailnetMode = m
+            onMode(m); ApiConfig.tailnetMode = m
             HostService.server?.start(ApiConfig.port)
             com.kilon.agentvscreen.host.Tailnet.sync(applicationContext)
-        }
-        val ready = @Composable {
-            if (remoteBase != null) Hint(tr("连好了。给那台设备上的 agent 接入：在上面选“在其它设备上”，再点“复制给 agent 的话”。", "Ready. To connect an agent on that device, choose \"On another device\" above and tap \"Copy message for your agent\"."), Palette.takeover)
         }
         when (mode) {
             com.kilon.agentvscreen.host.Tailnet.Mode.BUILTIN -> {
@@ -501,7 +517,6 @@ class MainActivity : ComponentActivity() {
                                 (ts.user?.let { "\n" + tr("账号", "Account") + " $it" } ?: "") +
                                 "\n" + tr("在线设备 ${ts.online} 台", "${ts.online} devices online") +
                                 (ts.lastPeer?.let { "\n" + tr("最近来访", "Last visitor") + " $it" } ?: ""))
-                        ready()
                         SecondaryAction(tr("退出 Tailscale 登录", "Log out of Tailscale")) { com.kilon.agentvscreen.host.Tailnet.logout() }
                     }
                     ts.needsLogin && ts.authUrl != null -> {
@@ -540,9 +555,9 @@ class MainActivity : ComponentActivity() {
             }
             com.kilon.agentvscreen.host.Tailnet.Mode.SYSTEM -> {
                 if (remoteBase == null) StatusCard(Palette.stopped, tr("还没找到 Tailscale 地址", "No Tailscale address yet"), tr("在这台手机上装好并登录 Tailscale App，打开连接后 20 秒内自动生效。不想装 App 就选“内置”。", "Install and log in to the Tailscale app on this phone; once it is connected this takes effect within 20 seconds. To skip the app, choose \"Built-in\"."))
-                else { StatusCard(Palette.takeover, tr("已连上 Tailscale App", "Connected through the Tailscale app"), tr("地址", "Address") + " $remoteBase"); ready() }
+                else { StatusCard(Palette.takeover, tr("已连上 Tailscale App", "Connected through the Tailscale app"), tr("地址", "Address") + " $remoteBase") }
             }
-            else -> {}
+            else -> Hint(tr("现在是关闭的：选“内置”或“外部 App”打开。", "Off now: choose \"Built-in\" or \"External app\" to turn it on."), Palette.stopped)
         }
     }
 
