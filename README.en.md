@@ -27,7 +27,7 @@ Any agent on the phone can use it: agents with a terminal use the `vscreen` CLI,
 <p align="center"><img src="docs/app.png" width="760" alt="Agent-VScreen home, setup, agent connection, settings and app restrictions"></p>
 <p align="center"><sub>The app: first-time setup, connecting an agent (CLI / MCP / HTTP), settings and app restrictions.</sub></p>
 
-- Version: 1.1.8 (versionCode 10) · [Download APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
+- Version: 1.1.7 (versionCode 9) · [Download APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
 - Package: `com.kilon.agentvscreen`
 - Android 11+ (Android 14+ recommended), arm64
 - Privileges: [Shizuku](https://shizuku.rikka.app/) only, no root

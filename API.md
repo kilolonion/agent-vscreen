@@ -1,8 +1,8 @@
-# Agent-VScreen 1.1.8 接口说明
+# Agent-VScreen 1.1.7 接口说明
 
 Agent-VScreen 是一个独立的 Android 应用。它在一块看不见的副屏（虚拟屏）上打开和操作别的应用，用户的主屏不受打扰，屏幕上只有一个悬浮小窗显示进度。它不依赖 Minis，也不依赖任何特定的 agent 软件：手机上的任何 agent 都可以通过命令行、HTTP 或 MCP 调用它。
 
-- 包名 `com.kilon.agentvscreen`，版本 1.1.8（versionCode 10），可以覆盖安装之前的版本，也可以和 Minis、Minis VScreen 同时安装。
+- 包名 `com.kilon.agentvscreen`，版本 1.1.7（versionCode 9），可以覆盖安装之前的版本，也可以和 Minis、Minis VScreen 同时安装。
 - 需要 Android 11 及以上、arm64。
 - 副屏能力来自 Minis VScreen v0.5.0：命令、四段回执、回合制、盯守都一样。区别见第 7 节。
 
@@ -183,7 +183,7 @@ Operit 的接入步骤见 [README](README.md#在-operit-中使用)。
 
 服务默认只在本机 `127.0.0.1` 上监听。要从电脑或另一台手机上的 agent 调用，有三种办法。
 
-在“接入 agent”第一步 **agent 在哪** 选 **其它设备上（Tailscale）**，下面就是 Tailscale 的设置，选一种：关（默认）、**内置**、**外部 App**（1.1.8 起这两块合在一起）。
+在“接入 agent”第一步 **agent 在哪** 选 **其它设备上（Tailscale）**，下面就是 Tailscale 的设置，选一种：关（默认）、**内置**、**外部 App**。
 
 **办法一：内置 Tailscale（1.1.6，推荐）**
 

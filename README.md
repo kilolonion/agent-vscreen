@@ -27,7 +27,7 @@ Agent-VScreen 在一块看不见的虚拟屏上打开和操作别的应用，你
 <p align="center"><img src="docs/app.png" width="760" alt="Agent-VScreen 首页、首次配置、接入 agent、设置和应用限制"></p>
 <p align="center"><sub>App 界面：首次配置、接入 agent（命令行 / MCP / HTTP）、设置和应用限制。</sub></p>
 
-- 版本：1.1.8（versionCode 10）
+- 版本：1.1.7（versionCode 9）
 - 包名：`com.kilon.agentvscreen`
 - 系统：Android 11 及以上，推荐 Android 14 及以上
 - 特权：只用 [Shizuku](https://shizuku.rikka.app/)，不需要 root
@@ -136,12 +136,10 @@ Tailscale 的设置就在这个选项下面。连好后，下面复制的给 age
 
 ## 1.1.x 更新内容
 
-- **1.1.8**
-  - “接入 agent”重新排版：先选 agent 在哪（这台手机 / 其它设备），选其它设备时 Tailscale 设置就在下面，再选接入方式、复制、令牌，不再东一块西一块；
-  - 修复：区分本机和其它设备的切换偶尔消失。现在它一直显示；Tailscale 节点重启或地址短暂读不到时，复制的地址也不会跳回 127.0.0.1。
 - **1.1.7**
+  - “接入 agent”重新排版：先选 agent 在哪（这台手机 / 其它设备），选其它设备时 Tailscale 设置就在下面，再选接入方式、复制、令牌；区分本机和其它设备的切换一直显示，Tailscale 地址短暂读不到时复制的地址也不会跳回 127.0.0.1；
   - 支持英语：设置里可以选“跟随系统 / 中文 / English”，App 界面、悬浮窗、通知，以及给 agent 的话、能力说明、skill、命令返回和 help 都跟着换。已安装的命令行会在下一次调用时自动换成新语言；
-  - 远程也能一键复制：开了 Tailscale（内置或 App）后，“接入 agent”可以切到“在其它设备上”，复制的内容直接带 Tailscale 地址；
+  - 远程也能一键复制：选“其它设备上（Tailscale）”并连好后，复制的内容直接带 Tailscale 地址；
   - 能力说明重写：存进 agent 记忆的是“我能在用户手机上后台操作应用”这项能力本身，写明什么时候用、怎么开始、连不上时怎么办，而不只是一条安装记录；
   - 修复：内置 Tailscale 有时一直显示 NeedsLogin、不出现登录按钮。现在拿不到登录链接时会自动反复去要，页面上写明在等什么，可以手动“重新获取登录链接”；连不上 Tailscale 服务器时会直接说明。
 - **1.1.6**
