@@ -167,9 +167,9 @@ internal fun VScreenOffloadHandler.degraded(d: VScreenDisplay?): Pair<JSONArray,
     if (com.kilon.agentvscreen.host.HostService.isAlive && !live.foreground) {
         deg.put("not_foreground_service")
         sug.put(run { val why = live.foregroundError ?: tr("原因未知", "unknown reason"); tr("Agent-VScreen 的服务没能成为前台服务（$why）：它在后台会被冻结，命令会卡住直到用户打开它。请用户打开一次 Agent-VScreen（会自动补上）。", "Agent-VScreen's service could not become a foreground service ($why): it gets frozen in the background and commands hang until the user opens it. Ask the user to open Agent-VScreen once (that fixes it).") })
-    } else if (live.recentlyFrozen()) {
+    } else if (live.frozenUnresolved()) {
         deg.put("frozen_in_background")
-        sug.put(tr("亮屏时系统在后台冻结过 Agent-VScreen ${live.screenOnFreezes} 次（最近一次 ${live.lastFreezeMs / 1000} 秒），那段时间的命令会一直等。", "With the screen on, the system froze Agent-VScreen in the background ${live.screenOnFreezes} times (last time ${live.lastFreezeMs / 1000} s); commands wait during that time.") +
+        sug.put(tr("亮屏时系统在后台冻结过 Agent-VScreen ${live.screenOnFreezesSinceVisit} 次（最近一次 ${live.lastScreenOnFreezeMs / 1000} 秒），那段时间的命令会一直等。", "With the screen on, the system froze Agent-VScreen in the background ${live.screenOnFreezesSinceVisit} times (last time ${live.lastScreenOnFreezeMs / 1000} s); commands wait during that time.") +
             tr("请用户打开 Agent-VScreen，点首页“后台运行受限”的“去设置”，把它设为允许自启动、关联启动和后台活动（荣耀/华为：应用启动管理 › 手动管理）。", "Ask the user to open Agent-VScreen, tap Settings on \"Background running restricted\" on the home page, and allow auto-start, start by other apps and background activity (Honor/Huawei: App launch › Manage manually)."))
     }
     if (s.privilege.name != "READY") {

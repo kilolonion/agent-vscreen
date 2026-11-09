@@ -148,9 +148,11 @@ class MainActivity : ComponentActivity() {
         var busy by remember { mutableStateOf(false) }
         var serviceOn by remember { mutableStateOf(Prefs.serviceOn(this)) }
         var setupOpen by remember { mutableStateOf(false) }
+        var liveProblem by remember { mutableStateOf(com.kilon.agentvscreen.host.Liveness.problem()) }
         LaunchedEffect(tick) {
             while (true) {
                 items = withContext(Dispatchers.IO) { runCatching { BackgroundOperation.refreshStatus(); Setup.check(this@MainActivity) }.getOrDefault(items) }
+                liveProblem = com.kilon.agentvscreen.host.Liveness.problem()
                 delay(2_000)
             }
         }
@@ -160,6 +162,7 @@ class MainActivity : ComponentActivity() {
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            LanguageBar()
             Hero(s, serviceOn) { on ->
                 serviceOn = on; Prefs.setServiceOn(this@MainActivity, on)
                 if (on) HostService.start(this@MainActivity) else { BackgroundOperation.stopAndRelease(tr("用户停止了服务", "The user stopped the service")); HostService.stop(this@MainActivity) }
@@ -178,9 +181,10 @@ class MainActivity : ComponentActivity() {
                 tr("小窗已收起", "Floating window hidden"), tr("AI 还在后台工作。下一轮开始时小窗会自己回来，也可以现在打开。", "The AI is still working in the background. The window comes back by itself on the next turn, or open it now."), Palette.standby, tr("显示小窗", "Show window"),
             ) { BackgroundOperation.showWindow() }
 
-            com.kilon.agentvscreen.host.Liveness.problem()?.let { p ->
+            liveProblem?.let { p ->
                 Banner(tr("后台运行受限", "Background running restricted"), p, Palette.stopped, tr("去设置", "Settings")) {
                     val opened = com.kilon.agentvscreen.host.Liveness.openBackgroundSettings(this@MainActivity)
+                    liveProblem = com.kilon.agentvscreen.host.Liveness.problem(); tick++
                     Toast.makeText(this@MainActivity, tr("已打开：$opened。把 Agent-VScreen 设为允许自启动、关联启动和后台活动", "Opened: $opened. Allow Agent-VScreen to auto-start, be started by other apps and run in the background"), Toast.LENGTH_LONG).show()
                 }
             }
@@ -212,6 +216,7 @@ class MainActivity : ComponentActivity() {
                     }
                     if (items.any { it.key == "vendor_bg" && !it.ok }) Button(onClick = {
                         val opened = com.kilon.agentvscreen.host.Liveness.openBackgroundSettings(this@MainActivity)
+                    liveProblem = com.kilon.agentvscreen.host.Liveness.problem(); tick++
                         Toast.makeText(this@MainActivity, tr("已打开：$opened。把 Agent-VScreen 改成手动管理，允许自启动、关联启动和后台活动", "Opened: $opened. Set Agent-VScreen to manual management and allow auto-start, start by other apps and background activity"), Toast.LENGTH_LONG).show()
                         tick++
                     }) { Text(tr("去设置后台管理", "Background management")) }
@@ -227,15 +232,6 @@ class MainActivity : ComponentActivity() {
 
             // ── settings ──
             Block(tr("设置", "Settings")) {
-                Text("语言 / Language", fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                Text(tr("App 界面、悬浮窗、通知，以及给 agent 的话和命令的返回都会换成这种语言", "Used for the app, the floating window, notifications, and everything said to the agent (messages and command replies)"),
-                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Segments(listOf(tr("跟随系统", "System"), "中文", "English"), I18n.Lang.entries.indexOf(I18n.choice)) { i ->
-                    I18n.choice = I18n.Lang.entries[i]
-                    Overlay.refresh()
-                    if (HostService.isAlive) HostService.start(this@MainActivity)
-                    recreate()
-                }
                 Toggle(tr("悬浮窗", "Floating window"), tr("有副屏时在所有应用上方显示", "Shown above all apps while there is a screen"), s.showPreview) { BackgroundOperation.setShowPreview(it); if (it) Overlay.refresh() }
                 Toggle(tr("精确文字识别", "Accurate text recognition"), tr("PP-OCR，在本机运行", "PP-OCR, runs on this phone"), s.accurateOcr) { BackgroundOperation.setAccurateOcr(it) }
                 Toggle(tr("后台录制", "Background recording"), tr("【这段时间】里的拼图", "The picture strip in [Meanwhile]"), s.recording) { BackgroundOperation.setRecording(it) }
@@ -260,6 +256,39 @@ class MainActivity : ComponentActivity() {
             Diagnostics(items)
             Text(tr("Agent-VScreen ${BuildConfig.VERSION_NAME} · 副屏能力来自 Minis VScreen", "Agent-VScreen ${BuildConfig.VERSION_NAME} · screen engine from Minis VScreen"), fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 12.dp))
+        }
+    }
+
+    /**
+     * The language switch sits above everything else, labelled in both languages, so someone who cannot read the
+     * current language finds it without scrolling.
+     */
+    @Composable
+    private fun LanguageBar() {
+        var open by remember { mutableStateOf(false) }
+        val names = listOf(tr("跟随系统", "System"), "中文", "English")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+            Box {
+                TextButton(onClick = { open = true }) {
+                    Text("🌐 语言 / Language · ${names[I18n.Lang.entries.indexOf(I18n.choice)]}", fontSize = 13.sp)
+                    Icon(Icons.Filled.ExpandMore, null, Modifier.size(18.dp))
+                }
+                androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                    names.forEachIndexed { i, n ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(n + if (I18n.Lang.entries[i] == I18n.choice) "  ✓" else "") },
+                            onClick = {
+                                open = false
+                                if (I18n.Lang.entries[i] == I18n.choice) return@DropdownMenuItem
+                                I18n.choice = I18n.Lang.entries[i]
+                                Overlay.refresh()
+                                if (HostService.isAlive) HostService.start(this@MainActivity)
+                                recreate()
+                            },
+                        )
+                    }
+                }
+            }
         }
     }
 

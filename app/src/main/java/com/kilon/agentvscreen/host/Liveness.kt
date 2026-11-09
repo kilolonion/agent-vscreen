@@ -38,8 +38,12 @@ object Liveness {
     /** 1.1.6: freezes while the screen stayed on (these hang a user's agent; screen-off ones do not count). */
     @Volatile var screenOnFreezes = 0; private set
     @Volatile var lastScreenOnFreezeWall = 0L; private set
+    @Volatile var lastScreenOnFreezeMs = 0L; private set
+    /** Screen-on freezes since the user last opened the background settings page (or since start). */
+    @Volatile var screenOnFreezesSinceVisit = 0; private set
     @Volatile private var pm: android.os.PowerManager? = null
-    fun init(ctx: Context) { pm = ctx.getSystemService(android.os.PowerManager::class.java) }
+    @Volatile private var app: Context? = null
+    fun init(ctx: Context) { app = ctx.applicationContext; pm = ctx.getSystemService(android.os.PowerManager::class.java) }
     private fun interactive(): Boolean = runCatching { pm?.isInteractive }.getOrNull() ?: true
     private var ticker: Thread? = null
 
@@ -66,7 +70,7 @@ object Liveness {
                     if (gap > longestFreezeMs) longestFreezeMs = gap
                     // On before and after the gap: the user was using the phone while we were frozen.
                     val screenOn = wasOn && on
-                    if (screenOn) { screenOnFreezes++; lastScreenOnFreezeWall = lastFreezeWall }
+                    if (screenOn) { screenOnFreezes++; screenOnFreezesSinceVisit++; lastScreenOnFreezeMs = gap; lastScreenOnFreezeWall = lastFreezeWall }
                     AppLogger.warning("Liveness", "process was frozen for ${gap / 1000}s (${if (screenOn) "screen on" else "screen off: ignored for setup"})")
                 }
                 wasOn = on
@@ -74,14 +78,22 @@ object Liveness {
         }, "vscreen-liveness").apply { isDaemon = true; priority = Thread.MAX_PRIORITY }.also { it.start() }
     }
 
-    /** A screen-on freeze within the last 10 minutes. */
-    fun recentlyFrozen(): Boolean = screenOnFreezes > 0 && System.currentTimeMillis() - lastScreenOnFreezeWall < 10 * 60_000L
+    private fun visitedAt(): Long = app?.let { prefs(it).getLong("vendor_bg_visited", 0L) } ?: 0L
+
+    /**
+     * The one answer to "is the background setting still a problem?", shared by the home banner, the setup item, the
+     * notification and the agent's degraded list: a screen-on freeze measured after the user last went to the
+     * background settings page. Going there clears it at once; only a new screen-on freeze brings it back.
+     * (1.1.7 fix: the banner used a separate 10-minute window and so stayed up after the user had fixed the setting,
+     * while the setup item already showed it done.)
+     */
+    fun frozenUnresolved(): Boolean = screenOnFreezes > 0 && lastScreenOnFreezeWall > visitedAt()
 
     /** What the user should know, or null when all is well. */
     fun problem(): String? = when {
         !HostService.isAlive -> null
-        !foreground -> "服务没能成为前台服务（${foregroundError ?: tr("原因未知", "unknown reason")}），切到后台后系统会冻结或杀掉它。打开一次本应用会自动补上。"
-        recentlyFrozen() -> tr("系统在后台冻结过本应用 $freezes 次（最近一次 ${lastFreezeMs / 1000} 秒）：冻结期间 agent 的命令会一直等，直到你打开本应用。", "The system froze this app in the background $freezes times (last time ${lastFreezeMs / 1000} s): while frozen, the agent's commands wait until you open this app.") +
+        !foreground -> run { val why = foregroundError ?: tr("原因未知", "unknown reason"); tr("服务没能成为前台服务（$why），切到后台后系统会冻结或杀掉它。打开一次本应用会自动补上。", "The service could not become a foreground service ($why), so the system freezes or kills it in the background. Opening this app once fixes it.") }
+        frozenUnresolved() -> tr("亮屏时系统在后台冻结过本应用 $screenOnFreezesSinceVisit 次（最近一次 ${lastScreenOnFreezeMs / 1000} 秒）：冻结期间 agent 的命令会一直等，直到你打开本应用。", "With the screen on, the system froze this app in the background $screenOnFreezesSinceVisit times (last time ${lastScreenOnFreezeMs / 1000} s): while frozen, the agent's commands wait until you open this app.") +
             tr("请在系统的后台管理里把 Agent-VScreen 设为“允许后台活动”。", "Set Agent-VScreen to \"allow background activity\" in the system's background management.")
         else -> null
     }
@@ -94,6 +106,7 @@ object Liveness {
         .put("last_frozen_ago_s", if (freezes > 0) (SystemClock.elapsedRealtime() - lastFreezeAt) / 1000 else JSONObject.NULL)
         .put("longest_frozen_s", if (freezes > 0) longestFreezeMs / 1000 else JSONObject.NULL)
         .put("frozen_screen_on_count", screenOnFreezes)
+        .put("frozen_unresolved", frozenUnresolved())
         .put("keep_alive_window", Presence.up)
         .put("pid", android.os.Process.myPid())
 
@@ -121,12 +134,13 @@ object Liveness {
      * counting as soon as a freeze is measured after that (the setting did not take, or was reset).
      */
     fun vendorSetupDone(ctx: Context): Boolean {
-        val at = prefs(ctx).getLong("vendor_bg_visited", 0L)
-        return at > 0L && lastScreenOnFreezeWall < at
+        if (app == null) init(ctx)
+        return visitedAt() > 0L && !frozenUnresolved()
     }
 
     fun openBackgroundSettings(ctx: Context): String {
-        prefs(ctx).edit().putLong("vendor_bg_visited", System.currentTimeMillis()).apply()
+        prefs(ctx).edit().putLong("vendor_bg_visited", System.currentTimeMillis()).commit()
+        screenOnFreezesSinceVisit = 0
         for ((label, cn) in PAGES) {
             val i = Intent().setComponent(cn).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             if (runCatching { ctx.startActivity(i) }.isSuccess) return label
