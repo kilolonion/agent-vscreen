@@ -2,7 +2,17 @@
 
 # Agent-VScreen
 
+<p align="center">
+  <a href="https://github.com/kilolonion/agent-vscreen/releases/latest"><img src="https://img.shields.io/github/v/release/kilolonion/agent-vscreen" alt="release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/kilolonion/agent-vscreen" alt="license"></a>
+  <img src="https://img.shields.io/badge/Android-11%2B-3DDC84?logo=android&logoColor=white" alt="Android 11+">
+  <img src="https://img.shields.io/badge/root-not%20required-blue" alt="no root">
+  <img src="https://img.shields.io/badge/MCP-supported-8A2BE2" alt="MCP">
+</p>
+
 给任何手机 agent 用的**后台副屏**。
+
+中文 · [English](README.en.md)
 
 Agent-VScreen 在一块看不见的虚拟屏上打开和操作别的应用，你的主屏照常用，不会被打断。屏幕上只有一个悬浮小窗，让你看到 AI 在做什么，随时可以接管或叫停。
 
