@@ -17,7 +17,7 @@ Agent-VScreen 在一块看不见的虚拟屏上打开和操作别的应用，你
 <p align="center"><img src="docs/app.png" width="760" alt="Agent-VScreen 首页、首次配置、接入 agent、设置和应用限制"></p>
 <p align="center"><sub>App 界面：首次配置、接入 agent（命令行 / MCP / HTTP）、设置和应用限制。</sub></p>
 
-- 版本：1.1.5（versionCode 7）
+- 版本：1.1.6（versionCode 8）
 - 包名：`com.kilon.agentvscreen`
 - 系统：Android 11 及以上，推荐 Android 14 及以上
 - 特权：只用 [Shizuku](https://shizuku.rikka.app/)，不需要 root
@@ -32,6 +32,8 @@ Agent-VScreen 在一块看不见的虚拟屏上打开和操作别的应用，你
   - 拖动可以移动，双指捏合可以缩放；松手时手指还在动，小窗会顺势滑一段；
   - 甩向四个角会缩到最小，靠近屏幕边缘会折成贴边的小标签；
   - 按住画面 1 秒就能接管；
+  - 右上角 × 点一下就关：AI 在工作时只收起小窗，AI 继续在后台干活；没有任务时直接关掉副屏。关闭不会停住 AI；
+  - 左下角“停止 AI”才会停住 AI，停住后通知栏一直有提示，点“允许继续”就放开；
   - 也可以打开原生全屏页。
 - **不和 agent 抢权限**：不占用 adb，不改无线调试的开关和端口，不重启 adbd。你的 agent 自己用的 adb 或 Shizuku 照常可用。一键配置只会把本应用“加进去”，不会改动别的应用的设置。
 
@@ -41,7 +43,7 @@ Agent-VScreen 在一块看不见的虚拟屏上打开和操作别的应用，你
 2. 确认 Shizuku 已经启动，然后点 **授权 Shizuku**。
 3. 点 **一键配置其余项**：悬浮窗、通知、只读无障碍、电池优化和后台运行。荣耀、华为、小米、OPPO、vivo 等手机还有一项 **系统后台管理**，点 **去设置后台管理**，把 Agent-VScreen 改成手动管理，允许自启动、关联启动和后台活动。
    - 无障碍建议打开。开着它，悬浮窗不会在设置、安装器这类页面上被系统藏起来，元素列表和中文输入也更准。
-4. 在 **接入 agent** 里复制一行命令，让 agent 在它的终端里执行。之后就能用 `vscreen` 了：
+4. 在 **接入 agent** 里点 **复制给 agent 的话**，原样发给你的 agent。它会装好 `vscreen` 命令，并按你的要求把一段说明存进它自己的长期记忆，以后的新对话里也知道手机上有这个工具。首页会显示它有没有记住。之后就能用 `vscreen` 了：
 
 ```sh
 vscreen launch 设置
@@ -63,7 +65,7 @@ vscreen help all
 
 ## 让其它设备连进来（可选，默认关闭）
 
-服务默认只监听本机的 `127.0.0.1:18765`。要从电脑或另一台手机调用，推荐 Tailscale：在“接入 agent”里打开 **让其它设备连进来（Tailscale）**，只有你自己 Tailscale 网络里的设备连得进来。也可以用 SSH 端口转发。
+服务默认只监听本机的 `127.0.0.1:18765`。要从电脑或另一台手机调用，在“接入 agent”的 **让其它设备连进来** 里选 **内置 Tailscale**：不用装 Tailscale App，也不占系统 VPN，在 App 里登录一次 Tailscale 就行，只有你自己 Tailscale 网络里的设备连得进来。已经装了 Tailscale App 的也可以选 **Tailscale App**，或者用 SSH 端口转发。
 
 令牌等于这台手机的操作权限，所以本应用不提供公网链接。
 
@@ -73,6 +75,11 @@ vscreen help all
 
 ## 1.1.x 更新内容
 
+- **1.1.6**
+  - 内置 Tailscale：不用另装 Tailscale App，在 App 里登录一次，电脑就能远程调用；不占系统 VPN；
+  - 接入改成“复制给 agent 的话”：让 agent 自己把说明存进长期记忆，并报告存在哪；首页显示 agent 有没有记住；新增 `vscreen guide`，MCP 连接时自带用法；
+  - 悬浮窗的关闭和停止分开：× 点一下就收起或关闭，不会再顺带停住 AI；“停止 AI”单独放在左下角，停住后有常驻通知和“允许继续”，agent 收到的提示也写明用户怎么解除；
+  - 修复：电池白名单被系统收回后首页反复显示没配置（现在自动补上），熄屏时的冻结不再让“系统后台管理”重新亮起。
 - **1.1.5**
   - 修复：用户接管过副屏或从悬浮窗关掉副屏后，agent 的动作一直被要求“先看清画面”。现在 launch 和 act 返回的画面就算看过，launch 打开新页面也不会被拒；
   - 命令行每次的完整输出另存到截图目录的 `last.txt`，输出太长时可以分段读；
@@ -100,6 +107,8 @@ vscreen help all
 echo "sdk.dir=/path/to/android-sdk" > local.properties
 ./gradlew :app:assembleRelease
 ```
+
+内置 Tailscale 是一个用 Go 编的小程序（`tsbridge/`），需要 Go 1.21 以上（会按 `tsbridge/go.mod` 自动下载 Go 1.27.3）。编 APK 之前先运行一次 `tsbridge/build.sh`，它会生成 `app/src/main/jniLibs/arm64-v8a/libtsbridge.so`；不运行也能编，只是 App 里没有内置 Tailscale。
 
 正式签名可选：把 `keystore.properties.example` 复制成 `keystore.properties` 并填好。不填的话，release 包用 debug 密钥签名。
 
