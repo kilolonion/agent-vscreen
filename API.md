@@ -130,7 +130,7 @@ Minis 用户：把 `VSCREEN_SHOT_DIR` 设成 `/var/minis/attachments/vscreen`，
 - 返回一段 text，以及最多 4 张 `image/jpeg`（当前截图，有变化时还有拼图），agent 的模型可以直接看图。文字里的截图路径换成了“[图N，见附图]”。
 - `isError` 在命令被拒绝或失败时为 true。
 
-Operit 的接入步骤见 [README](README.md#在-operit-中使用)。
+Operit 的接入步骤见 [README](README.zh-CN.md#在-operit-中使用)。
 
 ### 2.3 HTTP（适合自己写调用代码的 agent 应用）
 
@@ -192,7 +192,8 @@ Operit 的接入步骤见 [README](README.md#在-operit-中使用)。
 1. 选 **内置 Tailscale**，几秒后出现 **在浏览器里登录 Tailscale**，用你电脑上 Tailscale 的同一个账号登录。登录状态会记住，以后不用再登。
    - 1.1.7：如果一直没出现登录按钮（状态停在 NeedsLogin），内置节点每 20 秒会重新向 Tailscale 要一次登录链接，页面上也有 **重新获取登录链接**。等了 15 秒以上还没有，页面会写明原因：多半是手机连不上 `controlplane.tailscale.com`，换个网络或打开能访问它的代理就会出现；也可以用 auth key。
    - 也可以在“高级”里填一个 auth key 代替浏览器登录；key 只在第一次注册时用，注册成功后就从手机上删掉。
-   - “高级”里还可以填自建的控制服务器（例如 Headscale）。
+   - “高级”里还可以填自建的控制服务器（例如 Headscale）。1.1.8：地址可以只写域名（`hs.example.com`，会补成 `https://hs.example.com`），要和 Tailscale App 里“登录服务器”填的一样；每个服务器的登录状态分开保存（换服务器不会带着旧登录，换回来也不用重登）；填了 auth key / 预授权 key 会清掉这个服务器的旧状态，用 key 重新注册。Headscale 的注册页一般给出一条命令，在服务器上运行就行。连不上时页面会写出服务器名和节点报告的错误（`status` 的 `remote` 里也有 `control` 和 `login_error`）。
+   - 出口节点：内置节点是用户态的，只转发其它设备发给 Agent-VScreen 的请求，不接管手机自己的上网，所以没有出口节点。手机需要靠出口节点上网时（比如经家里的旁路由），让 Tailscale App 一直开着，选“外部 App”模式即可。
 2. 手机会以一台单独的设备 `agent-vscreen` 出现在你的 Tailscale 网络里，页面上会显示它的地址（`100.x.x.x`）和名字。
 3. 连好后，同一处往下点 **复制给 agent 的话**，发给那台设备上的 agent：里面的安装命令、MCP 配置和能力说明都已经是 Tailscale 地址。手动调用的话，在电脑上（已登录同一个 Tailscale 账号）：
 
@@ -380,7 +381,7 @@ ssh -p 8022 -L 18765:127.0.0.1:18765 <手机地址>
 
 ### 围绕副屏的脚手架
 
-Agent-VScreen 让调用方的 agent 直接操作副屏，并且围绕副屏提供：持续看屏和读字带来的时间感知（【这段时间】）、`until` / `--stop` / `--watch` / `--keep` 等待和盯守、无障碍加本机 OCR 的编号元素、逐步核对、会话和接力。概览见 [README](README.md#不只是一块副屏围绕副屏的脚手架)。
+Agent-VScreen 让调用方的 agent 直接操作副屏，并且围绕副屏提供：持续看屏和读字带来的时间感知（【这段时间】）、`until` / `--stop` / `--watch` / `--keep` 等待和盯守、无障碍加本机 OCR 的编号元素、逐步核对、会话和接力。概览见 [README](README.zh-CN.md#不只是一块副屏围绕副屏的脚手架)。
 
 ## 8. 已知限制
 

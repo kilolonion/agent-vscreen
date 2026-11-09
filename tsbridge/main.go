@@ -1,4 +1,4 @@
-// tsbridge: the built-in Tailscale node of Agent-VScreen (1.1.6; 1.1.7 login link fix).
+// tsbridge: the built-in Tailscale node of Agent-VScreen (1.1.6; 1.1.7 login link fix; 1.1.8 own control servers).
 //
 // It joins the user's tailnet as its own device (userspace tsnet: no VPN slot, no root, no Tailscale app) and forwards
 // HTTP that tailnet peers send to <node>:PORT on to the app's local server at 127.0.0.1:PORT. Every forwarded request
@@ -6,12 +6,14 @@
 // tailnet request) and X-VScreen-Peer: <who> (the peer's Tailscale login and device, from WhoIs).
 //
 // The app runs it as a child process and talks over pipes:
-//   stdout: one JSON object per line whenever the state changes ({"state":"Running","ip":"100.x", ...}).
-//   stdin:  commands, one per line: "login" (ask for a fresh login link), "logout", "quit". EOF (the app died) ends this process too.
+//
+//	stdout: one JSON object per line whenever the state changes ({"state":"Running","ip":"100.x", ...}).
+//	stdin:  commands, one per line: "login" (ask for a fresh login link), "logout", "quit". EOF (the app died) ends this process too.
 //
 // Configuration comes from the environment so nothing secret shows up in `ps`:
-//   TSB_DIR (state dir), TSB_HOSTNAME, TSB_PORT, TSB_TARGET (host:port), TSB_SECRET, TSB_AUTHKEY (optional),
-//   TSB_CONTROL_URL (optional, e.g. a Headscale server), TSB_DNS (comma separated resolvers of the phone's network).
+//
+//	TSB_DIR (state dir), TSB_HOSTNAME, TSB_PORT, TSB_TARGET (host:port), TSB_SECRET, TSB_AUTHKEY (optional),
+//	TSB_CONTROL_URL (optional, e.g. a Headscale server), TSB_DNS (comma separated resolvers of the phone's network).
 package main
 
 import (
@@ -47,6 +49,33 @@ type status struct {
 	// 1.1.7: why a login link is not there yet (control server unreachable, etc.), and how long we have waited.
 	Health   string `json:"health,omitempty"`
 	WaitingS int    `json:"waiting_s,omitempty"`
+	// 1.1.8: the control server this node talks to ("" = Tailscale's own), and the last login error the backend
+	// reported (unreachable server, bad address, rejected key ...), so the app can name the real cause.
+	Control    string `json:"control,omitempty"`
+	LoginError string `json:"login_error,omitempty"`
+}
+
+// normalizeControlURL turns what a person types ("hs.example.com", "https://hs.example.com/") into the URL tsnet needs.
+// Without a scheme tsnet fails with "unsupported protocol scheme" and just sits in NeedsLogin.
+func normalizeControlURL(v string) string {
+	v = strings.TrimRight(strings.TrimSpace(v), "/")
+	if v == "" {
+		return ""
+	}
+	if !strings.Contains(v, "://") {
+		v = "https://" + v
+	}
+	return v
+}
+
+// loginError pulls "The last login error was: X" out of the backend's health messages.
+func loginError(health []string) string {
+	for _, h := range health {
+		if i := strings.Index(h, "last login error was: "); i >= 0 {
+			return strings.TrimSpace(h[i+len("last login error was: "):])
+		}
+	}
+	return ""
 }
 
 var (
@@ -142,7 +171,7 @@ func main() {
 		Dir:        env("TSB_DIR", "./ts"),
 		Hostname:   env("TSB_HOSTNAME", "agent-vscreen"),
 		AuthKey:    os.Getenv("TSB_AUTHKEY"),
-		ControlURL: os.Getenv("TSB_CONTROL_URL"),
+		ControlURL: normalizeControlURL(os.Getenv("TSB_CONTROL_URL")),
 		Logf:       func(string, ...any) {},
 		UserLogf:   func(f string, a ...any) { fmt.Fprintf(os.Stderr, f+"\n", a...) },
 	}
@@ -252,7 +281,10 @@ func main() {
 		if err != nil {
 			emit(status{State: "Error", Error: err.Error()})
 		} else {
-			s := status{State: st.BackendState, AuthURL: st.AuthURL}
+			s := status{State: st.BackendState, AuthURL: st.AuthURL, Control: srv.ControlURL}
+			if st.BackendState != "Running" {
+				s.LoginError = loginError(st.Health)
+			}
 			if st.BackendState == "NeedsLogin" && st.AuthURL == "" {
 				if needSince.IsZero() {
 					needSince = time.Now()

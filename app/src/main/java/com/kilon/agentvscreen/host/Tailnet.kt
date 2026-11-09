@@ -46,12 +46,19 @@ object Tailnet {
         /** 1.1.7: NeedsLogin with no link yet: seconds waited and the node's health notes (e.g. control unreachable). */
         val waitingS: Int = 0,
         val health: String? = null,
+        /** 1.1.8: the control server in use (null = Tailscale's own) and the backend's last login error. */
+        val control: String? = null,
+        val loginError: String? = null,
     ) {
+        /** The server's host for messages: "controlplane.tailscale.com" or the user's own (Headscale). */
+        val serverName get() = control?.let { runCatching { java.net.URI(it).host }.getOrNull() ?: it } ?: "controlplane.tailscale.com"
+        val ownServer get() = control != null
         val loggedIn get() = state == "Running" && ip != null
         val needsLogin get() = state == "NeedsLogin" || state == "NeedsMachineAuth"
         fun json(): JSONObject = JSONObject().put("mode", "builtin").put("state", state).put("ip", ip ?: JSONObject.NULL)
             .put("dns_name", dnsName ?: JSONObject.NULL).put("tailnet", tailnet ?: JSONObject.NULL)
             .put("peers_online", online).put("error", error ?: JSONObject.NULL).put("last_peer", lastPeer ?: JSONObject.NULL)
+            .put("control", control ?: "tailscale").put("login_error", loginError ?: JSONObject.NULL)
     }
 
     /** Random per process: only our own child knows it, so no app on the phone can pose as a tailnet peer. */
@@ -103,6 +110,36 @@ object Tailnet {
     /** Restart now, e.g. with a new auth key or control server. */
     fun restart(ctx: Context) { stop(); sync(ctx) }
 
+    /**
+     * 1.1.8: one state directory per control server. A node's identity (its keys and login) belongs to the server it
+     * registered with; one shared directory carried the Tailscale login over to a Headscale server (the backend keeps
+     * the old keys when only the server changes), and an auth key was ignored while that old login looked valid.
+     * Tailscale's own server keeps the 1.1.6 directory, so existing logins stay.
+     */
+    fun stateDir(ctx: Context, control: String? = ApiConfig.tailnetControlUrl): File {
+        val name = if (control == null) "tailscale" else "tailscale-" + java.security.MessageDigest.getInstance("SHA-256")
+            .digest(control.lowercase().toByteArray()).take(6).joinToString("") { "%02x".format(it) }
+        return File(ctx.filesDir, name)
+    }
+
+    /**
+     * Save the control server and, optionally, an auth key, then reconnect. A new auth key means "register this node
+     * with this key": the node's old state for that server is dropped first, or the backend would keep the old login
+     * and ignore the key. Another server's login is left alone.
+     */
+    fun configure(ctx: Context, control: String?, authKey: String?) {
+        val old = proc
+        stop()
+        // Let the old node finish writing its state before it may be deleted.
+        runCatching { old?.waitFor(3, java.util.concurrent.TimeUnit.SECONDS) }
+        ApiConfig.tailnetControlUrl = control
+        if (!authKey.isNullOrBlank()) {
+            ApiConfig.tailnetAuthKey = authKey.trim()
+            runCatching { stateDir(ctx).deleteRecursively() }
+        }
+        sync(ctx)
+    }
+
     private fun supervise(ctx: Context) {
         val bin = binary(ctx)
         while (wanted && !Thread.currentThread().isInterrupted) {
@@ -124,7 +161,7 @@ object Tailnet {
     }
 
     private fun runOnce(ctx: Context, bin: File) {
-        val dir = File(ctx.filesDir, "tailscale").apply { mkdirs() }
+        val dir = stateDir(ctx).apply { mkdirs() }
         val pb = ProcessBuilder(bin.absolutePath).directory(dir)
         val env = pb.environment()
         env["TSB_DIR"] = dir.absolutePath
@@ -160,6 +197,8 @@ object Tailnet {
                 lastPeer = o.optString("last_peer").takeIf { it.isNotBlank() },
                 waitingS = o.optInt("waiting_s"),
                 health = o.optString("health").takeIf { it.isNotBlank() },
+                control = o.optString("control").takeIf { it.isNotBlank() },
+                loginError = o.optString("login_error").takeIf { it.isNotBlank() },
             )
             if (st.state != _status.value.state) AppLogger.info(TAG, "state ${st.state}${st.ip?.let { " $it" } ?: ""}${st.error?.let { " ($it)" } ?: ""}")
             if (st.loggedIn && ApiConfig.tailnetAuthKey != null) ApiConfig.tailnetAuthKey = null

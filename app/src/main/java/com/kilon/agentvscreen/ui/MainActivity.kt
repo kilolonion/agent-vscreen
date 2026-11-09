@@ -541,39 +541,59 @@ class MainActivity : ComponentActivity() {
                         StatusCard(Palette.takeover, tr("已连上 Tailscale", "Connected to Tailscale"),
                             tr("名字", "Name") + " ${ts.dnsName ?: ApiConfig.tailnetHostname}\n" + tr("地址", "Address") + " ${ts.ip}" +
                                 (ts.user?.let { "\n" + tr("账号", "Account") + " $it" } ?: "") +
+                                (if (ts.ownServer) "\n" + tr("服务器", "Server") + " ${ts.serverName}" else "") +
                                 "\n" + tr("在线设备 ${ts.online} 台", "${ts.online} devices online") +
                                 (ts.lastPeer?.let { "\n" + tr("最近来访", "Last visitor") + " $it" } ?: ""))
                         SecondaryAction(tr("退出 Tailscale 登录", "Log out of Tailscale")) { com.kilon.agentvscreen.host.Tailnet.logout() }
                     }
                     ts.needsLogin && ts.authUrl != null -> {
-                        Hint(tr("第一次使用要登录一次 Tailscale，之后会记住。用你电脑上 Tailscale 的同一个账号登录；手机上不方便的话，复制链接到电脑上打开也行。", "The first time, log in to Tailscale once; it is remembered after that. Use the same account as Tailscale on your computer. If that's awkward on the phone, copy the link and open it on the computer."))
-                        PrimaryAction(tr("在浏览器里登录 Tailscale", "Log in to Tailscale in the browser")) { runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ts.authUrl))) } }
+                        if (ts.ownServer) Hint(tr("这是你的服务器 ${ts.serverName} 的注册页，只要做一次。Headscale 通常会在页面上给出一条注册命令，在服务器上运行它（用户名换成你的）就连上了；也可以在下面的高级选项里填预授权 key，不用开网页。",
+                            "This is the registration page of your server ${ts.serverName}; it is needed once. Headscale usually shows a register command on that page: run it on the server (with your user name) and the node joins. Or put a pre-auth key in Advanced below and skip the page."))
+                        else Hint(tr("第一次使用要登录一次 Tailscale，之后会记住。用你电脑上 Tailscale 的同一个账号登录；手机上不方便的话，复制链接到电脑上打开也行。", "The first time, log in to Tailscale once; it is remembered after that. Use the same account as Tailscale on your computer. If that's awkward on the phone, copy the link and open it on the computer."))
+                        PrimaryAction(if (ts.ownServer) tr("打开注册页", "Open the registration page") else tr("在浏览器里登录 Tailscale", "Log in to Tailscale in the browser")) { runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ts.authUrl))) } }
                         SecondaryAction(tr("复制登录链接", "Copy login link")) { copy(tr("登录链接", "Login link"), ts.authUrl!!) }
                     }
                     ts.needsLogin -> {
                         // 1.1.7: logged out but no link yet. The bridge keeps asking; say why it may not come.
-                        val slow = ts.waitingS >= 15
+                        // 1.1.8: name the server actually in use, and show the node's own login error as soon as there is one.
+                        val slow = ts.waitingS >= 15 || ts.loginError != null
                         StatusCard(if (slow) Palette.stopped else Palette.standby,
-                            if (slow) tr("拿不到 Tailscale 登录链接（已等 ${ts.waitingS} 秒）", "No Tailscale login link yet (waited ${ts.waitingS} s)")
-                            else tr("正在向 Tailscale 要登录链接…", "Asking Tailscale for a login link…"),
+                            if (ts.loginError != null) tr("连不上控制服务器 ${ts.serverName}", "Cannot reach the control server ${ts.serverName}")
+                            else if (slow) tr("拿不到登录链接（已等 ${ts.waitingS} 秒）", "No login link yet (waited ${ts.waitingS} s)")
+                            else tr("正在向 ${ts.serverName} 要登录链接…", "Asking ${ts.serverName} for a login link…"),
                             if (!slow) tr("通常几秒内出现。", "It usually appears within seconds.")
-                            else tr("这台手机连不上 Tailscale 的服务器（controlplane.tailscale.com）时会这样：换个网络或打开能访问它的代理后会自动出现。也可以在下面的高级选项里填 auth key 免浏览器登录。", "This happens when the phone cannot reach Tailscale's server (controlplane.tailscale.com): switch networks or turn on a proxy that reaches it and the link appears by itself. Or put an auth key in Advanced below to skip the browser login.") +
-                                (ts.health?.let { "\n" + tr("Tailscale 报告：", "Tailscale says: ") + it.take(240) } ?: ""))
+                            else (ts.loginError?.let { tr("出错原因：", "Error: ") + it.take(240) + "\n" } ?: "") +
+                                (if (ts.ownServer) tr("请确认地址和端口跟你在 Tailscale App 里填的“登录服务器”完全一样，并且这台手机现在能打开它（在浏览器里打开 ${ts.control}/key?v=1 应该能看到一串字）。也可以在下面的高级选项里填预授权 key。",
+                                    "Check that the address and port are exactly what you use as the login server in the Tailscale app, and that this phone can open it now (${ts.control}/key?v=1 should show some text in a browser). You can also put a pre-auth key in Advanced below.")
+                                else tr("这台手机连不上 Tailscale 的服务器（controlplane.tailscale.com）时会这样：换个网络或打开能访问它的代理后会自动出现。也可以在下面的高级选项里填 auth key 免浏览器登录。", "This happens when the phone cannot reach Tailscale's server (controlplane.tailscale.com): switch networks or turn on a proxy that reaches it and the link appears by itself. Or put an auth key in Advanced below to skip the browser login.")) +
+                                (if (ts.loginError == null) ts.health?.let { "\n" + tr("Tailscale 报告：", "Tailscale says: ") + it.take(240) } ?: "" else ""))
                         SecondaryAction(tr("重新获取登录链接", "Get a login link again")) { com.kilon.agentvscreen.host.Tailnet.login() }
                     }
                     ts.error != null -> StatusCard(Palette.stopped, tr("内置 Tailscale 出错，会自动重试", "Built-in Tailscale failed, retrying automatically"), ts.error!!)
                     else -> StatusCard(Palette.standby, tr("内置 Tailscale 正在启动…", "Built-in Tailscale is starting…"), ts.state)
                 }
-                Disclosure(tr("高级选项（auth key、自建服务器）", "Advanced (auth key, own control server)"), more) { more = !more }
+                // 1.1.8: the built-in node is userspace: it only carries what other devices send to Agent-VScreen, never
+                // this phone's own traffic, so an exit node has nothing to route there. Say so where people look for it.
+                val appVpn = remember { mutableStateOf<String?>(null) }
+                LaunchedEffect(Unit) { while (true) { appVpn.value = withContext(Dispatchers.IO) { com.kilon.agentvscreen.api.ApiServer.tailnetAddress()?.hostAddress }; delay(5_000) } }
+                if (appVpn.value != null) Hint(tr("这台手机上的 Tailscale App 已经连着（${appVpn.value}）。手机要靠它的出口节点上网的话，App 得一直开着，这时直接选上面的“外部 App”更省事，不用再开内置。",
+                    "The Tailscale app on this phone is already connected (${appVpn.value}). If the phone needs its exit node to get online, the app has to stay on anyway, so choosing \"External app\" above is simpler than running the built-in one too."), Palette.standby)
+                Disclosure(tr("高级选项（自建服务器、auth key）", "Advanced (own control server, auth key)"), more) { more = !more }
                 AnimatedVisibility(more) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        androidx.compose.material3.OutlinedTextField(key, { key = it }, label = { Text(tr("auth key（可选，代替浏览器登录）", "auth key (optional, instead of browser login)")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                        androidx.compose.material3.OutlinedTextField(ctl, { ctl = it }, label = { Text(tr("控制服务器（可选，如 Headscale 地址）", "Control server (optional, e.g. a Headscale address)")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        val ctlProblem = ApiConfig.controlUrlProblem(ctl)
+                        androidx.compose.material3.OutlinedTextField(ctl, { ctl = it }, label = { Text(tr("控制服务器（自建 Headscale 时填，留空用 Tailscale）", "Control server (for your own Headscale; blank = Tailscale)")) },
+                            placeholder = { Text("https://hs.example.com") }, singleLine = true, isError = ctlProblem != null,
+                            supportingText = { Text(ctlProblem ?: ApiConfig.normalizeControlUrl(ctl)?.let { tr("将使用 $it", "Will use $it") } ?: tr("使用 Tailscale 官方服务器", "Using Tailscale's own server")) },
+                            modifier = Modifier.fillMaxWidth())
+                        androidx.compose.material3.OutlinedTextField(key, { key = it }, label = { Text(tr("auth key / 预授权 key（可选，代替网页登录）", "Auth key / pre-auth key (optional, instead of the web login)")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        Hint(tr("每个服务器的登录分开保存，换回原来的服务器不用重新登录。填了 key 会用它重新注册这个节点。出口节点只对这台手机自己的上网有用，内置节点不接管手机上网，所以这里没有这一项。",
+                            "Each server keeps its own login, so switching back needs no new login. A key re-registers this node with it. An exit node only matters for this phone's own internet traffic, which the built-in node does not carry, so there is no such option here."))
                         SecondaryAction(tr("保存并重连", "Save and reconnect")) {
-                            if (key.isNotBlank()) ApiConfig.tailnetAuthKey = key
-                            ApiConfig.tailnetControlUrl = ctl.ifBlank { null }
-                            key = ""
-                            com.kilon.agentvscreen.host.Tailnet.restart(applicationContext)
+                            if (ctlProblem != null) { Toast.makeText(this@MainActivity, ctlProblem, Toast.LENGTH_SHORT).show(); return@SecondaryAction }
+                            val k = key.trim(); val c = ctl
+                            key = ""; ctl = ApiConfig.normalizeControlUrl(c) ?: ""
+                            Thread { com.kilon.agentvscreen.host.Tailnet.configure(applicationContext, c, k) }.start()
                             Toast.makeText(this@MainActivity, tr("已保存，内置 Tailscale 重新连接中", "Saved, built-in Tailscale is reconnecting"), Toast.LENGTH_SHORT).show()
                         }
                     }

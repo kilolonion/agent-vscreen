@@ -7,7 +7,10 @@ export ANDROID_HOME="$BASE/toolchains/android-sdk" ANDROID_SDK_ROOT="$BASE/toolc
 mkdir -p "$TMPDIR" /srv/avs-build/logs
 cd "$(dirname "$0")"
 TASK="${1:-:app:assembleRelease}"
-# The built-in Tailscale node (Go) is built once; delete the .so to rebuild it.
-[ -f app/src/main/jniLibs/arm64-v8a/libtsbridge.so ] || ./tsbridge/build.sh >> /srv/avs-build/logs/tsb.log 2>&1
+# Rebuild the built-in Tailscale node when it is missing or older than its sources (it is not in git).
+SO=app/src/main/jniLibs/arm64-v8a/libtsbridge.so
+if [ ! -f "$SO" ] || [ -n "$(find tsbridge -newer "$SO" -type f \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' \) | head -1)" ]; then
+  ./tsbridge/build.sh >> /srv/avs-build/logs/tsb.log 2>&1
+fi
 ./gradlew --no-daemon --max-workers=2 -Dorg.gradle.jvmargs='-Xmx3g -Dfile.encoding=UTF-8' -Pkotlin.compiler.execution.strategy=in-process $TASK > /srv/avs-build/logs/gradle.log 2>&1
 echo AVS_BUILD_SUCCESS

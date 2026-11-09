@@ -27,7 +27,7 @@ Any agent on the phone can use it: agents with a terminal use the `vscreen` CLI,
 <p align="center"><img src="docs/app.en.png" width="760" alt="Agent-VScreen home, language, setup, agent connection, settings, app rules and diagnostics"></p>
 <p align="center"><sub>The app: language switch, first-time setup, connecting an agent (this phone / Tailscale, CLI / MCP / HTTP), settings, app rules and diagnostics.</sub></p>
 
-- Version: 1.1.7 (versionCode 9) · [Download APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
+- Version: 1.1.8 (versionCode 10) · [Download APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
 - Package: `com.kilon.agentvscreen`
 - Android 11+ (Android 14+ recommended), arm64
 - Privileges: [Shizuku](https://shizuku.rikka.app/) only, no root
@@ -114,9 +114,11 @@ Notes:
 
 The service only listens on `127.0.0.1:18765`. To call it from a computer or another phone, choose **Another device (Tailscale)** in step 1 of "Connect an agent", then **Built-in**: no Tailscale app needed and no system VPN slot taken; sign in to Tailscale once inside the app and only devices on your own tailnet can reach it. **Tailscale app** mode and SSH port forwarding also work.
 
+A self-hosted Headscale works too: enter its address under **Advanced** (for example `hs.example.com`; `https://` is added for you), then open the registration page or use a pre-auth key. Each server keeps its own login. The built-in node only carries what other devices send to Agent-VScreen, not the phone's own internet traffic, so it has no exit node. If the phone needs an exit node to get online, keep the Tailscale app on and choose **Tailscale app** mode.
+
 The Tailscale setup sits right under that choice. Once connected, the message for your agent, the install command, the MCP config and the ability note all switch to the Tailscale address.
 
-The app speaks Chinese or English (Settings › Language: System / 中文 / English), and so does everything it tells the agent.
+The app speaks Chinese or English (the **Language** card on the home page: System / 中文 / English), and so does everything it tells the agent.
 
 The token equals control of the phone, so the app never offers a public link.
 

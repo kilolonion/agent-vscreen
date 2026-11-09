@@ -27,7 +27,7 @@ Agent-VScreen 在一块看不见的虚拟屏上打开和操作别的应用，你
 <p align="center"><img src="docs/app.png" width="760" alt="Agent-VScreen 首页、语言、首次配置、接入 agent、设置、应用限制和诊断"></p>
 <p align="center"><sub>App 界面：语言切换、首次配置、接入 agent（本机 / Tailscale，命令行 / MCP / HTTP）、设置、应用限制和诊断。</sub></p>
 
-- 版本：1.1.7（versionCode 9）
+- 版本：1.1.8（versionCode 10）
 - 包名：`com.kilon.agentvscreen`
 - 系统：Android 11 及以上，推荐 Android 14 及以上
 - 特权：只用 [Shizuku](https://shizuku.rikka.app/)，不需要 root
@@ -126,6 +126,8 @@ vscreen help all
 
 服务默认只监听本机的 `127.0.0.1:18765`。要从电脑或另一台手机调用，在“接入 agent”第一步 **agent 在哪** 选 **其它设备上（Tailscale）**，再选 **内置**：不用装 Tailscale App，也不占系统 VPN，在 App 里登录一次 Tailscale 就行，只有你自己 Tailscale 网络里的设备连得进来。已经装了 Tailscale App 的也可以选 **Tailscale App**，或者用 SSH 端口转发。
 
+自建的 Headscale 也能用：在 **高级选项** 里填它的地址（比如 `hs.example.com`，`https://` 会自动补上），再打开注册页或填预授权 key。每个服务器的登录分开保存。内置节点只负责让其它设备连到 Agent-VScreen，不接管手机自己的上网，所以没有出口节点；手机要靠出口节点上网时，让 Tailscale App 一直开着，选 **Tailscale App** 模式就行。
+
 Tailscale 的设置就在这个选项下面。连好后，下面复制的给 agent 的话、安装命令、MCP 配置和能力说明就都换成 Tailscale 地址，直接发给那台设备上的 agent。
 
 令牌等于这台手机的操作权限，所以本应用不提供公网链接。
@@ -136,6 +138,9 @@ Tailscale 的设置就在这个选项下面。连好后，下面复制的给 age
 
 ## 1.1.x 更新内容
 
+- **1.1.8**
+  - 内置 Tailscale 支持自建 Headscale：控制服务器地址不写 `https://` 也行（以前少了它节点会一直停在 NeedsLogin，页面却说连不上 Tailscale 官方服务器）；每个服务器的登录状态分开保存，从 Tailscale 换到 Headscale 不会带着旧的登录，填了预授权 key 一定会用它注册；连不上时页面直接写出是哪个服务器、出了什么错；注册页的说明也按 Headscale 写；
+  - 内置节点不接管手机上网，所以不提供出口节点。检测到 Tailscale App 已经连着时，页面会建议直接用“外部 App”模式（手机靠出口节点上网时本来就要开着 App）；
 - **1.1.7**
   - “接入 agent”重新排版：先选 agent 在哪（这台手机 / 其它设备），选其它设备时 Tailscale 设置就在下面，再选接入方式、复制、令牌；区分本机和其它设备的切换一直显示，Tailscale 地址短暂读不到时复制的地址也不会跳回 127.0.0.1；
   - “后台运行受限”的提醒和“系统后台管理”这一项用同一个判断：点“去设置”后提醒立刻消失，只有之后亮屏时又被冻结才会再出现；
