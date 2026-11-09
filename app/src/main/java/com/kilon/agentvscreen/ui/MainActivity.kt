@@ -162,7 +162,6 @@ class MainActivity : ComponentActivity() {
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            LanguageBar()
             Hero(s, serviceOn) { on ->
                 serviceOn = on; Prefs.setServiceOn(this@MainActivity, on)
                 if (on) HostService.start(this@MainActivity) else { BackgroundOperation.stopAndRelease(tr("用户停止了服务", "The user stopped the service")); HostService.stop(this@MainActivity) }
@@ -188,6 +187,8 @@ class MainActivity : ComponentActivity() {
                     Toast.makeText(this@MainActivity, tr("已打开：$opened。把 Agent-VScreen 设为允许自启动、关联启动和后台活动", "Opened: $opened. Allow Agent-VScreen to auto-start, be started by other apps and run in the background"), Toast.LENGTH_LONG).show()
                 }
             }
+
+            LanguageCard()
 
             // ── setup ──
             val done = items.count { it.ok }
@@ -244,12 +245,7 @@ class MainActivity : ComponentActivity() {
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 var quiet by remember { mutableIntStateOf(ApiConfig.quietMinutes) }
                 val opts = listOf(1, 3, 5, 10, 30)
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    opts.forEachIndexed { i, m ->
-                        SegmentedButton(selected = quiet == m, onClick = { ApiConfig.quietMinutes = m; quiet = m },
-                            shape = SegmentedButtonDefaults.itemShape(i, opts.size), icon = {}) { Text(tr("${m}分", "${m} min"), maxLines = 1, fontSize = 13.sp) }
-                    }
-                }
+                Segments(opts.map { tr("${it}分", "$it min") }, opts.indexOf(quiet)) { i -> ApiConfig.quietMinutes = opts[i]; quiet = opts[i] }
             }
             Block(tr("应用限制", "App rules")) { VScreenAppRules() }
 
@@ -260,34 +256,28 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * The language switch sits above everything else, labelled in both languages, so someone who cannot read the
+     * Its own card just above the setup, folded to one bilingual line by default, so someone who cannot read the
      * current language finds it without scrolling.
      */
     @Composable
-    private fun LanguageBar() {
+    private fun LanguageCard() {
         var open by remember { mutableStateOf(false) }
         val names = listOf(tr("跟随系统", "System"), "中文", "English")
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
-            Box {
-                TextButton(onClick = { open = true }) {
-                    Text("🌐 语言 / Language · ${names[I18n.Lang.entries.indexOf(I18n.choice)]}", fontSize = 13.sp)
-                    Icon(Icons.Filled.ExpandMore, null, Modifier.size(18.dp))
-                }
-                androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-                    names.forEachIndexed { i, n ->
-                        androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(n + if (I18n.Lang.entries[i] == I18n.choice) "  ✓" else "") },
-                            onClick = {
-                                open = false
-                                if (I18n.Lang.entries[i] == I18n.choice) return@DropdownMenuItem
-                                I18n.choice = I18n.Lang.entries[i]
-                                Overlay.refresh()
-                                if (HostService.isAlive) HostService.start(this@MainActivity)
-                                recreate()
-                            },
-                        )
-                    }
-                }
+        Block(
+            title = "语言 / Language",
+            trailing = { Text(names[I18n.Lang.entries.indexOf(I18n.choice)], color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold) },
+            onHeader = { open = !open },
+            open = open,
+        ) {
+            if (!open) return@Block
+            Text(tr("App 界面、悬浮窗、通知，以及给 agent 的话和命令的返回都会换成这种语言", "Used for the app, the floating window, notifications, and everything said to the agent (messages and command replies)"),
+                fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Segments(names, I18n.Lang.entries.indexOf(I18n.choice)) { i ->
+                if (I18n.Lang.entries[i] == I18n.choice) return@Segments
+                I18n.choice = I18n.Lang.entries[i]
+                Overlay.refresh()
+                if (HostService.isAlive) HostService.start(this@MainActivity)
+                recreate()
             }
         }
     }
@@ -388,7 +378,14 @@ class MainActivity : ComponentActivity() {
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
             labels.forEachIndexed { i, t ->
                 SegmentedButton(selected = selected == i, onClick = { onSelect(i) }, shape = SegmentedButtonDefaults.itemShape(i, labels.size), icon = {}) {
-                    Text(t, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                    // Labels shrink to fit instead of being cut ("10 min" lost its "min", "Tailscale" became "Tailsc…").
+                    androidx.compose.foundation.text.BasicText(
+                        t, maxLines = 1,
+                        style = androidx.compose.material3.LocalTextStyle.current.copy(
+                            color = androidx.compose.material3.LocalContentColor.current, fontSize = 13.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center),
+                        autoSize = androidx.compose.foundation.text.TextAutoSize.StepBased(minFontSize = 8.sp, maxFontSize = 13.sp, stepSize = 0.5.sp),
+                    )
                 }
             }
         }
