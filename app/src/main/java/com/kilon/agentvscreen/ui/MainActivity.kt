@@ -310,6 +310,46 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // One look for every action in the connect card: a filled pill for the one thing to do, outlined pills of the same
+    // size for the rest, a left-aligned row with a chevron for anything that folds. Labels stay on one line; the
+    // explanation goes in the hint above, not in the button.
+    @Composable
+    private fun Hint(t: String, color: Color = MaterialTheme.colorScheme.onSurfaceVariant) =
+        Text(t, fontSize = 12.sp, lineHeight = 18.sp, color = color, modifier = Modifier.fillMaxWidth())
+
+    @Composable
+    private fun PrimaryAction(text: String, onClick: () -> Unit) =
+        Button(onClick = onClick, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+
+    @Composable
+    private fun SecondaryAction(text: String, onClick: () -> Unit) =
+        OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text(text, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+
+    @Composable
+    private fun Disclosure(text: String, open: Boolean, onClick: () -> Unit) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(text, fontSize = 14.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null, tint = MaterialTheme.colorScheme.primary)
+        }
+    }
+
+    @Composable
+    private fun SubTitle(t: String) = Text(t, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+
+    @Composable
+    private fun Segments(labels: List<String>, selected: Int, onSelect: (Int) -> Unit) {
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            labels.forEachIndexed { i, t ->
+                SegmentedButton(selected = selected == i, onClick = { onSelect(i) }, shape = SegmentedButtonDefaults.itemShape(i, labels.size), icon = {}) {
+                    Text(t, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                }
+            }
+        }
+    }
+
     @Composable
     private fun Connect() {
         var tab by remember { mutableIntStateOf(0) }
@@ -318,44 +358,36 @@ class MainActivity : ComponentActivity() {
         var rawOpen by remember { mutableStateOf(false) }
         val ledger by com.kilon.agentvscreen.api.AgentLedger.snap.collectAsState()
         Block("接入 agent") {
-            val tabs = listOf("命令行", "MCP", "HTTP")
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                tabs.forEachIndexed { i, t ->
-                    SegmentedButton(selected = tab == i, onClick = { tab = i }, shape = SegmentedButtonDefaults.itemShape(i, tabs.size), icon = {}) { Text(t, fontSize = 13.sp) }
-                }
-            }
-            val hint = @Composable { t: String -> Text(t, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            Segments(listOf("命令行", "MCP", "HTTP"), tab) { tab = it }
             when (tab) {
                 0 -> {
-                    hint("Termux、Minis 等带终端的 agent：复制下面这段话发给它。它会装好 vscreen 命令，并按你的要求把一段说明存进它自己的长期记忆，以后的新对话里也知道手机上有这个工具。")
-                    Button(onClick = { copy("给 agent 的话", AgentGuide.onboard()) }, modifier = Modifier.fillMaxWidth()) { Text("复制给 agent 的话（推荐）") }
-                    TextButton(onClick = { rawOpen = !rawOpen }) { Text(if (rawOpen) "收起安装命令" else "只要安装命令") }
+                    Hint("Termux、Minis 等带终端的 agent：把下面这段话发给它（推荐）。它会装好 vscreen 命令，并把一段说明存进自己的长期记忆，以后的新对话里也知道手机上有这个工具。")
+                    PrimaryAction("复制给 agent 的话") { copy("给 agent 的话", AgentGuide.onboard()) }
+                    Disclosure("只看安装命令", rawOpen) { rawOpen = !rawOpen }
                     AnimatedVisibility(rawOpen) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            hint("只把命令给 agent 的话，大多数 agent 装完就忘了，新对话里不知道有 vscreen。")
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Hint("只把命令给 agent 的话，大多数 agent 装完就忘了，新对话里不知道有 vscreen。")
                             Code(ApiConfig.installLine()) { copy("安装命令", ApiConfig.installLine()) }
                         }
                     }
                 }
                 1 -> {
-                    hint("支持 MCP 的 agent：把这段加进它的 MCP 配置（streamable HTTP，一个工具 vscreen，截图直接附在结果里）。每次连接时都会带上用法说明，新对话也知道怎么用。")
+                    Hint("支持 MCP 的 agent：把这段加进它的 MCP 配置（streamable HTTP，一个工具 vscreen，截图直接附在结果里）。每次连接都会带上用法说明，新对话也知道怎么用。")
                     Code(ApiConfig.mcpJson()) { copy("MCP 配置", ApiConfig.mcpJson()) }
                 }
                 else -> {
-                    hint("自己写调用代码的 agent 应用：复制下面这段话发给它，里面有地址、令牌和要它记住的说明。返回 JSON（text、data、images、exit、code），完整说明 GET /v1/help。")
-                    Button(onClick = { copy("给 agent 的话", AgentGuide.onboardHttp()) }, modifier = Modifier.fillMaxWidth()) { Text("复制给 agent 的话") }
+                    Hint("自己写调用代码的 agent 应用：把下面这段话发给它，里面有地址、令牌和要它记住的说明。返回 JSON（text、data、images、exit、code），完整说明 GET /v1/help。")
+                    PrimaryAction("复制给 agent 的话") { copy("给 agent 的话", AgentGuide.onboardHttp()) }
                 }
             }
             AgentMemoryRow(ledger)
-            OutlinedButton(onClick = { copy("记忆说明", if (tab == 2) AgentGuide.memoryHttp() else AgentGuide.memory()) }, modifier = Modifier.fillMaxWidth()) {
-                Text("复制一句话，放进 agent 的自定义指令 / 记忆")
-            }
+            Hint("agent 有“自定义指令”或“记忆”设置的话，也可以把一句说明直接贴进去。")
+            SecondaryAction("复制记忆说明") { copy("记忆说明", if (tab == 2) AgentGuide.memoryHttp() else AgentGuide.memory()) }
+            SubTitle("令牌")
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(start = 12.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(start = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("令牌", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.width(10.dp))
                 Text(if (showToken) token else "•".repeat(12) + token.takeLast(4), fontFamily = FontFamily.Monospace, fontSize = 13.sp,
                     modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 IconButton(onClick = { showToken = !showToken }) { Icon(if (showToken) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, "显示令牌") }
@@ -364,7 +396,7 @@ class MainActivity : ComponentActivity() {
                     Icon(Icons.Filled.Refresh, "换一个令牌")
                 }
             }
-            Text("令牌只给你信任的 agent：拿到它就能在副屏上操作你的应用。服务只监听本机，网页调用一律拒绝。", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Hint("令牌只给你信任的 agent：拿到它就能在副屏上操作你的应用。服务只监听本机，网页调用一律拒绝。")
             Remote(token)
         }
     }
@@ -380,12 +412,18 @@ class MainActivity : ComponentActivity() {
             l.remembered -> Triple(Palette.standby, "agent 说已记住", "存在了「${l.rememberedWhere}」（${fmt.format(java.util.Date(l.rememberedAt))}）。等它在新对话里主动用起来，这里会变成“记住了”。")
             else -> Triple(Palette.stopped, "agent 还没确认记住", "${fmt.format(java.util.Date(l.installAt))} 装好了 vscreen，但 agent 没有报告把说明存在哪。新对话里它可能不知道有这个工具：再把“给 agent 的话”发给它一次，或把下面那句放进它的自定义指令。")
         }
+        StatusCard(color, title, body)
+    }
+
+    @Composable
+    private fun StatusCard(color: Color, title: String, body: String) {
         Column(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(color.copy(alpha = 0.10f))
-                .border(BorderStroke(1.dp, color.copy(alpha = 0.45f)), RoundedCornerShape(14.dp)).padding(12.dp),
+                .border(BorderStroke(1.dp, color.copy(alpha = 0.45f)), RoundedCornerShape(14.dp)).padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = color)
-            Text(body, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = color)
+            if (body.isNotEmpty()) Text(body, fontSize = 12.sp, lineHeight = 18.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 
@@ -397,21 +435,18 @@ class MainActivity : ComponentActivity() {
         var sysAddr by remember { mutableStateOf<String?>(null) }
         LaunchedEffect(mode) { while (true) { sysAddr = HostService.server?.tailAddress; delay(3_000) } }
         val M = com.kilon.agentvscreen.host.Tailnet.Mode.entries
-        Text("让其它设备连进来", fontWeight = FontWeight.Medium, fontSize = 14.sp)
-        Text("默认关。打开后只有你自己 Tailscale 网络里的电脑或手机能连，走加密隧道，局域网和公网都连不到；令牌照样要。", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            val labels = listOf("关", "内置 Tailscale", "Tailscale App")
-            M.forEachIndexed { i, m ->
-                SegmentedButton(selected = mode == m, onClick = {
-                    mode = m; ApiConfig.tailnetMode = m
-                    HostService.server?.start(ApiConfig.port)
-                    com.kilon.agentvscreen.host.Tailnet.sync(applicationContext)
-                }, shape = SegmentedButtonDefaults.itemShape(i, M.size), icon = {}) { Text(labels[i], fontSize = 12.sp, maxLines = 1) }
-            }
+        SubTitle("让其它设备连进来")
+        Hint("默认关。打开后只有你自己 Tailscale 网络里的电脑或手机能连，走加密隧道，局域网和公网都连不到；令牌照样要。“内置”不用装 Tailscale App，“外部 App”用这台手机上已装的 Tailscale。")
+        Segments(listOf("关", "内置", "外部 App"), M.indexOf(mode)) { i ->
+            val m = M[i]
+            mode = m; ApiConfig.tailnetMode = m
+            HostService.server?.start(ApiConfig.port)
+            com.kilon.agentvscreen.host.Tailnet.sync(applicationContext)
         }
         val remoteLine: @Composable (String) -> Unit = { host ->
-            val line = "VSCREEN_URL=http://$host:${ApiConfig.port} VSCREEN_TOKEN=$token vscreen status"
-            Text("在你 Tailscale 网络里的另一台设备上（装好 curl，先 curl -fsS http://$host:${ApiConfig.port}/cli > vscreen && chmod +x vscreen）：", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            val line = "curl -fsS http://$host:${ApiConfig.port}/cli > vscreen && chmod +x vscreen\n" +
+                "VSCREEN_URL=http://$host:${ApiConfig.port} \\\nVSCREEN_TOKEN=$token \\\n./vscreen status"
+            Hint("在你 Tailscale 网络里的另一台电脑上运行（第一行下载命令行，只需一次）：")
             Code(line) { copy("远程调用示例", line) }
         }
         when (mode) {
@@ -420,41 +455,41 @@ class MainActivity : ComponentActivity() {
                 var ctl by remember { mutableStateOf(ApiConfig.tailnetControlUrl ?: "") }
                 var more by remember { mutableStateOf(false) }
                 if (!com.kilon.agentvscreen.host.Tailnet.available(this@MainActivity)) {
-                    Text("这个安装包里没有内置 Tailscale 组件（只支持 arm64 手机）。", fontSize = 12.sp, color = Palette.stopped)
+                    StatusCard(Palette.stopped, "这个安装包里没有内置 Tailscale", "只支持 arm64 手机。")
                 } else when {
                     ts.loggedIn -> {
-                        Text("已连上 Tailscale：本机在你的网络里叫 ${ts.dnsName ?: ApiConfig.tailnetHostname}，地址 ${ts.ip}。" +
-                            (ts.user?.let { "账号 $it，" } ?: "") + "在线设备 ${ts.online} 台。" + (ts.lastPeer?.let { "最近来访：$it。" } ?: ""),
-                            fontSize = 12.sp, color = Palette.takeover)
+                        StatusCard(Palette.takeover, "已连上 Tailscale",
+                            "名字 ${ts.dnsName ?: ApiConfig.tailnetHostname}\n地址 ${ts.ip}" + (ts.user?.let { "\n账号 $it" } ?: "") +
+                                "\n在线设备 ${ts.online} 台" + (ts.lastPeer?.let { "\n最近来访 $it" } ?: ""))
                         remoteLine(ts.ip!!)
-                        TextButton(onClick = { com.kilon.agentvscreen.host.Tailnet.logout() }) { Text("退出 Tailscale 登录") }
+                        SecondaryAction("退出 Tailscale 登录") { com.kilon.agentvscreen.host.Tailnet.logout() }
                     }
                     ts.needsLogin && ts.authUrl != null -> {
-                        Text("第一次使用要登录一次 Tailscale（之后会记住）。用你电脑上 Tailscale 的同一个账号登录。", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Button(onClick = { runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ts.authUrl))) } }, modifier = Modifier.fillMaxWidth()) { Text("在浏览器里登录 Tailscale") }
-                        TextButton(onClick = { copy("登录链接", ts.authUrl!!) }) { Text("复制登录链接（在电脑上打开也行）") }
+                        Hint("第一次使用要登录一次 Tailscale，之后会记住。用你电脑上 Tailscale 的同一个账号登录；手机上不方便的话，复制链接到电脑上打开也行。")
+                        PrimaryAction("在浏览器里登录 Tailscale") { runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ts.authUrl))) } }
+                        SecondaryAction("复制登录链接") { copy("登录链接", ts.authUrl!!) }
                     }
-                    ts.error != null -> Text("内置 Tailscale：${ts.error}（会自动重试）", fontSize = 12.sp, color = Palette.stopped)
-                    else -> Text("内置 Tailscale 正在启动（${ts.state}）…", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ts.error != null -> StatusCard(Palette.stopped, "内置 Tailscale 出错，会自动重试", ts.error!!)
+                    else -> StatusCard(Palette.standby, "内置 Tailscale 正在启动…", ts.state)
                 }
-                TextButton(onClick = { more = !more }) { Text(if (more) "收起高级选项" else "高级：auth key、自建控制服务器") }
+                Disclosure("高级选项（auth key、自建服务器）", more) { more = !more }
                 AnimatedVisibility(more) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         androidx.compose.material3.OutlinedTextField(key, { key = it }, label = { Text("auth key（可选，代替浏览器登录）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                         androidx.compose.material3.OutlinedTextField(ctl, { ctl = it }, label = { Text("控制服务器（可选，如 Headscale 地址）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                        OutlinedButton(onClick = {
+                        SecondaryAction("保存并重连") {
                             if (key.isNotBlank()) ApiConfig.tailnetAuthKey = key
                             ApiConfig.tailnetControlUrl = ctl.ifBlank { null }
                             key = ""
                             com.kilon.agentvscreen.host.Tailnet.restart(applicationContext)
                             Toast.makeText(this@MainActivity, "已保存，内置 Tailscale 重新连接中", Toast.LENGTH_SHORT).show()
-                        }) { Text("保存并重连") }
+                        }
                     }
                 }
             }
             com.kilon.agentvscreen.host.Tailnet.Mode.SYSTEM -> {
                 val a = sysAddr
-                if (a == null) Text("还没找到 Tailscale 地址：在这台手机上装好并登录 Tailscale App，打开连接后 20 秒内自动生效。不想装 App 就选“内置 Tailscale”。", fontSize = 12.sp, color = Palette.stopped)
+                if (a == null) StatusCard(Palette.stopped, "还没找到 Tailscale 地址", "在这台手机上装好并登录 Tailscale App，打开连接后 20 秒内自动生效。不想装 App 就选“内置”。")
                 else remoteLine(a)
             }
             else -> {}
@@ -547,8 +582,8 @@ class MainActivity : ComponentActivity() {
     private fun Code(text: String, onCopy: () -> Unit) {
         Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF12141C))) {
             SelectionContainer {
-                Text(text, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, lineHeight = 16.sp, color = Color(0xFFE6E8F0),
-                    modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 12.dp, end = 48.dp))
+                Text(text, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, lineHeight = 17.sp, color = Color(0xFFE6E8F0), softWrap = false,
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, bottom = 14.dp, end = 52.dp))
             }
             IconButton(onClick = onCopy, modifier = Modifier.align(Alignment.TopEnd)) { Icon(Icons.Filled.ContentCopy, "复制", tint = Color(0xFFE6E8F0)) }
         }
