@@ -1,4 +1,4 @@
-// tsbridge: the built-in Tailscale node of Agent-VScreen (1.1.6).
+// tsbridge: the built-in Tailscale node of Agent-VScreen (1.1.6; 1.1.7 login link fix).
 //
 // It joins the user's tailnet as its own device (userspace tsnet: no VPN slot, no root, no Tailscale app) and forwards
 // HTTP that tailnet peers send to <node>:PORT on to the app's local server at 127.0.0.1:PORT. Every forwarded request
@@ -7,7 +7,7 @@
 //
 // The app runs it as a child process and talks over pipes:
 //   stdout: one JSON object per line whenever the state changes ({"state":"Running","ip":"100.x", ...}).
-//   stdin:  commands, one per line: "logout", "quit". EOF (the app died) ends this process too.
+//   stdin:  commands, one per line: "login" (ask for a fresh login link), "logout", "quit". EOF (the app died) ends this process too.
 //
 // Configuration comes from the environment so nothing secret shows up in `ps`:
 //   TSB_DIR (state dir), TSB_HOSTNAME, TSB_PORT, TSB_TARGET (host:port), TSB_SECRET, TSB_AUTHKEY (optional),
@@ -44,6 +44,9 @@ type status struct {
 	Online   int    `json:"online"`
 	Error    string `json:"error,omitempty"`
 	LastPeer string `json:"last_peer,omitempty"`
+	// 1.1.7: why a login link is not there yet (control server unreachable, etc.), and how long we have waited.
+	Health   string `json:"health,omitempty"`
+	WaitingS int    `json:"waiting_s,omitempty"`
 }
 
 var (
@@ -193,12 +196,34 @@ func main() {
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusBadGateway)
-		fmt.Fprintf(w, `{"ok":false,"code":"APP_NOT_ANSWERING","error":"手机上的 Agent-VScreen 没有回应（%s）：打开一次 App"}`, strings.ReplaceAll(err.Error(), `"`, `'`))
+		fmt.Fprintf(w, `{"ok":false,"code":"APP_NOT_ANSWERING","error":"Agent-VScreen on the phone did not answer (%s): open the app once / 手机上的 Agent-VScreen 没有回应：打开一次 App"}`, strings.ReplaceAll(err.Error(), `"`, `'`))
 	}
 	go func() { _ = (&http.Server{Handler: rp, ReadHeaderTimeout: 30 * time.Second}).Serve(ln) }()
 
 	// Commands from the app; EOF = the app is gone.
 	quit := make(chan struct{})
+	// 1.1.7: tsnet asks the control server for a login link only once, and only if the backend is already in NeedsLogin
+	// at that instant. When it is still NoState then (slow storage, an old state file, an expired node) or after a
+	// logout or an expired link, the node sits in NeedsLogin with no link forever. So we ask ourselves: whenever the
+	// state is NeedsLogin without a link, at most every 20 s, and right away on a "login" command from the app.
+	var loginMu sync.Mutex
+	var lastKick time.Time
+	kick := func(force bool) {
+		loginMu.Lock()
+		if !force && time.Since(lastKick) < 20*time.Second {
+			loginMu.Unlock()
+			return
+		}
+		lastKick = time.Now()
+		loginMu.Unlock()
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := lc.StartLoginInteractive(ctx); err != nil {
+				fmt.Fprintln(os.Stderr, "StartLoginInteractive:", err)
+			}
+		}()
+	}
 	go func() {
 		sc := bufio.NewScanner(os.Stdin)
 		for sc.Scan() {
@@ -207,6 +232,8 @@ func main() {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				_ = lc.Logout(ctx)
 				cancel()
+			case "login":
+				kick(true)
 			case "quit":
 				close(quit)
 				return
@@ -215,6 +242,7 @@ func main() {
 		close(quit)
 	}()
 
+	var needSince time.Time
 	tick := time.NewTicker(2 * time.Second)
 	defer tick.Stop()
 	for {
@@ -225,6 +253,18 @@ func main() {
 			emit(status{State: "Error", Error: err.Error()})
 		} else {
 			s := status{State: st.BackendState, AuthURL: st.AuthURL}
+			if st.BackendState == "NeedsLogin" && st.AuthURL == "" {
+				if needSince.IsZero() {
+					needSince = time.Now()
+				}
+				s.WaitingS = int(time.Since(needSince) / time.Second)
+				s.Health = strings.Join(st.Health, "; ")
+				if srv.AuthKey == "" {
+					kick(false)
+				}
+			} else {
+				needSince = time.Time{}
+			}
 			if len(st.TailscaleIPs) > 0 {
 				for _, ip := range st.TailscaleIPs {
 					if ip.Is4() {

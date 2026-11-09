@@ -84,6 +84,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kilon.agentvscreen.BuildConfig
+import com.kilon.agentvscreen.I18n
+import com.kilon.agentvscreen.tr
 import com.kilon.agentvscreen.R
 import com.kilon.agentvscreen.api.AgentGuide
 import com.kilon.agentvscreen.api.ApiConfig
@@ -117,7 +119,7 @@ class MainActivity : ComponentActivity() {
 
     private fun copy(label: String, text: String) {
         getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(label, text))
-        Toast.makeText(this, "已复制：$label", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, tr("已复制：$label", "Copied: $label"), Toast.LENGTH_SHORT).show()
     }
 
     private fun diagnostics(items: List<Setup.Item>): String {
@@ -160,59 +162,63 @@ class MainActivity : ComponentActivity() {
         ) {
             Hero(s, serviceOn) { on ->
                 serviceOn = on; Prefs.setServiceOn(this@MainActivity, on)
-                if (on) HostService.start(this@MainActivity) else { BackgroundOperation.stopAndRelease("用户停止了服务"); HostService.stop(this@MainActivity) }
+                if (on) HostService.start(this@MainActivity) else { BackgroundOperation.stopAndRelease(tr("用户停止了服务", "The user stopped the service")); HostService.stop(this@MainActivity) }
                 tick++
             }
 
             if (s.userStopped) Banner(
-                "你停止了 AI", "你在悬浮窗上按了“停止 AI”${if (s.stoppedAt > 0) "（" + java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(s.stoppedAt)) + "）" else ""}。在你允许之前，agent 的每个操作都会被拒绝，它也会被告知来找你。关掉悬浮窗不会解除它。", Palette.stopped,
-                "允许继续",
+                tr("你停止了 AI", "You stopped the AI"), run {
+                    val at = if (s.stoppedAt > 0) java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(s.stoppedAt)) else null
+                    tr("你在悬浮窗上按了“停止 AI”${at?.let { "（$it）" } ?: ""}。在你允许之前，agent 的每个操作都会被拒绝，它也会被告知来找你。关掉悬浮窗不会解除它。",
+                        "You pressed \"Stop AI\" on the floating window${at?.let { " ($it)" } ?: ""}. Until you allow it, every action of the agent is refused and it is told to come to you. Closing the floating window does not lift it.")
+                }, Palette.stopped,
+                tr("允许继续", "Allow again"),
             ) { BackgroundOperation.userResume() }
             if (s.windowHidden && s.displayId != null && !s.userStopped) Banner(
-                "小窗已收起", "AI 还在后台工作。下一轮开始时小窗会自己回来，也可以现在打开。", Palette.standby, "显示小窗",
+                tr("小窗已收起", "Floating window hidden"), tr("AI 还在后台工作。下一轮开始时小窗会自己回来，也可以现在打开。", "The AI is still working in the background. The window comes back by itself on the next turn, or open it now."), Palette.standby, tr("显示小窗", "Show window"),
             ) { BackgroundOperation.showWindow() }
 
             com.kilon.agentvscreen.host.Liveness.problem()?.let { p ->
-                Banner("后台运行受限", p, Palette.stopped, "去设置") {
+                Banner(tr("后台运行受限", "Background running restricted"), p, Palette.stopped, tr("去设置", "Settings")) {
                     val opened = com.kilon.agentvscreen.host.Liveness.openBackgroundSettings(this@MainActivity)
-                    Toast.makeText(this@MainActivity, "已打开：$opened。把 Agent-VScreen 设为允许自启动、关联启动和后台活动", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, tr("已打开：$opened。把 Agent-VScreen 设为允许自启动、关联启动和后台活动", "Opened: $opened. Allow Agent-VScreen to auto-start, be started by other apps and run in the background"), Toast.LENGTH_LONG).show()
                 }
             }
 
             // ── setup ──
             val done = items.count { it.ok }
             Block(
-                title = "首次配置",
+                title = tr("首次配置", "First-time setup"),
                 trailing = { Text("$done/${items.size}", color = if (allOk) Palette.takeover else MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold) },
                 onHeader = if (allOk) ({ setupOpen = !setupOpen }) else null,
                 open = if (allOk) setupOpen else null,
             ) {
                 if (allOk && !setupOpen) {
-                    Text("全部就绪。只用 Shizuku：不占用 adb、不改无线调试，你的 agent 自己的 adb / Shizuku 照常用。", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(tr("全部就绪。只用 Shizuku：不占用 adb、不改无线调试，你的 agent 自己的 adb / Shizuku 照常用。", "All set. Shizuku only: adb and wireless debugging stay untouched, so your agent's own adb / Shizuku keep working."), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     return@Block
                 }
-                Text("只用 Shizuku 这一条可共享的特权通道：不占用 adb，不改无线调试，不重启 adbd。每一项都只把本应用“加进去”，不动别的应用的设置。",
+                Text(tr("只用 Shizuku 这一条可共享的特权通道：不占用 adb，不改无线调试，不重启 adbd。每一项都只把本应用“加进去”，不动别的应用的设置。", "Uses only Shizuku, a privilege channel that can be shared: adb is not taken, wireless debugging is not changed, adbd is not restarted. Each item only adds this app and leaves other apps' settings alone."),
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 items.forEachIndexed { i, it -> StepRow(i + 1, it) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
                     when (sh.state) {
-                        ShizukuManager.State.NEED_PERMISSION -> Button(onClick = { ShizukuManager.requestPermission(); tick++ }) { Text("授权 Shizuku") }
-                        ShizukuManager.State.NOT_RUNNING -> Button(onClick = { ShizukuManager.openShizukuApp(this@MainActivity) }) { Text("打开 Shizuku 启动") }
-                        ShizukuManager.State.NOT_INSTALLED -> Button(onClick = { ShizukuManager.openInstallPage(this@MainActivity) }) { Text("安装 Shizuku") }
+                        ShizukuManager.State.NEED_PERMISSION -> Button(onClick = { ShizukuManager.requestPermission(); tick++ }) { Text(tr("授权 Shizuku", "Grant Shizuku")) }
+                        ShizukuManager.State.NOT_RUNNING -> Button(onClick = { ShizukuManager.openShizukuApp(this@MainActivity) }) { Text(tr("打开 Shizuku 启动", "Open Shizuku to start it")) }
+                        ShizukuManager.State.NOT_INSTALLED -> Button(onClick = { ShizukuManager.openInstallPage(this@MainActivity) }) { Text(tr("安装 Shizuku", "Install Shizuku")) }
                         ShizukuManager.State.READY -> Button(enabled = !busy && items.any { !it.ok }, onClick = {
                             busy = true
                             scope.launch { setupLog = withContext(Dispatchers.IO) { Setup.grantAll(this@MainActivity) }; busy = false; Overlay.refresh(); tick++ }
-                        }) { Text(if (busy) "配置中…" else "一键配置其余项") }
+                        }) { Text(if (busy) tr("配置中…", "Setting up…") else tr("一键配置其余项", "Set up the rest")) }
                     }
                     if (items.any { it.key == "vendor_bg" && !it.ok }) Button(onClick = {
                         val opened = com.kilon.agentvscreen.host.Liveness.openBackgroundSettings(this@MainActivity)
-                        Toast.makeText(this@MainActivity, "已打开：$opened。把 Agent-VScreen 改成手动管理，允许自启动、关联启动和后台活动", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this@MainActivity, tr("已打开：$opened。把 Agent-VScreen 改成手动管理，允许自启动、关联启动和后台活动", "Opened: $opened. Set Agent-VScreen to manual management and allow auto-start, start by other apps and background activity"), Toast.LENGTH_LONG).show()
                         tick++
-                    }) { Text("去设置后台管理") }
-                    OutlinedButton(onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }) { Text("无障碍设置") }
+                    }) { Text(tr("去设置后台管理", "Background management")) }
+                    OutlinedButton(onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }) { Text(tr("无障碍设置", "Accessibility")) }
                     if (!Settings.canDrawOverlays(this@MainActivity)) OutlinedButton(onClick = {
                         startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-                    }) { Text("悬浮窗权限") }
+                    }) { Text(tr("悬浮窗权限", "Overlay permission")) }
                 }
                 setupLog.forEach { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
@@ -220,30 +226,39 @@ class MainActivity : ComponentActivity() {
             Connect()
 
             // ── settings ──
-            Block("设置") {
-                Toggle("悬浮窗", "有副屏时在所有应用上方显示", s.showPreview) { BackgroundOperation.setShowPreview(it); if (it) Overlay.refresh() }
-                Toggle("精确文字识别", "PP-OCR，在本机运行", s.accurateOcr) { BackgroundOperation.setAccurateOcr(it) }
-                Toggle("后台录制", "【这段时间】里的拼图", s.recording) { BackgroundOperation.setRecording(it) }
+            Block(tr("设置", "Settings")) {
+                Text("语言 / Language", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                Text(tr("App 界面、悬浮窗、通知，以及给 agent 的话和命令的返回都会换成这种语言", "Used for the app, the floating window, notifications, and everything said to the agent (messages and command replies)"),
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Segments(listOf(tr("跟随系统", "System"), "中文", "English"), I18n.Lang.entries.indexOf(I18n.choice)) { i ->
+                    I18n.choice = I18n.Lang.entries[i]
+                    Overlay.refresh()
+                    if (HostService.isAlive) HostService.start(this@MainActivity)
+                    recreate()
+                }
+                Toggle(tr("悬浮窗", "Floating window"), tr("有副屏时在所有应用上方显示", "Shown above all apps while there is a screen"), s.showPreview) { BackgroundOperation.setShowPreview(it); if (it) Overlay.refresh() }
+                Toggle(tr("精确文字识别", "Accurate text recognition"), tr("PP-OCR，在本机运行", "PP-OCR, runs on this phone"), s.accurateOcr) { BackgroundOperation.setAccurateOcr(it) }
+                Toggle(tr("后台录制", "Background recording"), tr("【这段时间】里的拼图", "The picture strip in [Meanwhile]"), s.recording) { BackgroundOperation.setRecording(it) }
                 val idleSave by com.kilon.agentvscreen.core.VScreenStore.idlePowerSave.collectAsState()
-                Toggle("空闲省电", "一轮结束 30 秒后暂停副屏渲染，页面保留，下一条命令自动恢复；个别应用恢复时会重新加载，遇到可以关掉", idleSave) {
+                Toggle(tr("空闲省电", "Idle power saving"), tr("一轮结束 30 秒后暂停副屏渲染，页面保留，下一条命令自动恢复；个别应用恢复时会重新加载，遇到可以关掉", "Pauses rendering 30 s after a turn ends; the page is kept and the next command resumes it. A few apps reload on resume: turn this off if you see that"), idleSave) {
                     BackgroundOperation.setIdlePowerSave(it)
                 }
-                Text("一轮的长度", fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                Text("agent 安静多久算这轮结束：之后副屏省电暂停，10 分钟后释放（agent 也可以用 vscreen done 马上结束）",
+                Text(tr("一轮的长度", "Turn length"), fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                Text(tr("agent 安静多久算这轮结束：之后副屏省电暂停，10 分钟后释放（agent 也可以用 vscreen done 马上结束）", "How long the agent stays quiet before its turn ends: the screen then pauses to save power and is released after 10 minutes (the agent can also end at once with vscreen done)"),
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 var quiet by remember { mutableIntStateOf(ApiConfig.quietMinutes) }
                 val opts = listOf(1, 3, 5, 10, 30)
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     opts.forEachIndexed { i, m ->
                         SegmentedButton(selected = quiet == m, onClick = { ApiConfig.quietMinutes = m; quiet = m },
-                            shape = SegmentedButtonDefaults.itemShape(i, opts.size), icon = {}) { Text("${m}分", maxLines = 1, fontSize = 13.sp) }
+                            shape = SegmentedButtonDefaults.itemShape(i, opts.size), icon = {}) { Text(tr("${m}分", "${m} min"), maxLines = 1, fontSize = 13.sp) }
                     }
                 }
             }
-            Block("应用限制") { VScreenAppRules() }
+            Block(tr("应用限制", "App rules")) { VScreenAppRules() }
 
             Diagnostics(items)
-            Text("Agent-VScreen ${BuildConfig.VERSION_NAME} · 副屏能力来自 Minis VScreen", fontSize = 11.sp,
+            Text(tr("Agent-VScreen ${BuildConfig.VERSION_NAME} · 副屏能力来自 Minis VScreen", "Agent-VScreen ${BuildConfig.VERSION_NAME} · screen engine from Minis VScreen"), fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 12.dp))
         }
     }
@@ -262,7 +277,7 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text("Agent-VScreen", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        Text("给任何手机 agent 用的后台副屏", color = Color(0xB3FFFFFF), fontSize = 13.sp)
+                        Text(tr("给任何手机 agent 用的后台副屏", "A background screen for any phone agent"), color = Color(0xB3FFFFFF), fontSize = 13.sp)
                     }
                     Switch(checked = serviceOn, onCheckedChange = setOn)
                 }
@@ -271,18 +286,18 @@ class MainActivity : ComponentActivity() {
                     Box(Modifier.size(8.dp).clip(CircleShape).background(if (ok) Palette.takeover else Palette.stopped))
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        if (HostService.isAlive) (HostService.server?.lastError ?: "服务运行中 · 127.0.0.1:${ApiConfig.port}") else "服务已停止",
+                        if (HostService.isAlive) (HostService.server?.lastError ?: tr("服务运行中 · 127.0.0.1:${ApiConfig.port}", "Service running · 127.0.0.1:${ApiConfig.port}")) else tr("服务已停止", "Service stopped"),
                         color = Color.White, fontSize = 13.sp, maxLines = 3, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
                     if (HostService.isAlive && HostService.server?.lastError != null)
-                        if (HostService.server?.lastError?.contains("别的程序") == true)
+                        if (HostService.server?.portBusy == true)
                             TextButton(onClick = {
                                 val np = if (ApiConfig.port >= 65535) ApiConfig.DEFAULT_PORT + 1 else ApiConfig.port + 1
                                 ApiConfig.setPort(np); HostService.server?.start(np)
-                                Toast.makeText(this@MainActivity, "端口改成 $np：请在“接入 agent”里重新复制接入命令给 agent", Toast.LENGTH_LONG).show()
-                            }) { Text("换端口", color = Color.White) }
-                        else TextButton(onClick = { HostService.server?.start(ApiConfig.port) }) { Text("立即重试", color = Color.White) }
+                                Toast.makeText(this@MainActivity, tr("端口改成 $np：请在“接入 agent”里重新复制接入命令给 agent", "Port changed to $np: copy the connect message for your agent again under \"Connect an agent\""), Toast.LENGTH_LONG).show()
+                            }) { Text(tr("换端口", "Change port"), color = Color.White) }
+                        else TextButton(onClick = { HostService.server?.start(ApiConfig.port) }) { Text(tr("立即重试", "Retry now"), color = Color.White) }
                 }
                 // The screen right now.
                 Row(
@@ -295,15 +310,15 @@ class MainActivity : ComponentActivity() {
                     }
                     Spacer(Modifier.width(14.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(if (s.displayId == null) "还没有副屏" else Palette.word(mode), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                        Text(if (s.displayId == null) tr("还没有副屏", "No screen yet") else Palette.word(mode), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                         Text(
-                            if (s.displayId == null) "agent 第一次 launch 时自动创建"
-                            else (s.agentTitle ?: "副屏 ${s.screenWidth}×${s.screenHeight} · 会话 ${s.ownerSessionId ?: "-"}"),
+                            if (s.displayId == null) tr("agent 第一次 launch 时自动创建", "Created automatically on the agent's first launch")
+                            else (s.agentTitle ?: tr("副屏 ${s.screenWidth}×${s.screenHeight} · 会话 ${s.ownerSessionId ?: "-"}", "Screen ${s.screenWidth}×${s.screenHeight} · session ${s.ownerSessionId ?: "-"}")),
                             color = Color(0xB3FFFFFF), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
                     }
                     if (s.displayId != null) TextButton(onClick = { startActivity(Intent(this@MainActivity, FullscreenActivity::class.java)) }) {
-                        Text("查看", color = Color.White)
+                        Text(tr("查看", "View"), color = Color.White)
                     }
                 }
             }
@@ -356,48 +371,71 @@ class MainActivity : ComponentActivity() {
         var token by remember { mutableStateOf(ApiConfig.token) }
         var showToken by remember { mutableStateOf(false) }
         var rawOpen by remember { mutableStateOf(false) }
+        var where by remember { mutableIntStateOf(0) }
         val ledger by com.kilon.agentvscreen.api.AgentLedger.snap.collectAsState()
-        Block("接入 agent") {
-            Segments(listOf("命令行", "MCP", "HTTP"), tab) { tab = it }
+        val ts by com.kilon.agentvscreen.host.Tailnet.status.collectAsState()
+        var sysAddr by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(Unit) { while (true) { sysAddr = HostService.server?.tailAddress; delay(3_000) } }
+        // 1.1.7: the address an agent on another device uses (built-in node or the Tailscale app), if any.
+        val remoteHost = when (ApiConfig.tailnetMode) {
+            com.kilon.agentvscreen.host.Tailnet.Mode.BUILTIN -> ts.ip?.takeIf { ts.loggedIn }
+            com.kilon.agentvscreen.host.Tailnet.Mode.SYSTEM -> sysAddr
+            else -> null
+        }
+        val remoteBase = remoteHost?.let { "http://$it:${ApiConfig.port}" }
+        val base = if (where == 1 && remoteBase != null) remoteBase else ApiConfig.baseUrl
+        Block(tr("接入 agent", "Connect an agent")) {
+            Segments(listOf(tr("命令行", "Shell"), "MCP", "HTTP"), tab) { tab = it }
+            if (remoteBase != null) {
+                Segments(listOf(tr("agent 在这台手机上", "Agent on this phone"), tr("在其它设备上", "On another device")), where) { where = it }
+                if (where == 1) Hint(tr("下面复制的内容会用 Tailscale 地址 $remoteBase，那台设备要在你的 Tailscale 网络里。", "What you copy below uses the Tailscale address $remoteBase; that device must be in your Tailscale network."))
+            }
             when (tab) {
                 0 -> {
-                    Hint("Termux、Minis 等带终端的 agent：把下面这段话发给它（推荐）。它会装好 vscreen 命令，并把一段说明存进自己的长期记忆，以后的新对话里也知道手机上有这个工具。")
-                    PrimaryAction("复制给 agent 的话") { copy("给 agent 的话", AgentGuide.onboard()) }
-                    Disclosure("只看安装命令", rawOpen) { rawOpen = !rawOpen }
+                    Hint(tr("Termux、Minis 等带终端的 agent：把下面这段话发给它（推荐）。它会装好 vscreen 命令，并把“我能在手机上后台操作应用”记进自己的长期记忆，以后的新对话里也会用。",
+                        "Agents with a terminal (Termux, Minis, ...): send them the message below (recommended). It installs the vscreen command and has the agent save \"I can operate apps on the phone in the background\" in its long-term memory, so new conversations use it too."))
+                    PrimaryAction(tr("复制给 agent 的话", "Copy message for your agent")) { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboard(base)) }
+                    Disclosure(tr("只看安装命令", "Install command only"), rawOpen) { rawOpen = !rawOpen }
                     AnimatedVisibility(rawOpen) {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Hint("只把命令给 agent 的话，大多数 agent 装完就忘了，新对话里不知道有 vscreen。")
-                            Code(ApiConfig.installLine()) { copy("安装命令", ApiConfig.installLine()) }
+                            Hint(tr("只把命令给 agent 的话，大多数 agent 装完就忘了，新对话里不知道有 vscreen。", "With only the command, most agents forget vscreen after installing it, and new conversations don't know about it."))
+                            Code(ApiConfig.installLine(base)) { copy(tr("安装命令", "Install command"), ApiConfig.installLine(base)) }
                         }
                     }
                 }
                 1 -> {
-                    Hint("支持 MCP 的 agent：把这段加进它的 MCP 配置（streamable HTTP，一个工具 vscreen，截图直接附在结果里）。每次连接都会带上用法说明，新对话也知道怎么用。")
-                    Code(ApiConfig.mcpJson()) { copy("MCP 配置", ApiConfig.mcpJson()) }
+                    Hint(tr("支持 MCP 的 agent：把下面这段话发给它，里面有 MCP 配置（streamable HTTP，一个工具 vscreen，截图直接附在结果里）和要它记住的能力说明。",
+                        "Agents with MCP: send them the message below. It has the MCP config (streamable HTTP, one tool vscreen, screenshots attached to results) and the ability note for it to remember."))
+                    PrimaryAction(tr("复制给 agent 的话", "Copy message for your agent")) { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboardMcp(base)) }
+                    Disclosure(tr("只看 MCP 配置", "MCP config only"), rawOpen) { rawOpen = !rawOpen }
+                    AnimatedVisibility(rawOpen) { Code(ApiConfig.mcpJson(base)) { copy(tr("MCP 配置", "MCP config"), ApiConfig.mcpJson(base)) } }
                 }
                 else -> {
-                    Hint("自己写调用代码的 agent 应用：把下面这段话发给它，里面有地址、令牌和要它记住的说明。返回 JSON（text、data、images、exit、code），完整说明 GET /v1/help。")
-                    PrimaryAction("复制给 agent 的话") { copy("给 agent 的话", AgentGuide.onboardHttp()) }
+                    Hint(tr("自己写调用代码的 agent 应用：把下面这段话发给它，里面有地址、令牌和要它记住的能力说明。返回 JSON（text、data、images、exit、code），完整说明 GET /v1/help。",
+                        "Agent apps that write their own calls: send them the message below, with the address, token and the ability note to remember. Replies are JSON (text, data, images, exit, code); full reference at GET /v1/help."))
+                    PrimaryAction(tr("复制给 agent 的话", "Copy message for your agent")) { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboardHttp(base)) }
                 }
             }
             AgentMemoryRow(ledger)
-            Hint("agent 有“自定义指令”或“记忆”设置的话，也可以把一句说明直接贴进去。")
-            SecondaryAction("复制记忆说明") { copy("记忆说明", if (tab == 2) AgentGuide.memoryHttp() else AgentGuide.memory()) }
-            SubTitle("令牌")
+            Hint(tr("agent 有“自定义指令”或“记忆”设置的话，也可以把能力说明直接贴进去。", "If the agent has a custom instructions or memory setting, you can also paste the ability note there yourself."))
+            SecondaryAction(tr("复制能力说明", "Copy ability note")) {
+                copy(tr("能力说明", "Ability note"), when (tab) { 1 -> AgentGuide.memoryMcp(); 2 -> AgentGuide.memoryHttp(base); else -> AgentGuide.memory(base) })
+            }
+            SubTitle(tr("令牌", "Token"))
             Row(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(start = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(if (showToken) token else "•".repeat(12) + token.takeLast(4), fontFamily = FontFamily.Monospace, fontSize = 13.sp,
                     modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                IconButton(onClick = { showToken = !showToken }) { Icon(if (showToken) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, "显示令牌") }
-                IconButton(onClick = { copy("令牌", token) }) { Icon(Icons.Filled.ContentCopy, "复制令牌") }
-                IconButton(onClick = { ApiConfig.resetToken(); token = ApiConfig.token; Toast.makeText(this@MainActivity, "已换新令牌：旧的立即失效，各 agent 要重新接入", Toast.LENGTH_LONG).show() }) {
-                    Icon(Icons.Filled.Refresh, "换一个令牌")
+                IconButton(onClick = { showToken = !showToken }) { Icon(if (showToken) Icons.Filled.VisibilityOff else Icons.Filled.Visibility, tr("显示令牌", "Show token")) }
+                IconButton(onClick = { copy(tr("令牌", "Token"), token) }) { Icon(Icons.Filled.ContentCopy, tr("复制令牌", "Copy token")) }
+                IconButton(onClick = { ApiConfig.resetToken(); token = ApiConfig.token; Toast.makeText(this@MainActivity, tr("已换新令牌：旧的立即失效，各 agent 要重新接入", "New token: the old one stops working now, every agent has to connect again"), Toast.LENGTH_LONG).show() }) {
+                    Icon(Icons.Filled.Refresh, tr("换一个令牌", "New token"))
                 }
             }
-            Hint("令牌只给你信任的 agent：拿到它就能在副屏上操作你的应用。服务只监听本机，网页调用一律拒绝。")
-            Remote(token)
+            Hint(tr("令牌只给你信任的 agent：拿到它就能在副屏上操作你的应用。服务只监听本机，网页调用一律拒绝。", "Give the token only to agents you trust: with it they can operate your apps on the screen. The service listens only on this phone, and calls from web pages are always refused."))
+            Remote(ts, remoteBase)
         }
     }
 
@@ -405,12 +443,17 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun AgentMemoryRow(l: com.kilon.agentvscreen.api.AgentLedger.Snapshot) {
         if (!l.installed) return
-        val fmt = remember { java.text.SimpleDateFormat("M月d日 HH:mm", java.util.Locale.CHINA) }
+        val fmt = remember(I18n.en) { java.text.SimpleDateFormat(tr("M月d日 HH:mm", "MMM d HH:mm"), if (I18n.en) java.util.Locale.US else java.util.Locale.CHINA) }
+        fun at(t: Long) = fmt.format(java.util.Date(t))
         val (color, title, body) = when {
-            l.cameBack -> Triple(Palette.takeover, "agent 记住了", "安装后，agent 在隔了一段时间的新对话里又主动用了 ${l.comebacks} 次（最近 ${fmt.format(java.util.Date(l.lastComebackAt))}）。" +
-                (l.rememberedWhere?.let { "它说存在了「$it」。" } ?: ""))
-            l.remembered -> Triple(Palette.standby, "agent 说已记住", "存在了「${l.rememberedWhere}」（${fmt.format(java.util.Date(l.rememberedAt))}）。等它在新对话里主动用起来，这里会变成“记住了”。")
-            else -> Triple(Palette.stopped, "agent 还没确认记住", "${fmt.format(java.util.Date(l.installAt))} 装好了 vscreen，但 agent 没有报告把说明存在哪。新对话里它可能不知道有这个工具：再把“给 agent 的话”发给它一次，或把下面那句放进它的自定义指令。")
+            l.cameBack -> Triple(Palette.takeover, tr("agent 记住了", "The agent remembers"),
+                tr("安装后，agent 在隔了一段时间的新对话里又主动用了 ${l.comebacks} 次（最近 ${at(l.lastComebackAt)}）。", "Since installing, the agent came back on its own in a later conversation ${l.comebacks} times (last ${at(l.lastComebackAt)}). ") +
+                    (l.rememberedWhere?.let { tr("它说存在了「$it」。", "It says it saved it in \"$it\".") } ?: ""))
+            l.remembered -> Triple(Palette.standby, tr("agent 说已记住", "The agent says it saved it"),
+                tr("存在了「${l.rememberedWhere}」（${at(l.rememberedAt)}）。等它在新对话里主动用起来，这里会变成“记住了”。", "Saved in \"${l.rememberedWhere}\" (${at(l.rememberedAt)}). Once it uses vscreen on its own in a new conversation, this turns into \"remembers\"."))
+            else -> Triple(Palette.stopped, tr("agent 还没确认记住", "The agent has not confirmed it saved it"),
+                tr("${at(l.installAt)} 装好了 vscreen，但 agent 没有报告把说明存在哪。新对话里它可能不知道自己有这个能力：再把“给 agent 的话”发给它一次，或把能力说明放进它的自定义指令。",
+                    "vscreen was installed ${at(l.installAt)}, but the agent has not said where it saved the note. New conversations may not know they have this ability: send the message for your agent again, or put the ability note in its custom instructions."))
         }
         StatusCard(color, title, body)
     }
@@ -429,25 +472,20 @@ class MainActivity : ComponentActivity() {
 
     /** 1.1.6: other devices: off / built-in Tailscale (no app needed) / the Tailscale app on this phone. */
     @Composable
-    private fun Remote(token: String) {
+    private fun Remote(ts: com.kilon.agentvscreen.host.Tailnet.Status, remoteBase: String?) {
         var mode by remember { mutableStateOf(ApiConfig.tailnetMode) }
-        val ts by com.kilon.agentvscreen.host.Tailnet.status.collectAsState()
-        var sysAddr by remember { mutableStateOf<String?>(null) }
-        LaunchedEffect(mode) { while (true) { sysAddr = HostService.server?.tailAddress; delay(3_000) } }
         val M = com.kilon.agentvscreen.host.Tailnet.Mode.entries
-        SubTitle("让其它设备连进来")
-        Hint("默认关。打开后只有你自己 Tailscale 网络里的电脑或手机能连，走加密隧道，局域网和公网都连不到；令牌照样要。“内置”不用装 Tailscale App，“外部 App”用这台手机上已装的 Tailscale。")
-        Segments(listOf("关", "内置", "外部 App"), M.indexOf(mode)) { i ->
+        SubTitle(tr("让其它设备连进来", "Let other devices connect"))
+        Hint(tr("默认关。打开后只有你自己 Tailscale 网络里的电脑或手机能连，走加密隧道，局域网和公网都连不到；令牌照样要。“内置”不用装 Tailscale App，“外部 App”用这台手机上已装的 Tailscale。",
+            "Off by default. When on, only computers and phones in your own Tailscale network can connect, through an encrypted tunnel; the local network and the internet cannot, and the token is still required. \"Built-in\" needs no Tailscale app; \"External app\" uses the Tailscale app already on this phone."))
+        Segments(listOf(tr("关", "Off"), tr("内置", "Built-in"), tr("外部 App", "External app")), M.indexOf(mode)) { i ->
             val m = M[i]
             mode = m; ApiConfig.tailnetMode = m
             HostService.server?.start(ApiConfig.port)
             com.kilon.agentvscreen.host.Tailnet.sync(applicationContext)
         }
-        val remoteLine: @Composable (String) -> Unit = { host ->
-            val line = "curl -fsS http://$host:${ApiConfig.port}/cli > vscreen && chmod +x vscreen\n" +
-                "VSCREEN_URL=http://$host:${ApiConfig.port} \\\nVSCREEN_TOKEN=$token \\\n./vscreen status"
-            Hint("在你 Tailscale 网络里的另一台电脑上运行（第一行下载命令行，只需一次）：")
-            Code(line) { copy("远程调用示例", line) }
+        val ready = @Composable {
+            if (remoteBase != null) Hint(tr("连好了。给那台设备上的 agent 接入：在上面选“在其它设备上”，再点“复制给 agent 的话”。", "Ready. To connect an agent on that device, choose \"On another device\" above and tap \"Copy message for your agent\"."), Palette.takeover)
         }
         when (mode) {
             com.kilon.agentvscreen.host.Tailnet.Mode.BUILTIN -> {
@@ -455,42 +493,54 @@ class MainActivity : ComponentActivity() {
                 var ctl by remember { mutableStateOf(ApiConfig.tailnetControlUrl ?: "") }
                 var more by remember { mutableStateOf(false) }
                 if (!com.kilon.agentvscreen.host.Tailnet.available(this@MainActivity)) {
-                    StatusCard(Palette.stopped, "这个安装包里没有内置 Tailscale", "只支持 arm64 手机。")
+                    StatusCard(Palette.stopped, tr("这个安装包里没有内置 Tailscale", "This package has no built-in Tailscale"), tr("只支持 arm64 手机。", "Only arm64 phones are supported."))
                 } else when {
                     ts.loggedIn -> {
-                        StatusCard(Palette.takeover, "已连上 Tailscale",
-                            "名字 ${ts.dnsName ?: ApiConfig.tailnetHostname}\n地址 ${ts.ip}" + (ts.user?.let { "\n账号 $it" } ?: "") +
-                                "\n在线设备 ${ts.online} 台" + (ts.lastPeer?.let { "\n最近来访 $it" } ?: ""))
-                        remoteLine(ts.ip!!)
-                        SecondaryAction("退出 Tailscale 登录") { com.kilon.agentvscreen.host.Tailnet.logout() }
+                        StatusCard(Palette.takeover, tr("已连上 Tailscale", "Connected to Tailscale"),
+                            tr("名字", "Name") + " ${ts.dnsName ?: ApiConfig.tailnetHostname}\n" + tr("地址", "Address") + " ${ts.ip}" +
+                                (ts.user?.let { "\n" + tr("账号", "Account") + " $it" } ?: "") +
+                                "\n" + tr("在线设备 ${ts.online} 台", "${ts.online} devices online") +
+                                (ts.lastPeer?.let { "\n" + tr("最近来访", "Last visitor") + " $it" } ?: ""))
+                        ready()
+                        SecondaryAction(tr("退出 Tailscale 登录", "Log out of Tailscale")) { com.kilon.agentvscreen.host.Tailnet.logout() }
                     }
                     ts.needsLogin && ts.authUrl != null -> {
-                        Hint("第一次使用要登录一次 Tailscale，之后会记住。用你电脑上 Tailscale 的同一个账号登录；手机上不方便的话，复制链接到电脑上打开也行。")
-                        PrimaryAction("在浏览器里登录 Tailscale") { runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ts.authUrl))) } }
-                        SecondaryAction("复制登录链接") { copy("登录链接", ts.authUrl!!) }
+                        Hint(tr("第一次使用要登录一次 Tailscale，之后会记住。用你电脑上 Tailscale 的同一个账号登录；手机上不方便的话，复制链接到电脑上打开也行。", "The first time, log in to Tailscale once; it is remembered after that. Use the same account as Tailscale on your computer. If that's awkward on the phone, copy the link and open it on the computer."))
+                        PrimaryAction(tr("在浏览器里登录 Tailscale", "Log in to Tailscale in the browser")) { runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ts.authUrl))) } }
+                        SecondaryAction(tr("复制登录链接", "Copy login link")) { copy(tr("登录链接", "Login link"), ts.authUrl!!) }
                     }
-                    ts.error != null -> StatusCard(Palette.stopped, "内置 Tailscale 出错，会自动重试", ts.error!!)
-                    else -> StatusCard(Palette.standby, "内置 Tailscale 正在启动…", ts.state)
+                    ts.needsLogin -> {
+                        // 1.1.7: logged out but no link yet. The bridge keeps asking; say why it may not come.
+                        val slow = ts.waitingS >= 15
+                        StatusCard(if (slow) Palette.stopped else Palette.standby,
+                            if (slow) tr("拿不到 Tailscale 登录链接（已等 ${ts.waitingS} 秒）", "No Tailscale login link yet (waited ${ts.waitingS} s)")
+                            else tr("正在向 Tailscale 要登录链接…", "Asking Tailscale for a login link…"),
+                            if (!slow) tr("通常几秒内出现。", "It usually appears within seconds.")
+                            else tr("这台手机连不上 Tailscale 的服务器（controlplane.tailscale.com）时会这样：换个网络或打开能访问它的代理后会自动出现。也可以在下面的高级选项里填 auth key 免浏览器登录。", "This happens when the phone cannot reach Tailscale's server (controlplane.tailscale.com): switch networks or turn on a proxy that reaches it and the link appears by itself. Or put an auth key in Advanced below to skip the browser login.") +
+                                (ts.health?.let { "\n" + tr("Tailscale 报告：", "Tailscale says: ") + it.take(240) } ?: ""))
+                        SecondaryAction(tr("重新获取登录链接", "Get a login link again")) { com.kilon.agentvscreen.host.Tailnet.login() }
+                    }
+                    ts.error != null -> StatusCard(Palette.stopped, tr("内置 Tailscale 出错，会自动重试", "Built-in Tailscale failed, retrying automatically"), ts.error!!)
+                    else -> StatusCard(Palette.standby, tr("内置 Tailscale 正在启动…", "Built-in Tailscale is starting…"), ts.state)
                 }
-                Disclosure("高级选项（auth key、自建服务器）", more) { more = !more }
+                Disclosure(tr("高级选项（auth key、自建服务器）", "Advanced (auth key, own control server)"), more) { more = !more }
                 AnimatedVisibility(more) {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        androidx.compose.material3.OutlinedTextField(key, { key = it }, label = { Text("auth key（可选，代替浏览器登录）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                        androidx.compose.material3.OutlinedTextField(ctl, { ctl = it }, label = { Text("控制服务器（可选，如 Headscale 地址）") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                        SecondaryAction("保存并重连") {
+                        androidx.compose.material3.OutlinedTextField(key, { key = it }, label = { Text(tr("auth key（可选，代替浏览器登录）", "auth key (optional, instead of browser login)")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        androidx.compose.material3.OutlinedTextField(ctl, { ctl = it }, label = { Text(tr("控制服务器（可选，如 Headscale 地址）", "Control server (optional, e.g. a Headscale address)")) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        SecondaryAction(tr("保存并重连", "Save and reconnect")) {
                             if (key.isNotBlank()) ApiConfig.tailnetAuthKey = key
                             ApiConfig.tailnetControlUrl = ctl.ifBlank { null }
                             key = ""
                             com.kilon.agentvscreen.host.Tailnet.restart(applicationContext)
-                            Toast.makeText(this@MainActivity, "已保存，内置 Tailscale 重新连接中", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(this@MainActivity, tr("已保存，内置 Tailscale 重新连接中", "Saved, built-in Tailscale is reconnecting"), Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
             }
             com.kilon.agentvscreen.host.Tailnet.Mode.SYSTEM -> {
-                val a = sysAddr
-                if (a == null) StatusCard(Palette.stopped, "还没找到 Tailscale 地址", "在这台手机上装好并登录 Tailscale App，打开连接后 20 秒内自动生效。不想装 App 就选“内置”。")
-                else remoteLine(a)
+                if (remoteBase == null) StatusCard(Palette.stopped, tr("还没找到 Tailscale 地址", "No Tailscale address yet"), tr("在这台手机上装好并登录 Tailscale App，打开连接后 20 秒内自动生效。不想装 App 就选“内置”。", "Install and log in to the Tailscale app on this phone; once it is connected this takes effect within 20 seconds. To skip the app, choose \"Built-in\"."))
+                else { StatusCard(Palette.takeover, tr("已连上 Tailscale App", "Connected through the Tailscale app"), tr("地址", "Address") + " $remoteBase"); ready() }
             }
             else -> {}
         }
@@ -499,16 +549,16 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun Diagnostics(items: List<Setup.Item>) {
         var open by remember { mutableStateOf(false) }
-        Block("诊断", trailing = { Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null) }, onHeader = { open = !open }) {
-            Text("出问题时把诊断信息发给开发者：版本、配置状态和最近日志（不含令牌、不含你输入的字）。", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Block(tr("诊断", "Diagnostics"), trailing = { Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, null) }, onHeader = { open = !open }) {
+            Text(tr("出问题时把诊断信息发给开发者：版本、配置状态和最近日志（不含令牌、不含你输入的字）。", "When something goes wrong, send this to the developer: version, setup state and recent log (no token, nothing you typed)."), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { copy("诊断信息", diagnostics(items)) }) { Icon(Icons.Filled.ContentCopy, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("复制") }
+                OutlinedButton(onClick = { copy(tr("诊断信息", "Diagnostics"), diagnostics(items)) }) { Icon(Icons.Filled.ContentCopy, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text(tr("复制", "Copy")) }
                 OutlinedButton(onClick = {
                     runCatching {
                         startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain")
-                            .putExtra(Intent.EXTRA_SUBJECT, "Agent-VScreen 诊断").putExtra(Intent.EXTRA_TEXT, diagnostics(items)), "发送诊断"))
+                            .putExtra(Intent.EXTRA_SUBJECT, tr("Agent-VScreen 诊断", "Agent-VScreen diagnostics")).putExtra(Intent.EXTRA_TEXT, diagnostics(items)), tr("发送诊断", "Send diagnostics")))
                     }
-                }) { Icon(Icons.Filled.Share, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text("分享") }
+                }) { Icon(Icons.Filled.Share, null, Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)); Text(tr("分享", "Share")) }
             }
             AnimatedVisibility(open) {
                 SelectionContainer {
@@ -543,7 +593,7 @@ class MainActivity : ComponentActivity() {
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(it.label + if (it.key == "accessibility") "（可选）" else "", fontWeight = FontWeight.Medium, fontSize = 14.sp)
+                Text(it.label + if (it.key == "accessibility") tr("（可选）", "(optional)") else "", fontWeight = FontWeight.Medium, fontSize = 14.sp)
                 Text(it.detail, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -568,7 +618,7 @@ class MainActivity : ComponentActivity() {
                             .padding(start = 10.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(if (open) "收起" else "展开", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        Text(if (open) tr("收起", "Hide") else tr("展开", "Show"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSecondaryContainer)
                         Icon(Icons.Filled.KeyboardArrowDown, null, tint = MaterialTheme.colorScheme.onSecondaryContainer,
                             modifier = Modifier.size(18.dp).rotate(turn))
                     }
@@ -585,7 +635,7 @@ class MainActivity : ComponentActivity() {
                 Text(text, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, lineHeight = 17.sp, color = Color(0xFFE6E8F0), softWrap = false,
                     modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, bottom = 14.dp, end = 52.dp))
             }
-            IconButton(onClick = onCopy, modifier = Modifier.align(Alignment.TopEnd)) { Icon(Icons.Filled.ContentCopy, "复制", tint = Color(0xFFE6E8F0)) }
+            IconButton(onClick = onCopy, modifier = Modifier.align(Alignment.TopEnd)) { Icon(Icons.Filled.ContentCopy, tr("复制", "Copy"), tint = Color(0xFFE6E8F0)) }
         }
     }
 

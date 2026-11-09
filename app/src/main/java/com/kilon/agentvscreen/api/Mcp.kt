@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.tr
+
 import android.util.Base64
 import com.kilon.agentvscreen.BuildConfig
 import com.kilon.agentvscreen.cmd.ShotStore
@@ -14,15 +16,18 @@ import org.json.JSONObject
 internal object Mcp {
     private val VERSIONS = listOf("2025-06-18", "2025-03-26", "2024-11-05")
 
-    private val TOOL = JSONObject()
+    private val TOOL get() = JSONObject()
         .put("name", "vscreen")
-        .put("description", "在看不见的副屏里操作手机上的应用（不占用户主屏）。参数 command 就是一条 vscreen 命令行，例如 " +
+        .put("description", tr("在看不见的副屏里操作手机上的应用（不占用户主屏）。参数 command 就是一条 vscreen 命令行，例如 " +
             "`launch 设置`、`act \"tap 搜索; type 耳机; key enter until text:综合\"`、`act`（看一眼）、`status`、`help act`。" +
-            "返回四段文字（做了什么 / 这段时间 / 现在 / 注意）和截图；画面的意思由你看图判断。\n\n" + VScreenOffloadHandler.QUICK_HELP)
+            "返回四段文字（做了什么 / 这段时间 / 现在 / 注意）和截图；画面的意思由你看图判断。\n\n",
+            "Operates apps on the phone on an invisible second screen (the user's screen is not used). The command parameter is one vscreen command line, e.g. " +
+            "`launch Settings`, `act \"tap Search; type headphones; key enter until text:Results\"`, `act` (look), `status`, `help act`. " +
+            "Returns four text blocks (done / meanwhile / now / notes) and screenshots; you judge what the screen means by looking.\n\n") + VScreenOffloadHandler.QUICK_HELP)
         .put("inputSchema", JSONObject().put("type", "object")
             .put("properties", JSONObject()
-                .put("command", JSONObject().put("type", "string").put("description", "vscreen 后面的部分，如 act \"tap 搜索; type 耳机\""))
-                .put("session", JSONObject().put("type", "string").put("description", "可选：会话名（一个副屏同一时间属于一个会话），默认取请求头 X-VScreen-Session 或 default")))
+                .put("command", JSONObject().put("type", "string").put("description", tr("vscreen 后面的部分，如 act \"tap 搜索; type 耳机\"", "What follows vscreen, e.g. act \"tap Search; type headphones\"")))
+                .put("session", JSONObject().put("type", "string").put("description", tr("可选：会话名（一个副屏同一时间属于一个会话），默认取请求头 X-VScreen-Session 或 default", "Optional: session name (the screen belongs to one session at a time); defaults to the X-VScreen-Session header or default"))))
             .put("required", JSONArray().put("command")))
 
     fun handle(server: ApiServer, r: ApiServer.Req): ApiServer.Resp {
@@ -55,8 +60,9 @@ internal object Mcp {
                     .put("serverInfo", JSONObject().put("name", "agent-vscreen").put("version", BuildConfig.VERSION_NAME))
                     // 1.1.6: the full short guide, so every new conversation of an MCP agent knows how to use us
                     // without anyone having saved a note.
-                    .put("instructions", "Agent-VScreen：这台手机上的后台副屏。要打开、查看或操作手机里的应用时，用 vscreen 工具（参数 command 就是一条 vscreen 命令行），" +
-                        "它在看不见的副屏上操作，不打扰用户主屏，不需要 adb。\n\n" + AgentGuide.guide().replace("`vscreen ", "`")))
+                    .put("instructions", tr("Agent-VScreen：这台手机上的后台副屏。要打开、查看或操作手机里的应用时，用 vscreen 工具（参数 command 就是一条 vscreen 命令行），" +
+                        "它在看不见的副屏上操作，不打扰用户主屏，不需要 adb。\n\n", "Agent-VScreen: a background screen on this phone. To open, view or operate apps on the phone, use the vscreen tool (its command parameter is one vscreen command line); " +
+                        "it works on an invisible second screen, never disturbs the user's screen, and needs no adb.\n\n") + AgentGuide.guide().replace("`vscreen ", "`")))
             }
             "ping" -> result(id, JSONObject())
             "tools/list" -> result(id, JSONObject().put("tools", JSONArray().put(TOOL)))
@@ -69,7 +75,7 @@ internal object Mcp {
                 val res = server.exec(argv, session)
                 val shots = ShotStore.refs(res.output)
                 var text = res.output
-                shots.forEachIndexed { i, n -> text = text.replace(ShotStore.REF + n, "[图${i + 1}，见附图]") }
+                shots.forEachIndexed { i, n -> text = text.replace(ShotStore.REF + n, tr("[图${i + 1}，见附图]", "[picture ${i + 1}, attached]")) }
                 val content = JSONArray().put(JSONObject().put("type", "text").put("text", text))
                 for (n in shots.take(4)) {
                     val f = ShotStore.file(server.ctxFiles(), n) ?: continue

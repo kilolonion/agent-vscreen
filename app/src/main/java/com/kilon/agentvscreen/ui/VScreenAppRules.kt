@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.tr
+
 import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -68,11 +70,11 @@ fun VScreenAppRules() {
     }
 
     Text(
-        "禁止操作：AI 不能在后台打开、读屏或操作这个应用。只读：AI 可以打开、看和滚动，但不能点击、输入或滑动。只在后台副屏里生效，不影响你自己用。",
+        tr("禁止操作：AI 不能在后台打开、读屏或操作这个应用。只读：AI 可以打开、看和滚动，但不能点击、输入或滑动。只在后台副屏里生效，不影响你自己用。", "Blocked: the AI cannot open, read or operate the app in the background. Read-only: the AI can open, look and scroll, but not tap, type or swipe. Applies only to the background screen, not to your own use."),
         fontSize = 12.sp, lineHeight = 17.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     if (rules.isEmpty()) {
-        Text("还没有限制：后台可以打开和操作所有应用（付费、删除等按钮仍需你确认）。", fontSize = 13.sp)
+        Text(tr("还没有限制：后台可以打开和操作所有应用（付费、删除等按钮仍需你确认）。", "No rules yet: every app can be opened and operated in the background (payment, delete and similar buttons still need your confirmation)."), fontSize = 13.sp)
     } else {
         rules.entries.sortedBy { labels[it.key] ?: it.key }.forEach { (pkg, rule) ->
             Row(
@@ -90,12 +92,12 @@ fun VScreenAppRules() {
                 }
                 TextButton(onClick = {
                     VScreenStore.setRule(pkg, if (rule == VScreenStore.Rule.BLOCK) VScreenStore.Rule.READONLY else VScreenStore.Rule.BLOCK)
-                }) { Text(if (rule == VScreenStore.Rule.BLOCK) "改只读" else "改禁止") }
-                TextButton(onClick = { VScreenStore.setRule(pkg, null) }) { Text("移除") }
+                }) { Text(if (rule == VScreenStore.Rule.BLOCK) tr("改只读", "Make read-only") else tr("改禁止", "Make blocked")) }
+                TextButton(onClick = { VScreenStore.setRule(pkg, null) }) { Text(tr("移除", "Remove")) }
             }
         }
     }
-    OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) { Text("添加应用") }
+    OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) { Text(tr("添加应用", "Add app")) }
 
     if (adding) AddRuleDialog(apps, rules.keys, onDismiss = { adding = false }) { pkg, rule ->
         VScreenStore.setRule(pkg, rule)
@@ -115,14 +117,14 @@ private fun AddRuleDialog(
     var picked by remember { mutableStateOf<Pair<String, String>?>(null) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(picked?.first ?: "选择应用") },
+        title = { Text(picked?.first ?: tr("选择应用", "Choose app")) },
         text = {
             val p = picked
             if (p == null) {
                 Column {
                     OutlinedTextField(
                         value = query, onValueChange = { query = it }, singleLine = true,
-                        placeholder = { Text("搜索名称或包名") }, modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text(tr("搜索名称或包名", "Search name or package")) }, modifier = Modifier.fillMaxWidth(),
                     )
                     Spacer(Modifier.height(8.dp))
                     val q = query.trim().lowercase()
@@ -140,17 +142,17 @@ private fun AddRuleDialog(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(p.second, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedButton(onClick = { onPick(p.second, VScreenStore.Rule.BLOCK) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("禁止操作（不能打开、读屏、操作）")
+                        Text(tr("禁止操作（不能打开、读屏、操作）", "Blocked (no opening, reading or operating)"))
                     }
                     OutlinedButton(onClick = { onPick(p.second, VScreenStore.Rule.READONLY) }, modifier = Modifier.fillMaxWidth()) {
-                        Text("只读（能看和滚动，不能点击输入）")
+                        Text(tr("只读（能看和滚动，不能点击输入）", "Read-only (look and scroll, no tapping or typing)"))
                     }
                 }
             }
         },
         confirmButton = {},
         dismissButton = {
-            TextButton(onClick = { if (picked != null) picked = null else onDismiss() }) { Text(if (picked != null) "返回" else "取消") }
+            TextButton(onClick = { if (picked != null) picked = null else onDismiss() }) { Text(if (picked != null) tr("返回", "Back") else tr("取消", "Cancel")) }
         },
     )
 }

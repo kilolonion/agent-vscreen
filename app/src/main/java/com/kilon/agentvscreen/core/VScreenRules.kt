@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.tr
+
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -37,14 +39,14 @@ internal object VScreenRules {
         val app: String?, val everyMs: Long, val forMs: Long,
         val wake: Boolean, val notify: Boolean,
     ) {
-        fun describe(): String = "满足 $cond" + (app?.let { "（$it）" } ?: "")
+        fun describe(): String = tr("满足 $cond", "when $cond") + (app?.let { tr("（$it）", " ($it)") } ?: "")
     }
 
     class Live(val spec: Spec) {
         val startedAt = System.currentTimeMillis()
         val startedElapsed = SystemClock.elapsedRealtime()
         @Volatile var checks = 0
-        @Volatile var status = "启动中"
+        @Volatile var status = tr("启动中", "starting")
         @Volatile var lastValue: String? = null
         @Volatile var fired = 0
         @Volatile var lastFire: String? = null
@@ -59,14 +61,14 @@ internal object VScreenRules {
             return JSONObject().put("name", spec.name).put("condition", spec.describe())
                 .put("every_ms", spec.everyMs)
                 .put("running", !stopped)
-                .put("status", if (stopped) (endReason ?: "已结束") else status)
+                .put("status", if (stopped) (endReason ?: tr("已结束", "ended")) else status)
                 .put("started", fmt.format(java.util.Date(startedAt)))
                 .put("ends_in_min", if (stopped) JSONObject.NULL else ((spec.forMs - (SystemClock.elapsedRealtime() - startedElapsed)) / 60_000L).coerceAtLeast(0))
                 .put("checks", checks).put("fired", fired)
                 .put("last_value", lastValue ?: JSONObject.NULL)
                 .put("last_fire", lastFire ?: JSONObject.NULL)
                 .put("last_fire_at", if (lastFireAt > 0) fmt.format(java.util.Date(lastFireAt)) else JSONObject.NULL)
-                .put("action", JSONArray(listOfNotNull(if (spec.wake) "发事件给调用方（events 取）" else null, if (spec.notify) "通知用户" else null)))
+                .put("action", JSONArray(listOfNotNull(if (spec.wake) tr("发事件给调用方（events 取）", "sends an event to the caller (collect with events)") else null, if (spec.notify) tr("通知用户", "notifies the user") else null)))
         }
     }
 
@@ -86,11 +88,11 @@ internal object VScreenRules {
     fun running(): List<Live> = synchronized(live) { live.values.toList() }
 
     fun start(spec: Spec, host: Host): Live {
-        val ctx = appContext ?: throw IllegalStateException("后台操作未初始化")
+        val ctx = appContext ?: throw IllegalStateException(tr("后台操作未初始化", "Background operation is not initialized"))
         val l = Live(spec)
         synchronized(live) {
-            live[spec.name]?.let { stopInner(it, "被同名的新盯守替换") }
-            if (live.size >= MAX) throw IllegalStateException("最多同时盯 $MAX 个条件，先 keep off 一个")
+            live[spec.name]?.let { stopInner(it, tr("被同名的新盯守替换", "replaced by a new watch with the same name")) }
+            if (live.size >= MAX) throw IllegalStateException(tr("最多同时盯 $MAX 个条件，先 keep off 一个", "At most $MAX conditions can be watched at once; turn one off with keep off first"))
             live[spec.name] = l
         }
         BackgroundOperation.hold(true)
@@ -101,7 +103,7 @@ internal object VScreenRules {
         return l
     }
 
-    fun stop(name: String, reason: String = "已按要求停止"): Boolean {
+    fun stop(name: String, reason: String = tr("已按要求停止", "stopped as asked")): Boolean {
         val l = synchronized(live) { live[name] } ?: return false
         stopInner(l, reason)
         return true
@@ -114,7 +116,7 @@ internal object VScreenRules {
         before - ended.size
     }
 
-    fun stopAll(reason: String = "已按要求停止"): Int {
+    fun stopAll(reason: String = tr("已按要求停止", "stopped as asked")): Int {
         val all = running()
         all.forEach { stopInner(it, reason) }
         return all.size
@@ -142,27 +144,27 @@ internal object VScreenRules {
         try {
             while (!l.stopped) {
                 if (SystemClock.elapsedRealtime() - l.startedElapsed >= s.forMs) {
-                    stopInner(l, if (l.fired > 0) "到时间了（期间触发 ${l.fired} 次）" else "到时间了，没等到条件")
+                    stopInner(l, if (l.fired > 0) tr("到时间了（期间触发 ${l.fired} 次）", "time is up (fired ${l.fired} times)") else tr("到时间了，没等到条件", "time is up, the condition never came"))
                     break
                 }
                 val st = BackgroundOperation.state.value
                 val d = BackgroundOperation.previewDisplayFor(s.sid)
                 when {
                     d == null -> l.status = if (st.ownerSessionId != null && st.ownerSessionId != s.sid)
-                        "副屏正被另一个会话使用，暂停检查（那边用完、副屏空闲后不会自动回来；需要时在本会话重新操作一次副屏）"
-                    else "副屏已释放，暂停检查（在本会话里重新 launch 后自动继续）"
-                    st.takeoverSessionId != null -> l.status = "用户正在接管副屏，暂停检查"
+                        tr("副屏正被另一个会话使用，暂停检查（那边用完、副屏空闲后不会自动回来；需要时在本会话重新操作一次副屏）", "The screen is used by another session, checks paused (they do not resume by themselves when it is free; operate the screen once from this session when needed)")
+                    else tr("副屏已释放，暂停检查（在本会话里重新 launch 后自动继续）", "The screen was released, checks paused (they resume after a new launch in this session)")
+                    st.takeoverSessionId != null -> l.status = tr("用户正在接管副屏，暂停检查", "The user is controlling the screen, checks paused")
                     else -> {
                         if (d.parked) runCatching { BackgroundOperation.unpark(d) }
                         if (s.app != null && (n % maxOf(1, (3_000 / s.everyMs).toInt()) == 0)) appOk = VScreenShell.topPackage(d.displayId) == s.app
                         n++
-                        if (!appOk) l.status = "副屏顶部不是 ${s.app}，暂停检查"
+                        if (!appOk) l.status = tr("副屏顶部不是 ${s.app}，暂停检查", "The top of the screen is not ${s.app}, checks paused")
                         else {
                             var failed: String? = null
                             val hit = try { host.check(l, d) } catch (e: InterruptedException) { throw e } catch (t: Throwable) {
-                                failed = "检查出错：${t.javaClass.simpleName}: ${t.message?.take(80)}"; null }
+                                failed = tr("检查出错：${t.javaClass.simpleName}: ${t.message?.take(80)}", "Check error: ${t.javaClass.simpleName}: ${t.message?.take(80)}"); null }
                             l.checks++
-                            l.status = failed ?: "正在盯"
+                            l.status = failed ?: tr("正在盯", "watching")
                             if (hit != null) fire(ctx, l, host, hit)
                         }
                     }
@@ -173,7 +175,7 @@ internal object VScreenRules {
         } catch (_: InterruptedException) {
         } catch (t: Throwable) {
             AppLogger.warning(TAG, "keep ${s.name}: ${t.message}")
-            stopInner(l, "出错停止：${t.javaClass.simpleName}: ${t.message?.take(100)}")
+            stopInner(l, tr("出错停止：${t.javaClass.simpleName}: ${t.message?.take(100)}", "stopped on an error: ${t.javaClass.simpleName}: ${t.message?.take(100)}"))
         }
     }
 
@@ -181,23 +183,25 @@ internal object VScreenRules {
         val s = l.spec
         l.fired++
         l.lastFireAt = System.currentTimeMillis()
-        val parts = arrayListOf("看到：$hit")
+        val parts = arrayListOf(tr("看到：$hit", "seen: $hit"))
         var woke: String? = null
         if (s.wake) {
-            val text = "[盯守「${s.name}」看到了] $hit（条件 ${s.cond}）\n\n（这是你之前用 vscreen act --keep wake 设的盯守发出的事件。" +
-                "副屏停在看到时的页面：先 vscreen act 看现在的画面和这段时间发生了什么，再决定下一步。）"
+            val text = tr("[盯守「${s.name}」看到了] $hit（条件 ${s.cond}）\n\n（这是你之前用 vscreen act --keep wake 设的盯守发出的事件。" +
+                "副屏停在看到时的页面：先 vscreen act 看现在的画面和这段时间发生了什么，再决定下一步。）",
+                "[Watch \"${s.name}\" saw it] $hit (condition ${s.cond})\n\n(This event comes from the watch you set earlier with vscreen act --keep wake. " +
+                "The screen stays on the page where it was seen: run vscreen act first to see the screen now and what happened meanwhile, then decide.)")
             woke = runCatching { com.kilon.agentvscreen.api.EventHub.post(ctx, s.sid, "keep", s.name, text) }
-                .getOrElse { "失败：${it.message}" }
-            parts += "事件：$woke"
+                .getOrElse { tr("失败：${it.message}", "Failed: ${it.message}") }
+            parts += tr("事件：$woke", "event: $woke")
         }
-        if (s.notify || woke?.let { it == "Rejected" || it.startsWith("失败") } == true) {
-            val okN = VScreenHandoff.alert(ctx, 7300 + (s.name.hashCode() and 0xff), "盯守「${s.name}」看到了", parts.joinToString("\n"))
-            if (!okN) parts += "（通知没发出去：${VScreenHandoff.notifyBlocked(ctx) ?: "发送失败"}）"
+        if (s.notify || woke?.let { it == "Rejected" || it.startsWith(tr("失败", "Failed")) } == true) {
+            val okN = VScreenHandoff.alert(ctx, 7300 + (s.name.hashCode() and 0xff), tr("盯守「${s.name}」看到了", "Watch \"${s.name}\" saw it"), parts.joinToString("\n"))
+            if (!okN) parts += tr("（通知没发出去：", " (notification not sent: ") + (VScreenHandoff.notifyBlocked(ctx) ?: tr("发送失败", "sending failed")) + tr("）", ")")
         }
-        l.lastFire = parts.joinToString("；")
+        l.lastFire = parts.joinToString(tr("；", "; "))
         BackgroundOperation.backgroundDone(s.sid)
         AppLogger.info(TAG, "keep ${s.name} fired: ${l.lastFire}")
-        stopInner(l, "已看到：${l.lastFire?.take(160)}")
+        stopInner(l, tr("已看到：${l.lastFire?.take(160)}", "seen: ${l.lastFire?.take(160)}"))
     }
 
     // ── keeping it alive: foreground notification + wake lock ─────────────
@@ -209,7 +213,7 @@ internal object VScreenRules {
 
         override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
             if (intent?.action == ACTION_STOP) {
-                stopAll("用户在通知里点了全部停止")
+                stopAll(tr("用户在通知里点了全部停止", "The user tapped Stop all in the notification"))
                 stopSelfSafely(); return START_NOT_STICKY
             }
             val list = running()
@@ -246,18 +250,18 @@ internal object VScreenRules {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     val nm = ctx.getSystemService(NotificationManager::class.java)
                     if (nm?.getNotificationChannel(CHANNEL) == null)
-                        nm?.createNotificationChannel(NotificationChannel(CHANNEL, "副屏盯守", NotificationManager.IMPORTANCE_LOW))
+                        nm?.createNotificationChannel(NotificationChannel(CHANNEL, tr("副屏盯守", "Screen watches"), NotificationManager.IMPORTANCE_LOW))
                 }
                 val stop = PendingIntent.getService(ctx, 1, Intent(ctx, RuleService::class.java).setAction(ACTION_STOP),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-                val body = list.joinToString("\n") { "「${it.spec.name}」${it.spec.describe()}" }
+                val body = list.joinToString("\n") { tr("「${it.spec.name}」${it.spec.describe()}", "\"${it.spec.name}\" ${it.spec.describe()}") }
                 return NotificationCompat.Builder(ctx, CHANNEL)
                     .setSmallIcon(android.R.drawable.ic_menu_view)
-                    .setContentTitle("副屏正在盯 ${list.size} 个条件")
+                    .setContentTitle(tr("副屏正在盯 ${list.size} 个条件", "The screen is watching ${list.size} conditions"))
                     .setContentText(body.lineSequence().first())
                     .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                     .setOngoing(true)
-                    .addAction(0, "全部停止", stop)
+                    .addAction(0, tr("全部停止", "Stop all"), stop)
                     .build()
             }
 

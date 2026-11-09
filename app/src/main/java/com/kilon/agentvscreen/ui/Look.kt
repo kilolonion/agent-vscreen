@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.tr
+
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -60,8 +62,8 @@ object Palette {
     }
 
     fun word(m: Mode): String = when (m) {
-        Mode.ACTING -> "AI 操作中"; Mode.STANDBY -> "AI 待命"; Mode.IDLE -> "空闲"
-        Mode.TAKEOVER -> "你在操作"; Mode.STOPPED -> "已停止 AI"
+        Mode.ACTING -> tr("AI 操作中", "AI working"); Mode.STANDBY -> tr("AI 待命", "AI on standby"); Mode.IDLE -> tr("空闲", "Idle")
+        Mode.TAKEOVER -> tr("你在操作", "You're in control"); Mode.STOPPED -> tr("已停止 AI", "AI stopped")
     }
 }
 

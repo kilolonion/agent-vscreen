@@ -1,8 +1,8 @@
-# Agent-VScreen 1.1.6 接口说明
+# Agent-VScreen 1.1.7 接口说明
 
 Agent-VScreen 是一个独立的 Android 应用。它在一块看不见的副屏（虚拟屏）上打开和操作别的应用，用户的主屏不受打扰，屏幕上只有一个悬浮小窗显示进度。它不依赖 Minis，也不依赖任何特定的 agent 软件：手机上的任何 agent 都可以通过命令行、HTTP 或 MCP 调用它。
 
-- 包名 `com.kilon.agentvscreen`，版本 1.1.6（versionCode 8），可以覆盖安装之前的版本，也可以和 Minis、Minis VScreen 同时安装。
+- 包名 `com.kilon.agentvscreen`，版本 1.1.7（versionCode 9），可以覆盖安装之前的版本，也可以和 Minis、Minis VScreen 同时安装。
 - 需要 Android 11 及以上、arm64。
 - 副屏能力来自 Minis VScreen v0.5.0：命令、四段回执、回合制、盯守都一样。区别见第 7 节。
 
@@ -50,6 +50,10 @@ Agent-VScreen 是一个独立的 Android 应用。它在一块看不见的副屏
 
 **端口被占用**：通常是还没退出的旧 Agent-VScreen 进程（更新、崩溃重启、被冻结后被杀）。App 会自己重试（1 秒、2 秒、4 秒……最长每 15 秒一次），并写明是谁占着；首页状态行旁边也有 **立即重试**。如果是别的程序占着，这个按钮会变成 **换端口**（端口号加 1），之后要在“接入 agent”里重新复制接入命令给 agent。
 
+### 语言（1.1.7）
+
+设置里的 **语言** 可以选跟随系统（系统是中文就用中文，其他用英文）、中文或 English。它决定 App 界面、悬浮窗、通知，也决定给 agent 的一切文字：给 agent 的话、能力说明、`/skill`、`/memory`、`help`、命令返回和错误说明。英文模式下四段的标题是 `[Done]` `[Meanwhile]` `[Now]` `[Notes]`，错误是 `[Error] CODE: …`；命令名、参数、步骤和条件的写法两种语言完全一样。已安装的 `vscreen` 命令行带着语言标记（`X-VScreen-Version` 形如 `1.1.7-en`），切换语言后下一次调用会自动换成新语言的脚本和 skill。
+
 ## 2. 三种接入方式
 
 三种方式背后是同一套命令，返回的文字也一样。
@@ -66,6 +70,7 @@ curl -fsS http://127.0.0.1:18765/cli | sh -s -- install <令牌>
 
 **让 agent 记住（1.1.6）**：推荐在 App 里点 **复制给 agent 的话**，把整段发给 agent，而不是只给它上面那一行命令。那段话让 agent 做三件事：执行安装命令；把一段简短说明存进它自己的长期记忆（或 skill、规则）；然后执行 `vscreen remembered "<存在哪里>"` 并告诉你存在了哪。
 
+- 1.1.7：要存的这段说明改成写 agent 自己的能力（“我可以在用户手机上后台操作应用”），包括什么时候用、怎么开始、连不上时怎么办，agent 以后看到相关请求会想到用它；远程设备上的 agent 存的说明里带的是 Tailscale 地址。
 - 为什么这样做：1.1.4、1.1.5 把 skill 放在安装命令的输出里请 agent 保存，大多数 agent 不照做。工具输出里的要求，模型通常当作数据，甚至当作提示注入；用户在聊天里提的要求它们才会执行。
 - 首页“接入 agent”里会显示结果，只根据事实判断：
   - **agent 还没确认记住**：装好了，但 agent 没有执行 `remembered`；
@@ -185,10 +190,11 @@ Operit 的接入步骤见 [README](README.md#在-operit-中使用)。
 不用在手机上装 Tailscale App。App 里自带 Tailscale 官方的 tsnet 组件，只在 Agent-VScreen 自己的进程里联网，不占用系统的 VPN（你原来的 VPN 照常用），也不需要 root。
 
 1. 选 **内置 Tailscale**，几秒后出现 **在浏览器里登录 Tailscale**，用你电脑上 Tailscale 的同一个账号登录。登录状态会记住，以后不用再登。
+   - 1.1.7：如果一直没出现登录按钮（状态停在 NeedsLogin），内置节点每 20 秒会重新向 Tailscale 要一次登录链接，页面上也有 **重新获取登录链接**。等了 15 秒以上还没有，页面会写明原因：多半是手机连不上 `controlplane.tailscale.com`，换个网络或打开能访问它的代理就会出现；也可以用 auth key。
    - 也可以在“高级”里填一个 auth key 代替浏览器登录；key 只在第一次注册时用，注册成功后就从手机上删掉。
    - “高级”里还可以填自建的控制服务器（例如 Headscale）。
 2. 手机会以一台单独的设备 `agent-vscreen` 出现在你的 Tailscale 网络里，页面上会显示它的地址（`100.x.x.x`）和名字。
-3. 在电脑上（已登录同一个 Tailscale 账号）：
+3. 在“接入 agent”顶部选 **在其它设备上**（1.1.7），再点 **复制给 agent 的话**，发给那台设备上的 agent：里面的安装命令、MCP 配置和能力说明都已经是 Tailscale 地址。手动调用的话，在电脑上（已登录同一个 Tailscale 账号）：
 
 ```sh
 VSCREEN_URL=http://100.x.x.x:18765 VSCREEN_TOKEN=<令牌> vscreen status
@@ -209,7 +215,7 @@ VSCREEN_URL=http://100.x.x.x:18765 VSCREEN_TOKEN=<令牌> vscreen status
 
 1. 手机和另一台设备都装 Tailscale，登录同一个账号。
 2. 选 **Tailscale App**。服务会多监听一个手机的 Tailscale 地址（`100.x.x.x`）；地址变了会在 20 秒内跟着换。
-3. 在另一台设备上用同样的 `VSCREEN_URL=http://100.x.x.x:18765 …` 调用。
+3. 同样在“接入 agent”顶部选 **在其它设备上** 复制给 agent 的话，或在另一台设备上用 `VSCREEN_URL=http://100.x.x.x:18765 …` 调用。
 
 - 只有 Tailscale 网络里的设备连得进来，局域网和公网都连不进来。
 - 流量由 Tailscale 加密，令牌不会在 Wi-Fi 上明文传。

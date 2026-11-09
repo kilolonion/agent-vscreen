@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.tr
+
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -54,9 +56,9 @@ object VScreenAwake {
         val rx = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
                 when (i.action) {
-                    Intent.ACTION_SCREEN_OFF -> { screenOff = true; kick("熄屏") }
+                    Intent.ACTION_SCREEN_OFF -> { screenOff = true; kick(tr("熄屏", "screen off")) }
                     Intent.ACTION_SCREEN_ON -> { screenOff = false; releaseLock() }
-                    ACTION_TICK -> kick("定时")
+                    ACTION_TICK -> kick(tr("定时", "timer"))
                 }
             }
         }
@@ -82,16 +84,16 @@ object VScreenAwake {
         if (d.released || d.parked) return null
         val st = stateOf(d) ?: return null
         if (st == Display.STATE_ON) return null
-        if (!canWakeAlone(d)) return "副屏处于休眠（状态 ${stateName(st)}），这台手机上它和主屏一起休眠，单独唤醒会点亮主屏，所以没唤醒：画面可能不动"
+        if (!canWakeAlone(d)) return tr("副屏处于休眠（状态 ${stateName(st)}），这台手机上它和主屏一起休眠，单独唤醒会点亮主屏，所以没唤醒：画面可能不动", "The screen is asleep (state ${stateName(st)}); on this phone it sleeps with the main screen and waking it alone would light the main screen, so it was not woken: the picture may not move")
         val ok = runCatching { VScreenShell.run(arrayOf("input", "-d", d.displayId.toString(), "keyevent", "KEYCODE_WAKEUP"), 4_000L).exitCode == 0 }.getOrDefault(false)
         val t0 = SystemClock.elapsedRealtime()
         while (ok && SystemClock.elapsedRealtime() - t0 < 2_000L && stateOf(d) != Display.STATE_ON) Thread.sleep(100)
         val on = stateOf(d) == Display.STATE_ON
         wakes++
-        lastWake = "${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())} ${if (on) "已唤醒" else "唤醒失败"}（原状态 ${stateName(st)}${if (screenOff) "，主屏熄屏中" else ""}）"
+        lastWake = "${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())} " + tr("${if (on) "已唤醒" else "唤醒失败"}（原状态 ${stateName(st)}${if (screenOff) "，主屏熄屏中" else ""}）", "${if (on) "woken" else "wake failed"} (was ${stateName(st)}${if (screenOff) ", phone screen off" else ""})")
         AppLogger.info(TAG, "display ${d.displayId}: $lastWake")
         if (on) { d.requestFreshFrame(); d.awaitFrameAfter(SystemClock.elapsedRealtime(), 400) }
-        return if (on) "副屏刚才休眠了（${stateName(st)}${if (screenOff) "，手机熄屏中" else ""}），已唤醒" else "副屏休眠（${stateName(st)}），唤醒没成功：画面可能不动"
+        return if (on) tr("副屏刚才休眠了（${stateName(st)}${if (screenOff) "，手机熄屏中" else ""}），已唤醒", "The screen had gone to sleep (${stateName(st)}${if (screenOff) ", phone screen off" else ""}); woken") else tr("副屏休眠（${stateName(st)}），唤醒没成功：画面可能不动", "The screen is asleep (${stateName(st)}) and waking it failed: the picture may not move")
     }
 
     private fun stateName(s: Int) = when (s) {
@@ -151,6 +153,6 @@ object VScreenAwake {
         .put("runs_when_locked", d?.let { (it.flags and ALWAYS_UNLOCKED) != 0 } ?: JSONObject.NULL)
         .put("wakes", wakes)
         .put("last_wake", lastWake ?: JSONObject.NULL)
-        .put("note", if (d != null && !canWakeAlone(d)) "这台手机上副屏随主屏休眠：熄屏后后台任务会停住，亮屏后继续"
-            else "熄屏时副屏单独保持唤醒（每 15 秒检查，熄屏时另有定时器），主屏不会被点亮")
+        .put("note", if (d != null && !canWakeAlone(d)) tr("这台手机上副屏随主屏休眠：熄屏后后台任务会停住，亮屏后继续", "On this phone the screen sleeps with the main screen: background tasks pause while the screen is off and go on when it is on")
+            else tr("熄屏时副屏单独保持唤醒（每 15 秒检查，熄屏时另有定时器），主屏不会被点亮", "While the phone screen is off the background screen is kept awake on its own (checked every 15 s, plus a timer while off); the main screen is not lit"))
 }

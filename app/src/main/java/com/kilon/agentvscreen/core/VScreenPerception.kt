@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.tr
+
 import android.graphics.Bitmap
 import android.os.SystemClock
 import com.kilon.agentvscreen.host.AppLogger
@@ -139,7 +141,7 @@ object VScreenPerception {
     fun blankFor(displayId: Int): Long? = watcher(displayId)?.blankSince?.takeIf { it > 0 }
         ?.let { SystemClock.elapsedRealtime() - it }?.takeIf { it >= BLANK_MS }
 
-    fun engine(displayId: Int): String? = watcher(displayId)?.let { it.ocrEngine + if (it.ocrMs > 0) "（约 ${it.ocrMs}ms/次）" else "" }
+    fun engine(displayId: Int): String? = watcher(displayId)?.let { it.ocrEngine + if (it.ocrMs > 0) tr("（约 ${it.ocrMs}ms/次）", " (about ${it.ocrMs}ms each)") else "" }
 
     /** The words of one reading: OCR lines (no junk) + accessibility texts, trimmed, one each by normalised form. */
     internal fun wordsOf(items: List<VScreenOcr.Item>, a11y: List<String>): List<String> {

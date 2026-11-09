@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.tr
+
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -78,9 +80,9 @@ object Liveness {
     /** What the user should know, or null when all is well. */
     fun problem(): String? = when {
         !HostService.isAlive -> null
-        !foreground -> "服务没能成为前台服务（${foregroundError ?: "原因未知"}），切到后台后系统会冻结或杀掉它。打开一次本应用会自动补上。"
-        recentlyFrozen() -> "系统在后台冻结过本应用 $freezes 次（最近一次 ${lastFreezeMs / 1000} 秒）：冻结期间 agent 的命令会一直等，直到你打开本应用。" +
-            "请在系统的后台管理里把 Agent-VScreen 设为“允许后台活动”。"
+        !foreground -> "服务没能成为前台服务（${foregroundError ?: tr("原因未知", "unknown reason")}），切到后台后系统会冻结或杀掉它。打开一次本应用会自动补上。"
+        recentlyFrozen() -> tr("系统在后台冻结过本应用 $freezes 次（最近一次 ${lastFreezeMs / 1000} 秒）：冻结期间 agent 的命令会一直等，直到你打开本应用。", "The system froze this app in the background $freezes times (last time ${lastFreezeMs / 1000} s): while frozen, the agent's commands wait until you open this app.") +
+            tr("请在系统的后台管理里把 Agent-VScreen 设为“允许后台活动”。", "Set Agent-VScreen to \"allow background activity\" in the system's background management.")
         else -> null
     }
 
@@ -100,11 +102,11 @@ object Liveness {
      * fall back to the app's own settings page. Returns what was opened.
      */
     private val PAGES get() = listOf(
-            "荣耀 应用启动管理" to ComponentName("com.hihonor.systemmanager", "com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
-            "华为 应用启动管理" to ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
-            "小米 自启动管理" to ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
-            "OPPO 自启动" to ComponentName("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"),
-            "vivo 后台高耗电" to ComponentName("com.vivo.abe", "com.vivo.applicationbehaviorengine.ui.ExcessivePowerManagerActivity"),
+            tr("荣耀 应用启动管理", "Honor App launch") to ComponentName("com.hihonor.systemmanager", "com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
+            tr("华为 应用启动管理", "Huawei App launch") to ComponentName("com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"),
+            tr("小米 自启动管理", "Xiaomi Autostart") to ComponentName("com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"),
+            tr("OPPO 自启动", "OPPO Auto-launch") to ComponentName("com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity"),
+            tr("vivo 后台高耗电", "vivo High background power use") to ComponentName("com.vivo.abe", "com.vivo.applicationbehaviorengine.ui.ExcessivePowerManagerActivity"),
         )
 
     /** This phone's own background manager page (Honor / Huawei / Xiaomi / OPPO / vivo …), or null on stock Android. */
@@ -132,6 +134,6 @@ object Liveness {
         runCatching {
             ctx.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${ctx.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         }
-        return "应用信息（在“电池”里选“不限制 / 允许后台活动”）"
+        return tr("应用信息（在“电池”里选“不限制 / 允许后台活动”）", "App info (under Battery choose \"Unrestricted / allow background activity\")")
     }
 }

@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.tr
+
 import android.content.ComponentName
 import android.content.ServiceConnection
 import android.os.IBinder
@@ -48,20 +50,20 @@ internal object VScreenRemoteDisplay {
     /** A live service binder, binding (and waiting) if needed. Never on the main thread. */
     private fun service(): Result<IBinder> {
         binder?.takeIf { it.isBinderAlive }?.let { return Result.success(it) }
-        if (!ShizukuManager.isReady()) return Result.failure(IllegalStateException("Shizuku 未就绪"))
+        if (!ShizukuManager.isReady()) return Result.failure(IllegalStateException(tr("Shizuku 未就绪", "Shizuku not ready")))
         synchronized(lock) {
             binder?.takeIf { it.isBinderAlive }?.let { return Result.success(it) }
             val l = CountDownLatch(1).also { latch = it }
             try {
                 Shizuku.bindUserService(args, conn)
             } catch (t: Throwable) {
-                return Result.failure(IllegalStateException("Shizuku 不支持 UserService：${t.message}"))
+                return Result.failure(IllegalStateException(tr("Shizuku 不支持 UserService：${t.message}", "Shizuku does not support UserService: ${t.message}")))
             }
             if (!l.await(BIND_TIMEOUT_S, TimeUnit.SECONDS)) {
-                return Result.failure(IllegalStateException("等待 Shizuku 启动副屏服务超时"))
+                return Result.failure(IllegalStateException(tr("等待 Shizuku 启动副屏服务超时", "Timed out waiting for Shizuku to start the screen service")))
             }
             return binder?.let { Result.success(it) }
-                ?: Result.failure(IllegalStateException("副屏服务连接失败"))
+                ?: Result.failure(IllegalStateException(tr("副屏服务连接失败", "Connecting to the screen service failed")))
         }
     }
 
@@ -98,7 +100,7 @@ internal object VScreenRemoteDisplay {
         try {
             data.writeInterfaceToken(VScreenDisplayService.DESCRIPTOR)
             write(data)
-            if (!b.transact(code, data, reply, 0)) error("副屏服务不认识这个调用（旧版本服务仍在运行，重连后会更新）")
+            if (!b.transact(code, data, reply, 0)) error(tr("副屏服务不认识这个调用（旧版本服务仍在运行，重连后会更新）", "The screen service does not know this call (an old service version is still running; it updates after a reconnect)"))
             if (reply.readInt() != 0) error(reply.readString() ?: "unknown error")
             read(reply)
         } finally { data.recycle(); reply.recycle() }

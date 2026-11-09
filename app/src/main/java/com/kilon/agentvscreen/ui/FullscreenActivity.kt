@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.tr
+
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.WindowManager
@@ -205,20 +207,20 @@ class FullscreenActivity : ComponentActivity() {
 
             // Top bar.
             Row(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Circle(Icons.Filled.CloseFullscreen, "退出全屏", Color(0x33FFFFFF)) { finish() }
+                Circle(Icons.Filled.CloseFullscreen, tr("退出全屏", "Exit full screen"), Color(0x33FFFFFF)) { finish() }
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(appLabel ?: "后台副屏", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(appLabel ?: tr("后台副屏", "Background screen"), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(7.dp).clip(CircleShape).background(if (mode == Mode.ACTING) Brush.sweepGradient(Palette.rainbow) else SolidColor(Palette.of(mode))))
                         Spacer(Modifier.width(5.dp))
-                        val word = s.agentTitle ?: (Palette.word(mode) + if (mode == Mode.STANDBY && left >= 0) " · ${left / 60000}:${"%02d".format((left / 1000) % 60)} 后省电" else "")
+                        val word = s.agentTitle ?: (Palette.word(mode) + if (mode == Mode.STANDBY && left >= 0) (" · " + tr("${left / 60000}:${"%02d".format((left / 1000) % 60)} 后省电", "power save in ${left / 60000}:${"%02d".format((left / 1000) % 60)}")) else "")
                         Text(word, color = Color(0xCCFFFFFF), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
                 when (mode) {
-                    Mode.ACTING, Mode.STANDBY -> Pill("停止 AI", Icons.Filled.Stop, Palette.stopped, Color.White) { BackgroundOperation.userStop() }
-                    else -> Circle(Icons.Filled.Close, "关闭副屏", Color(0x33FFFFFF)) {
+                    Mode.ACTING, Mode.STANDBY -> Pill(tr("停止 AI", "Stop AI"), Icons.Filled.Stop, Palette.stopped, Color.White) { BackgroundOperation.userStop() }
+                    else -> Circle(Icons.Filled.Close, tr("关闭副屏", "Close screen"), Color(0x33FFFFFF)) {
                         BackgroundOperation.releaseNow(session); finish()
                     }
                 }
@@ -228,7 +230,7 @@ class FullscreenActivity : ComponentActivity() {
             var now by remember { mutableLongStateOf(0L) }
             LaunchedEffect(hintAt) { now = SystemClock.uptimeMillis(); delay(2600); now = SystemClock.uptimeMillis() }
             AnimatedVisibility(now - hintAt < 2500 && hintAt > 0, Modifier.align(Alignment.Center), enter = fadeIn(), exit = fadeOut()) {
-                Text("长按画面 1 秒接管，接管后点、长按、滑动都会落到副屏上", color = Color.White, fontSize = 13.sp,
+                Text(tr("长按画面 1 秒接管，接管后点、长按、滑动都会落到副屏上", "Hold the picture 1 s to take over; then taps, long presses and swipes go to the screen"), color = Color.White, fontSize = 13.sp,
                     modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xE612141C)).padding(horizontal = 14.dp, vertical = 8.dp))
             }
 
@@ -243,37 +245,37 @@ class FullscreenActivity : ComponentActivity() {
                         text = ""
                         vscreenUserInput(session) { id ->
                             val r = runCatching { BackgroundOperation.typeText(id, t, append = true) }
-                            r.exceptionOrNull()?.let { toast("没输进去：${it.message?.take(60)}") }
+                            r.exceptionOrNull()?.let { toast(tr("没输进去：${it.message?.take(60)}", "Not typed: ${it.message?.take(60)}")) }
                         }
                     }
                     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color(0xFF1B1E2A)).padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.weight(1f)) {
-                            if (text.isEmpty()) Text("输入到副屏里有焦点的输入框", color = Color(0x88FFFFFF), fontSize = 15.sp)
+                            if (text.isEmpty()) Text(tr("输入到副屏里有焦点的输入框", "Types into the focused input box on the screen"), color = Color(0x88FFFFFF), fontSize = 15.sp)
                             BasicTextField(text, { text = it }, Modifier.fillMaxWidth().focusRequester(fr), singleLine = true,
                                 textStyle = TextStyle(color = Color.White, fontSize = 15.sp), cursorBrush = SolidColor(Palette.standby),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send), keyboardActions = KeyboardActions(onSend = { send() }))
                         }
-                        Circle(Icons.AutoMirrored.Filled.Send, "发送", Palette.brandA) { send() }
+                        Circle(Icons.AutoMirrored.Filled.Send, tr("发送", "Send"), Palette.brandA) { send() }
                     }
                 }
                 Row(Modifier.clip(RoundedCornerShape(30.dp)).background(Color(0xE612141C)).padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (takenOver) {
-                        Circle(Icons.AutoMirrored.Filled.ArrowBack, "返回", Color(0x22FFFFFF)) { vscreenUserInput(session) { VScreenShell.key(it, "back") } }
-                        Circle(Icons.Filled.Home, "桌面", Color(0x22FFFFFF)) { vscreenUserInput(session) { VScreenShell.key(it, "home") } }
-                        Circle(Icons.Filled.Keyboard, "打字", if (typing) Palette.brandA else Color(0x22FFFFFF)) { typing = !typing }
-                        Circle(Icons.AutoMirrored.Filled.KeyboardReturn, "回车", Color(0x22FFFFFF)) { vscreenUserInput(session) { VScreenShell.key(it, "enter") } }
-                        Pill("交还 AI", Icons.Filled.SmartToy, Palette.takeover, Color(0xFF052E1C)) { BackgroundOperation.userResume() }
+                        Circle(Icons.AutoMirrored.Filled.ArrowBack, tr("返回", "Back"), Color(0x22FFFFFF)) { vscreenUserInput(session) { VScreenShell.key(it, "back") } }
+                        Circle(Icons.Filled.Home, tr("桌面", "Home"), Color(0x22FFFFFF)) { vscreenUserInput(session) { VScreenShell.key(it, "home") } }
+                        Circle(Icons.Filled.Keyboard, tr("打字", "Type"), if (typing) Palette.brandA else Color(0x22FFFFFF)) { typing = !typing }
+                        Circle(Icons.AutoMirrored.Filled.KeyboardReturn, tr("回车", "Enter"), Color(0x22FFFFFF)) { vscreenUserInput(session) { VScreenShell.key(it, "enter") } }
+                        Pill(tr("交还 AI", "Hand back"), Icons.Filled.SmartToy, Palette.takeover, Color(0xFF052E1C)) { BackgroundOperation.userResume() }
                     } else {
-                        if (mode == Mode.STOPPED) Pill("交还 AI", Icons.Filled.SmartToy, Palette.takeover, Color(0xFF052E1C)) { BackgroundOperation.userResume() }
-                        Pill("接管", Icons.Filled.TouchApp, Color(0x22FFFFFF), Color.White) {
+                        if (mode == Mode.STOPPED) Pill(tr("交还 AI", "Hand back"), Icons.Filled.SmartToy, Palette.takeover, Color(0xFF052E1C)) { BackgroundOperation.userResume() }
+                        Pill(tr("接管", "Take over"), Icons.Filled.TouchApp, Color(0x22FFFFFF), Color.White) {
                             if (s.userStopped) BackgroundOperation.userResume()
                             BackgroundOperation.beginTakeover(session)
                         }
-                        Pill("移到主屏", Icons.Filled.PhoneAndroid, Color(0x22FFFFFF), Color.White) {
+                        Pill(tr("移到主屏", "Move to main screen"), Icons.Filled.PhoneAndroid, Color(0x22FFFFFF), Color.White) {
                             Thread {
-                                val (ok, msg) = runCatching { VScreenHandoff.userToMain(session) }.getOrElse { false to (it.message ?: "失败") }
+                                val (ok, msg) = runCatching { VScreenHandoff.userToMain(session) }.getOrElse { false to (it.message ?: tr("失败", "failed")) }
                                 toast(msg); if (ok) runOnUiThread { finish() }
                             }.start()
                         }

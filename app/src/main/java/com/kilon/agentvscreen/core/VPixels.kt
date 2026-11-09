@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.tr
+
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Rect
@@ -105,16 +107,16 @@ internal object VPixels {
     sealed class Expect {
         abstract val label: String
         data class ColorAt(val x: Int, val y: Int, val color: Int, val tol: Int) : Expect() {
-            override val label get() = "($x,$y) 是 ${hex(color)}"
+            override val label get() = tr("($x,$y) 是 ${hex(color)}", "($x,$y) is ${hex(color)}")
         }
         data class More(val color: Int, val region: Rect?, val tol: Int) : Expect() {
-            override val label get() = "${hex(color)} 变多" + (region?.let { " 在 ${box(it)}" } ?: "")
+            override val label get() = tr("${hex(color)} 变多", "more ${hex(color)}") + (region?.let { tr(" 在 ${box(it)}", " in ${box(it)}") } ?: "")
         }
         data class Less(val color: Int, val region: Rect?, val tol: Int) : Expect() {
-            override val label get() = "${hex(color)} 变少" + (region?.let { " 在 ${box(it)}" } ?: "")
+            override val label get() = tr("${hex(color)} 变少", "less ${hex(color)}") + (region?.let { tr(" 在 ${box(it)}", " in ${box(it)}") } ?: "")
         }
-        data class Change(val region: Rect) : Expect() { override val label get() = "区域 ${box(region)} 变了" }
-        data class Same(val region: Rect) : Expect() { override val label get() = "区域 ${box(region)} 没变" }
+        data class Change(val region: Rect) : Expect() { override val label get() = tr("区域 ${box(region)} 变了", "region ${box(region)} changed") }
+        data class Same(val region: Rect) : Expect() { override val label get() = tr("区域 ${box(region)} 没变", "region ${box(region)} unchanged") }
     }
 
     data class Outcome(val expect: Expect, val ok: Boolean?, val detail: String)
@@ -125,7 +127,7 @@ internal object VPixels {
         is Expect.ColorAt -> {
             val c = at(after, e.x, e.y)
             val d = dist(c, e.color)
-            Outcome(e, d <= e.tol, "现在是 ${hex(c)}（差 ${d.roundToInt()}，容差 ${e.tol}）")
+            Outcome(e, d <= e.tol, tr("现在是 ${hex(c)}（差 ${d.roundToInt()}，容差 ${e.tol}）", "now ${hex(c)} (off by ${d.roundToInt()}, tolerance ${e.tol})"))
         }
         is Expect.More -> amount(e, e.color, e.region, e.tol, before, after, more = true)
         is Expect.Less -> amount(e, e.color, e.region, e.tol, before, after, more = false)
@@ -135,18 +137,18 @@ internal object VPixels {
 
     private fun amount(e: Expect, color: Int, region: Rect?, tol: Int, before: Bitmap?, after: Bitmap, more: Boolean): Outcome {
         val now = count(after, color, tol, region)
-        if (before == null) return Outcome(e, null, "没有动作前的画面可比（现在 $now 个采样点）")
+        if (before == null) return Outcome(e, null, tr("没有动作前的画面可比（现在 $now 个采样点）", "no picture from before the action to compare (now $now sample points)"))
         val was = count(before, color, tol, region)
         val need = maxOf(6, (was * 0.04).roundToInt())
         val ok = if (more) now >= was + need else now <= was - need
-        return Outcome(e, ok, "采样点 $was → $now（至少要变 $need）")
+        return Outcome(e, ok, tr("采样点 $was → $now（至少要变 $need）", "sample points $was → $now (needs a change of at least $need)"))
     }
 
     private fun region(e: Expect, r: Rect, before: Bitmap?, after: Bitmap, change: Boolean): Outcome {
-        if (before == null) return Outcome(e, null, "没有动作前的画面可比")
+        if (before == null) return Outcome(e, null, tr("没有动作前的画面可比", "no picture from before the action to compare"))
         val f = regionDiff(before, after, r)
-        if (f < 0) return Outcome(e, null, "区域不在画面里")
-        return Outcome(e, if (change) f > 0.08 else f < 0.03, "区域里 ${(f * 100).roundToInt()}% 的像素变了")
+        if (f < 0) return Outcome(e, null, tr("区域不在画面里", "the region is outside the picture"))
+        return Outcome(e, if (change) f > 0.08 else f < 0.03, tr("区域里 ${(f * 100).roundToInt()}% 的像素变了", "${(f * 100).roundToInt()}% of the pixels in the region changed"))
     }
 
     /** Share of sampled pixels in [r0] that differ noticeably between two same-size frames; -1 = cannot compare. */

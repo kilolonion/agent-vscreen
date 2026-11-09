@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.tr
+
 import android.content.Context
 import android.content.Intent
 import org.json.JSONObject
@@ -32,7 +34,7 @@ object EventHub {
             ctx.sendBroadcast(Intent(ACTION).putExtra("session", session).putExtra("kind", kind).putExtra("name", name)
                 .putExtra("text", text).putExtra("json", ev.toString()))
         }
-        return "已放进会话 $session 的事件队列（vscreen events 取），并发了广播 $ACTION"
+        return tr("已放进会话 $session 的事件队列（vscreen events 取），并发了广播 $ACTION", "Queued for session $session (collect with vscreen events) and broadcast $ACTION")
     }
 
     /** Take every event of [session]; when there is none, wait up to [waitMs] for one. */

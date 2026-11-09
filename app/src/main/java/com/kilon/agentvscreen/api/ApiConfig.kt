@@ -56,14 +56,17 @@ object ApiConfig {
     fun resetToken() { prefs.edit().putString("token", newToken()).apply() }
 
     /** One line that installs the `vscreen` command in Termux / a proot or chroot Linux / adb shell and stores the token. */
-    fun installLine(): String = "curl -fsS $baseUrl/cli | sh -s -- install $token"
+    /** 1.1.7: [base] is another address (Tailscale) when the agent runs on another device; the script then keeps it. */
+    fun installLine(base: String = baseUrl): String =
+        if (base == baseUrl) "curl -fsS $base/cli | sh -s -- install $token"
+        else "curl -fsS $base/cli | VSCREEN_URL=$base sh -s -- install $token"
 
     /** MCP client config (streamable HTTP). */
-    fun mcpJson(): String = """{
+    fun mcpJson(base: String = baseUrl): String = """{
   "mcpServers": {
     "agent-vscreen": {
       "type": "http",
-      "url": "$baseUrl/mcp",
+      "url": "$base/mcp",
       "headers": { "Authorization": "Bearer $token" }
     }
   }

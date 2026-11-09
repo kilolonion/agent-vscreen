@@ -1,4 +1,7 @@
 package com.kilon.agentvscreen.cmd
+import com.kilon.agentvscreen.I18n
+
+import com.kilon.agentvscreen.tr
 
 import android.content.Context
 import com.kilon.agentvscreen.host.AppLogger
@@ -29,7 +32,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         const val DEFAULT_SESSION = "default"
         internal const val SHOT_DIR = "vscreen"
 
-        const val QUICK_HELP = """vscreen — Agent-VScreen：在看不见的副屏里操作应用，不占用户主屏（完整说明：help all；单条：help act）
+        const val QUICK_HELP_ZH = """vscreen — Agent-VScreen：在看不见的副屏里操作应用，不占用户主屏（完整说明：help all；单条：help act）
   launch 应用名            打开应用，返回四段（做了什么 / 这段时间 / 现在 / 注意）
   act "步骤; 步骤; …"      做一段操作，返回四段；act 不带步骤 = 看一眼
         步骤：tap 目标 | press 目标 | swipe x1 y1 x2 y2 | drag x1 y1 x2 y2 … | scroll down | type 文字 | key back | wait 条件 | use 段名
@@ -43,7 +46,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
 一步没达到预期（until 没等到、字没输进去）这段就停在那一步，后面的不做，【注意】里写明现在的画面。
 输出很长时完整结果也存在截图目录的 last.txt（路径见 help all），可以用 head / sed 分段看。"""
 
-        const val HELP = """vscreen — Agent-VScreen 后台操作：在看不见的副屏里操作其他应用，不占用户主屏。截图由你（调用方的模型）看，手机只报事实。
+        const val HELP_ZH = """vscreen — Agent-VScreen 后台操作：在看不见的副屏里操作其他应用，不占用户主屏。截图由你（调用方的模型）看，手机只报事实。
 不需要 adb 或无线调试：特权走 Agent-VScreen 自己的 Shizuku 通道。不要去连 adb、配无线调试或改 adb 密钥。没有副屏时直接 launch，会自动建屏。
 
 返回的四段（launch / act / handoff in）：
@@ -124,6 +127,104 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
   那个会话 done 或 release 后，或它安静满 N 分钟后，你就能接手（页面保留）。
 - --keep 在你不在时替你盯：告诉用户你在盯什么、盯多久、看到后会怎样、怎么停（keep off）。"""
 
+        const val QUICK_HELP_EN = """vscreen — Agent-VScreen: operate apps on an invisible background screen without taking the user's screen (full guide: help all; one command: help act)
+  launch <app>              open an app, returns four blocks (Done / Meanwhile / Now / Notes)
+  act "step; step; …"       do a stretch of steps, returns four blocks; act with no steps = take a look
+        steps: tap <target> | press <target> | swipe x1 y1 x2 y2 | drag x1 y1 x2 y2 … | scroll down | type <text> | key back | wait <condition> | use <segment>
+        target: x y | #N (number in the [Now] list) | text on the screen; after an action add until <condition> (text:word gone:word change still color:x,y=#RRGGBB app:name)
+        --stop <condition>  --watch 2s  --keep notify|wake  --save <segment>  --confirmed
+  note [text] | note pause|resume "steps" | note realtime on|off | note delete <number>
+  keep | keep off <name>    list / stop watches that run after this turn
+  events [--wait 30s]       fetch events sent by watches (--keep wake)
+  title <text> | done       tell the user what you are doing (shown on the floating window) | this turn is finished (screen freed, page kept)
+  stop | release | handoff in|out | status | apps <keyword> | spots | zoom <region> | collect | fix
+If a step does not reach what it expects (until never came, text was not typed in), the stretch stops at that step, skips the rest, and [Notes] describes the screen now.
+When output is long, the full result is also saved as last.txt in the screenshot folder (path in help all); read it in parts with head / sed."""
+
+        const val HELP_EN = """vscreen — Agent-VScreen background operation: operate other apps on an invisible background screen without taking the user's screen. You (the caller's model) look at the screenshots; the phone only reports facts.
+No adb or wireless debugging needed: privileges go through Agent-VScreen's own Shizuku channel. Don't connect adb, set up wireless debugging or change adb keys. With no screen, just launch: one is created automatically.
+
+The four blocks returned (launch / act / handoff in):
+  [Done]       what each step did, what was waited for and whether it came or time ran out, which stop condition fired (facts only, no "success/failure" verdicts)
+  [Meanwhile]  from your last result until now (including your thinking time): text that appeared / disappeared / flashed, where the picture changed and for how long; a contact sheet when it changed
+  [Now]        front screen, screen size, screenshot path (screen coordinates on the edges) and numbered elements: #N "text" (x,y) tappable/input/…; on the same page only new or changed elements are listed (numbers stay), act with no steps lists all
+  [Notes]      main screen touched, payment button not tapped, user takeover, app rules, causes of failure; "none" when there are none
+
+Commands:
+  launch <app name|package> [--landscape|--portrait] [--restart]
+        open an app (if not found, apps <keyword>). The screen orientation follows what the app declares; system scaling is handled automatically.
+        Returns four blocks; [Done] also lists the notes, saved segments and pause/resume steps you kept for this app.
+        --restart cold start; --landscape / --portrait choose the screen orientation
+  act ["step; step; …"] [--stop "<condition>"] [--watch <duration>] [--paused] [--keep notify|wake] [--for <duration>] [--save <name>] [--confirmed]
+        do a stretch of steps (up to 40, separated by ; or newlines), returns four blocks. No steps = take a look (waits for the picture to settle, up to 3 s).
+        steps:
+          tap <target> | press <target> [duration, e.g. 1.2s; a bare number is ms] | swipe x1 y1 x2 y2 [duration] | drag x1 y1 x2 y2 [x3 y3 …] [duration]
+          scroll up|down|left|right [#N | x y] | type <text> | type+ <text> (append) | key back|enter|home|tab|del|search|… | back | enter
+          wait <condition> [or <condition>] [max duration] | wait 2s | use <segment>
+          target = x y | #N (number in the last [Now] list) | text on the screen (exact match first, then contains; a single number = tap that number on the screen)
+        A step that does not reach what it expects stops the stretch there and skips the rest ([Notes] describes the screen now): until timed out; type found no focused input box,
+        or your text is not in the box after typing, or accessibility is off so it can't be confirmed. Tap the input box before type; in [Now] it is marked "input focused"
+        After each action you may add until <condition> [or <condition>] [max duration, default 5s]; without it the picture is awaited to settle (up to 3 s; not for realtime apps).
+        conditions: text:<word> | gone:<word> | change[:x1,y1,x2,y2] | still[:region] | stable | color:x,y=#RRGGBB[~tolerance] | app:<package or screen name>
+        --stop <condition>: watched for the whole stretch; when met it stops and skips the rest
+        --watch <duration>: keep looking this long after the steps (realtime picture); realtime apps look 1s by default
+        --paused: for apps with saved pause/resume steps, this stretch neither resumes nor pauses (look at / tap menus while paused)
+        --keep notify|wake [--for <duration>]: after this turn keep watching the --stop condition (default 1 hour, at most 12 hours);
+        when seen, notify the user (notify) or send the caller an event (wake, fetched with events), then end
+        --save <name>: save these steps as a segment of this app, later: use <name>
+        --confirmed: for payment / irreversible buttons, add only after the user clearly agreed in this turn (otherwise not tapped; [Notes] says CONFIRM_REQUIRED)
+        e.g. act "tap Search; type headphones; key enter until text:All"
+             act "drag 300 900 800 900" --watch 2s
+             act --stop "text:In stock" --keep notify --for 2h
+  note [text] | note pause "<steps>" | note resume "<steps>" | note realtime on|off | note delete <number|pause|resume|segment>
+        keep notes for the current app (no arguments = list notes, segments and pause/resume steps). The next launch lists them.
+        With both pause and resume saved: every act first does the resume steps, then after acting and looking does the pause steps (a realtime game becomes turn-based)
+  events [--wait <duration>]
+        fetch events that watches (act --keep wake) sent when their condition was seen; --wait waits up to this long (default no wait, at most 120s).
+        Without a running --keep wake watch in this session it does not wait and says so
+  title [text]
+        show what you are doing on the floating window (up to 40 characters, for the user; no text = clear; cleared when this turn ends)
+  done
+        this turn is finished: the screen pauses to save power at once, the page is kept 10 minutes, and other sessions can take over (without done, it ends after N quiet minutes, set in the app)
+  keep | keep off <name|all>
+        list / stop watches that run after this turn (started with act --stop … --keep)
+  stop [package] [--force]
+        close the app on the screen (--force stops the whole app, also on the main screen: ask the user first)
+  release
+        release the screen now
+  handoff in [package] | handoff out [package] [--note <text>]
+        in: move the app from the user's main screen to the background screen and carry on (returns four blocks); out: hand it back to the main screen when the user must act
+  status
+        whether background operation works, the screen, permissions, app rules, watches running
+  apps [keyword]
+        installed apps and packages
+  spots [x1,y1,x2,y2] [--color #RRGGBB]
+        find color spots locally (no model), listing centers and a marked picture
+  zoom x1,y1,x2,y2 [--scale <factor>]
+        zoom into a region (screen coordinates on the picture's edges)
+  collect [--pages <count>] [--until <text>]
+        scroll down page by page from here and collect every line of text (deduplicated)
+  fix [code] [--open]
+        fix the problems listed in status (changes system settings or opens a settings page on the main screen: ask the user first)
+
+After a user takeover or a restart: the [Now] of the next launch or act counts as a fresh look; no other command is needed (there is no resume).
+When the user taps "Stop" on the floating window, only the user can hand control back; closing the floating window only releases the screen, then just launch.
+The full command-line output is also saved as last.txt under VSCREEN_SHOT_DIR (default TMPDIR/vscreen-shots/last.txt); read it when output is too long or redirection goes wrong.
+
+Rules:
+- When the background screen is unavailable, commands fail; they never run on the main screen instead.
+- While the user has taken over, actions wait (up to 15 s, then USER_TAKEOVER); the first act after the hand-back returns the screen now (REREAD_REQUIRED): look, then carry on.
+- After the user taps "Stop AI" on the floating window, every action returns USER_STOPPED (with the time): stop, and pass on the "how to undo" line to the user (notification "Allow again" / floating window "Hand back to AI" / app home page); don't retry. The user merely closing or folding the floating window does not stop you.
+- The user can set an app to "blocked" (APP_BLOCKED) or "read-only" (APP_READ_ONLY: look, scroll, back). That is the user's decision: don't get around it, and don't enter the same app another way.
+- Steps touching privacy (messages, contacts, photos, balances) or high risk (paying, transferring, sending, deleting, authorizing, logging in): ask the user first and act after the answer.
+- fix changes system settings: ask the user first.
+- A screen belongs to one session at a time (header X-VScreen-Session, default "default"). When another session is using it you get BUSY, with whose it is and when it frees up;
+  after that session's done or release, or N quiet minutes, you can take over (page kept).
+- --keep watches for you while you are away: tell the user what you watch, for how long, what happens when seen, and how to stop it (keep off)."""
+
+        val QUICK_HELP: String get() = if (I18n.en) QUICK_HELP_EN else QUICK_HELP_ZH
+        val HELP: String get() = if (I18n.en) HELP_EN else HELP_ZH
+
         /** Last activity observed per display (status shows it). */
         internal val lastActivity = HashMap<Int, String>()
         /** Per chat: when its last four-block return was made (epoch ms) — the start of the next 【这段时间】. */
@@ -151,14 +252,19 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
     /** `help <命令>`: that command's lines from [HELP] (all of them for `help all` or an unknown name). */
     internal fun helpFor(cmd: String?): String {
         if (cmd == null || cmd == "all") return HELP
+        return helpLines(cmd, HELP)?.joinToString("\n") ?: (tr("没有叫 $cmd 的命令。", "There is no command called $cmd.") + "\n\n$QUICK_HELP")
+    }
+
+    /** [cmd]'s lines in [help]; null when it has none. */
+    private fun helpLines(cmd: String, help: String): List<String>? {
         val out = ArrayList<String>()
         var take = false
-        for (l in HELP.lines()) {
+        for (l in help.lines()) {
             val starts = l.startsWith("  $cmd ") || l == "  $cmd"
             if (starts) { take = true; out += l; continue }
             if (take) { if (l.startsWith("        ")) out += l else take = false }
         }
-        return if (out.isEmpty()) "没有叫 $cmd 的命令。\n\n$QUICK_HELP" else out.joinToString("\n")
+        return out.takeIf { it.isNotEmpty() }
     }
 
     /** Nothing a command does may take the app down: any throwable becomes an error result. */
@@ -166,7 +272,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         handleCommand(request)
     } catch (t: Throwable) {
         AppLogger.warning(TAG, "vscreen command crashed: ${t.javaClass.simpleName}: ${t.message} / ${t.cause?.message}")
-        errText("INTERNAL_ERROR", "工具内部错误（${t.javaClass.simpleName}: ${(t.cause?.message ?: t.message ?: "").take(300)}），命令没有执行。请把这段报错发给开发者")
+        errText("INTERNAL_ERROR", run { val why = "${t.javaClass.simpleName}: ${(t.cause?.message ?: t.message ?: "").take(300)}"; tr("工具内部错误（$why），命令没有执行。请把这段报错发给开发者", "Internal tool error ($why); the command did not run. Please send this error to the developer") })
     }
 
     private fun handleCommand(request: NativeOffloadRequest): NativeOffloadResult {
@@ -187,7 +293,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         } catch (e: ActionError) {
             errText(e.code, e.message ?: e.code)
         } catch (e: OffloadArgs.BadOption) {
-            errText("INVALID_ARGS", e.message ?: "参数不对")
+            errText("INVALID_ARGS", e.message ?: tr("参数不对", "bad arguments"))
         } catch (t: Exception) {
             AppLogger.warning(TAG, "$sub failed: ${t.message}")
             errText("OPERATION_FAILED", "${t.javaClass.simpleName}: ${t.message}")
@@ -202,31 +308,35 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         val allowed = optionsOf(sub) ?: emptySet()
         val given = rest.filter { it.startsWith("--") && it.length > 2 }.map { it.substring(2).substringBefore('=') }
         val foreign = given.filter { it !in allowed && it !in GLOBAL_OPTIONS }.distinct()
-        if (foreign.isNotEmpty()) throw ActionError("UNKNOWN_OPTION", "$sub 没有参数 ${foreign.joinToString(" ") { "--$it" }}" +
-            suggestFor(sub, foreign.first()) + "。命令没有执行。$sub 的参数：" + allowed.sorted().joinToString(" ") { "--$it" }.ifEmpty { "无" })
+        if (foreign.isNotEmpty()) throw ActionError("UNKNOWN_OPTION", run {
+            val bad = foreign.joinToString(" ") { "--$it" }; val hint = suggestFor(sub, foreign.first())
+            val ok = allowed.sorted().joinToString(" ") { "--$it" }.ifEmpty { tr("无", "none") }
+            tr("$sub 没有参数 $bad$hint。命令没有执行。$sub 的参数：$ok", "$sub has no option $bad$hint. The command did not run. Options of $sub: $ok")
+        })
         for ((i, t) in rest.withIndex()) {
             if (!t.startsWith("--") || t.length <= 2) continue
             val key = t.substring(2).substringBefore('=')
             val kind = VScreenOptions.kindOf(sub, key)
-            if ('=' in t && kind == VScreenOptions.Kind.SWITCH) throw ActionError("INVALID_ARGS", "--$key 是开关，不带值（收到 $t）。命令没有执行")
+            if ('=' in t && kind == VScreenOptions.Kind.SWITCH) throw ActionError("INVALID_ARGS", tr("--$key 是开关，不带值（收到 $t）。命令没有执行", "--$key is a switch and takes no value (got $t). The command did not run"))
             val next = rest.getOrNull(i + 1)
             if ('=' !in t && kind == VScreenOptions.Kind.VALUE && (next == null || next.startsWith("--")))
-                throw ActionError("INVALID_ARGS", "--$key 后面要跟一个值（收到的是 ${next ?: "结尾"}）。命令没有执行")
+                throw ActionError("INVALID_ARGS", run { val got = next ?: tr("结尾", "the end"); tr("--$key 后面要跟一个值（收到的是 $got）。命令没有执行", "--$key needs a value after it (got $got). The command did not run") })
         }
     }
 
     /** Options of [sub], from its help lines (null: no such command). */
     internal fun optionsOf(sub: String): Set<String>? = synchronized(optionCache) {
         optionCache.getOrPut(sub) {
-            val h = helpFor(sub)
-            if (h.startsWith("没有叫")) emptySet() else Regex("--([a-z][a-z0-9-]*)").findAll(h).map { it.groupValues[1] }.toSet()
+            // Options come from the Chinese help in every language: one source, the English help lists the same ones.
+            val h = helpLines(sub, HELP_ZH)?.joinToString("\n")
+            if (h == null) emptySet() else Regex("--([a-z][a-z0-9-]*)").findAll(h).map { it.groupValues[1] }.toSet()
         }.takeIf { it.isNotEmpty() }
     }
 
     private fun suggestFor(sub: String, bad: String): String {
         val pool = (optionsOf(sub) ?: emptySet())
         val best = pool.minByOrNull { editDistance(it, bad) } ?: return ""
-        return if (editDistance(best, bad) <= maxOf(2, bad.length / 3)) "；是不是 --$best？" else ""
+        return if (editDistance(best, bad) <= maxOf(2, bad.length / 3)) tr("；是不是 --$best？", "; did you mean --$best?") else ""
     }
 
     private fun editDistance(a: String, b: String): Int {
@@ -248,8 +358,8 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         val id = BackgroundOperation.state.value.displayId ?: return
         val pkg = com.kilon.agentvscreen.core.VScreenShell.topPackage(id) ?: return
         if (VScreenStore.ruleFor(pkg) == VScreenStore.Rule.BLOCK)
-            throw ActionError("APP_BLOCKED", "副屏上现在是 $pkg，用户禁止后台操作它（不能读屏也不能操作）：act \"key back\" 离开或 stop。" +
-                "这是用户在 Agent-VScreen › 应用限制 里定的，不要绕过")
+            throw ActionError("APP_BLOCKED", tr("副屏上现在是 $pkg，用户禁止后台操作它（不能读屏也不能操作）：act \"key back\" 离开或 stop。这是用户在 Agent-VScreen › 应用限制 里定的，不要绕过",
+                "The screen now shows $pkg, which the user blocked from background operation (no reading, no actions): leave with act \"key back\" or stop. The user set this in Agent-VScreen › App rules; don't get around it"))
     }
 
     internal fun dispatch(sub: String, args: OffloadArgs, sid: String?): NativeOffloadResult = when (sub) {
@@ -269,9 +379,9 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         "zoom" -> zoomCmd(sid, args)
         "collect" -> collectCmd(sid, args)
         "fix" -> fix(sid, args)
-        "resume", "continue", "look" -> NativeOffloadResult(2, "vscreen: 没有 $sub 命令，也不需要：要看现在的画面就 act（不带步骤）；" +
-            "launch 和 act 返回的【现在】就算重新看过画面，之后的动作照常执行。用户在悬浮窗上点了“停止”或接管时，只有用户能交还，这时告诉用户、等用户交还\n")
-        else -> NativeOffloadResult(2, "vscreen: 没有命令 '$sub'（v49 只有一个操作动词 act，点击/输入/滑动/等待都写成 act 的步骤）\n\n$QUICK_HELP\n")
+        "resume", "continue", "look" -> NativeOffloadResult(2, tr("vscreen: 没有 $sub 命令，也不需要：要看现在的画面就 act（不带步骤）；launch 和 act 返回的【现在】就算重新看过画面，之后的动作照常执行。用户在悬浮窗上点了“停止”或接管时，只有用户能交还，这时告诉用户、等用户交还\n",
+            "vscreen: there is no $sub command, and none is needed: to see the screen now, act (no steps); the [Now] returned by launch and act counts as a fresh look, and later actions run as usual. When the user tapped \"Stop\" or took over on the floating window, only the user can hand back: tell the user and wait\n"))
+        else -> NativeOffloadResult(2, tr("vscreen: 没有命令 '$sub'（只有一个操作动词 act，点击/输入/滑动/等待都写成 act 的步骤）", "vscreen: no command '$sub' (there is one action verb, act: tapping / typing / swiping / waiting are all act steps)") + "\n\n$QUICK_HELP\n")
     }
 
     /** Facts about the display, for status. */
@@ -285,5 +395,5 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
     }
 
     private fun errText(code: String, message: String): NativeOffloadResult =
-        NativeOffloadResult(1, "【错误】$code：$message\n")
+        NativeOffloadResult(1, "${Blocks.error}$code${tr("：", ": ")}$message\n")
 }

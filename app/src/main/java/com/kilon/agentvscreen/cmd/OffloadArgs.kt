@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.tr
+
 /**
  * Tiny long-option parser shared by android-* offload handlers.
  *
@@ -84,7 +86,7 @@ internal class OffloadArgs(
     /** Lenient mode: a non-number reads as absent (the default applies). Strict: refused. */
     private fun <T> num(names: Array<out String>, conv: (String) -> T?): T? {
         val raw = get(*names) ?: return null
-        return conv(raw) ?: if (strict) throw BadOption("--${names.first()} 要一个数字（收到 “$raw”）") else null
+        return conv(raw) ?: if (strict) throw BadOption(tr("--${names.first()} 要一个数字（收到 “$raw”）", "--${names.first()} needs a number (got \"$raw\")")) else null
     }
     fun getBool(vararg names: String): Boolean? =
         get(*names)?.lowercase()?.let { it == "true" || it == "1" || it == "yes" }

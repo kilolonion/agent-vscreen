@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.tr
+
 import com.kilon.agentvscreen.core.BackgroundOperation.ActionError
 
 /**
@@ -61,5 +63,5 @@ internal object VScreenOptions {
     }
 
     private fun ms(key: String, v: String): Long = durationMs(v)
-        ?: throw ActionError("INVALID_ARGS", "--$key 是时长，写成 500ms / 1.5s / 2m（不带单位就是毫秒）：收到 $v。命令没有执行")
+        ?: throw ActionError("INVALID_ARGS", tr("--$key 是时长，写成 500ms / 1.5s / 2m（不带单位就是毫秒）：收到 $v。命令没有执行", "--$key is a duration, write it as 500ms / 1.5s / 2m (no unit means milliseconds): got $v. The command did not run"))
 }

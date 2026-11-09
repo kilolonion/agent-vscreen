@@ -1,5 +1,8 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.I18n
+import com.kilon.agentvscreen.tr
+
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -80,16 +83,16 @@ internal fun a11yRaw(d: VScreenDisplay): List<RawEl> {
         for (i in 0 until n.childCount) walk(runCatching { n.getChild(i) }.getOrNull(), depth + 1)
         if (!inside || !(text != null || (actionable && !big) || n.isEditable)) return
         val flags = buildList {
-            if (n.isEditable) add("可输入") else if (n.isClickable) add("可点")
-            if (n.isScrollable) add("可滚动")
-            if (n.isCheckable) add(if (n.isChecked) "已选" else "未选")
-            if (n.isFocused && n.isEditable) add("有焦点")
-            if (n.isPassword) add("密码")
+            if (n.isEditable) add(tr("可输入", "input")) else if (n.isClickable) add(tr("可点", "tappable"))
+            if (n.isScrollable) add(tr("可滚动", "scrollable"))
+            if (n.isCheckable) add(if (n.isChecked) tr("已选", "checked") else tr("未选", "unchecked"))
+            if (n.isFocused && n.isEditable) add(tr("有焦点", "focused"))
+            if (n.isPassword) add(tr("密码", "password"))
         }.joinToString(" ")
         var label = text?.let { tidy(it) }
         if (label == null && !n.isEditable && (n.isClickable || n.isCheckable)) {
             // Plain words drawn inside this tappable node (not inside a tappable child of it).
-            val inner = (start until raw.size).filter { i -> raw[i].let { it.flags.isEmpty() && !it.editable && !it.label.startsWith("（") && b.contains(it.box.centerX(), it.box.centerY()) } }
+            val inner = (start until raw.size).filter { i -> raw[i].let { it.flags.isEmpty() && !it.editable && !it.label.let { l -> l.startsWith("（") || l.startsWith("(") } && b.contains(it.box.centerX(), it.box.centerY()) } }
             if (inner.isNotEmpty()) {
                 label = inner.map { raw[it].label }.distinct().joinToString(" · ").let { if (it.length > 60) it.take(58) + "…" else it }
                 inner.asReversed().forEach { raw.removeAt(it) }
@@ -98,8 +101,8 @@ internal fun a11yRaw(d: VScreenDisplay): List<RawEl> {
         val id = n.viewIdResourceName?.substringAfterLast('/')?.takeIf { it.length in 2..32 }
         if (label == null) {
             if (!n.isEditable && area > screenArea / 40) return
-            label = if (n.isEditable) "（空输入框${id?.let { " $it" } ?: ""}）"
-                else "（无文字${(id ?: n.className?.toString()?.substringAfterLast('.')?.takeIf { it.length in 3..24 })?.let { " $it" } ?: ""}）"
+            label = if (n.isEditable) tr("（空输入框", "(empty input box") + (id?.let { " $it" } ?: "") + tr("）", ")")
+                else tr("（无文字", "(no text") + ((id ?: n.className?.toString()?.substringAfterLast('.')?.takeIf { it.length in 3..24 })?.let { " $it" } ?: "") + tr("）", ")")
         }
         raw.add(start.coerceAtMost(raw.size), RawEl(label, b, flags, true, n.isEditable))
     }
@@ -128,7 +131,7 @@ internal fun mergeElements(d: VScreenDisplay, a11y: List<RawEl>, ocr: List<VScre
     val out = ArrayList<RawEl>()
     val usedOcr = HashSet<VScreenOcr.Item>()
     for (a in a11y) {
-        if (!a.label.startsWith("（") && DIGIT.containsMatchIn(a.label) && a.label.length <= 24) {
+        if (!(a.label.startsWith("（") || a.label.startsWith("(")) && DIGIT.containsMatchIn(a.label) && a.label.length <= 24) {
             val drawn = items.filter { Rect(a.box).apply { inset(-8, -8) }.contains(it.box.centerX(), it.box.centerY()) && DIGIT.containsMatchIn(it.text) }
             val drawnText = drawn.joinToString(" ") { it.text.trim() }
             if (drawn.isNotEmpty() && VScreenOcr.norm(drawnText) != VScreenOcr.norm(a.label) && !VScreenOcr.norm(drawnText).contains(VScreenOcr.norm(a.label))) {
@@ -207,8 +210,8 @@ private val URLISH = Regex("^(https?://|[a-z][a-z0-9+.-]*://)|[?&][\\w%]+=")
 /** Labels: URL-encoded tracking strings are summarised, long ones cut (and said so). */
 internal fun tidy(raw: String): String {
     val t = raw.trim()
-    if (PCT.findAll(t).count() >= 3 || (t.length > 40 && !t.contains(' ') && URLISH.containsMatchIn(t))) return "（链接/标识 ${t.length} 字）"
-    return if (t.length > 40) t.take(40) + "…（共 ${t.length} 字）" else t
+    if (PCT.findAll(t).count() >= 3 || (t.length > 40 && !t.contains(' ') && URLISH.containsMatchIn(t))) return tr("（链接/标识 ${t.length} 字）", "(link / id, ${t.length} chars)")
+    return if (t.length > 40) t.take(40) + tr("…（共 ${t.length} 字）", "… (${t.length} chars)") else t
 }
 
 internal fun El.line(): String {
@@ -224,8 +227,8 @@ internal fun El.line(): String {
  */
 internal fun sinceHeader(from: Long, to: Long, actionMs: Long): String {
     val span = ((to - from) / 100) / 10.0
-    return if (actionMs > 0 && to - from > actionMs + 300) "上次返回到现在 ${span}s（其中这段动作 ${(actionMs / 100) / 10.0}s，之前 ${((to - from - actionMs) / 100) / 10.0}s 是你在思考或做别的）"
-        else "这段 ${span}s"
+    return if (actionMs > 0 && to - from > actionMs + 300) tr("上次返回到现在 ${span}s（其中这段动作 ${(actionMs / 100) / 10.0}s，之前 ${((to - from - actionMs) / 100) / 10.0}s 是你在思考或做别的）", "${span}s since the last reply (this segment's actions ${(actionMs / 100) / 10.0}s; the ${((to - from - actionMs) / 100) / 10.0}s before were you thinking or doing other things)")
+        else tr("这段 ${span}s", "this segment ${span}s")
 }
 
 /** Words that appeared, went, or came and went between [from] and [to], from the perception readings. */
@@ -239,9 +242,9 @@ internal fun wordFacts(d: VScreenDisplay, from: Long, to: Long): List<String> {
         val gone = then.filter { VScreenOcr.norm(it) !in nowN }
         val between = LinkedHashMap<String, String>()
         for (r in rs.drop(1).dropLast(1)) for (w in r.words) { val k = VScreenOcr.norm(w); if (k !in thenN && k !in nowN) between.putIfAbsent(k, w) }
-        if (appeared.isNotEmpty()) lines += "出现了：" + list(appeared, 20)
-        if (gone.isNotEmpty()) lines += "不见了：" + list(gone, 20)
-        if (between.isNotEmpty()) lines += "中途出现过又消失：" + list(between.values.toList(), 12)
+        if (appeared.isNotEmpty()) lines += tr("出现了：", "appeared: ") + list(appeared, 20)
+        if (gone.isNotEmpty()) lines += tr("不见了：", "disappeared: ") + list(gone, 20)
+        if (between.isNotEmpty()) lines += tr("中途出现过又消失：", "appeared and disappeared meanwhile: ") + list(between.values.toList(), 12)
     }
     return lines
 }
@@ -278,20 +281,21 @@ internal fun pictureFacts(d: VScreenDisplay, from: Long, to: Long): Pair<List<St
             }
         } else null
         val shown = spans.sortedByDescending { (it.end - it.start) * (it.share + 0.01) }.take(6).sortedBy { it.start }
-        lines += "画面变化（时间相对现在，区域是副屏坐标，百分比是变了的格子占全屏）：" + shown.joinToString("；") { sp ->
+        lines += tr("画面变化（时间相对现在，区域是副屏坐标，百分比是变了的格子占全屏）：", "picture changes (times relative to now, regions in screen coordinates, percent = changed cells of the whole screen): ") + shown.joinToString(tr("；", "; ")) { sp ->
             val dur = ((sp.end - sp.start) / 100) / 10.0
-            "${Report.ago(sp.start, to)}～${if (to - sp.end < 400) "现在" else Report.ago(sp.end, to)}（${dur}s）[${Report.box(sp.area)}] ${(sp.share * 100).roundToInt()}%"
-        } + if (spans.size > shown.size) "；另有 ${spans.size - shown.size} 段较小的变化" else ""
+            "${Report.ago(sp.start, to)}～${if (to - sp.end < 400) tr("现在", "now") else Report.ago(sp.end, to)} (${dur}s) [${Report.box(sp.area)}] ${(sp.share * 100).roundToInt()}%"
+        } + if (spans.size > shown.size) tr("；另有 ${spans.size - shown.size} 段较小的变化", "; plus ${spans.size - shown.size} smaller changes") else ""
         firstLast?.let { (share, bb) ->
-            lines += if (share <= 0.0) "开头和现在的画面一样（中间动过又回去了）"
-                else "开头和现在相比：${(share * 100).roundToInt()}% 的格子不同" + (bb?.let { " [${Report.box(it)}]" } ?: "")
+            lines += if (share <= 0.0) tr("开头和现在的画面一样（中间动过又回去了）", "the start and now look the same (it moved and came back)")
+                else tr("开头和现在相比：${(share * 100).roundToInt()}% 的格子不同", "start vs now: ${(share * 100).roundToInt()}% of cells differ") + (bb?.let { " [${Report.box(it)}]" } ?: "")
         }
         return lines to true
     } finally { pics.forEach { it.second.recycle() } }
 }
 
 private fun list(ws: List<String>, max: Int): String =
-    ws.take(max).joinToString("、") { "“${it.take(30)}”" } + if (ws.size > max) " 等 ${ws.size} 处" else ""
+    if (I18n.en) ws.take(max).joinToString(", ") { "\"${it.take(30)}\"" } + (if (ws.size > max) " and more, ${ws.size} in all" else "")
+    else ws.take(max).joinToString("、") { "“${it.take(30)}”" } + if (ws.size > max) " 等 ${ws.size} 处" else ""
 
 // ── the picture ──────────────────────────────────────────────────────
 
@@ -325,7 +329,7 @@ internal fun VScreenOffloadHandler.picture(sid: String, d: VScreenDisplay, frame
     val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 15f; color = Color.rgb(30, 30, 160) }
     val line = Paint().apply { color = Color.rgb(30, 30, 160); strokeWidth = 1f }
     val faint = Paint().apply { color = Color.argb(70, 30, 30, 160); strokeWidth = 1f }
-    c.drawText("现在（边上是副屏坐标）", margin.toFloat(), 20f, head)
+    c.drawText(tr("现在（边上是副屏坐标）", "Now (screen coordinates on the edges)"), margin.toFloat(), 20f, head)
     val ox = margin; val oy = title + margin
     c.drawBitmap(frame, null, Rect(ox, oy, ox + nw, oy + nh), Paint(Paint.FILTER_BITMAP_FLAG))
     // Ticks every 100 screen px, numbers every 200 (every 500 on big screens), faint lines across every 200/500.
@@ -349,7 +353,7 @@ internal fun VScreenOffloadHandler.picture(sid: String, d: VScreenDisplay, frame
     }
     if (cells.isNotEmpty()) {
         val sx = if (landscape) 0 else nowW; val sy = if (landscape) nowH else 0
-        c.drawText("这段时间（${Report.ago(since!!.from, since.to)} 到现在，红点=点击 红线=拖动）", (sx + pad).toFloat(), (sy + 20).toFloat(), head)
+        c.drawText(tr("这段时间（${Report.ago(since!!.from, since.to)} 到现在，红点=点击 红线=拖动）", "Meanwhile (${Report.ago(since!!.from, since.to)} to now; red dot = tap, red line = drag)"), (sx + pad).toFloat(), (sy + 20).toFloat(), head)
         val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 15f; color = Color.BLACK }
         val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.rgb(255, 30, 60); style = Paint.Style.STROKE; strokeWidth = 3f }
         val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(150, 255, 30, 60) }
@@ -410,39 +414,39 @@ internal fun VScreenOffloadHandler.fourBlocks(sid: String, d: VScreenDisplay, do
     val from = if (last != null && now - last <= 600_000L && last <= segmentStart) last else segmentStart
     // The screen is gone (privileged connection lost): say so instead of describing an empty screen.
     connectionLost(d)?.let { lost ->
-        val sb = StringBuilder("【做了什么】\n"); done.forEach { sb.append(it).append('\n') }
-        sb.append("\n【这段时间】\n（副屏已不存在，没有录屏）\n\n【现在】\n（没有副屏）\n\n【注意】\n")
+        val sb = StringBuilder(Blocks.done + "\n"); done.forEach { sb.append(it).append('\n') }
+        sb.append("\n" + Blocks.meanwhile + "\n" + tr("（副屏已不存在，没有录屏）", "(the screen no longer exists, no recording)") + "\n\n" + Blocks.now + "\n" + tr("（没有副屏）", "(no screen)") + "\n\n" + Blocks.notes + "\n")
         (attention + lost).distinct().forEach { sb.append("- ").append(it).append('\n') }
         synchronized(VScreenOffloadHandler.lastReturn) { VScreenOffloadHandler.lastReturn[sid] = System.currentTimeMillis() }
         return NativeOffloadResult(0, sb.toString())
     }
     // v0.5: the recording-track work (decoding frames for 【这段时间】 and the sheet) runs while the screen is read.
-    val picF = REPORT_POOL.submit<Pair<List<String>, Boolean>> { runCatching { pictureFacts(d, from, now) }.getOrElse { listOf("（读不到录屏：${it.message}）") to false } }
+    val picF = REPORT_POOL.submit<Pair<List<String>, Boolean>> { runCatching { pictureFacts(d, from, now) }.getOrElse { listOf(tr("（读不到录屏：${it.message}）", "(recording unreadable: ${it.message})")) to false } }
     val cellsF = REPORT_POOL.submit<List<Pair<Long, Bitmap>>> { runCatching { pickTrack(d.displayId, from, now, Report.MAX_CELLS) }.getOrDefault(emptyList()) }
     val snap = snapshot(d)
     val (picLines, changed) = runCatching { picF.get(5, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault(emptyList<String>() to false)
     val cells = runCatching { cellsF.get(5, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault(emptyList())
     val words = wordFacts(d, from, System.currentTimeMillis())
-    val sinceLines = ArrayList<String>().apply { add(sinceHeader(from, now, actionMs)); addAll(words); addAll(picLines); if (size == 1) add("文字和画面都没有明显变化（光标、细小动画这类小变动不算）") }
+    val sinceLines = ArrayList<String>().apply { add(sinceHeader(from, now, actionMs)); addAll(words); addAll(picLines); if (size == 1) add(tr("文字和画面都没有明显变化（光标、细小动画这类小变动不算）", "no clear change in text or picture (cursors and tiny animations don't count)")) }
     val since = Since(sinceLines, changed, from, now)
     val els = numbered(sid, d, snap.els)
     val prev = synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] }
     synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] = ElSet(d.generation, now, els) }
     val shownCells = if (changed) cells else { cells.forEach { it.second.recycle() }; emptyList() }
     val pic = snap.frame?.let { picture(sid, d, it, since, tag, shownCells) } ?: run { shownCells.forEach { it.second.recycle() }; null }
-    if (snap.activity == null) attention += "副屏上没有应用（副屏没有桌面，home 和 back 回不到桌面）：launch <应用名> 打开一个"
-    VScreenPerception.blankFor(d.displayId)?.let { ms -> attention += "画面已连续 ${(ms / 100) / 10.0} 秒是一整片纯色（黑屏/白屏）" }
+    if (snap.activity == null) attention += tr("副屏上没有应用（副屏没有桌面，home 和 back 回不到桌面）：launch <应用名> 打开一个", "No app on the screen (the screen has no launcher; home and back can't reach one): open one with launch <app name>")
+    VScreenPerception.blankFor(d.displayId)?.let { ms -> attention += tr("画面已连续 ${(ms / 100) / 10.0} 秒是一整片纯色（黑屏/白屏）", "The picture has been one solid color for ${(ms / 100) / 10.0} s (black / white screen)") }
     val sb = StringBuilder()
-    sb.append("【做了什么】\n")
+    sb.append(Blocks.done + "\n")
     done.forEach { sb.append(it).append('\n') }
-    sb.append("\n【这段时间】\n")
+    sb.append("\n" + Blocks.meanwhile + "\n")
     since.lines.forEach { sb.append(it).append('\n') }
-    sb.append("\n【现在】 ").append(snap.activity ?: "（副屏上没有应用）").append("  副屏 ${d.width}x${d.height}")
-    if (pic != null) sb.append("  图 ").append(pic).append(if (since.changed) "（左/上是现在，旁边是这段时间的拼图）" else "")
+    sb.append("\n" + Blocks.now + " ").append(snap.activity ?: tr("（副屏上没有应用）", "(no app on the screen)")).append(tr("  副屏 ", "  screen ") + "${d.width}x${d.height}")
+    if (pic != null) sb.append(tr("  图 ", "  picture ")).append(pic).append(if (since.changed) tr("（左/上是现在，旁边是这段时间的拼图）", " (left / top is now, next to it the strip of meanwhile)") else "")
     sb.append('\n')
     appendElements(sb, els, prev?.takeIf { it.generation == d.generation }, fullList, snap.items == null)
-    sb.append("\n【注意】\n")
-    if (attention.isEmpty()) sb.append("无\n") else attention.distinct().forEach { sb.append("- ").append(it).append('\n') }
+    sb.append("\n" + Blocks.notes + "\n")
+    if (attention.isEmpty()) sb.append(tr("无\n", "none\n")) else attention.distinct().forEach { sb.append("- ").append(it).append('\n') }
     synchronized(VScreenOffloadHandler.lastReturn) { VScreenOffloadHandler.lastReturn[sid] = System.currentTimeMillis() }
     return NativeOffloadResult(0, sb.toString())
 }
@@ -475,12 +479,21 @@ internal fun numbered(sid: String, d: VScreenDisplay, els: List<El>): List<El> {
  * for #N and zoom.
  */
 private fun appendElements(sb: StringBuilder, els: List<El>, prev: ElSet?, full: Boolean, noOcr: Boolean) {
-    if (els.isEmpty()) { sb.append(if (noOcr) "（没读到文字：OCR 没有结果）\n" else "（画面上没有可读的文字或控件：看图）\n"); return }
+    if (els.isEmpty()) { sb.append(if (noOcr) tr("（没读到文字：OCR 没有结果）\n", "(no text read: OCR returned nothing)\n") else tr("（画面上没有可读的文字或控件：看图）\n", "(no readable text or widgets on the screen: look at the picture)\n")); return }
     val same = if (full || prev == null) emptyList() else els.filter { e -> prev.list.any { it.n == e.n && sameEl(it, e) } }
     val show = if (same.size >= els.size * 0.6) els - same.toSet() else els
-    val keptLine = if (show.size < els.size) "（另有 ${els.size - show.size} 个元素和上次【现在】一样，编号不变；act 不带步骤会列出全部）" else null
+    val keptLine = if (show.size < els.size) tr("（另有 ${els.size - show.size} 个元素和上次【现在】一样，编号不变；act 不带步骤会列出全部）", "(${els.size - show.size} more elements are the same as in the last [Now], numbers unchanged; act without steps lists them all)") else null
     val gone = if (prev != null && show.size < els.size) prev.list.count { p -> els.none { sameEl(it, p) } } else 0
     show.sortedWith(compareBy({ it.box.centerY() }, { it.box.centerX() })).take(Report.MAX_ELEMENTS).forEach { sb.append(it.line()).append('\n') }
-    if (show.size > Report.MAX_ELEMENTS) sb.append("（还有 ${show.size - Report.MAX_ELEMENTS} 个没列出：zoom x1,y1,x2,y2 列出那块的全部元素）\n")
-    keptLine?.let { sb.append(it).append(if (gone > 0) "；上次的 $gone 个不见了" else "").append('\n') }
+    if (show.size > Report.MAX_ELEMENTS) sb.append(tr("（还有 ${show.size - Report.MAX_ELEMENTS} 个没列出：zoom x1,y1,x2,y2 列出那块的全部元素）\n", "(${show.size - Report.MAX_ELEMENTS} more not listed: zoom x1,y1,x2,y2 lists every element in that area)\n"))
+    keptLine?.let { sb.append(it).append(if (gone > 0) tr("；上次的 $gone 个不见了", "; $gone from last time are gone") else "").append('\n') }
+}
+
+/** 1.1.7: the four block headers (and the error header) in the current language. */
+object Blocks {
+    val done: String get() = tr("【做了什么】", "[Done]")
+    val meanwhile: String get() = tr("【这段时间】", "[Meanwhile]")
+    val now: String get() = tr("【现在】", "[Now]")
+    val notes: String get() = tr("【注意】", "[Notes]")
+    val error: String get() = tr("【错误】", "[Error]")
 }

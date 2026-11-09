@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.tr
+
 import android.content.Context
 import android.content.SharedPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,7 +62,7 @@ object AgentLedger {
     }
 
     fun remembered(where: String) {
-        save(_snap.value.copy(rememberedAt = System.currentTimeMillis(), rememberedWhere = where.trim().take(80).ifEmpty { "（没说）" }))
+        save(_snap.value.copy(rememberedAt = System.currentTimeMillis(), rememberedWhere = where.trim().take(80).ifEmpty { tr("（没说）", "(not said)") }))
     }
 
     /**

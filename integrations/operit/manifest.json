@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "toolpkg_id": "com.kilon.agentvscreen",
+  "version": "1.0.0",
+  "api_version": "1.0.0",
+  "author": ["Agent VScreen"],
+  "main": "dist/main.js",
+  "display_name": {
+    "zh": "Agent-VScreen 后台操作",
+    "en": "Agent-VScreen Background Operation"
+  },
+  "description": {
+    "zh": "让 AI 在一块看不见的副屏上打开、查看和操作手机上的任何应用（点、滑、输入、截图、盯守），不占用你正在用的主屏。需要先安装 Agent-VScreen App 并用 Shizuku 授权。",
+    "en": "Let the AI open, read and operate any app on the phone on an invisible background screen (tap, swipe, type, screenshots, watches) without taking the screen you are using. Requires the Agent-VScreen app with Shizuku permission."
+  },
+  "logo": "logo",
+  "enabled_by_default": true,
+  "subpackages": [
+    {
+      "id": "agent_vscreen",
+      "entry": "dist/packages/agent_vscreen.js",
+      "enabled_by_default": true,
+      "display_name": { "zh": "Agent-VScreen", "en": "Agent-VScreen" },
+      "description": {
+        "zh": "vscreen 工具：在副屏上操作应用，返回文字和截图",
+        "en": "The vscreen tool: operate apps on the background screen, returns text and screenshots"
+      }
+    }
+  ],
+  "resources": [
+    { "key": "logo", "path": "resources/logo.svg", "mime": "image/svg+xml" }
+  ]
+}

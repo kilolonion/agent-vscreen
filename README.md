@@ -27,7 +27,7 @@ Agent-VScreen 在一块看不见的虚拟屏上打开和操作别的应用，你
 <p align="center"><img src="docs/app.png" width="760" alt="Agent-VScreen 首页、首次配置、接入 agent、设置和应用限制"></p>
 <p align="center"><sub>App 界面：首次配置、接入 agent（命令行 / MCP / HTTP）、设置和应用限制。</sub></p>
 
-- 版本：1.1.6（versionCode 8）
+- 版本：1.1.7（versionCode 9）
 - 包名：`com.kilon.agentvscreen`
 - 系统：Android 11 及以上，推荐 Android 14 及以上
 - 特权：只用 [Shizuku](https://shizuku.rikka.app/)，不需要 root
@@ -77,7 +77,10 @@ vscreen help all
 
 下面以 Operit 为例。这不是专门为 Operit 做的适配：同一台手机上的其他安卓 agent，按“接入 agent”里的命令行、MCP 或 HTTP 方式默认安装就能用；云端或电脑上的 agent 用 Tailscale 连进来，见下一节。
 
-Operit 和 Operit 2 都能连远程 MCP，Agent-VScreen 不用装任何插件。
+有两种接法，任选一种：
+
+- **ToolPkg（推荐）**：导入 [`integrations/operit`](integrations/operit/) 打出的 `agent-vscreen.toolpkg`（Releases 里也有），把令牌发给 Operit 的 AI 让它保存就能用，截图会直接给到模型。详见那个目录的 README。
+- **远程 MCP**：Operit 和 Operit 2 都能连远程 MCP，不用装任何插件，步骤如下。
 
 1. 在 Agent-VScreen 里完成首次配置，确认服务在运行。
 2. 在 **接入 agent → MCP** 里复制令牌。
@@ -112,6 +115,8 @@ Operit 和 Operit 2 都能连远程 MCP，Agent-VScreen 不用装任何插件。
 
 服务默认只监听本机的 `127.0.0.1:18765`。要从电脑或另一台手机调用，在“接入 agent”的 **让其它设备连进来** 里选 **内置 Tailscale**：不用装 Tailscale App，也不占系统 VPN，在 App 里登录一次 Tailscale 就行，只有你自己 Tailscale 网络里的设备连得进来。已经装了 Tailscale App 的也可以选 **Tailscale App**，或者用 SSH 端口转发。
 
+连好后，在“接入 agent”顶部选 **在其它设备上**，复制给 agent 的话、安装命令、MCP 配置和能力说明就都换成 Tailscale 地址，直接发给那台设备上的 agent。
+
 令牌等于这台手机的操作权限，所以本应用不提供公网链接。
 
 ## 文档
@@ -120,6 +125,11 @@ Operit 和 Operit 2 都能连远程 MCP，Agent-VScreen 不用装任何插件。
 
 ## 1.1.x 更新内容
 
+- **1.1.7**
+  - 支持英语：设置里可以选“跟随系统 / 中文 / English”，App 界面、悬浮窗、通知，以及给 agent 的话、能力说明、skill、命令返回和 help 都跟着换。已安装的命令行会在下一次调用时自动换成新语言；
+  - 远程也能一键复制：开了 Tailscale（内置或 App）后，“接入 agent”可以切到“在其它设备上”，复制的内容直接带 Tailscale 地址；
+  - 能力说明重写：存进 agent 记忆的是“我能在用户手机上后台操作应用”这项能力本身，写明什么时候用、怎么开始、连不上时怎么办，而不只是一条安装记录；
+  - 修复：内置 Tailscale 有时一直显示 NeedsLogin、不出现登录按钮。现在拿不到登录链接时会自动反复去要，页面上写明在等什么，可以手动“重新获取登录链接”；连不上 Tailscale 服务器时会直接说明。
 - **1.1.6**
   - 内置 Tailscale：不用另装 Tailscale App，在 App 里登录一次，电脑就能远程调用；不占系统 VPN；
   - 接入改成“复制给 agent 的话”：让 agent 自己把说明存进长期记忆，并报告存在哪；首页显示 agent 有没有记住；新增 `vscreen guide`，MCP 连接时自带用法；

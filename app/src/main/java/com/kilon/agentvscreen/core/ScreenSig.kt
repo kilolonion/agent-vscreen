@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.tr
+
 import android.graphics.Bitmap
 import kotlin.math.abs
 
@@ -47,10 +49,10 @@ internal class ScreenSig private constructor(
         val ratio: Double get() = maxOf(cell, hash, fine)
 
         fun describeZh(): String = when (kind) {
-            Kind.NONE -> "无明显变化"
-            Kind.LOCAL -> "局部变化（约 ${pct(ratio)}）"
-            Kind.PAGE -> if (topHash >= 0.25) "整页切换（标题区也变了）" else "整页切换（约 ${pct(ratio)}）"
-            Kind.UNKNOWN -> "unknown（变化约 ${pct(ratio)}，无法判断是局部刷新还是换页）"
+            Kind.NONE -> tr("无明显变化", "no clear change")
+            Kind.LOCAL -> tr("局部变化（约 ${pct(ratio)}）", "partial change (about ${pct(ratio)})")
+            Kind.PAGE -> if (topHash >= 0.25) tr("整页切换（标题区也变了）", "whole page changed (the title area too)") else tr("整页切换（约 ${pct(ratio)}）", "whole page changed (about ${pct(ratio)})")
+            Kind.UNKNOWN -> tr("unknown（变化约 ${pct(ratio)}，无法判断是局部刷新还是换页）", "unknown (about ${pct(ratio)} changed; can't tell a partial refresh from a new page)")
         }
 
         private fun pct(v: Double) = if (v > 0 && v < 0.01) "<1%" else "${(v * 100).toInt()}%"

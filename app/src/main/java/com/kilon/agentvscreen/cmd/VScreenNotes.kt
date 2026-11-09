@@ -1,4 +1,7 @@
 package com.kilon.agentvscreen.cmd
+import com.kilon.agentvscreen.I18n
+
+import com.kilon.agentvscreen.tr
 
 import com.kilon.agentvscreen.cmd.NativeOffloadResult
 import com.kilon.agentvscreen.core.BackgroundOperation
@@ -18,7 +21,7 @@ private fun VScreenOffloadHandler.noteApp(sid: String?): String {
     val d = sid?.let { BackgroundOperation.previewDisplayFor(it) }
     d?.let { runCatching { VScreenShell.topPackage(it.displayId) }.getOrNull() }?.takeIf { it != context.packageName }?.let { return it }
     VScreenKnowledge.lastApp(sid)?.let { return it }
-    throw ActionError("NO_APP", "不知道记到哪个应用：先 launch 应用")
+    throw ActionError("NO_APP", tr("不知道记到哪个应用：先 launch 应用", "no app to keep it for: launch an app first"))
 }
 
 /** Everything written down about [pkg], as lines. */
@@ -26,13 +29,14 @@ internal fun noteLines(pkg: String): List<String> {
     val m = VScreenMap.load(pkg)
     val out = ArrayList<String>()
     val name = VScreenKnowledge.label(pkg)?.let { "$it（$pkg）" } ?: pkg
-    out += "【$name】"
-    if (m.notes.isEmpty()) out += "笔记：无" else { out += "笔记："; m.notes.forEach { out += "  ${it.id}. ${it.text}" } }
-    if (m.segments.isEmpty()) out += "段：无" else { out += "段（act \"use 名字\"）："; m.segments.forEach { out += "  ${it.name} = ${it.steps}（用过 ${it.uses} 次）" } }
+    out += if (I18n.en) "[$name]" else "【$name】"
+    if (m.notes.isEmpty()) out += tr("笔记：无", "Notes: none") else { out += tr("笔记：", "Notes:"); m.notes.forEach { out += "  ${it.id}. ${it.text}" } }
+    if (m.segments.isEmpty()) out += tr("段：无", "Segments: none") else { out += tr("段（act \"use 名字\"）：", "Segments (act \"use name\"):"); m.segments.forEach { out += "  ${it.name} = ${it.steps}" + tr("（用过 ${it.uses} 次）", " (used ${it.uses} times)") } }
     val p = m.profile
-    out += "暂停：" + (p["pause"] ?: "没记") + "；继续：" + (p["resume"] ?: "没记") +
-        (if (p["pause"] != null && p["resume"] != null) "（回合制：每段 act 先继续、末尾暂停）" else "") +
-        "；实时：" + (if (p["realtime"] == "true") "是" else "否") + (p["orientation"]?.let { "；方向：$it" } ?: "")
+    val none = tr("没记", "not kept")
+    out += tr("暂停：", "Pause: ") + (p["pause"] ?: none) + tr("；继续：", "; resume: ") + (p["resume"] ?: none) +
+        (if (p["pause"] != null && p["resume"] != null) tr("（回合制：每段 act 先继续、末尾暂停）", " (turn-based: every act resumes first and pauses at the end)") else "") +
+        tr("；实时：", "; realtime: ") + (if (p["realtime"] == "true") tr("是", "yes") else tr("否", "no")) + (p["orientation"]?.let { tr("；方向：$it", "; orientation: $it") } ?: "")
     return out
 }
 
@@ -48,33 +52,33 @@ internal fun VScreenOffloadHandler.noteCmd(sid: String?, args: OffloadArgs): Nat
         p.isEmpty() -> return text(noteLines(pkg).joinToString("\n"))
         first == "pause" || first == "resume" -> {
             val body = p.drop(1).joinToString(" ").trim()
-            if (body.isEmpty()) throw ActionError("INVALID_ARGS", "note $first \"<步骤>\"，如 note $first \"tap 1840 60\"")
+            if (body.isEmpty()) throw ActionError("INVALID_ARGS", tr("note $first \"<步骤>\"，如 note $first \"tap 1840 60\"", "note $first \"<steps>\", e.g. note $first \"tap 1840 60\""))
             Steps.parseAll(body)
             VScreenMap.setProfile(pkg, mapOf(first to body))
             val prof = VScreenMap.profile(pkg)
-            "已记 $pkg 的${if (first == "pause") "暂停" else "继续"}步骤：$body" +
-                if (prof["pause"] != null && prof["resume"] != null) "。暂停和继续都记了：之后每段 act 先“${prof["resume"]}”，做完和观察完再“${prof["pause"]}”（--paused 可跳过）"
-                else "。还要记 note ${if (first == "pause") "resume" else "pause"} 才会自动回合制"
+            (if (I18n.en) "Kept $pkg's ${first} steps: $body" else "已记 $pkg 的${if (first == "pause") "暂停" else "继续"}步骤：$body") +
+                if (prof["pause"] != null && prof["resume"] != null) run { val r = prof["resume"]; val pz = prof["pause"]; tr("。暂停和继续都记了：之后每段 act 先“$r”，做完和观察完再“$pz”（--paused 可跳过）", ". Both pause and resume are kept: every act now first does \"$r\", and after acting and looking does \"$pz\" (--paused skips it)") }
+                else run { val other = if (first == "pause") "resume" else "pause"; tr("。还要记 note $other 才会自动回合制", ". Also keep note $other to make it turn-based automatically") }
         }
         first == "realtime" -> {
             val v = p.getOrNull(1)?.lowercase()
             val on = when (v) { "on", "true", "1", "是" -> true; "off", "false", "0", "否" -> false; else -> throw ActionError("INVALID_ARGS", "note realtime on|off") }
             VScreenMap.setProfile(pkg, mapOf("realtime" to on.toString()))
-            if (on) "已记 $pkg 为实时应用：动作之间不等画面稳定，不带步骤的 act 看 1 秒" else "已记 $pkg 不是实时应用"
+            if (on) tr("已记 $pkg 为实时应用：动作之间不等画面稳定，不带步骤的 act 看 1 秒", "Kept $pkg as a realtime app: no waiting for the picture to settle between actions, act with no steps looks for 1 s") else tr("已记 $pkg 不是实时应用", "Kept $pkg as not realtime")
         }
         first == "delete" || first == "del" || first == "rm" -> {
-            val what = p.drop(1).joinToString(" ").trim().ifEmpty { throw ActionError("INVALID_ARGS", "note delete <编号|pause|resume|段名>") }
+            val what = p.drop(1).joinToString(" ").trim().ifEmpty { throw ActionError("INVALID_ARGS", tr("note delete <编号|pause|resume|段名>", "note delete <number|pause|resume|segment>")) }
             when {
-                what == "pause" || what == "resume" || what == "realtime" -> { VScreenMap.setProfile(pkg, mapOf(what to "")); "已删 $pkg 的 $what" }
-                what.toIntOrNull() != null -> if (VScreenMap.deleteNote(pkg, what.toInt())) "已删笔记 $what" else throw ActionError("NOT_FOUND", "$pkg 没有第 $what 条笔记")
-                else -> if (VScreenMap.deleteSegment(pkg, what)) "已删段“$what”" else throw ActionError("NOT_FOUND", "$pkg 没有叫“$what”的笔记编号或段")
+                what == "pause" || what == "resume" || what == "realtime" -> { VScreenMap.setProfile(pkg, mapOf(what to "")); tr("已删 $pkg 的 $what", "deleted $pkg's $what") }
+                what.toIntOrNull() != null -> if (VScreenMap.deleteNote(pkg, what.toInt())) tr("已删笔记 $what", "deleted note $what") else throw ActionError("NOT_FOUND", tr("$pkg 没有第 $what 条笔记", "$pkg has no note $what"))
+                else -> if (VScreenMap.deleteSegment(pkg, what)) tr("已删段“$what”", "deleted segment \"$what\"") else throw ActionError("NOT_FOUND", tr("$pkg 没有叫“$what”的笔记编号或段", "$pkg has no note number or segment called \"$what\""))
             }
         }
         else -> {
             val t = p.joinToString(" ").trim()
-            if (t.length > 300) throw ActionError("INVALID_ARGS", "一条笔记最多 300 字（收到 ${t.length}）：写要点")
+            if (t.length > 300) throw ActionError("INVALID_ARGS", tr("一条笔记最多 300 字（收到 ${t.length}）：写要点", "a note has at most 300 characters (got ${t.length}): keep to the point"))
             val n = VScreenMap.addNote(pkg, t)
-            "已记到 $pkg 第 ${n.id} 条（下次 launch 它会列出来）"
+            tr("已记到 $pkg 第 ${n.id} 条（下次 launch 它会列出来）", "Kept as $pkg note ${n.id} (the next launch lists it)")
         }
     }
     return text(msg + "\n\n" + noteLines(pkg).joinToString("\n"))
@@ -84,29 +88,29 @@ internal fun VScreenOffloadHandler.noteCmd(sid: String?, args: OffloadArgs): Nat
 internal fun VScreenOffloadHandler.keepCmd(@Suppress("UNUSED_PARAMETER") sid: String?, args: OffloadArgs): NativeOffloadResult {
     val p = args.positional
     if (p.firstOrNull()?.lowercase() == "off") {
-        val name = p.getOrNull(1) ?: throw ActionError("INVALID_ARGS", "keep off <名字|all>")
+        val name = p.getOrNull(1) ?: throw ActionError("INVALID_ARGS", tr("keep off <名字|all>", "keep off <name|all>"))
         // 1.1: ended watches (seen / timed out) stay listed until cleared; off clears them too.
         if (name == "all") {
             val stopped = VScreenRules.stopAll(); val cleared = VScreenRules.clearEnded()
-            return text("已停 $stopped 个正在盯的" + if (cleared > 0) "，清掉 $cleared 条已结束的" else "")
+            return text(tr("已停 $stopped 个正在盯的", "Stopped $stopped running watches") + if (cleared > 0) tr("，清掉 $cleared 条已结束的", ", cleared $cleared ended ones") else "")
         }
-        if (VScreenRules.stop(name)) { VScreenRules.clearEnded(name); return text("已停「$name」") }
-        if (VScreenRules.clearEnded(name) > 0) return text("「$name」已经结束了，已从列表清掉")
-        throw ActionError("NOT_FOUND", "没有叫「$name」的盯守：keep 看列表")
+        if (VScreenRules.stop(name)) { VScreenRules.clearEnded(name); return text(tr("已停「$name」", "Stopped \"$name\"")) }
+        if (VScreenRules.clearEnded(name) > 0) return text(tr("「$name」已经结束了，已从列表清掉", "\"$name\" had already ended; cleared from the list"))
+        throw ActionError("NOT_FOUND", tr("没有叫「$name」的盯守：keep 看列表", "no watch called \"$name\": keep lists them"))
     }
-    if (p.isNotEmpty()) throw ActionError("INVALID_ARGS", "keep（列表）| keep off <名字|all>。开始盯守用 act --stop \"条件\" --keep notify|wake [--for 1h]")
+    if (p.isNotEmpty()) throw ActionError("INVALID_ARGS", tr("keep（列表）| keep off <名字|all>。开始盯守用 act --stop \"条件\" --keep notify|wake [--for 1h]", "keep (list) | keep off <name|all>. Start a watch with act --stop \"condition\" --keep notify|wake [--for 1h]"))
     val list = VScreenRules.list()
-    if (list.isEmpty()) return text("没有盯守。开始：act --stop \"text:到货\" --keep notify [--for 2h]")
-    fun action(l: VScreenRules.Live) = l.json().optJSONArray("action")?.join("、")?.replace("\"", "")
+    if (list.isEmpty()) return text(tr("没有盯守。开始：act --stop \"text:到货\" --keep notify [--for 2h]", "No watches. Start one: act --stop \"text:In stock\" --keep notify [--for 2h]"))
+    fun action(l: VScreenRules.Live) = l.json().optJSONArray("action")?.join(tr("、", ", "))?.replace("\"", "")
     val running = list.filter { !it.stopped }.map { l ->
-        "「${l.spec.name}」${l.spec.describe()} — ${l.status}，还剩 ${l.json().opt("ends_in_min")} 分钟；看到时${action(l)}"
+        run { val left = l.json().opt("ends_in_min"); val a = action(l); if (I18n.en) "\"${l.spec.name}\" ${l.spec.describe()} — ${l.status}, $left min left; when seen: $a" else "「${l.spec.name}」${l.spec.describe()} — ${l.status}，还剩 $left 分钟；看到时$a" }
     }
     val ended = list.filter { it.stopped }.map { l ->
-        "「${l.spec.name}」${l.spec.describe()} — ${l.endReason ?: "已结束"}"
+        run { val why = l.endReason ?: tr("已结束", "ended"); if (I18n.en) "\"${l.spec.name}\" ${l.spec.describe()} — $why" else "「${l.spec.name}」${l.spec.describe()} — $why" }
     }
     return text(buildList {
-        if (running.isNotEmpty()) { add("正在盯："); addAll(running) }
-        if (ended.isNotEmpty()) { add("已结束（keep off <名字> 或 keep off all 清掉）："); addAll(ended) }
+        if (running.isNotEmpty()) { add(tr("正在盯：", "Watching:")); addAll(running) }
+        if (ended.isNotEmpty()) { add(tr("已结束（keep off <名字> 或 keep off all 清掉）：", "Ended (clear with keep off <name> or keep off all):")); addAll(ended) }
     }.joinToString("\n"))
 }
 

@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.tr
+
 import androidx.compose.foundation.border
 import androidx.compose.ui.draw.shadow
 import android.annotation.SuppressLint
@@ -125,7 +127,7 @@ import kotlin.math.roundToInt
  *  - top right: ⤢ full screen and × close. × is always there and always one tap: while the AI works it only hides the
  *    window for this turn (the AI goes on; the notification can bring it back); when nothing runs it closes the screen.
  *    Closing never stops or locks the AI.
- *  - bottom left, only while the AI acts or waits: the red "停止 AI" pill (its calls get USER_STOPPED until you allow
+ *  - bottom left, only while the AI acts or waits: the red tr("停止 AI", "Stop AI") pill (its calls get USER_STOPPED until you allow
  *    it again: green 交还 AI pill here, the "已停止 AI" notification, or the app's home).
  * While our own full-screen page is in front, the window steps aside (the page already shows the same picture).
  */
@@ -550,7 +552,7 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
         AppLogger.info("Overlay", "window visibility ${if (visibility == VISIBLE) "visible" else "hidden ($visibility)"}" +
-            if (!Overlay.hostedByA11y) "（app overlay：系统可能因副屏上的安全页面隐藏它；打开无障碍可避免）" else "")
+            if (!Overlay.hostedByA11y) tr("（app overlay：系统可能因副屏上的安全页面隐藏它；打开无障碍可避免）", "(app overlay: the system may hide it for a secure page on the screen; turning on accessibility prevents that)") else "")
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration?) {
@@ -732,8 +734,8 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
     }
     val title = s.agentTitle ?: when (mode) {
         Mode.ACTING -> s.action?.take(18) ?: Palette.word(mode)
-        Mode.STANDBY -> if (left >= 0) "AI 待命 · ${left / 60000}:${"%02d".format((left / 1000) % 60)}" else Palette.word(mode)
-        Mode.IDLE -> if (s.powerSaving) "空闲 · 省电暂停" else "空闲"
+        Mode.STANDBY -> if (left >= 0) tr("AI 待命", "AI on standby") + " · ${left / 60000}:${"%02d".format((left / 1000) % 60)}" else Palette.word(mode)
+        Mode.IDLE -> if (s.powerSaving) tr("空闲 · 省电暂停", "Idle · paused to save power") else tr("空闲", "Idle")
         else -> Palette.word(mode)
     }
 
@@ -763,9 +765,9 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
 
             // Buttons, top right: full screen, close. Same places in every state.
             Row(Modifier.align(Alignment.TopEnd).padding(end = (6 * k).dp, top = (6 * k).dp)) {
-                RoundBtn(Icons.Filled.OpenInFull, "全屏", Color(0xCC12141C), k, "full") { Overlay.openFull() }
+                RoundBtn(Icons.Filled.OpenInFull, tr("全屏", "Full screen"), Color(0xCC12141C), k, "full") { Overlay.openFull() }
                 Spacer(Modifier.width((5 * k).dp))
-                RoundBtn(Icons.Filled.Close, if (mode == Mode.ACTING || mode == Mode.STANDBY || mode == Mode.TAKEOVER) "收起小窗" else "关闭副屏",
+                RoundBtn(Icons.Filled.Close, if (mode == Mode.ACTING || mode == Mode.STANDBY || mode == Mode.TAKEOVER) tr("收起小窗", "Hide window") else tr("关闭副屏", "Close screen"),
                     Color(0xCC12141C), k, "close") { Overlay.closeTapped() }
             }
 
@@ -779,13 +781,13 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
                 ) {
                     Icon(Icons.Filled.Stop, null, tint = Color.White, modifier = Modifier.size((13 * k).dp))
                     Spacer(Modifier.width((3 * k).dp))
-                    Text("停止 AI", color = Color.White, fontSize = (11 * k).sp, fontWeight = FontWeight.SemiBold)
+                    Text(tr("停止 AI", "Stop AI"), color = Color.White, fontSize = (11 * k).sp, fontWeight = FontWeight.SemiBold)
                 }
             }
 
             // Stopped: say what that means right on the window.
             if (mode == Mode.STOPPED) {
-                Text("已停止 AI：它的操作会被拒绝，点“交还 AI”或通知里的“允许继续”放开", color = Color.White, fontSize = (10 * k).sp, lineHeight = (13 * k).sp,
+                Text(tr("已停止 AI：它的操作会被拒绝，点“交还 AI”或通知里的“允许继续”放开", "AI stopped: its actions are refused. Tap \"Hand back\" or \"Allow again\" in the notification to lift it"), color = Color.White, fontSize = (10 * k).sp, lineHeight = (13 * k).sp,
                     modifier = Modifier.align(Alignment.Center).padding(horizontal = (12 * k).dp).clip(RoundedCornerShape(10.dp)).background(Color(0xDD7F1D1D)).padding(horizontal = 8.dp, vertical = 5.dp))
             }
 
@@ -799,7 +801,7 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
                 ) {
                     Icon(Icons.Filled.SmartToy, null, tint = Color(0xFF052E1C), modifier = Modifier.size((14 * k).dp))
                     Spacer(Modifier.width((4 * k).dp))
-                    Text("交还 AI", color = Color(0xFF052E1C), fontSize = (12 * k).sp, fontWeight = FontWeight.SemiBold)
+                    Text(tr("交还 AI", "Hand back"), color = Color(0xFF052E1C), fontSize = (12 * k).sp, fontWeight = FontWeight.SemiBold)
                 }
             }
 
@@ -807,7 +809,7 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
             var now by remember { mutableLongStateOf(SystemClock.uptimeMillis()) }
             LaunchedEffect(Overlay.hintAt.longValue) { now = SystemClock.uptimeMillis(); delay(3100); now = SystemClock.uptimeMillis() }
             val hint = when {
-                Overlay.hintAt.longValue > 0 && now - Overlay.hintAt.longValue < 2500 -> "长按 1 秒接管 · 双指缩放 · 拖到边缘收起 · × 关闭"
+                Overlay.hintAt.longValue > 0 && now - Overlay.hintAt.longValue < 2500 -> tr("长按 1 秒接管 · 双指缩放 · 拖到边缘收起 · × 关闭", "Hold 1 s to take over · pinch to resize · drag to an edge to dock · × closes")
                 else -> null
             }
             AnimatedVisibility(hint != null, Modifier.align(Alignment.Center), enter = fadeIn(), exit = fadeOut()) {

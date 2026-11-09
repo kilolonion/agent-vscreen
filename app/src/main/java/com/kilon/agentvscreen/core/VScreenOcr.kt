@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.tr
+
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.SystemClock
@@ -91,9 +93,9 @@ internal object VScreenOcr {
     }
 
     /** Engines for status: what read / tap --text use, and what the fast paths use. */
-    fun engineInfo(): String = if (accurateEnabled()) "${VScreenPaddleOcr.ENGINE}；滚动等快速路径用 $ENGINE；后台感知（state 的 now.words）也用精确引擎" +
-            (if (accurateMs > 0L) "（约 ${accurateMs}ms/次，慢时降低频率）" else "")
-        else ENGINE + (VScreenPaddleOcr.loadError()?.let { "（PP-OCRv6 加载失败：$it）" } ?: "")
+    fun engineInfo(): String = if (accurateEnabled()) tr("${VScreenPaddleOcr.ENGINE}；滚动等快速路径用 $ENGINE；后台感知（state 的 now.words）也用精确引擎", "${VScreenPaddleOcr.ENGINE}; fast paths such as scrolling use $ENGINE; background perception (now.words in state) uses the accurate engine too") +
+            (if (accurateMs > 0L) tr("（约 ${accurateMs}ms/次，慢时降低频率）", " (about ${accurateMs}ms each, less often when slow)") else "")
+        else ENGINE + (VScreenPaddleOcr.loadError()?.let { tr("（PP-OCRv6 加载失败：$it）", " (PP-OCRv6 failed to load: $it)") } ?: "")
 
     /**
      * OCR of [frame] (version [version]) on display [displayId]. Never throws. Not on the main thread.
@@ -114,7 +116,7 @@ internal object VScreenOcr {
                 return Result(items, displayId, version, took, null, ScreenSig.of(frame),
                     engine = VScreenPaddleOcr.ENGINE).also { accurateCache = it }
             } catch (t: Throwable) {
-                fallback = "PP-OCRv6 失败（${t.javaClass.simpleName}: ${t.message}），已改用 ML Kit"
+                fallback = tr("PP-OCRv6 失败（${t.javaClass.simpleName}: ${t.message}），已改用 ML Kit", "PP-OCRv6 failed (${t.javaClass.simpleName}: ${t.message}), switched to ML Kit")
                 AppLogger.warning(TAG, fallback)
             }
         }

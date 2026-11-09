@@ -1,8 +1,8 @@
 #!/bin/sh
 # vscreen — command-line client for Agent-VScreen @@VERSION@@ (talks to the app on 127.0.0.1; needs curl).
 #
-#   vscreen launch 设置
-#   vscreen act "tap 搜索; type 耳机; key enter until text:综合"
+#   vscreen launch Settings
+#   vscreen act "tap Search; type headphones; key enter until text:All"
 #   vscreen help all
 #
 # Pictures the command made are downloaded to $VSCREEN_SHOT_DIR and their paths printed in the text.
@@ -24,7 +24,7 @@ SESSION="${VSCREEN_SESSION:-default}"
 SHOT_DIR="${VSCREEN_SHOT_DIR:-${TMPDIR:-/tmp}/vscreen-shots}"
 
 if ! command -v curl >/dev/null 2>&1; then
-  echo "vscreen: 需要 curl（Termux: pkg install curl；Alpine: apk add curl；Debian: apt install curl）" >&2; exit 3
+  echo "vscreen: «需要 curl（Termux: pkg install curl；Alpine: apk add curl；Debian: apt install curl）|needs curl (Termux: pkg install curl; Alpine: apk add curl; Debian: apt install curl)»" >&2; exit 3
 fi
 
 # The app is local (or on the tailnet): never route it through an http(s)_proxy set for the internet.
@@ -39,34 +39,34 @@ skill_sync() {
   if [ "$1" = "show" ]; then
     # 1.1.6: short. The request to remember comes from the user's own message (copied from the app), not from here.
     echo
-    echo "要记住的说明（存进你的长期记忆，存好后执行 vscreen remembered \"<存在哪里>\"）："
-    c -fsS "$URL/memory" 2>/dev/null || echo "（取不到，见 $CONF_DIR/SKILL.md）"
+    echo "«要记住的说明（存进你的长期记忆，存好后执行 vscreen remembered \"<存在哪里>\"）：|Note to remember (save it in your long-term memory, then run vscreen remembered \"<where you saved it>\"):»"
+    c -fsS "$URL/memory" 2>/dev/null || echo "«（取不到，见 $CONF_DIR/SKILL.md）|(could not fetch it; see $CONF_DIR/SKILL.md)»"
     echo
-    echo "完整的 skill 版本在 $CONF_DIR/SKILL.md；用法速查：vscreen guide"
+    echo "«完整的 skill 版本在 $CONF_DIR/SKILL.md；用法速查：vscreen guide|The full skill version is in $CONF_DIR/SKILL.md; quick usage: vscreen guide»"
   else
-    echo "（skill 已随 App 更新：$CONF_DIR/SKILL.md，如果你存过旧版，请换成新的）" >&2
+    echo "«（skill 已随 App 更新：$CONF_DIR/SKILL.md，如果你存过旧版，请换成新的）|(the skill was updated with the app: $CONF_DIR/SKILL.md; if you saved an old copy, replace it)»" >&2
   fi
 }
 
 if [ "$1" = "install" ]; then
   tok="$2"; dest="$3"
-  [ -n "$tok" ] || { echo "用法: vscreen install <令牌> [安装目录]" >&2; exit 2; }
+  [ -n "$tok" ] || { echo "«用法: vscreen install <令牌> [安装目录]|usage: vscreen install <token> [install dir]»" >&2; exit 2; }
   if [ -z "$dest" ]; then
     for d in "$PREFIX/bin" "$HOME/.local/bin" /usr/local/bin; do
       [ -n "$d" ] && [ "$d" != "/bin" ] || continue
       mkdir -p "$d" 2>/dev/null && [ -w "$d" ] && { dest="$d"; break; }
     done
   fi
-  [ -n "$dest" ] || { echo "vscreen: 找不到可写的安装目录，请指定：vscreen install <令牌> <目录>" >&2; exit 2; }
-  c -fsS "$URL/cli?via=install" -o "$dest/vscreen" || { echo "vscreen: 下载失败：Agent-VScreen 在运行吗？" >&2; exit 3; }
+  [ -n "$dest" ] || { echo "vscreen: «找不到可写的安装目录，请指定：vscreen install <令牌> <目录>|no writable install dir found, give one: vscreen install <token> <dir>»" >&2; exit 2; }
+  c -fsS "$URL/cli?via=install" -o "$dest/vscreen" || { echo "vscreen: «下载失败：Agent-VScreen 在运行吗？|download failed: is Agent-VScreen running?»" >&2; exit 3; }
   chmod +x "$dest/vscreen"
   mkdir -p "$CONF_DIR"
   printf 'VSCREEN_URL=%s\nVSCREEN_TOKEN=%s\n' "$URL" "$tok" > "$CONF_DIR/env"
   chmod 600 "$CONF_DIR/env" 2>/dev/null
-  echo "已安装：$dest/vscreen（令牌存在 $CONF_DIR/env）"
+  echo "«已安装：$dest/vscreen（令牌存在 $CONF_DIR/env）|Installed: $dest/vscreen (token saved in $CONF_DIR/env)»"
   skill_sync show
-  case ":$PATH:" in *":$dest:"*) ;; *) echo "注意：$dest 不在 PATH 里，用全路径调用或加进 PATH" ;; esac
-  "$dest/vscreen" status >/dev/null 2>&1 && echo "连接正常：vscreen help 看用法" || echo "已安装，但现在连不上：确认 App 里服务已启动"
+  case ":$PATH:" in *":$dest:"*) ;; *) echo "«注意：$dest 不在 PATH 里，用全路径调用或加进 PATH|Note: $dest is not on PATH; call it by full path or add it to PATH»" ;; esac
+  "$dest/vscreen" status >/dev/null 2>&1 && echo "«连接正常：vscreen help 看用法|Connected: vscreen help shows usage»" || echo "«已安装，但现在连不上：确认 App 里服务已启动|Installed, but it cannot connect now: check that the service is on in the app»"
   exit 0
 fi
 
@@ -88,7 +88,7 @@ while [ $j -le $i ]; do set -- "$@" --data-urlencode "a@$tmp/a$j"; j=$((j+1)); d
 # A frozen app still accepts the connection (the kernel does) but never answers: find out in 5 s, not minutes.
 c -s -m 5 -o /dev/null "$URL/v1/ping"
 if [ $? -eq 28 ]; then
-  echo "vscreen: Agent-VScreen 5 秒没有响应，多半是系统把它冻结在后台了。请用户打开一次 Agent-VScreen，按首页“后台运行受限”的提示允许它后台活动（荣耀/华为：应用启动管理 › 手动管理）。" >&2
+  echo "vscreen: «Agent-VScreen 5 秒没有响应，多半是系统把它冻结在后台了。请用户打开一次 Agent-VScreen，按首页“后台运行受限”的提示允许它后台活动（荣耀/华为：应用启动管理 › 手动管理）。|Agent-VScreen did not answer for 5 s; the system most likely froze it in the background. Ask the user to open Agent-VScreen once and allow background activity as \"Background running restricted\" on its home page says (Honor/Huawei: App launch › Manage manually).»" >&2
   exit 3
 fi
 c -sS --connect-timeout 5 -X POST -D "$tmp/h" -o "$tmp/b" \
@@ -96,12 +96,12 @@ c -sS --connect-timeout 5 -X POST -D "$tmp/h" -o "$tmp/b" \
   --data-urlencode "session=$SESSION" "$@" "$URL/v1/run?format=text"
 rc=$?
 if [ $rc -ne 0 ]; then
-  echo "vscreen: 连不上 Agent-VScreen（$URL，curl $rc）：打开 Agent-VScreen，确认“服务”已启动；手机重启后要先启动 Shizuku 再打开它。" >&2
+  echo "vscreen: «连不上 Agent-VScreen（$URL，curl $rc）：打开 Agent-VScreen，确认“服务”已启动；手机重启后要先启动 Shizuku 再打开它。|cannot reach Agent-VScreen ($URL, curl $rc): open Agent-VScreen and check the service is on; after a phone restart, start Shizuku first, then open it.»" >&2
   exit 3
 fi
 code=$(sed -n '1s/^HTTP\/[0-9.]* \([0-9]*\).*/\1/p' "$tmp/h")
 if [ "$code" = "401" ]; then
-  echo "vscreen: 令牌不对：在 Agent-VScreen 里点“复制接入命令”重新执行一遍（会更新 $CONF_DIR/env 里的 VSCREEN_TOKEN），或设置环境变量 VSCREEN_TOKEN。" >&2; cat "$tmp/b" >&2; echo >&2; exit 3
+  echo "vscreen: «令牌不对：在 Agent-VScreen 里复制接入的话重新执行一遍（会更新 $CONF_DIR/env 里的 VSCREEN_TOKEN），或设置环境变量 VSCREEN_TOKEN。|wrong token: copy the connect message in Agent-VScreen and run it again (it updates VSCREEN_TOKEN in $CONF_DIR/env), or set the VSCREEN_TOKEN environment variable.»" >&2; cat "$tmp/b" >&2; echo >&2; exit 3
 fi
 # Version parity: the app serves the matching client; when the app was updated, this script replaces itself once.
 srv=$(tr -d '\r' < "$tmp/h" | sed -n 's/^[Xx]-[Vv][Ss]creen-[Vv]ersion: *//p' | head -n1)
@@ -110,7 +110,7 @@ if [ -n "$srv" ] && [ "$srv" != "$CLI_VERSION" ] && [ -z "$VSCREEN_NO_UPDATE" ];
   if [ -w "$self" ] && [ -w "$(dirname "$self")" ] && c -fsS "$URL/cli" -o "$tmp/new" && grep -q "^CLI_VERSION=\"$srv\"" "$tmp/new"; then
     # A new file moved over the old one: this running copy keeps reading the old file safely.
     cp "$tmp/new" "$self.new.$$" && chmod +x "$self.new.$$" && mv -f "$self.new.$$" "$self" &&
-      echo "（vscreen 命令行已随 App 更新到 $srv）" >&2
+      echo "«（vscreen 命令行已随 App 更新到 $srv）|(the vscreen CLI was updated with the app to $srv)»" >&2
     skill_sync
   fi
 fi

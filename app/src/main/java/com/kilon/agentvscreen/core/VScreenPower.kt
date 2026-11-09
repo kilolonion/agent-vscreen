@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.tr
+
 import android.app.ActivityManager
 import android.app.usage.UsageStatsManager
 import android.content.Context
@@ -42,10 +44,10 @@ internal object VScreenPower {
         val bucketRestricted get() = standbyBucket >= 45 // RARE(40) still has network; RESTRICTED(45) does not
         val ok get() = batteryExempt && !backgroundRestricted && !dataBlocked && !bucketRestricted
         fun problems(): List<String> = buildList {
-            if (!batteryExempt) add("未加入电池优化白名单")
-            if (backgroundRestricted) add("系统限制了后台活动")
-            if (dataBlocked) add("省流量模式禁止后台数据")
-            if (bucketRestricted) add("应用待机分组为受限（$standbyBucket）")
+            if (!batteryExempt) add(tr("未加入电池优化白名单", "not exempt from battery optimization"))
+            if (backgroundRestricted) add(tr("系统限制了后台活动", "background activity restricted by the system"))
+            if (dataBlocked) add(tr("省流量模式禁止后台数据", "Data Saver blocks background data"))
+            if (bucketRestricted) add(tr("应用待机分组为受限（$standbyBucket）", "app standby bucket is restricted ($standbyBucket)"))
         }
         fun json(): JSONObject = JSONObject()
             .put("ok", ok)
@@ -73,15 +75,15 @@ internal object VScreenPower {
 
     /** Grants the background exemptions through Shizuku. Returns (all-ok-after, what was done). */
     fun whitelist(ctx: Context): Pair<Boolean, String> {
-        if (ShizukuManager.snapshot.value.state != ShizukuManager.State.READY) return false to "Shizuku 不可用"
+        if (ShizukuManager.snapshot.value.state != ShizukuManager.State.READY) return false to tr("Shizuku 不可用", "Shizuku unavailable")
         val pkg = ctx.packageName
         val uid = ctx.applicationInfo.uid.toString()
         val steps = listOf(
-            "电池优化白名单" to arrayOf("dumpsys", "deviceidle", "whitelist", "+$pkg"),
-            "允许后台运行" to arrayOf("cmd", "appops", "set", pkg, "RUN_ANY_IN_BACKGROUND", "allow"),
-            "允许后台启动" to arrayOf("cmd", "appops", "set", pkg, "RUN_IN_BACKGROUND", "allow"),
-            "省流量时允许后台数据" to arrayOf("cmd", "netpolicy", "add", "restrict-background-whitelist", uid),
-            "待机分组设为活跃" to arrayOf("am", "set-standby-bucket", pkg, "active"),
+            tr("电池优化白名单", "battery exemption") to arrayOf("dumpsys", "deviceidle", "whitelist", "+$pkg"),
+            tr("允许后台运行", "background running") to arrayOf("cmd", "appops", "set", pkg, "RUN_ANY_IN_BACKGROUND", "allow"),
+            tr("允许后台启动", "background start") to arrayOf("cmd", "appops", "set", pkg, "RUN_IN_BACKGROUND", "allow"),
+            tr("省流量时允许后台数据", "background data under Data Saver") to arrayOf("cmd", "netpolicy", "add", "restrict-background-whitelist", uid),
+            tr("待机分组设为活跃", "standby bucket set to active") to arrayOf("am", "set-standby-bucket", pkg, "active"),
         )
         val done = mutableListOf<String>(); val failed = mutableListOf<String>()
         for ((label, argv) in steps) {
@@ -90,9 +92,9 @@ internal object VScreenPower {
         }
         val after = check(ctx)
         val msg = buildString {
-            if (done.isNotEmpty()) append("已设置：${done.joinToString("、")}")
-            if (failed.isNotEmpty()) { if (isNotEmpty()) append("；"); append("未成功：${failed.joinToString("、")}") }
-            if (!after.ok) append("；仍有：${after.problems().joinToString("、")}")
+            if (done.isNotEmpty()) append(tr("已设置：", "Set: ") + done.joinToString(tr("、", ", ")))
+            if (failed.isNotEmpty()) { if (isNotEmpty()) append(tr("；", "; ")); append(tr("未成功：", "Failed: ") + failed.joinToString(tr("、", ", "))) }
+            if (!after.ok) append(tr("；仍有：", "; still: ") + after.problems().joinToString(tr("、", ", ")))
         }
         lastFix = msg
         AppLogger.info(TAG, "background whitelist: $msg")
@@ -126,21 +128,21 @@ internal object VScreenPower {
             val now = android.os.SystemClock.elapsedRealtime()
             if (now - lastHealAt < 20_000L) return check(ctx)
             lastHealAt = now
-            if (everOk) { resets++; lastResetWhat = before.problems().joinToString("、") }
+            if (everOk) { resets++; lastResetWhat = before.problems().joinToString(tr("、", ", ")) }
         }
-        val (ok, msg) = runCatching { whitelist(ctx) }.getOrElse { false to (it.message ?: "失败") }
+        val (ok, msg) = runCatching { whitelist(ctx) }.getOrElse { false to (it.message ?: tr("失败", "failed")) }
         if (ok) everOk = true
-        AppLogger.info(TAG, "heal ($why): missing ${before.problems().joinToString("、")} -> ${if (ok) "fixed" else "still missing"}: $msg" +
+        AppLogger.info(TAG, "heal ($why): missing ${before.problems().joinToString(tr("、", ", "))} -> ${if (ok) "fixed" else "still missing"}: $msg" +
             if (resets > 0) " (system took it back $resets times)" else "")
         return check(ctx)
     }
 
     /** What the user does by hand on this phone when Shizuku is not available. */
     fun manualSteps(): String = when (VScreenShell.device().vendor.lowercase()) {
-        "honor", "huawei" -> "手机管家 › 应用启动管理 › Agent-VScreen：关闭“自动管理”，手动打开“允许后台活动”；设置 › 电池 › 更多电池设置：打开“休眠时始终保持网络连接”"
-        "xiaomi", "redmi" -> "设置 › 应用设置 › 应用管理 › Agent-VScreen › 省电策略：无限制；并打开“自启动”"
-        "vivo", "iqoo" -> "i管家 › 应用管理 › 权限管理 › 自启动 打开 Agent-VScreen；设置 › 电池 › 后台耗电管理 › Agent-VScreen：允许后台高耗电"
-        "oppo", "oneplus", "realme" -> "设置 › 电池 › 应用耗电管理 › Agent-VScreen：允许后台运行、允许完全后台行为"
-        else -> "系统设置 › 应用 › Agent-VScreen › 电池：不受限制（或“不优化”），并允许后台数据"
+        "honor", "huawei" -> tr("手机管家 › 应用启动管理 › Agent-VScreen：关闭“自动管理”，手动打开“允许后台活动”；设置 › 电池 › 更多电池设置：打开“休眠时始终保持网络连接”", "Phone Manager › App launch › Agent-VScreen: turn off \"Manage automatically\" and turn on \"Run in background\"; Settings › Battery › More battery settings: turn on \"Stay connected while asleep\"")
+        "xiaomi", "redmi" -> tr("设置 › 应用设置 › 应用管理 › Agent-VScreen › 省电策略：无限制；并打开“自启动”", "Settings › Apps › Manage apps › Agent-VScreen › Battery saver: No restrictions; and turn on \"Autostart\"")
+        "vivo", "iqoo" -> tr("i管家 › 应用管理 › 权限管理 › 自启动 打开 Agent-VScreen；设置 › 电池 › 后台耗电管理 › Agent-VScreen：允许后台高耗电", "i Manager › App manager › Permissions › Autostart: turn on Agent-VScreen; Settings › Battery › Background power consumption › Agent-VScreen: allow high background power use")
+        "oppo", "oneplus", "realme" -> tr("设置 › 电池 › 应用耗电管理 › Agent-VScreen：允许后台运行、允许完全后台行为", "Settings › Battery › App battery management › Agent-VScreen: allow background running and full background activity")
+        else -> tr("系统设置 › 应用 › Agent-VScreen › 电池：不受限制（或“不优化”），并允许后台数据", "Settings › Apps › Agent-VScreen › Battery: Unrestricted (or \"Don't optimize\"), and allow background data")
     }
 }

@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.tr
+
 import android.content.AttributionSource
 import android.content.Context
 import android.content.ContextWrapper
@@ -184,7 +186,7 @@ class VScreenDisplayService : Binder {
                 LIST_TASKS -> {
                     val id = data.readInt()
                     val all = rootTasks()
-                    if (all.isNotEmpty() && all.all { it.displayId < 0 }) error("系统任务列表里没有 displayId")
+                    if (all.isNotEmpty() && all.all { it.displayId < 0 }) error(tr("系统任务列表里没有 displayId", "The system task list has no displayId"))
                     val roots = all.filter { it.displayId == id }
                     val rows = roots.flatMap { r -> r.children.mapIndexed { i, c -> listOf(c.first, c.second, if (r.visible) 1 else 0, r.type, if (i == 0) r.top else null) } }
                     out.writeInt(0); out.writeInt(rows.size)
@@ -214,7 +216,7 @@ class VScreenDisplayService : Binder {
                 }
                 APS -> {
                     val op = data.readInt()
-                    val pkg = data.readString() ?: throw IllegalArgumentException("缺少包名")
+                    val pkg = data.readString() ?: throw IllegalArgumentException(tr("缺少包名", "Missing package name"))
                     when (op) {
                         0 -> {
                             val s = runCatching { aps() }
@@ -244,9 +246,9 @@ class VScreenDisplayService : Binder {
                             fun hasNow() = runCatching { apsCall("getPackageApsInfo", pkg) != null }.getOrDefault(false)
                             when {
                                 entry != null -> steps += "setPackageApsInfo=" + runCatching { apsCall("setPackageApsInfo", pkg, entry) }.fold({ "$it" }, { it.javaClass.simpleName })
-                                had -> steps += "原配置无法还原（快照不可读），未动它"
+                                had -> steps += tr("原配置无法还原（快照不可读），未动它", "The original cannot be restored (snapshot unreadable); left alone")
                                 hasNow() -> steps += "deletePackageApsInfo=" + runCatching { apsCall("deletePackageApsInfo", pkg) }.fold({ "$it" }, { it.javaClass.simpleName })
-                                else -> steps += "无单独配置，无需删除"
+                                else -> steps += tr("无单独配置，无需删除", "No separate setting, nothing to delete")
                             }
                             var rb = apsResolution(pkg)
                             // Last resort only when it cannot create an entry that was not there before.
@@ -277,9 +279,9 @@ class VScreenDisplayService : Binder {
     private fun aps(): Any = synchronized(this) {
         apsSvc?.let { return it }
         val b = Class.forName("android.os.ServiceManager").getMethod("getService", String::class.java)
-            .invoke(null, "aps_service") as? android.os.IBinder ?: throw IllegalStateException("本机没有 aps_service")
+            .invoke(null, "aps_service") as? android.os.IBinder ?: throw IllegalStateException(tr("本机没有 aps_service", "This phone has no aps_service"))
         val s = Class.forName("android.aps.IHwApsManager\$Stub").getMethod("asInterface", android.os.IBinder::class.java).invoke(null, b)
-            ?: throw IllegalStateException("aps_service 接口不可用")
+            ?: throw IllegalStateException(tr("aps_service 接口不可用", "aps_service interface unavailable"))
         apsSvc = s
         s
     }

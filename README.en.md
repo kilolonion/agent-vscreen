@@ -27,7 +27,7 @@ Any agent on the phone can use it: agents with a terminal use the `vscreen` CLI,
 <p align="center"><img src="docs/app.png" width="760" alt="Agent-VScreen home, setup, agent connection, settings and app restrictions"></p>
 <p align="center"><sub>The app: first-time setup, connecting an agent (CLI / MCP / HTTP), settings and app restrictions.</sub></p>
 
-- Version: 1.1.6 (versionCode 8) · [Download APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
+- Version: 1.1.7 (versionCode 9) · [Download APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
 - Package: `com.kilon.agentvscreen`
 - Android 11+ (Android 14+ recommended), arm64
 - Privileges: [Shizuku](https://shizuku.rikka.app/) only, no root
@@ -65,7 +65,10 @@ vscreen help all
 
 Operit is just an example here; nothing is tailored to it. Other Android agents on the same phone work with the default install from "Connect an agent" (command line, MCP or HTTP), and cloud or desktop agents connect over Tailscale (see the next section).
 
-Operit and Operit 2 can both connect to remote MCP servers, so Agent-VScreen needs no plugin.
+There are two ways; pick one:
+
+- **ToolPkg (recommended)**: import `agent-vscreen.toolpkg` built from [`integrations/operit`](integrations/operit/) (also in Releases), send the token to Operit's AI to save, and it works; screenshots go straight to the model. See that folder's README.
+- **Remote MCP**: Operit and Operit 2 can both connect to remote MCP servers with no plugin, as follows.
 
 1. Finish the first-time setup in Agent-VScreen and make sure the service is running.
 2. Copy the token under **Connect an agent → MCP**.
@@ -99,6 +102,10 @@ Notes:
 ## Connecting from other devices (optional, off by default)
 
 The service only listens on `127.0.0.1:18765`. To call it from a computer or another phone, pick **Built-in Tailscale** under **Let other devices connect**: no Tailscale app needed and no system VPN slot taken; sign in to Tailscale once inside the app and only devices on your own tailnet can reach it. **Tailscale app** mode and SSH port forwarding also work.
+
+Once connected, choose **On another device** at the top of "Connect an agent": the message for your agent, the install command, the MCP config and the ability note all switch to the Tailscale address.
+
+The app speaks Chinese or English (Settings › Language: System / 中文 / English), and so does everything it tells the agent.
 
 The token equals control of the phone, so the app never offers a public link.
 

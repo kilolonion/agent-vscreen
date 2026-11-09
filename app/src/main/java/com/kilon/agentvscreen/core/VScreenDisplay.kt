@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.tr
+
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
@@ -129,12 +131,12 @@ class VScreenDisplay private constructor(
         return org.json.JSONObject()
             .put("display_rotation", rotation * 90)
             .put("surface", "${physWidth}x$physHeight")
-            .put("frame_space", "${width}x$height（已转正，read/look/截图/tap 的坐标都在这里）")
-            .put("input_space", "${iw}x$ih（系统注入触摸用的逻辑坐标）")
+            .put("frame_space", tr("${width}x$height（已转正，read/look/截图/tap 的坐标都在这里）", "${width}x$height (upright; read/look/screenshot/tap coordinates are all in this space)"))
+            .put("input_space", tr("${iw}x$ih（系统注入触摸用的逻辑坐标）", "${iw}x$ih (logical coordinates the system uses for injected touches)"))
             .put("frame_turn_deg", bufferTurn)
-            .put("turn_source", if (turnOverride != null) "screen rotate 手动" else if (flip180) "自动（文字校准后翻转 180°）" else "自动")
-            .put("transform", if (identity) "identity：画面坐标 = 输入坐标，工具不需要也不会再换算"
-                else "letterbox：逻辑屏 ${iw}x$ih 缩放后居中放在 ${width}x$height 画面里，工具自动逆变换")
+            .put("turn_source", if (turnOverride != null) tr("screen rotate 手动", "screen rotate (manual)") else if (flip180) tr("自动（文字校准后翻转 180°）", "auto (flipped 180° after text calibration)") else tr("自动", "auto"))
+            .put("transform", if (identity) tr("identity：画面坐标 = 输入坐标，工具不需要也不会再换算", "identity: picture coordinates = input coordinates, nothing is converted")
+                else tr("letterbox：逻辑屏 ${iw}x$ih 缩放后居中放在 ${width}x$height 画面里，工具自动逆变换", "letterbox: the ${iw}x$ih logical screen is scaled and centered in the ${width}x$height picture; the tool converts back automatically"))
     }
 
     private var listener: DisplayManager.DisplayListener? = null
@@ -302,7 +304,7 @@ class VScreenDisplay private constructor(
 
     /** Give the surface back and wait (max ~3 s) for the first new frame. Returns a short note. */
     fun unpark(): String {
-        if (!parked || released) { parked = false; return "副屏在运行" }
+        if (!parked || released) { parked = false; return tr("副屏在运行", "screen running") }
         val t0 = SystemClock.elapsedRealtime()
         fun attach(): Boolean = if (shellOwned) VScreenRemoteDisplay.setSurface(displayId, reader.surface).isSuccess
             else runCatching { virtualDisplay?.surface = reader.surface; true }.getOrDefault(false)
@@ -317,9 +319,9 @@ class VScreenDisplay private constructor(
         }
         val woke = lastFrameAtMs >= t0
         return when {
-            woke -> "副屏刚从省电暂停中恢复（${SystemClock.elapsedRealtime() - t0}ms），页面保留；应用可能刚回到前台，先 read 确认"
-            ok -> "副屏已从省电暂停中恢复，但还没收到新画面（静止页面可能不重绘）；先 read 确认"
-            else -> "副屏从省电暂停恢复失败：画面可能不更新。用 release 后重新 launch"
+            woke -> tr("副屏刚从省电暂停中恢复（${SystemClock.elapsedRealtime() - t0}ms），页面保留；应用可能刚回到前台，先 read 确认", "The screen just resumed from its power-save pause (${SystemClock.elapsedRealtime() - t0}ms) with the page kept; the app may have just come back to the front, check with read first")
+            ok -> tr("副屏已从省电暂停中恢复，但还没收到新画面（静止页面可能不重绘）；先 read 确认", "The screen resumed from its power-save pause but no new frame arrived yet (a still page may not redraw); check with read first")
+            else -> tr("副屏从省电暂停恢复失败：画面可能不更新。用 release 后重新 launch", "Resuming the screen from its power-save pause failed: the picture may not update. release, then launch again")
         }
     }
 
@@ -465,7 +467,7 @@ class VScreenDisplay private constructor(
                 runCatching { reader.close() }
                 thread.quitSafely()
                 return Result.failure(
-                    IllegalStateException("系统拒绝创建虚拟显示屏（ROM 策略或显示屏数量上限）"),
+                    IllegalStateException(tr("系统拒绝创建虚拟显示屏（ROM 策略或显示屏数量上限）", "The system refused to create the virtual display (ROM policy or display limit)")),
                 )
             }
             val gen = synchronized(this) { ++generationCounter }

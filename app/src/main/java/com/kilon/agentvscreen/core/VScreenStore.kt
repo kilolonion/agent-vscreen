@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.tr
+
 import android.content.Context
 import android.content.SharedPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,8 +26,9 @@ internal object VScreenStore {
     private const val K_RULES = "app_rules"
     private const val K_IDLE_SAVE = "idle_power_save"
 
-    enum class Rule(val key: String, val zh: String) {
-        BLOCK("block", "禁止操作"), READONLY("readonly", "只读");
+    enum class Rule(val key: String, private val zhText: String, private val enText: String) {
+        BLOCK("block", "禁止操作", "blocked"), READONLY("readonly", "只读", "read-only");
+        val zh: String get() = tr(zhText, enText)
         companion object { fun of(s: String?): Rule? = values().firstOrNull { it.key == s } }
     }
 

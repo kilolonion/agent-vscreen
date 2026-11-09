@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.tr
+
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -50,7 +52,7 @@ class HostService : Service() {
                 .onFailure {
                     // Android 12+ refuses to start a foreground service from the background (e.g. the process was
                     // restarted by the system). Opening the app starts it again (MainActivity.onResume).
-                    Liveness.foregroundFailed("后台启动服务被系统拒绝：${it.javaClass.simpleName}")
+                    Liveness.foregroundFailed(tr("后台启动服务被系统拒绝：${it.javaClass.simpleName}", "The system refused to start the service in the background: ${it.javaClass.simpleName}"))
                     AppLogger.warning("HostService", "start: ${it.message}")
                     startFromShell(ctx.applicationContext)
                 }
@@ -112,20 +114,20 @@ class HostService : Service() {
         val nm = getSystemService(NotificationManager::class.java) ?: return
         if (!stopped) { nm.cancel(STOP_NOTE_ID); return }
         if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(STOP_CHANNEL) == null)
-            nm.createNotificationChannel(NotificationChannel(STOP_CHANNEL, "AI 已停止", NotificationManager.IMPORTANCE_DEFAULT))
+            nm.createNotificationChannel(NotificationChannel(STOP_CHANNEL, tr("AI 已停止", "AI stopped"), NotificationManager.IMPORTANCE_DEFAULT))
         val allow = PendingIntent.getService(this, 3, Intent(this, HostService::class.java).setAction(ACTION_ALLOW), PendingIntent.FLAG_IMMUTABLE)
         val open = PendingIntent.getActivity(this, 4, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val at = BackgroundOperation.state.value.stoppedAt.takeIf { it > 0 }?.let { java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(it)) }
         val n = NotificationCompat.Builder(this, STOP_CHANNEL)
             .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
-            .setContentTitle("已停止 AI" + (at?.let { "（$it）" } ?: ""))
-            .setContentText("agent 的操作会被拒绝，直到你点“允许继续”")
-            .setStyle(NotificationCompat.BigTextStyle().bigText("你在悬浮窗上按了“停止 AI”。在你允许之前，agent 的每个操作都会被拒绝，它也会被告知去找你。要让它继续，点下面的“允许继续”。"))
+            .setContentTitle(tr("已停止 AI", "AI stopped") + (at?.let { tr("（$it）", " ($it)") } ?: ""))
+            .setContentText(tr("agent 的操作会被拒绝，直到你点“允许继续”", "The agent's actions are refused until you tap \"Allow again\""))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(tr("你在悬浮窗上按了“停止 AI”。在你允许之前，agent 的每个操作都会被拒绝，它也会被告知去找你。要让它继续，点下面的“允许继续”。", "You pressed \"Stop AI\" on the floating window. Until you allow it, every action of the agent is refused and it is told to come to you. To let it go on, tap \"Allow again\" below.")))
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setColor(0xFFE5484D.toInt())
-            .addAction(0, "允许继续", allow)
+            .addAction(0, tr("允许继续", "Allow again"), allow)
             .build()
         runCatching { nm.notify(STOP_NOTE_ID, n) }
     }
@@ -174,7 +176,7 @@ class HostService : Service() {
     private fun notification(): Notification {
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26 && nm?.getNotificationChannel(CHANNEL) == null)
-            nm?.createNotificationChannel(NotificationChannel(CHANNEL, "Agent-VScreen 服务", NotificationManager.IMPORTANCE_LOW))
+            nm?.createNotificationChannel(NotificationChannel(CHANNEL, tr("Agent-VScreen 服务", "Agent-VScreen service"), NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val stop = PendingIntent.getService(this, 1, Intent(this, HostService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
         val err = server?.lastError ?: Liveness.problem()
@@ -184,17 +186,17 @@ class HostService : Service() {
         val b = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
             .setContentTitle(when {
-                s.userStopped -> "Agent-VScreen · AI 已停止"
-                s.windowHidden && s.displayId != null -> "Agent-VScreen · AI 在后台工作（小窗已收起）"
-                else -> "Agent-VScreen 服务运行中"
+                s.userStopped -> tr("Agent-VScreen · AI 已停止", "Agent-VScreen · AI stopped")
+                s.windowHidden && s.displayId != null -> tr("Agent-VScreen · AI 在后台工作（小窗已收起）", "Agent-VScreen · AI working in the background (window hidden)")
+                else -> tr("Agent-VScreen 服务运行中", "Agent-VScreen service running")
             })
             .setContentText(err ?: "$where · CLI / HTTP / MCP")
             .setContentIntent(open)
             .setOngoing(true)
         if (s.windowHidden && s.displayId != null)
-            b.addAction(0, "显示小窗", PendingIntent.getService(this, 5, Intent(this, HostService::class.java).setAction(ACTION_SHOW_WINDOW), PendingIntent.FLAG_IMMUTABLE))
-        else b.addAction(0, "查看副屏", PendingIntent.getActivity(this, 2, Intent(this, com.kilon.agentvscreen.ui.FullscreenActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE))
-        return b.addAction(0, "停止服务", stop).build()
+            b.addAction(0, tr("显示小窗", "Show window"), PendingIntent.getService(this, 5, Intent(this, HostService::class.java).setAction(ACTION_SHOW_WINDOW), PendingIntent.FLAG_IMMUTABLE))
+        else b.addAction(0, tr("查看副屏", "View screen"), PendingIntent.getActivity(this, 2, Intent(this, com.kilon.agentvscreen.ui.FullscreenActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE))
+        return b.addAction(0, tr("停止服务", "Stop service"), stop).build()
     }
 }
 

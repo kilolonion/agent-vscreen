@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.tr
+
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import com.kilon.agentvscreen.host.AppLogger
@@ -173,7 +175,7 @@ object VScreenRecorder {
             o.put("recording", true).put("full", t.on).put("frames", t.frames.size)
                 .put("seconds", t.frames.firstOrNull()?.let { ((System.currentTimeMillis() - it.atMs) / 1000) } ?: 0)
                 .put("mb", ((t.bytes / 1024.0 / 1024.0) * 10).roundToInt() / 10.0)
-                .put("note", if (t.on) "后台录屏：最近 3 分钟全速、3–10 分钟每秒一帧（rewind 查看）" else "录屏关着：只留最近 15 秒给 film / 暂停核对")
+                .put("note", if (t.on) tr("后台录屏：最近 3 分钟全速、3–10 分钟每秒一帧（rewind 查看）", "Background recording: the last 3 minutes at full rate, 3–10 minutes at one frame a second (see with rewind)") else tr("录屏关着：只留最近 15 秒给 film / 暂停核对", "Recording off: only the last 15 s are kept for film / pause checks"))
         }
     }
 

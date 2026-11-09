@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.tr
+
 import android.content.Context
 import android.net.ConnectivityManager
 import com.kilon.agentvscreen.api.ApiConfig
@@ -41,6 +43,9 @@ object Tailnet {
         val online: Int = 0,
         val error: String? = null,
         val lastPeer: String? = null,
+        /** 1.1.7: NeedsLogin with no link yet: seconds waited and the node's health notes (e.g. control unreachable). */
+        val waitingS: Int = 0,
+        val health: String? = null,
     ) {
         val loggedIn get() = state == "Running" && ip != null
         val needsLogin get() = state == "NeedsLogin" || state == "NeedsMachineAuth"
@@ -92,6 +97,9 @@ object Tailnet {
     /** Sign out of the tailnet (the node stays listed in the admin console until removed there). */
     fun logout() { runCatching { stdin?.apply { write("logout\n"); flush() } } }
 
+    /** 1.1.7: ask the control server for a fresh login link (the bridge also does this by itself every 20 s). */
+    fun login() { runCatching { stdin?.apply { write("login\n"); flush() } } }
+
     /** Restart now, e.g. with a new auth key or control server. */
     fun restart(ctx: Context) { stop(); sync(ctx) }
 
@@ -99,7 +107,7 @@ object Tailnet {
         val bin = binary(ctx)
         while (wanted && !Thread.currentThread().isInterrupted) {
             if (!bin.canExecute()) {
-                _status.value = Status(state = "Error", error = "内置 Tailscale 组件缺失（$bin）"); return
+                _status.value = Status(state = "Error", error = tr("内置 Tailscale 组件缺失（$bin）", "Built-in Tailscale component missing ($bin)")); return
             }
             val t0 = System.currentTimeMillis()
             runCatching { runOnce(ctx, bin) }.onFailure { e ->
@@ -150,6 +158,8 @@ object Tailnet {
                 peers = o.optInt("peers"), online = o.optInt("online"),
                 error = o.optString("error").takeIf { it.isNotBlank() },
                 lastPeer = o.optString("last_peer").takeIf { it.isNotBlank() },
+                waitingS = o.optInt("waiting_s"),
+                health = o.optString("health").takeIf { it.isNotBlank() },
             )
             if (st.state != _status.value.state) AppLogger.info(TAG, "state ${st.state}${st.ip?.let { " $it" } ?: ""}${st.error?.let { " ($it)" } ?: ""}")
             if (st.loggedIn && ApiConfig.tailnetAuthKey != null) ApiConfig.tailnetAuthKey = null
@@ -158,7 +168,7 @@ object Tailnet {
         val code = runCatching { p.waitFor() }.getOrDefault(-1)
         proc = null; stdin = null
         _status.value = _status.value.copy(running = false, state = if (wanted) "Restarting" else "Stopped",
-            error = if (code != 0 && wanted) "内置 Tailscale 退出（$code）" else null)
+            error = if (code != 0 && wanted) tr("内置 Tailscale 退出（$code）", "Built-in Tailscale exited ($code)") else null)
     }
 
     /** The phone's resolvers: Android has no /etc/resolv.conf for the Go resolver. */

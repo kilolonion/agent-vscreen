@@ -13,8 +13,8 @@ android {
         applicationId = "com.kilon.agentvscreen"
         minSdk = 30
         targetSdk = 35
-        versionCode = 8
-        versionName = "1.1.6"
+        versionCode = 9
+        versionName = "1.1.7"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     // Release signing is read from keystore.properties (not committed). See keystore.properties.example.
@@ -52,7 +52,9 @@ android {
     // The built-in Tailscale node is an executable shipped as lib*.so: it must be unpacked into nativeLibraryDir.
     packaging { jniLibs { useLegacyPackaging = true } }
     lint { checkReleaseBuilds = false; abortOnError = false }
-    testOptions { unitTests.isReturnDefaultValues = true; unitTests.isIncludeAndroidResources = true }
+    // 1.1.7: tests assert the Chinese texts; the system language picks them (English tests set I18n.choice).
+    testOptions { unitTests.isReturnDefaultValues = true; unitTests.isIncludeAndroidResources = true
+        unitTests.all { it.jvmArgs("-Duser.language=zh", "-Duser.country=CN") } }
 }
 
 dependencies {
