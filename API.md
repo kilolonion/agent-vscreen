@@ -378,6 +378,10 @@ ssh -p 8022 -L 18765:127.0.0.1:18765 <手机地址>
 | 特权 | Shizuku | Shizuku（不碰 adb 和无线调试） |
 | 应用限制（禁止或只读） | Minis 设置 | Agent-VScreen 首页 › 应用限制 |
 
+### 和 Mika 等自带虚拟屏的 agent 的区别
+
+Mika 这类完整的 agent 应用也有后台虚拟屏，但外部 agent 只能把任务交给它，由它自己的模型去做。Agent-VScreen 让调用方的 agent 直接操作副屏，并且围绕副屏提供：持续看屏和读字带来的时间感知（【这段时间】）、`until` / `--stop` / `--watch` / `--keep` 等待和盯守、无障碍加本机 OCR 的编号元素、逐步核对、会话和接力。对照表见 [README](README.md#不只是一块副屏围绕副屏的脚手架) 和 [docs/COMPARISON.md](docs/COMPARISON.md)。
+
 ## 8. 已知限制
 
 - 1.0.0 在荣耀 MagicOS 11 真机上跑过一轮，副屏、命令行、HTTP 和 MCP 都正常。
