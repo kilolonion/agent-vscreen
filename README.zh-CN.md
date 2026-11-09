@@ -12,7 +12,7 @@
 
 给任何手机 agent 用的**后台副屏**。
 
-中文 · [English](README.en.md)
+中文 · [English](README.md)
 
 Agent-VScreen 在一块看不见的虚拟屏上打开和操作别的应用，你的主屏照常用，不会被打断。屏幕上只有一个悬浮小窗，让你看到 AI 在做什么，随时可以接管或叫停。
 

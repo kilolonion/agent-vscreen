@@ -12,7 +12,7 @@
 
 **A background second screen for any phone agent.**
 
-[中文](README.md) · English
+[中文](README.zh-CN.md) · English
 
 Agent-VScreen opens and drives other apps on an invisible virtual display, so your own screen stays yours. All you see is a small floating window showing what the AI is doing, which you can take over or stop at any moment.
 
