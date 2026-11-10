@@ -1,10 +1,11 @@
-# Agent-VScreen 1.1.7 接口说明
+# Agent-VScreen 1.2.0 接口说明
 
-Agent-VScreen 是一个独立的 Android 应用。它在一块看不见的副屏（虚拟屏）上打开和操作别的应用，用户的主屏不受打扰，屏幕上只有一个悬浮小窗显示进度。它不依赖 Minis，也不依赖任何特定的 agent 软件：手机上的任何 agent 都可以通过命令行、HTTP 或 MCP 调用它。
+Agent-VScreen 是一个独立的 Android 应用。它在一块看不见的副屏（虚拟屏）上打开和操作别的应用，用户的主屏不受打扰，屏幕上只有一个悬浮小窗显示进度。它不依赖任何特定的 agent 软件：任何 agent 都可以通过命令行、HTTP 或 MCP 调用它。
 
-- 包名 `com.kilon.agentvscreen`，版本 1.1.7（versionCode 9），可以覆盖安装之前的版本，也可以和 Minis、Minis VScreen 同时安装。
+- 包名 `com.kilon.agentvscreen`，版本 1.2.0（versionCode 11），可以覆盖安装之前的版本。
 - 需要 Android 11 及以上、arm64。
-- 副屏能力来自 Minis VScreen v0.5.0：命令、四段回执、回合制、盯守都一样。区别见第 7 节。
+- 1.2.0 改了返回格式和安全模型，旧接口 `/v1` 再保留一个版本。升级要点见第 9 节。
+- 每条命令的参数和每个结果代码的完整列表在 [docs/REFERENCE.md](docs/REFERENCE.md)，它由代码里的命令表和代码表生成，和 `vscreen help all`、`vscreen help codes` 的内容一致。
 
 ## 1. 安装和首次配置
 
@@ -56,130 +57,74 @@ Agent-VScreen 是一个独立的 Android 应用。它在一块看不见的副屏
 
 ## 2. 三种接入方式
 
-三种方式背后是同一套命令，返回的文字也一样。
+三种方式背后是同一套命令，同一个结果。先在 App 的“接入 agent”里复制 **给 agent 的话** 发给 agent，它会自己装好、记住。要给不同的 agent 不同的权限，在“令牌与权限”里给每个 agent 新建一个令牌（见第 7 节）。
 
-### 2.1 命令行 `vscreen`（推荐，适合 Termux、Minis 和任何带 Linux 环境的 agent）
-
-在 agent 的终端里执行 App 里复制的那一行：
+### 2.1 命令行 `vscreen`（推荐）
 
 ```sh
 curl -fsS http://127.0.0.1:18765/cli | sh -s -- install <令牌>
-```
-
-它会把 `vscreen` 装到 `$PREFIX/bin`、`~/.local/bin` 或 `/usr/local/bin` 中第一个可写的目录，并把地址和令牌存进 `~/.config/agent-vscreen/env`。文件里的名字和环境变量相同（`VSCREEN_URL`、`VSCREEN_TOKEN`）；环境变量设置了就以环境变量为准。1.0.0 写的 `*_SAVED` 旧名字仍然认。
-
-**让 agent 记住（1.1.6）**：推荐在 App 里点 **复制给 agent 的话**，把整段发给 agent，而不是只给它上面那一行命令。那段话让 agent 做三件事：执行安装命令；把一段简短说明存进它自己的长期记忆（或 skill、规则）；然后执行 `vscreen remembered "<存在哪里>"` 并告诉你存在了哪。
-
-- 1.1.7：要存的这段说明改成写 agent 自己的能力（“我可以在用户手机上后台操作应用”），包括什么时候用、怎么开始、连不上时怎么办，agent 以后看到相关请求会想到用它；远程设备上的 agent 存的说明里带的是 Tailscale 地址。
-- 为什么这样做：1.1.4、1.1.5 把 skill 放在安装命令的输出里请 agent 保存，大多数 agent 不照做。工具输出里的要求，模型通常当作数据，甚至当作提示注入；用户在聊天里提的要求它们才会执行。
-- 首页“接入 agent”里会显示结果，只根据事实判断：
-  - **agent 还没确认记住**：装好了，但 agent 没有执行 `remembered`；
-  - **agent 说已记住**：agent 报告了存在哪里（这是 agent 自己的说法）；
-  - **agent 记住了**：安装后，隔了 30 分钟以上的新一段使用里，agent 又主动调用了 vscreen。
-- 本应用不往任何 agent 的目录里写文件。
-- 也可以把 **复制一句话，放进 agent 的自定义指令 / 记忆** 复制出来，自己贴进 agent 的设置。
-- `vscreen guide`（或不带参数的 `vscreen`）输出简明用法。完整的 skill 版本在 `~/.config/agent-vscreen/SKILL.md`，也可以 `GET /skill`；要记住的那段说明是 `GET /memory`。这两个都不需要令牌，内容里也不含令牌。
-- 隔了 30 分钟以上的第一条命令，返回末尾会附一行“用法速查 vscreen guide”。
-
-**版本对齐**：App 的每个响应都带 `X-VScreen-Version`。命令行发现 App 已经更新，会自动把自己换成同版本（只换一次，并在标准错误里提示一行）。设 `VSCREEN_NO_UPDATE=1` 可以关掉。
-
-之后就可以这样用：
-
-```sh
+vscreen guide                 # 一页用法：看 → 做 → 核对
 vscreen launch 设置
-vscreen act "tap 关于手机 until text:版本"
-vscreen act                      # 看一眼
-vscreen help all
+vscreen act "tap 搜索; type 蓝牙; key enter until text:蓝牙"
+vscreen act                   # 看一眼现在的画面
+vscreen done
 ```
 
-- 需要 `curl`。
-- 截图会下载到 `$VSCREEN_SHOT_DIR`（默认 `$TMPDIR/vscreen-shots`），返回文字里的截图路径已经换成本地路径，agent 直接读这个文件看图。
-- 退出码：0 表示成功；1 表示命令被拒绝或执行失败（原因写在文字里）；2 表示用法错误；3 表示连不上 App 或令牌不对。
-- 环境变量：
+- 需要 `curl`。有 `sha256sum`、`shasum` 或 `openssl` 之一时，命令行给每个请求签名，令牌本身不发送，回复也校验（见 7.2）。都没有时退回到发送令牌，这种方式只在本机可用。
+- 退出码：0 整段按预期做完；1 停在某一步或被拒绝；2 命令写错，什么都没执行；3 连不上或回复校验失败。
+- 截图下载到 `$VSCREEN_SHOT_DIR`（默认 `$TMPDIR/vscreen-shots`），文字里是本地路径。完整输出另存为同目录的 `last.txt`。
+- 每条命令带一个请求号。连接中途断了，命令行用同一个请求号重试一次，拿到的是第一次执行的结果，不会执行两遍。
+- App 更新后命令行会自己换成新版。新脚本通过签名请求取回并校验，校验不过不会安装。第一次安装的那一行 `curl … | sh` 没有校验可做，它信任的是你当时连的那个地址。
+- 环境变量：`VSCREEN_URL`、`VSCREEN_TOKEN`、`VSCREEN_SESSION`、`VSCREEN_SHOT_DIR`、`VSCREEN_SHOTS=none`、`VSCREEN_NO_UPDATE`。
 
-| 变量 | 作用 |
-|---|---|
-| `VSCREEN_URL` | 服务地址，默认 `http://127.0.0.1:18765` |
-| `VSCREEN_TOKEN` | 令牌，默认取 install 时存下的 |
-| `VSCREEN_SESSION` | 会话名，默认 `default`，见第 4 节 |
-| `VSCREEN_SHOT_DIR` | 截图下载到哪个目录 |
-| `VSCREEN_SHOTS=none` | 不下载截图，文字里保留 URL |
-| `VSCREEN_NO_UPDATE=1` | 不随 App 自动更新命令行 |
+### 2.2 MCP
 
-Minis 用户：把 `VSCREEN_SHOT_DIR` 设成 `/var/minis/attachments/vscreen`，截图就会直接显示在对话里。
+把 App 里复制的 MCP 配置加进 agent（streamable HTTP，地址 `/mcp`）。
 
-想让 agent 自己学会用法：在 App 里点 **复制给 agent 的说明**，把复制到的那段文字（不到 1200 字）贴进 agent 的系统提示、记忆或技能里。
+- **工具**：`vscreen`（参数 `command` 是一整条命令行）和按命令分开的 `vscreen_launch`、`vscreen_act`、`vscreen_status` 等。分开的工具参数是字段：`args` 是位置参数，每个选项一个字段，由命令表生成。
+- **结果**：`content` 是文字和截图；`structuredContent` 是结构化结果（`ok`、`code`、`next`、`steps`、`screen`、`notes`）；`isError` 跟随结果代码。
+- **进度**：调用带 `_meta.progressToken` 且请求头 `Accept` 含 `text/event-stream` 时，每做完一步发一条 `notifications/progress`。
+- **取消**：断开这次请求的连接，这段操作会在当前这一步之后停下。
+- MCP 客户端不会签名。从其它设备用 MCP 接入时，要在 App 的“其它设备”里关掉“只接受签名请求”。
 
-### 2.2 MCP（适合支持 MCP 的 agent）
+### 2.3 HTTP
 
-使用 streamable HTTP，返回 JSON，不建 SSE 流：
+```
+POST /v2/run
+Authorization: Bearer <令牌>            （本机；其它设备见 7.2 的签名）
+{"cmd": "act \"tap 搜索; type 蓝牙\"", "session": "a", "request_id": "任意唯一字符串"}
+```
+
+请求体三种写法任选：`{"cmd": "一整条命令行"}`、`{"args": ["act", "tap 搜索"]}`、`{"command": "act", "args": "tap 搜索", "options": {"fast": true}}`。
+
+回复（HTTP 状态总是 200，结果看 `ok`）：
 
 ```json
 {
-  "mcpServers": {
-    "agent-vscreen": {
-      "type": "http",
-      "url": "http://127.0.0.1:18765/mcp",
-      "headers": { "Authorization": "Bearer <令牌>" }
-    }
-  }
+  "ok": false, "exit": 1, "code": "STEP_MISSED", "next": "look",
+  "session": "a", "request_id": "…",
+  "outcome": "missed",
+  "steps": [{"n": "1", "step": "tap 搜索", "status": "done", "x": 540, "y": 180, "changed": true},
+            {"n": "2", "step": "type 蓝牙", "status": "missed", "code": "TYPE_FAILED"}],
+  "screen": {"app": "com.android.settings", "activity": "…", "width": 1080, "height": 2400,
+             "image": "http://127.0.0.1:18765/v2/shot/vscreen_….jpg",
+             "elements": [{"n": 1, "text": "搜索", "x": 540, "y": 180, "clickable": true}], "elements_total": 23},
+  "notes": [{"code": "TYPE_FAILED", "text": "…", "next": "look"}],
+  "meanwhile": ["…"], "done": ["…"],
+  "text": "和命令行一样的四段文字", "images": [{"name": "…", "url": "…"}]
 }
 ```
 
-- 只有一个工具 `vscreen`。参数 `command` 写 `vscreen` 后面的部分，比如 `act "tap 搜索; type 耳机"`；可选参数 `session`。
-- 返回一段 text，以及最多 4 张 `image/jpeg`（当前截图，有变化时还有拼图），agent 的模型可以直接看图。文字里的截图路径换成了“[图N，见附图]”。
-- `isError` 在命令被拒绝或失败时为 true。
+- `ok` 为真只表示整段按预期做完。停在某一步时 `ok` 为假，`code` 是那一步的代码，`next` 是建议的下一步：`look`（先看画面）、`fix_command`（改命令）、`ask_user`（停下问用户）、`retry_later`（稍后重试）、`none`。
+- `request_id`：同一个令牌用同一个 id 重发，10 分钟内只执行一次，后来的请求拿到第一次的结果并带 `"replayed": true`。
+- 请求头 `Accept: text/event-stream`：回复变成事件流，每做完一步一条 `step` 事件，最后一条 `result` 事件是上面的 JSON。
+- 请求头 `X-VScreen-Lang: zh|en`：这一次请求用哪种语言回复，不影响别的调用方。
+- 断开连接：正在执行的命令在当前这一步之后停下（带 `request_id` 时先等 3 秒，看调用方是否用同一个 id 重连）。
+- 长操作可以加 `--async`：马上返回任务号，之后 `task <号> --wait 60s` 取结果，`task cancel <号>` 取消。
+- 其它地址：`GET /v2/ping`（不要令牌，含手机时间）、`GET /v2/help`、`GET /v2/codes`、`GET /v2/shot/<名字>`、`GET /v2/events?session=&wait=30s&again=1`。
+- 服务端限制：同时最多 24 个连接（超出返回 503 `SERVER_BUSY`），请求头 16 KB，请求体 1 MB，请求头 10 秒内、请求体 20 秒内要发完。支持 chunked 请求体。带 `Origin` 的请求（网页发起）一律拒绝。
 
-Operit 的接入步骤见 [README](README.zh-CN.md#在-operit-中使用)。
-
-### 2.3 HTTP（适合自己写调用代码的 agent 应用）
-
-只监听 `127.0.0.1:18765`，端口可以在 App 里改。除标注“无需令牌”的接口外，都要带令牌，三种写法任选一种：`Authorization: Bearer <令牌>`、`X-VScreen-Token: <令牌>`、`?token=<令牌>`。
-
-| 方法和路径 | 令牌 | 作用 |
-|---|---|---|
-| `GET /v1/ping` | 无需 | 是否在运行、版本号 |
-| `GET /v1/help` | 无需 | 完整命令说明（同 `vscreen help all`） |
-| `GET /cli` | 无需 | `vscreen` 命令行脚本 |
-| `GET /skill` | 无需 | 给 agent 存的 skill（SKILL.md） |
-| `POST /v1/run` | 要 | 执行一条命令 |
-| `GET /v1/shot/<name>` | 要 | 取命令里提到的图片（保留最近 300 张） |
-| `GET /v1/events?session=&wait=30s` | 要 | 取盯守事件，见第 5 节 |
-| `POST /mcp` | 要 | MCP |
-
-`POST /v1/run` 的请求体可以用三种写法：
-
-```json
-{"cmd": "act \"tap 搜索; type 耳机; key enter until text:综合\"", "session": "default"}
-{"args": ["act", "tap 搜索; type 耳机; key enter until text:综合"]}
-```
-
-或者表单 `a=act&a=tap%20…&session=default`（`a` 可重复，命令行客户端用的就是这种）。
-
-默认返回 JSON。下面是一次 `act` 的返回：
-
-```json
-{"ok": true, "exit": 0, "code": null, "session": "default",
- "text": "【做了什么】…\n【现在】… 截图 http://127.0.0.1:18765/v1/shot/vscreen_act_…jpg …",
- "data": null,
- "images": [{"name": "vscreen_act_….jpg", "url": "http://127.0.0.1:18765/v1/shot/vscreen_act_….jpg"}]}
-```
-
-- `images[].url` 用 `GET` 加同一个令牌就能取到 JPEG。
-- 命令本身输出 JSON 时（比如 `status`），`data` 里是解析好的对象，不用再解析 `text`；这时 JSON 里的 `"ok": false` 也会让 `exit` 不为 0。
-- 命令出错时 `ok` 为 false，`exit` 不为 0，`code` 是错误码（如 `BUSY`、`USER_STOPPED`、`INVALID_STEP`）。
-
-`status` 的返回大致是：
-
-```json
-{"ok": true, "exit": 0, "code": null, "session": "default", "text": "{…}", "data": {"ok": true, "data": {"privilege": "READY", …}}, "images": []}
-```
-
-加 `?format=text`（或带 `Accept: text/plain`）时直接返回文字。这时退出码在响应头 `X-VScreen-Exit` 里，错误码在 `X-VScreen-Code` 里，图片名在 `X-VScreen-Images` 里。
-
-安全上：服务只绑定本机地址。带 `Origin` 头的请求（来自网页）一律拒绝，`Host` 不是 localhost 的请求也拒绝，所以网页无法借浏览器调用它。令牌可以在 App 里随时换一个。
-
-### 2.4 让其它设备连进来（默认关闭；1.1.6 起可以不装 Tailscale App）
+### 2.4 让其它设备连进来（默认关闭）
 
 服务默认只在本机 `127.0.0.1` 上监听。要从电脑或另一台手机上的 agent 调用，有三种办法。
 
@@ -239,62 +184,77 @@ ssh -p 8022 -L 18765:127.0.0.1:18765 <手机地址>
 
 需要远程使用时，用 Tailscale 或 SSH。
 
+
+**1.2.0 的远程安全设置**（“接入 agent › 其它设备上”下面）：
+
+- **只接受签名请求**（默认开）：其它设备来的请求必须按 7.2 签名。`vscreen` 命令行会自动签名。
+- **只允许这些设备**：填设备名、登录名或 100.x 地址；留空表示网络里的所有设备都可以连（仍然要令牌）。
+- **自建控制服务器的域名后缀**：用 Headscale 等自建服务器、MagicDNS 名字不以 `.ts.net` 结尾时填这里，否则用名字访问会被当成不认识的 Host 拒绝。
+- “外部 App”模式只在系统里类型为 VPN 的网络上找 100.64.0.0/10 的地址。运营商给移动网络分配的同网段地址不会被当成 Tailscale 地址。
+- 同一来源一分钟内验证失败 8 次，暂停接受它的请求 5 分钟，并发通知告诉你。
+
 ## 3. 命令
 
-命令和 Minis VScreen v0.5.0 相同（`help all` 有完整说明）：
+完整列表、每个参数和权限范围见 [docs/REFERENCE.md](docs/REFERENCE.md) 或 `vscreen help all`。
 
-- **核心**：`launch`、`act`、`note`、`keep`、`stop`、`release`、`handoff`、`status`、`apps`、`help`。
-- **辅助**：`spots`、`zoom`、`collect`、`fix`。
-- **新增**：`events`、`title`、`done`。
+- **核心**：`launch`、`act`、`note`、`keep`、`events`、`task`、`title`、`done`、`stop`、`release`、`handoff`、`status`、`apps`。
+- **辅助**：`spots`、`zoom`、`collect`、`fix`、`diag`、`guide`、`help`。
 
-`launch` 和 `act` 返回固定的四段：
+`launch` 和 `act` 返回固定的四段：【做了什么】、【这段时间】（从上次返回到现在，包括 agent 思考的时间）、【现在】（编号元素和截图）、【注意】（每条以代码开头）。手机只报事实，画面是什么意思由调用方的模型看图判断。
 
-- 【做了什么】
-- 【这段时间】：从上次返回到现在，包括 agent 思考的时间
-- 【现在】：编号元素和截图
-- 【注意】
+### 3.1 一步没达到预期，这段就停在那一步
 
-手机只报事实，画面是什么意思由调用方的模型看图判断。
+后面的步骤是照着预期的画面写的，画面不对就不再往下做。这时结果是失败（退出码 1，`ok` 为假）。会让一段停下的情况：
 
-**一步没达到预期，这段就停在那一步**（1.1.0）。后面的步骤是照着预期的画面写的，画面不对就不再往下做。【注意】里会写：
+| 代码 | 情况 |
+|---|---|
+| `STEP_MISSED` | `until` 或 `wait` 到时间也没等到 |
+| `NOT_FOUND` | 画面上没有你写的字。回复里列出相近的字和输入框，各带坐标 |
+| `AMBIGUOUS` | 你写的字在画面上有好几处。什么都不点，回复里列出每一处和坐标。只有一处可点、其余是普通文字时不算歧义 |
+| `STALE_ELEMENT` | `#N` 指的元素已经不在原来的位置。同一页上它只是挪了位置时会点新位置并说明；页面变了就什么都不点 |
+| `TYPE_FAILED` / `FOCUS_ELSEWHERE` | 没有获得焦点的输入框，或输入后框里没有你的字 |
+| `CONFIRM_PENDING` / `USER_DENIED` | 需要用户在手机上确认的一步，用户没答复或拒绝了（见第 7 节） |
 
-- 哪一步没达到预期；
-- 现在前台是哪个界面，能看到哪些字；
-- 后面有几步没做。
+`NO_CHANGE` 是提示，不让一段停下：一个动作之后画面完全没有变化，多半是没点中。
 
-“没达到预期”包括：
+### 3.2 等待
 
-- `until` 或 `wait` 到时间也没等到；
-- `type` 时没有获得焦点的输入框；
-- 输入后框里没有你输入的字；
-- 无障碍没开，确认不了字落在哪。
+- 没写 `until` 的动作等画面“稳定”，最多 3 秒。**稳定**的意思是：画面连续 0.5 秒完全不动，或者至少 1.2 秒以来只剩幅度小而均匀的循环变化（转圈、光标闪烁、轮播）。1.1 里要求完全不动，带动画的页面每一步都会等满 3 秒。
+- `still` 条件仍然是“完全不动”。`stable` 是上面这种“稳定”。
+- 感知由新画面驱动：副屏出了新的一帧就看一次，画面不动时每半秒看一次。
+- `--fast`：动作之间不等，最后一步仍然等。用在游戏和连续点击上。
 
-没写 until 的动作只等画面稳定，不算预期。
+### 3.3 目标的写法
 
-**目标的写法**：
-
-- `tap 1`：只写一个数，就是点画面上的这个数字（计算器、页码）；
+- `tap 登录`：画面上的字，先找完全一样的，再找包含的；
+- `tap #3`：【现在】列表里的编号；
 - `tap 100 200`：坐标；
-- `tap #3`：编号。
+- `tap 1`：只写一个数，就是点画面上的这个数字。
 
-文字找不到时，NOT_FOUND 会列出画面上相近的字和输入框，各自带坐标。
+### 3.4 每段前后的固定步骤
 
-**【现在】列表**：
+`note before "<步骤>"` 和 `note after "<步骤>"` 记下之后，这个应用上每一段带步骤或带 `--watch` 的 `act` 会先做前置步骤，最后做收尾步骤（比如游戏的继续和暂停）。`--bare` 跳过它们。1.1 的 `note pause` / `note resume` 自动对应到 `after` / `before`，已经记下的内容不用重写。`note realtime` 取消了，改用 `--fast`。
 
-- 可点的容器自己没有字时，用它里面的字作标签，里面那些字不再单独列；
-- 没有字的大容器不列；
-- 没有字的小图标按钮照列，有 id 时带上 id。
+笔记带着是谁记的、记的时候应用是哪个版本。应用升级后，`launch` 列出旧笔记时会注明“可能已过时”。
+
+### 3.5 排队
+
+同一块副屏上的命令一条一条执行，按到达的顺序排队。排队超过 60 秒返回 `QUEUE_TIMEOUT`，这条没有执行。`status`、`apps`、`events`、`task`、`diag`、`help` 不排队。
+
+### 3.6 按键
+
+`key` 接受 back、enter、tab、del、space、esc、search、menu、方向键、paste、copy、cut、page_up、page_down，或数字 keycode。没有 home 和多任务键：副屏上没有桌面，这两个键会作用到用户的主屏。
 
 ## 4. 会话和“回合”
 
-- **会话**：一块副屏同一时间只属于一个会话。会话名取请求头 `X-VScreen-Session`、参数 `session` 或环境变量 `VSCREEN_SESSION`，默认是 `default`。另一个会话的回合还没结束时，会返回 `BUSY`。返回里写明：
+- **会话**：一块副屏同一时间只属于一个会话。会话名取请求头 `X-VScreen-Session`、参数 `session` 或环境变量 `VSCREEN_SESSION`，默认是 `default`。另一个会话的回合还没结束时，会返回 `BUSY`（同一个会话自己的命令则排队执行）。返回里写明：
   - 副屏归哪个会话；
   - 那个会话是不是正在执行命令；
   - 还要安静多久才自动让出；
   - 现在就要接手的办法：那个会话执行 `vscreen done` 或 `vscreen release`。
 
   回合结束后，任何会话都能接手，页面保留。
-- **回合**：Minis 里一轮对话就是一个回合。独立 App 没有对话，所以从某个会话发出第一条命令起算回合开始，之后安静满 N 分钟算回合结束（N 默认 3，可以在 App 里改成 1、3、5、10 或 30）。
+- **回合**：从某个会话发出第一条命令起算回合开始，之后安静满 N 分钟算回合结束（N 默认 3，可以在 App 里改成 1、3、5、10 或 30）。
   - 回合进行中：副屏保持唤醒，后台录制不停，所以下一次的【这段时间】能覆盖 agent 思考的这段时间。
   - 回合结束后：副屏省电暂停，10 分钟后释放；下一条命令会自动唤醒或重建副屏。
   - `vscreen done`：这一轮做完了，回合马上结束，不用等 N 分钟。
@@ -305,11 +265,15 @@ ssh -p 8022 -L 18765:127.0.0.1:18765 <手机地址>
 `act --stop "条件" --keep notify|wake [--for 2h]`：本轮之后在手机上继续盯这个条件，看到后：
 
 - `notify`：发一条系统通知给用户；
-- `wake`：把一条事件放进这个会话的事件队列，并发出广播 `com.kilon.agentvscreen.action.EVENT`，附带的 extras 有 session、kind、name、text、json。
-  - 命令行和 MCP 用 `vscreen events --wait 60s` 取事件；HTTP 用 `GET /v1/events?wait=60s`。
-  - 安卓应用形态的 agent 也可以动态注册这个广播的接收器。
-  - `events --wait` 只在这个会话有正在运行的 `--keep wake` 盯守时才等；没有的话马上返回，并写明“没有盯守，没等”。
-- `keep` 分两组列出“正在盯”和“已结束”（已看到或到期）。`keep off <名字>` 对已结束的条目也有效，会把它从列表里清掉；`keep off all` 停掉全部并清空已结束的。
+- `wake`：把一条事件放进这个会话的事件队列。命令行和 MCP 用 `vscreen events --wait 60s` 取，HTTP 用 `GET /v2/events?wait=60s`。
+
+1.2.0 的变化：
+
+- **事件至少送达一次**。`events` 取走的一批会保留到你下一次 `events`，下一次调用等于确认上一批收到了。回复丢了就用 `events --again` 把上一批再取一遍。每条事件有只增不减的 `#编号`，用它去重。
+- **事件和盯守都写在磁盘上**。App 被系统杀掉再起来，没取走的事件还在，没到期的盯守会接着盯（副屏本身不会恢复：盯守会等到它的会话重新 `launch`）。
+- **广播默认不发**。1.1 把事件广播给手机上所有应用，内容里有画面上看到的字。现在只有在 App 的“操作日志”下面填了接收应用的包名，才会把广播 `com.kilon.agentvscreen.action.EVENT` 定向发给那一个应用。
+- `events --wait` 只在这个会话有正在运行的 `--keep wake` 盯守时才等。
+- `keep` 分两组列出“正在盯”和“已结束”。`keep off <名字>` 对两组都有效，`keep off all` 全部停掉并清空。
 
 ## 6. 悬浮窗和全屏
 
@@ -358,41 +322,100 @@ ssh -p 8022 -L 18765:127.0.0.1:18765 <手机地址>
 
 - 沉浸式，画面按比例放大，带同样的边框；
 - 长按 1 秒接管；
-- 接管后，底栏有返回、桌面、打字（输入到副屏里有焦点的输入框）、回车和交还 AI；
+- 接管后，底栏有返回、打字（输入到副屏里有焦点的输入框）、回车和交还 AI；
 - 没有接管时，底栏有接管和“移到主屏”（把副屏上的应用挪到你的主屏）。
 
 通知栏里的 **查看副屏** 也能打开全屏页。
 
 如果你在停止状态下关掉了副屏，通知栏的“已停止 AI”和 App 首页顶部的提示都会一直在，点“允许继续”才会放开。
 
-## 7. 和 Minis VScreen v0.5.0 的区别
+## 7. 权限和安全（1.2.0）
 
-| 项目 | Minis VScreen | Agent-VScreen |
-|---|---|---|
-| 调用方 | Minis 沙箱里的 `android-vscreen` | 任何 agent：CLI `vscreen`、HTTP、MCP |
-| `look`（让视觉模型看图） | 借用当前对话的模型 | **删掉了**：截图直接交给调用方的模型看，这个 App 不调用任何模型，也不发数据出手机 |
-| 截图交付 | 写进 Minis 附件目录，自动内联 | CLI 下载到本地文件；HTTP 给 URL；MCP 直接附图 |
-| `--keep wake` | 叫醒 Minis 对话 | 进事件队列并发广播，用 `events` 取 |
-| 回合 | Minis 一轮对话 | 按会话活跃度：安静满 N 分钟算结束 |
-| 小窗 | 聊天界面里的小窗 | 系统悬浮窗（彩色呼吸边框、手势、停止）+ 原生全屏页 |
-| 无障碍 | Minis 的无障碍服务 | 自己的只读无障碍服务（可选） |
-| 特权 | Shizuku | Shizuku（不碰 adb 和无线调试） |
-| 应用限制（禁止或只读） | Minis 设置 | Agent-VScreen 首页 › 应用限制 |
+### 7.1 每个 agent 一个令牌
 
-### 围绕副屏的脚手架
+App 首页“令牌与权限”里可以新建令牌，形如 `avs_<id>_<密钥>`。每个令牌有：
 
-Agent-VScreen 让调用方的 agent 直接操作副屏，并且围绕副屏提供：持续看屏和读字带来的时间感知（【这段时间】）、`until` / `--stop` / `--watch` / `--keep` 等待和盯守、无障碍加本机 OCR 的编号元素、逐步核对、会话和接力。概览见 [README](README.zh-CN.md#不只是一块副屏围绕副屏的脚手架)。
+- **名字**：出现在操作日志、确认弹窗和“最近调用方”里。
+- **权限范围**：`look`（只看：状态、应用列表、截图分析）、`operate`（打开和操作应用）、`system`（另外允许 `fix` 改系统设置等）。范围不够时命令返回 `SCOPE_DENIED`，什么都不执行。
+- **单独撤销**：不影响别的 agent。
+- **自己的会话**：不同令牌的 agent 即使用同一个会话名，也互不相干，抢不了对方的副屏。
+- App 只保存新令牌密钥的 SHA-256，令牌本身只在创建时显示一次。
+
+原来的那一个令牌叫主令牌，照旧可用，权限是 `system`。
+
+### 7.2 签名请求
+
+令牌不上网络的调用方式。K = sha256hex(令牌的密钥部分；主令牌就是整个令牌)。
+
+```
+X-VScreen-Key:   <令牌 id；主令牌写 main>
+X-VScreen-Time:  <unix 秒，和手机相差不超过 300 秒>
+X-VScreen-Nonce: <8 到 64 位字母数字，每个请求不同>
+X-VScreen-Sign:  sha256hex( K \n Time \n Nonce \n METHOD \n 路径和查询串 \n sha256hex(请求体) \n K )
+```
+
+- 被截获的请求不能重放（时间窗加 Nonce），不能改动（请求体和路径都在签名里）。
+- 对签名请求的回复带 `X-VScreen-Proof: sha256hex( K \n Nonce \n resp \n sha256hex(回复体) \n K )`，调用方可以确认回复来自这台手机、没被改过。事件流回复没有这个头。
+- 网址里的 `?token=` 不再接受：网址会留在日志和历史记录里。
+- 本机（127.0.0.1）仍然接受 `Authorization: Bearer <令牌>`。其它设备默认必须签名。
+
+### 7.3 需要用户确认的步骤
+
+下面这些步骤由用户在手机上确认。手机弹出一条带“允许 / 拒绝”的通知，App 首页顶部也有同样的卡片：
+
+- 点付费、下单等花钱的按钮，点删除、发送等不可撤销的按钮；
+- 用户设为“每次询问”的应用里的点击和输入（允许一次后 5 分钟内不再问）；
+- `stop --force`（结束整个应用）、`fix`、`handoff in`（把用户正在用的应用接到副屏）。
+
+命令最多等 60 秒。用户允许就执行；拒绝是 `USER_DENIED`；没答复是 `CONFIRM_PENDING`，这个请求再保留 5 分钟，用户之后点了允许，agent 重发同一步就会通过。
+
+1.1 的 `--confirmed` 不再起作用：agent 自己加一个参数，工具分不清用户是不是真的同意了。
+
+用户信任某个 agent 时，可以在“令牌与权限”里给它的令牌开 **免确认 30 分钟**。这段时间里的放行同样记进操作日志。
+
+### 7.4 操作日志
+
+每条命令记一行：时间、令牌名、来源设备、会话、命令、结果代码、耗时、请求号。`type` 输入的文字只记字数。确认的每次答复、令牌的创建和撤销、验证失败和封禁也记在里面。在 App 首页“操作日志”里看、复制、清空。文件最大 1 MB，满了保留上一份。
+
+### 7.5 其它
+
+- 截图随副屏清理：副屏释放 2 分钟后，在那之前的截图都会删掉。
+- 密码框只报字符数，内容不会出现在任何回复里。
+- 中文等非 ASCII 文字在无障碍没开、输入框读不到时，仍然通过剪贴板粘贴输入。粘贴后剪贴板会恢复原内容，读不到原内容时清空。
+- `vscreen diag` 导出一份诊断：版本、设备、连接状态、最近的命令（代码和耗时）、被吞掉的异常计数、应用日志末尾。不含截图、输入的文字和令牌。
 
 ## 8. 已知限制
 
-- 1.0.0 在荣耀 MagicOS 11 真机上跑过一轮，副屏、命令行、HTTP 和 MCP 都正常。
-- 1.1.0 新写的悬浮窗手势、全屏页、首页、停止和无障碍自动恢复还没有在真机上验证。
-- 1.1.1 的无障碍悬浮窗、1.1.2 的甩动手势和全屏时隐藏悬浮窗，也还没有在真机上验证。
+- **1.2.0 没有在真机上跑过**。它通过了编译和单元测试（命令表、代码表、步骤语言、签名、令牌、审计脱敏、状态阶段、厂商适配、事件送达、指南内容）。下面这些只能在手机上验证，请先按 [docs/TASKS.md](docs/TASKS.md) 跑一遍：
+  - 点击、滑动、按键、ASCII 输入全部改走副屏服务注入，不再调用 shell 的 `input` 命令。副屏服务升级到协议 10，第一次连接会自动重启旧服务。
+  - 手机上的确认通知（弹出、按钮、超时）。
+  - “稳定”的新判定在各种带动画的页面上是否合适。
+  - 调用方断开后命令是否及时停下，以及个别 HTTP 客户端发完请求就半关闭连接时会不会被误判为断开。
+  - “外部 App”模式下只认 VPN 网络的地址。
+- 入口仍然在 App 进程里。把 HTTP 入口放进 shell 身份的副屏服务、让它不受厂商冻结影响，需要先在真机上做验证，这一版没有做，计划见 [docs/SPIKE-FRONT-DOOR.md](docs/SPIKE-FRONT-DOOR.md)。
+- 内置 Tailscale 节点仍然打包在 APK 里。按需下载做不到：Android 10 起不允许执行下载到应用数据目录里的程序。
+- 第一次安装命令行的 `curl … | sh` 没有校验（见 2.1）。
 - 冷启动后第一次识别文字要加载约 30 MB 的 OCR 模型，第一条命令会慢几秒。
 - 荣耀、华为等系统可能拦截通过 Shizuku 打开无障碍的写入，这时要到 系统设置 › 无障碍 里手动打开一次。
-- 手机重启后，Shizuku 需要重新启动；Agent-VScreen 会自己恢复服务，但在 Shizuku 启动之前，命令会返回 `NOT_CONNECTED`。
-- 令牌等于操作权限：拿到令牌的程序都能在副屏上操作你的应用。只把令牌给你信任的 agent。
-- 首页“诊断”可以复制或分享版本、配置状态和最近日志，不含令牌，也不含输入的文字。
+- 手机重启后，Shizuku 需要重新启动；在那之前命令返回 `NOT_CONNECTED`。
+
+## 9. 从 1.1 升级
+
+| 1.1 | 1.2.0 |
+|---|---|
+| `POST /v1/run`，停在某一步也返回 `ok: true` | `POST /v2/run`，停在某一步是 `ok: false`、`exit: 1`，带 `code` 和 `next`。`/v1` 行为不变，再保留一个版本，回复带 `Deprecation: true` |
+| 从文字里找【错误】判断结果 | 看 `ok` / `code` / `next`，结构化内容在 `steps`、`screen`、`notes` |
+| `?token=` | 不再接受。用请求头，或签名 |
+| 一个令牌 | 主令牌照旧；可以给每个 agent 新建带权限范围的令牌 |
+| `--confirmed` | 不起作用。用户在手机上确认 |
+| `--paused` | 改名 `--bare`（旧名仍可用） |
+| `note pause` / `note resume` / `note realtime` | `note after` / `note before` / `act --fast`（旧的记录自动对应） |
+| 事件取走即删，广播给所有应用 | 保留到下一次 `events`，`--again` 重取；广播只发给用户指定的应用 |
+| 别的命令在执行时返回 `BUSY` | 排队，最长 60 秒 |
+| `key home` | 没有了 |
+| MCP 一个工具 `vscreen` | 另有按命令分开的工具和 `structuredContent` |
+
+已安装的 `vscreen` 命令行会在第一次调用时自己换成新版。agent 存过的旧说明（skill 或记忆）建议换成新版：重新发一次“给 agent 的话”，或让它执行 `vscreen guide`。
 
 ## 命令行的完整输出（1.1.5）
 

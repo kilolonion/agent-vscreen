@@ -61,6 +61,12 @@ class VScreenV49Test {
         assertEquals("back", Steps.parse("back").text)
         assertEquals("enter", Steps.parse("key enter").text)
         refused { Steps.parse("key launchmissiles") }
+        // 1.2: no home / recents on the background screen, by name or by keycode.
+        assertTrue(refused { Steps.parse("key home") }.message.orEmpty().contains("没有 home 键"))
+        refused { Steps.parse("key 3") }
+        assertEquals("66", Steps.parse("key 66").text)
+        assertEquals("stable", Steps.parse("wait stable").until!![0].kind)
+        assertEquals("still", Steps.parse("wait still").until!![0].kind)
         val sl = Steps.parse("wait 2s"); assertEquals("sleep", sl.kind); assertEquals(2_000L, sl.ms)
         val w = Steps.parse("wait text:完成 or gone:加载中 30s")
         assertEquals("wait", w.kind); assertEquals(listOf("text", "gone"), w.until!!.map { it.kind }); assertEquals(30_000L, w.untilMs)
@@ -73,7 +79,7 @@ class VScreenV49Test {
     @Test fun conditions() {
         val c = Steps.cond("change:0,0,100,50")
         assertEquals("change", c.kind); assertEquals(100, c.area!!.right)
-        assertEquals("still", Steps.cond("stable").kind)
+        assertEquals("stable", Steps.cond("stable").kind)
         val col = Steps.cond("color:10,20=#FF0000~30")
         assertEquals(10, col.x); assertEquals(20, col.y); assertEquals(0xFF0000, col.color and 0xFFFFFF); assertEquals(30, col.tol)
         assertEquals("app", Steps.cond("app:com.x").kind)
@@ -94,24 +100,26 @@ class VScreenV49Test {
         assertEquals(VScreenOptions.Kind.VALUE, VScreenOptions.kindOf("act", "keep"))
     }
 
-    @Test fun helpIsTheOptionSource() {
+    @Test fun theCommandTableIsTheOptionSource() {
         val h = VScreenOffloadHandler(RuntimeEnvironment.getApplication())
-        assertEquals(setOf("stop", "watch", "paused", "keep", "for", "save", "confirmed"), h.optionsOf("act"))
-        assertEquals(setOf("landscape", "portrait", "restart"), h.optionsOf("launch"))
+        assertEquals(setOf("stop", "watch", "fast", "bare", "keep", "for", "save", "paused", "confirmed", "async"), h.optionsOf("act"))
+        assertEquals(setOf("landscape", "portrait", "restart", "async"), h.optionsOf("launch"))
         assertNull(h.optionsOf("tap"))
         refused { h.checkOptions("act", listOf("--expect", "x")) }
-        refused { h.checkOptions("act", listOf("--paused=1")) }
+        refused { h.checkOptions("act", listOf("--fast=1")) }
         refused { h.checkOptions("act", listOf("--stop")) }
-        h.checkOptions("act", listOf("tap 1 1", "--stop", "text:x", "--paused"))
-        // Every switch and duration the parser knows is spelled in some help line, and every command in the
-        // dispatch table has a help line.
-        val all = Regex("--([a-z][a-z0-9-]*)").findAll(VScreenOffloadHandler.HELP).map { it.groupValues[1] }.toSet()
-        VScreenOptions.SWITCHES.forEach { assertTrue("--$it documented", it in all) }
-        VScreenOptions.DURATIONS.forEach { assertTrue("--$it documented", it in all) }
-        for (c in listOf("launch", "act", "note", "keep", "stop", "release", "handoff", "status", "apps", "events", "spots", "zoom", "collect", "fix")) {
-            assertFalse("help $c", h.helpFor(c).startsWith("没有叫"))
-            assertTrue("quick help mentions $c", VScreenOffloadHandler.QUICK_HELP.contains(c))
+        h.checkOptions("act", listOf("tap 1 1", "--stop", "text:x", "--bare"))
+        // Deprecated options are accepted but not advertised.
+        assertFalse(VScreenOffloadHandler.HELP.contains("--confirmed <") || VScreenOffloadHandler.HELP.contains("[--confirmed]"))
+        // Every command has help, is in the quick help, and is dispatched (an unknown one is exit 2).
+        for (c in CommandSpec.commands) {
+            assertFalse("help ${c.name}", h.helpFor(c.name).startsWith("没有叫"))
+            assertTrue("quick help mentions ${c.name}", VScreenOffloadHandler.QUICK_HELP.contains(c.name))
         }
+        val r = h.handle(NativeOffloadRequest(listOf("vscreen", "frobnicate"), "s"))
+        assertEquals(2, r.exitCode); assertEquals("UNKNOWN_COMMAND", r.code)
+        val bad = h.handle(NativeOffloadRequest(listOf("vscreen", "act", "--nope"), "s"))
+        assertEquals(2, bad.exitCode); assertEquals("UNKNOWN_OPTION", bad.code)
     }
 
     @Test fun notebookSegmentsAndProfile() {
@@ -122,14 +130,14 @@ class VScreenV49Test {
         assertEquals(n.id, VScreenMap.addNote(pkg, "搜索框在顶部").id)
         VScreenMap.saveSegment(pkg, "收菜", "tap 100 100; tap 200 200")
         assertNotNull(VScreenMap.segment(pkg, "收菜"))
-        VScreenMap.setProfile(pkg, mapOf("pause" to "tap 10 10", "resume" to "tap 10 10"))
+        VScreenMap.setProfile(pkg, mapOf("after" to "tap 10 10", "before" to "tap 20 20"))
         VScreenMap.clearCache()
-        assertEquals("tap 10 10", VScreenMap.profile(pkg)["pause"])
+        assertEquals("tap 10 10", VScreenMap.profile(pkg)["after"])
         assertEquals(1, VScreenMap.notes(pkg).size)
         val lines = noteLines(pkg).joinToString("\n")
-        assertTrue(lines, lines.contains("回合制") && lines.contains("收菜"))
-        VScreenMap.setProfile(pkg, mapOf("pause" to ""))
-        assertNull(VScreenMap.profile(pkg)["pause"])
+        assertTrue(lines, lines.contains("前置步骤") && lines.contains("收菜"))
+        VScreenMap.setProfile(pkg, mapOf("after" to ""))
+        assertNull(VScreenMap.profile(pkg)["after"])
         assertTrue(VScreenMap.deleteSegment(pkg, "收菜"))
         assertTrue(VScreenMap.deleteNote(pkg, n.id))
     }

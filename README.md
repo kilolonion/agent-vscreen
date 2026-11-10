@@ -27,7 +27,7 @@ Any agent on the phone can use it: agents with a terminal use the `vscreen` CLI,
 <p align="center"><img src="docs/app.en.png" width="760" alt="Agent-VScreen home, language, setup, agent connection, settings, app rules and diagnostics"></p>
 <p align="center"><sub>The app: language switch, first-time setup, connecting an agent (this phone / Tailscale, CLI / MCP / HTTP), settings, app rules and diagnostics.</sub></p>
 
-- Version: 1.1.8 (versionCode 10) · [Download APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
+- Version: 1.2.0 (versionCode 11) · [Download APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
 - Package: `com.kilon.agentvscreen`
 - Android 11+ (Android 14+ recommended), arm64
 - Privileges: [Shizuku](https://shizuku.rikka.app/) only, no root
@@ -122,9 +122,28 @@ The app speaks Chinese or English (the **Language** card on the home page: Syste
 
 The token equals control of the phone, so the app never offers a public link.
 
+## What's new in 1.2.0
+
+This version rebuilds the command gate, the reply format and the security model. 1.2.0 passes compilation and unit tests but has not yet run on a real phone: verify it first with [docs/TASKS.md](docs/TASKS.md). The upgrade table from 1.1 is in section 9 of [API.md](API.md).
+
+- **Structured results**: every reply carries `ok`, `code` and `next` (look at the screen / fix the command / ask the user / retry later), plus each step's status, the screen's elements and the notes. A stretch that stops at a step is a failure; no reading text to find out. The new API is `/v2`; `/v1` is unchanged and stays for one more version.
+- **One command table**: option checks, help, MCP tool schemas and the docs are generated from it. MCP has one tool per command besides `vscreen`.
+- **More precise taps**: text that appears several times is listed with coordinates instead of tapping the first; a `#number` whose element moved away is not tapped at its old place; an action that changed nothing is flagged.
+- **Shorter waits**: a page left with only a spinner or blinking cursor counts as settled. Perception is driven by new frames.
+- **One input path**: taps, swipes and keys are injected by the display service; dumpsys parsing and shell `input` are gone.
+- **A token per agent**: look-only / operate / everything, revoked separately, with separate sessions.
+- **Signed requests**: from another device the token never travels, requests cannot be replayed or altered, and replies are verified. The CLI does it by itself.
+- **The user confirms on the phone**: payment, irreversible steps, force-stop, taking an app off the main screen, and apps set to "ask every time". A flag added by the agent no longer counts. A trusted agent can be given 30 minutes without confirmations.
+- **Activity log**: who ran which command, when, with what result. Typed text is recorded as a length only.
+- **Harder to knock over**: connection cap, request size and time limits; a command stops when its caller disconnects; a resent request never runs twice; long work can run `--async` and be collected with `task`; commands queue.
+- **Events are not lost**: kept until the next fetch, re-fetchable, stored on disk; watches resume after an app restart; the event broadcast goes only to an app you name.
+- **A rewritten guide for agents**: built around one loop (look → act → check), with what to do next for each result code; `vscreen guide` is one page.
+
 ## Docs
 
-- [API.md](API.md) (Chinese): the full CLI, MCP and HTTP reference, sessions, watches, the floating window, remote access and known limits.
+- [API.md](API.md) (Chinese): the full CLI, MCP and HTTP reference, sessions, watches, permissions and security, the floating window, remote access, known limits and upgrading from 1.1.
+- [docs/REFERENCE.md](docs/REFERENCE.md): every command option and result code (generated from the source).
+- [docs/TASKS.md](docs/TASKS.md): the fixed task set to run on a real phone before a release.
 
 ## Build from source
 

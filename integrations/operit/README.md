@@ -23,8 +23,9 @@
 | `vscreen_configure` | 保存令牌和地址（Operit 环境变量 `VSCREEN_TOKEN`、`VSCREEN_URL`），并检测连接 |
 | `usage_advice` | 告诉 AI 什么时候用 vscreen、怎么开始、哪些操作要先问用户 |
 
-- 默认地址 `http://127.0.0.1:18765`。Agent-VScreen 在别的手机上时，把 `VSCREEN_URL` 设成它的 Tailscale 地址（见主 README 的“让其它设备连进来”）。
+- 默认地址 `http://127.0.0.1:18765`。
 - 默认会话名是 `operit`。同一块副屏同一时间只属于一个会话，别的 agent 正在用时会返回 `BUSY`。
+- 配合 Agent-VScreen 1.2.0：这个包用的是 `/v1` 接口，1.2.0 里它的行为不变，可以照常用。建议在 Agent-VScreen 的“令牌与权限”里给 Operit 单独建一个令牌。1.2.0 起从其它设备连接要求签名请求，这个包还不支持，所以目前只能连本机的 Agent-VScreen。
 - 令牌等于这台手机的操作权限，不要贴进公开的角色卡、分享的配置或截图。这个包里不含任何令牌。
 
 **打包**：`./build.sh` 生成 `agent-vscreen.toolpkg`（zip：`manifest.json`、`dist/`、`resources/`）。
@@ -50,7 +51,8 @@ A ToolPkg for Operit: once installed, Operit's AI gets a `vscreen` tool that ope
 | `vscreen_configure` | saves the token and address (Operit environment variables `VSCREEN_TOKEN`, `VSCREEN_URL`) and tests the connection |
 | `usage_advice` | tells the AI when to use vscreen, how to start, and what to ask the user first |
 
-- Default address `http://127.0.0.1:18765`. If Agent-VScreen runs on another phone, set `VSCREEN_URL` to its Tailscale address (see "Connecting from other devices" in the main README).
+- Default address `http://127.0.0.1:18765`.
+- With Agent-VScreen 1.2.0: this package uses the `/v1` API, which is unchanged in 1.2.0. Give Operit its own token under "Tokens and permissions". From 1.2.0 a connection from another device must use signed requests, which this package does not support yet, so it only reaches the Agent-VScreen on the same phone.
 - The default session is `operit`. A screen belongs to one session at a time; when another agent is using it you get `BUSY`.
 - The token equals control of this phone: don't paste it into public character cards, shared configs or screenshots. This package contains no token.
 

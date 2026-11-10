@@ -26,8 +26,10 @@ class I18nTest {
     }
 
     @Test fun englishHelpListsTheSameOptionsAsChinese() {
-        for (c in listOf("launch", "act", "note", "events", "title", "done", "keep", "stop", "release", "handoff", "status", "apps", "spots", "zoom", "collect", "fix"))
-            assertEquals(c, opts(VScreenOffloadHandler.HELP_ZH, c), opts(VScreenOffloadHandler.HELP_EN, c))
+        // 1.2: both languages are generated from the one command table, so they list the same options by construction.
+        I18n.choice = I18n.Lang.ZH; val zh = VScreenOffloadHandler.HELP
+        I18n.choice = I18n.Lang.EN; val en = VScreenOffloadHandler.HELP
+        for (c in CommandSpec.commands.map { it.name }) assertEquals(c, opts(zh, c), opts(en, c))
     }
 
     @Test fun englishModeSpeaksEnglish() {

@@ -28,7 +28,7 @@ class V110Test {
     }
 
     private fun el(n: Int, label: String, x: Int, y: Int, editable: Boolean = false) =
-        El(n, label, Rect(x - 20, y - 10, x + 20, y + 10), if (editable) "可输入" else "可点", true, editable)
+        El(n, label, Rect(x - 20, y - 10, x + 20, y + 10), true, clickable = true, editable = editable)
 
     @Test fun nearMissListsCloseWordsAndFields() {
         val els = listOf(el(1, "xbox360播放dvd", 400, 150, editable = true), el(2, "搜索", 900, 150), el(3, "新闻", 100, 600))
@@ -53,6 +53,19 @@ class V110Test {
         val dt = System.currentTimeMillis() - t0
         assertTrue(got.isEmpty())
         assertTrue("waited $dt ms", dt >= 280L)
+    }
+
+    @Test fun eventsAreKeptUntilTheNextTakeAndNumbered() {
+        val ctx: Context = RuntimeEnvironment.getApplication()
+        EventHub.post(ctx, "t-again", "keep", "盯1", "一"); EventHub.post(ctx, "t-again", "keep", "盯2", "二")
+        val first = EventHub.take("t-again", 0L)
+        assertEquals(2, first.size)
+        assertTrue(first[1].optLong("seq") > first[0].optLong("seq"))
+        // The reply got lost: the same batch again.
+        assertEquals(first.map { it.optLong("seq") }, EventHub.take("t-again", 0L, again = true).map { it.optLong("seq") })
+        // The next plain take confirms it.
+        assertTrue(EventHub.take("t-again", 0L).isEmpty())
+        assertTrue(EventHub.take("t-again", 0L, again = true).isEmpty())
     }
 
     @Test fun eventsWaitWakesOnPost() {
