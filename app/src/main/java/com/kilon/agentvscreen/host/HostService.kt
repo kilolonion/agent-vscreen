@@ -129,7 +129,7 @@ class HostService : Service() {
             .setColor(0xFFE5484D.toInt())
             .addAction(0, tr("允许继续", "Allow again"), allow)
             .build()
-        runCatching { nm.notify(STOP_NOTE_ID, n) }
+        com.kilon.agentvscreen.host.quiet("HostService:132") { nm.notify(STOP_NOTE_ID, n) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -158,13 +158,13 @@ class HostService : Service() {
     }
 
     private fun renotify() {
-        runCatching { getSystemService(NotificationManager::class.java)?.notify(NOTE_ID, notification()) }
+        com.kilon.agentvscreen.host.quiet("HostService:161") { getSystemService(NotificationManager::class.java)?.notify(NOTE_ID, notification()) }
     }
 
     override fun onDestroy() {
         watch?.cancel()
         Tailnet.stop()
-        runCatching { getSystemService(NotificationManager::class.java)?.cancel(STOP_NOTE_ID) }
+        com.kilon.agentvscreen.host.quiet("HostService:167") { getSystemService(NotificationManager::class.java)?.cancel(STOP_NOTE_ID) }
         Overlay.detach()
         Presence.stop()
         server?.onChange = null; server?.stop(); server = null

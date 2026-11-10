@@ -70,11 +70,11 @@ fun VScreenAppRules() {
     }
 
     Text(
-        tr("禁止操作：AI 不能在后台打开、读屏或操作这个应用。只读：AI 可以打开、看和滚动，但不能点击、输入或滑动。只在后台副屏里生效，不影响你自己用。", "Blocked: the AI cannot open, read or operate the app in the background. Read-only: the AI can open, look and scroll, but not tap, type or swipe. Applies only to the background screen, not to your own use."),
+        tr("禁止操作：AI 不能在后台打开、读屏或操作这个应用。只读：AI 可以打开、看和滚动，但不能点击、输入或滑动。每次询问：AI 要点击或输入前，手机上先弹确认，你允许后 5 分钟内不再问。只在后台副屏里生效，不影响你自己用。", "Blocked: the AI cannot open, read or operate the app in the background. Read-only: the AI can open, look and scroll, but not tap, type or swipe. Ask every time: before the AI taps or types, the phone asks you; once allowed it does not ask again for 5 minutes. Applies only to the background screen, not to your own use."),
         fontSize = 12.sp, lineHeight = 17.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     if (rules.isEmpty()) {
-        Text(tr("还没有限制：后台可以打开和操作所有应用（付费、删除等按钮仍需你确认）。", "No rules yet: every app can be opened and operated in the background (payment, delete and similar buttons still need your confirmation)."), fontSize = 13.sp)
+        Text(tr("还没有限制：后台可以打开和操作所有应用（付费、删除等按钮会在手机上请你确认）。", "No rules yet: every app can be opened and operated in the background (payment, delete and similar buttons are confirmed by you on the phone)."), fontSize = 13.sp)
     } else {
         rules.entries.sortedBy { labels[it.key] ?: it.key }.forEach { (pkg, rule) ->
             Row(
@@ -91,8 +91,9 @@ fun VScreenAppRules() {
                     )
                 }
                 TextButton(onClick = {
-                    VScreenStore.setRule(pkg, if (rule == VScreenStore.Rule.BLOCK) VScreenStore.Rule.READONLY else VScreenStore.Rule.BLOCK)
-                }) { Text(if (rule == VScreenStore.Rule.BLOCK) tr("改只读", "Make read-only") else tr("改禁止", "Make blocked")) }
+                    val all = VScreenStore.Rule.values()
+                    VScreenStore.setRule(pkg, all[(all.indexOf(rule) + 1) % all.size])
+                }) { Text(tr("换一种", "Change")) }
                 TextButton(onClick = { VScreenStore.setRule(pkg, null) }) { Text(tr("移除", "Remove")) }
             }
         }
@@ -146,6 +147,9 @@ private fun AddRuleDialog(
                     }
                     OutlinedButton(onClick = { onPick(p.second, VScreenStore.Rule.READONLY) }, modifier = Modifier.fillMaxWidth()) {
                         Text(tr("只读（能看和滚动，不能点击输入）", "Read-only (look and scroll, no tapping or typing)"))
+                    }
+                    OutlinedButton(onClick = { onPick(p.second, VScreenStore.Rule.ASK) }, modifier = Modifier.fillMaxWidth()) {
+                        Text(tr("每次询问（操作前在手机上问你）", "Ask every time (asks you on the phone before acting)"))
                     }
                 }
             }

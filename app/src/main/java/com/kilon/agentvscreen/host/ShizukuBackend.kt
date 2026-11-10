@@ -264,22 +264,22 @@ class ShizukuBackend(private val appContext: Context) {
             done
         } catch (t: Throwable) {
             AppLogger.warning(TAG, "Shizuku waitFor failed: type=${t::class.java.name} msg=${t.message}")
-            runCatching { proc.destroy() }
-            runCatching { outThread.join(2000) }
-            runCatching { errThread.join(2000) }
+            com.kilon.agentvscreen.host.quiet("ShizukuBackend:267") { proc.destroy() }
+            com.kilon.agentvscreen.host.quiet("ShizukuBackend:268") { outThread.join(2000) }
+            com.kilon.agentvscreen.host.quiet("ShizukuBackend:269") { errThread.join(2000) }
             return ShizukuManager.ProcessResult(1, out.toString().trimEnd('\n'), (err.toString().trimEnd('\n') + "\nwaitFor failed: ${t.message}").trim())
         }
 
         if (!exited) {
-            runCatching { proc.destroy() }
-            runCatching { outThread.join(2000) }
-            runCatching { errThread.join(2000) }
+            com.kilon.agentvscreen.host.quiet("ShizukuBackend:274") { proc.destroy() }
+            com.kilon.agentvscreen.host.quiet("ShizukuBackend:275") { outThread.join(2000) }
+            com.kilon.agentvscreen.host.quiet("ShizukuBackend:276") { errThread.join(2000) }
             // Linux convention: 124 = command timed out (coreutils `timeout`).
             return ShizukuManager.ProcessResult(124, out.toString().trimEnd('\n'), err.toString().trimEnd('\n'))
         }
 
-        runCatching { outThread.join(2000) }
-        runCatching { errThread.join(2000) }
+        com.kilon.agentvscreen.host.quiet("ShizukuBackend:281") { outThread.join(2000) }
+        com.kilon.agentvscreen.host.quiet("ShizukuBackend:282") { errThread.join(2000) }
         val rc = runCatching { proc.exitValue() }.getOrDefault(-1)
         return ShizukuManager.ProcessResult(rc, out.toString().trimEnd('\n'), err.toString().trimEnd('\n'))
     }

@@ -134,7 +134,7 @@ object VScreenTyping {
         if (!a11y) return TypeFact(method, null, null, null, checked = false)
         Thread.sleep(250)
         val after = focusedEditable(displayId, tappedAt) ?: node
-        runCatching { after?.refresh() }
+        com.kilon.agentvscreen.host.quiet("VScreenTyping:137") { after?.refresh() }
         // A password box gives its length only: what is in it never leaves the phone.
         val now = after?.let { if (it.isPassword) "•".repeat(fieldText(it).length) else fieldText(it) }
         val ab = after?.let { n -> Rect().also { n.getBoundsInScreen(it) } }

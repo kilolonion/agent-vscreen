@@ -101,7 +101,7 @@ class ApiServer(private val ctx: Context) {
             ss.reuseAddress = true
             ss.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 50)
         } catch (e: Exception) {
-            runCatching { ss.close() }
+            com.kilon.agentvscreen.host.quiet("ApiServer:104") { ss.close() }
             bindFailures++
             lastError = tr("端口 $port 被占用：${owner ?: "正在查是谁占着"}，正在自动重试（第 $bindFailures 次）", "Port $port is taken: ${owner ?: "checking by whom"}; retrying automatically (attempt $bindFailures)")
             AppLogger.warning(TAG, "bind $port: ${e.message} — ${owner ?: "?"}")

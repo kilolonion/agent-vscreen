@@ -132,8 +132,7 @@ class MainActivity : ComponentActivity() {
             items.forEach { appendLine("${if (it.ok) "✓" else "✗"} ${it.label}：${it.detail}") }
             appendLine("无障碍自动恢复：${A11yHeal.lastResult ?: "-"}")
             appendLine()
-            appendLine("—— 最近日志 ——")
-            append(AppLogger.tail(300))
+            append(com.kilon.agentvscreen.cmd.Diag.text(this@MainActivity))
         }
     }
 
@@ -162,6 +161,7 @@ class MainActivity : ComponentActivity() {
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            ConsentCards()
             Hero(s, serviceOn) { on ->
                 serviceOn = on; Prefs.setServiceOn(this@MainActivity, on)
                 if (on) HostService.start(this@MainActivity) else { BackgroundOperation.stopAndRelease(tr("用户停止了服务", "The user stopped the service")); HostService.stop(this@MainActivity) }
@@ -231,6 +231,12 @@ class MainActivity : ComponentActivity() {
 
             Connect()
 
+            var tokensOpen by remember { mutableStateOf(false) }
+            Block(tr("令牌与权限", "Tokens and permissions"), onHeader = { tokensOpen = !tokensOpen }, open = tokensOpen) {
+                if (tokensOpen) TokensPanel(ApiConfig.baseUrl) { l, t -> copy(l, t) }
+                else Text(tr("给每个 agent 单独的令牌和权限，开免确认时段，撤销。", "A separate token and permission per agent, no-confirmation periods, revoking."), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
             // ── settings ──
             Block(tr("设置", "Settings")) {
                 Toggle(tr("悬浮窗", "Floating window"), tr("有副屏时在所有应用上方显示", "Shown above all apps while there is a screen"), s.showPreview) { BackgroundOperation.setShowPreview(it); if (it) Overlay.refresh() }
@@ -248,9 +254,14 @@ class MainActivity : ComponentActivity() {
                 Segments(opts.map { tr("${it}分", "$it min") }, opts.indexOf(quiet)) { i -> ApiConfig.quietMinutes = opts[i]; quiet = opts[i] }
             }
             Block(tr("应用限制", "App rules")) { VScreenAppRules() }
+            var auditOpen by remember { mutableStateOf(false) }
+            Block(tr("操作日志", "Activity log"), onHeader = { auditOpen = !auditOpen }, open = auditOpen) {
+                if (auditOpen) { AuditPanel { l, t -> copy(l, t) }; EventTargetRow() }
+                else Text(tr("agent 做过的每条命令：谁、什么时候、结果。", "Every command agents ran: who, when, the result."), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
 
             Diagnostics(items)
-            Text(tr("Agent-VScreen ${BuildConfig.VERSION_NAME} · 副屏能力来自 Minis VScreen", "Agent-VScreen ${BuildConfig.VERSION_NAME} · screen engine from Minis VScreen"), fontSize = 11.sp,
+            Text(tr("Agent-VScreen ${BuildConfig.VERSION_NAME} ", "Agent-VScreen ${BuildConfig.VERSION_NAME}"), fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 12.dp))
         }
     }
@@ -431,6 +442,7 @@ class MainActivity : ComponentActivity() {
                     "Agents on this phone (Termux, Minis, Operit, ...) connect to 127.0.0.1:${ApiConfig.port} directly; nothing to set up."))
             } else {
                 Remote(ts, remoteBase, mode) { mode = it }
+                if (mode != com.kilon.agentvscreen.host.Tailnet.Mode.OFF) RemoteSafety()
             }
 
             SubTitle(tr("2. 接入方式", "2. How it connects"))
@@ -438,10 +450,10 @@ class MainActivity : ComponentActivity() {
             Hint(when (tab) {
                 0 -> tr("带终端的 agent：把“给 agent 的话”发给它。它会装好 vscreen 命令，并把“我能在手机上后台操作应用”记进自己的长期记忆，以后的新对话里也会用。",
                     "Agents with a terminal: send them the message. It installs the vscreen command and has the agent save \"I can operate apps on the phone in the background\" in its long-term memory, so new conversations use it too.")
-                1 -> tr("支持 MCP 的 agent：发给它的话里有 MCP 配置（streamable HTTP，一个工具 vscreen，截图直接附在结果里）和要它记住的能力说明。",
-                    "Agents with MCP: the message has the MCP config (streamable HTTP, one tool vscreen, screenshots attached to results) and the ability note for it to remember.")
-                else -> tr("自己写调用代码的 agent 应用：发给它的话里有地址、令牌和能力说明。返回 JSON（text、data、images、exit、code），完整说明 GET /v1/help。",
-                    "Agent apps that write their own calls: the message has the address, token and ability note. Replies are JSON (text, data, images, exit, code); full reference at GET /v1/help.")
+                1 -> tr("支持 MCP 的 agent：发给它的话里有 MCP 配置（streamable HTTP，每条命令一个工具，截图直接附在结果里）和要它记住的能力说明。",
+                    "Agents with MCP: the message has the MCP config (streamable HTTP, one tool per command, screenshots attached to results) and the ability note for it to remember.")
+                else -> tr("自己写调用代码的 agent 应用：发给它的话里有地址、令牌和能力说明。返回 JSON（ok、code、next、text、images、steps、screen、notes），完整说明 GET /v2/help。",
+                    "Agent apps that write their own calls: the message has the address, token and ability note. Replies are JSON (ok, code, next, text, images, steps, screen, notes); full reference at GET /v2/help.")
             })
             if (where == 1) Hint(
                 if (remoteReady) tr("下面复制的内容用 Tailscale 地址 $remoteBase。", "What you copy below uses the Tailscale address $remoteBase.")

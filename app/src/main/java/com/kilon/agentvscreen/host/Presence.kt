@@ -47,7 +47,7 @@ object Presence {
 
     fun stop() = main.post {
         val v = view ?: return@post
-        runCatching { wm?.removeView(v) }
+        com.kilon.agentvscreen.host.quiet("Presence:50") { wm?.removeView(v) }
         view = null; wm = null; up = false
     }
 }

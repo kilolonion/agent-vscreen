@@ -95,7 +95,7 @@ object Tailnet {
 
     @Synchronized fun stop() {
         wanted = false
-        runCatching { stdin?.apply { write("quit\n"); flush() } }
+        com.kilon.agentvscreen.host.quiet("Tailnet:98") { stdin?.apply { write("quit\n"); flush() } }
         proc?.let { p -> Thread { Thread.sleep(1500); runCatching { p.destroy() } }.apply { isDaemon = true }.start() }
         supervisor?.interrupt(); supervisor = null
         _status.value = Status()
@@ -131,11 +131,11 @@ object Tailnet {
         val old = proc
         stop()
         // Let the old node finish writing its state before it may be deleted.
-        runCatching { old?.waitFor(3, java.util.concurrent.TimeUnit.SECONDS) }
+        com.kilon.agentvscreen.host.quiet("Tailnet:134") { old?.waitFor(3, java.util.concurrent.TimeUnit.SECONDS) }
         ApiConfig.tailnetControlUrl = control
         if (!authKey.isNullOrBlank()) {
             ApiConfig.tailnetAuthKey = authKey.trim()
-            runCatching { stateDir(ctx).deleteRecursively() }
+            com.kilon.agentvscreen.host.quiet("Tailnet:138") { stateDir(ctx).deleteRecursively() }
         }
         sync(ctx)
     }

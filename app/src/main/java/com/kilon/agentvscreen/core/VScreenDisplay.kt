@@ -155,7 +155,7 @@ class VScreenDisplay private constructor(
                 }
             }
             listener = l
-            runCatching { dm.registerDisplayListener(l, pumpHandler ?: Handler(thread.looper)) }
+            com.kilon.agentvscreen.host.quiet("VScreenDisplay:158") { dm.registerDisplayListener(l, pumpHandler ?: Handler(thread.looper)) }
             watchContext = context.applicationContext
         }
         return true
@@ -235,14 +235,14 @@ class VScreenDisplay private constructor(
                 // otherwise the LAST frame of an animation (a list snapping back, a page
                 // sliding in) can be lost and a static screen keeps showing a mid-animation
                 // picture (e.g. two stacked title bars) until something else redraws.
-                runCatching { pending?.close() }
+                com.kilon.agentvscreen.host.quiet("VScreenDisplay:238") { pending?.close() }
                 pending = img
                 h.removeCallbacks(flushPending)
                 h.postDelayed(flushPending, wait)
                 return@setOnImageAvailableListener
             }
             h.removeCallbacks(flushPending)
-            runCatching { pending?.close() }
+            com.kilon.agentvscreen.host.quiet("VScreenDisplay:245") { pending?.close() }
             pending = null
             convert(img)
         }, h)
@@ -279,7 +279,7 @@ class VScreenDisplay private constructor(
         } catch (t: Throwable) {
             AppLogger.warning(TAG, "frame convert failed on display $displayId: ${t.message}")
         } finally {
-            runCatching { img.close() }
+            com.kilon.agentvscreen.host.quiet("VScreenDisplay:282") { img.close() }
         }
     }
 
@@ -400,7 +400,7 @@ class VScreenDisplay private constructor(
         released = true
         listener?.let { l -> runCatching { (watchContext?.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)?.unregisterDisplayListener(l) } }
         listener = null
-        runCatching { reader.setOnImageAvailableListener(null, null) }
+        com.kilon.agentvscreen.host.quiet("VScreenDisplay:403") { reader.setOnImageAvailableListener(null, null) }
         val h = pumpHandler
         h?.removeCallbacks(flushPending)
         if (shellOwned) runCatching { VScreenRemoteDisplay.release(displayId) }
@@ -411,11 +411,11 @@ class VScreenDisplay private constructor(
         val queued = h != null && runCatching {
             h.post {
                 runCatching { pending?.close() }; pending = null
-                runCatching { reader.close() }
+                com.kilon.agentvscreen.host.quiet("VScreenDisplay:414") { reader.close() }
             }
         }.getOrDefault(false)
         if (!queued) { runCatching { pending?.close() }; pending = null; runCatching { reader.close() } }
-        runCatching { thread.quitSafely() }
+        com.kilon.agentvscreen.host.quiet("VScreenDisplay:418") { thread.quitSafely() }
         latestRaw = null
     }
 
@@ -486,7 +486,7 @@ class VScreenDisplay private constructor(
             val vd = attempt(publicFlags)
                 ?: attempt(DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY).also { isPublic = false }
             if (vd == null) {
-                runCatching { reader.close() }
+                com.kilon.agentvscreen.host.quiet("VScreenDisplay:489") { reader.close() }
                 thread.quitSafely()
                 return Result.failure(
                     IllegalStateException(tr("系统拒绝创建虚拟显示屏（ROM 策略或显示屏数量上限）", "The system refused to create the virtual display (ROM policy or display limit)")),

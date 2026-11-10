@@ -62,6 +62,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
             synchronized(lastActivity) { lastActivity.remove(displayId) }
             com.kilon.agentvscreen.core.VScreenPerception.stop(displayId)
             com.kilon.agentvscreen.core.VScreenRecorder.stop(displayId)
+            BackgroundOperation.appContextOrNull()?.let { ShotStore.clearLater(it) }
         }
 
         init { BackgroundOperation.onScreenReleased { forgetDisplay(it) } }

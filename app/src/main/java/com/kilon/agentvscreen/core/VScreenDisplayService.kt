@@ -505,7 +505,7 @@ class VScreenDisplayService : Binder {
         fingerWatch = true
         Thread {
             while (true) {
-                runCatching { Thread.sleep(1_000) }
+                com.kilon.agentvscreen.host.quiet("VScreenDisplayService:508") { Thread.sleep(1_000) }
                 synchronized(fingers) {
                     val now = SystemClock.uptimeMillis()
                     fingers.entries.filter { now - it.value.lastMs > FINGER_MAX_IDLE_MS }.map { it.key }.forEach { liftAll(it) }

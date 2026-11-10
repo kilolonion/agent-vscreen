@@ -43,3 +43,6 @@ internal fun diagText(context: android.content.Context): String = buildString {
 /** The same as JSON (the app's "export diagnostics" button shares the text). */
 internal fun diagJson(context: android.content.Context): JSONObject = JSONObject().put("text", diagText(context))
     .put("swallowed", JSONArray(Swallowed.snapshot().map { JSONObject().put("site", it.first).put("count", it.second.count).put("last", it.second.last) }))
+
+/** For the app's own "copy diagnostics" button. */
+object Diag { fun text(context: android.content.Context): String = diagText(context) }

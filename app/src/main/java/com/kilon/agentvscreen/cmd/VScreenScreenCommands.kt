@@ -52,7 +52,7 @@ private val A11Y_SERVICE = "com.kilon.agentvscreen.host.VScreenAccessibilityServ
 internal fun VScreenOffloadHandler.status(sid: String?, args: OffloadArgs): NativeOffloadResult {
     // After a Minis restart the screen may still live in the Shizuku service: adopt it now.
     if (sid != null && BackgroundOperation.state.value.let { it.enabled && it.displayId == null && !it.needsExplicitReconnect }) {
-        runCatching { BackgroundOperation.acquire(sid, create = false) }
+        com.kilon.agentvscreen.host.quiet("VScreenScreenCommands:55") { BackgroundOperation.acquire(sid, create = false) }
     }
     val t0 = SystemClock.elapsedRealtime()
     // Right after the app starts the system may still be binding the accessibility service: wait for it once
@@ -338,7 +338,7 @@ internal fun VScreenOffloadHandler.capabilities(d: VScreenDisplay?): JSONObject 
     val s = BackgroundOperation.state.value
     val o = JSONObject()
     o.put("screen", when { d == null -> tr("无副屏", "no screen"); d.shellOwned && d.trusted -> tr("Shizuku 服务创建的受信任副屏", "trusted screen created by the Shizuku service"); d.shellOwned -> tr("Shizuku 服务创建（未受信任）", "created by the Shizuku service (untrusted)"); else -> tr("应用自建副屏（受限）", "app's own screen (limited)") })
-    o.put("tap_swipe", if (d?.shellOwned == true) tr("input -d（坐标由工具换算）；拖动/按住/多指走副屏服务注入", "input -d (coordinates converted by the tool); drag / hold / multi-finger injected through the screen service") else "input -d")
+    o.put("tap_swipe", tr("副屏服务注入（触摸事件直接进副屏，不经过 shell 命令）", "injected by the display service (touch events go straight to the screen, no shell command)"))
     o.put("keys", if (d?.ownFocus == true) tr("带 displayId 注入（副屏有独立焦点）", "injected with displayId (the screen has its own focus)") else tr("带 displayId 注入，失败时 input -d", "injected with displayId, input -d as fallback"))
     o.put("drag", if (d?.shellOwned == true) tr("副屏服务 POINTER（drag 多点、按住）", "screen service POINTER (multi-point drag, hold)") else tr("不可用（需要 Shizuku 副屏服务）", "unavailable (needs the Shizuku screen service)"))
     o.put("ocr", VScreenOcr.engineInfo())

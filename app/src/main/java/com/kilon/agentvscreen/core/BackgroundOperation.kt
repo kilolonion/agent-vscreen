@@ -436,7 +436,7 @@ object BackgroundOperation {
         val d = synchronized(lock) { display.also { display = null } } ?: return
         // Close whatever app was left on the screen so it does not hop to the
         // main display when its display disappears.
-        runCatching { VScreenShell.finger(d.displayId, "cancel", 0, -1, -1) }
+        com.kilon.agentvscreen.host.quiet("BackgroundOperation:439") { VScreenShell.finger(d.displayId, "cancel", 0, -1, -1) }
         runCatching { VScreenShell.closeAllOnDisplay(d.displayId) }
             .onSuccess { AppLogger.info(TAG, "release close: ${it.message}") }
         d.release()

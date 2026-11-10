@@ -186,8 +186,8 @@ internal object VScreenShell {
 
     /** Undo [disableDownscale]. */
     fun resetDownscale(pkg: String) {
-        runCatching { run(arrayOf("am", "compat", "reset", "DOWNSCALED", pkg), 8_000L) }
-        runCatching { run(arrayOf("cmd", "game", "reset", pkg), 8_000L) }
+        com.kilon.agentvscreen.host.quiet("VScreenShell:189") { run(arrayOf("am", "compat", "reset", "DOWNSCALED", pkg), 8_000L) }
+        com.kilon.agentvscreen.host.quiet("VScreenShell:190") { run(arrayOf("cmd", "game", "reset", pkg), 8_000L) }
     }
 
     /** Orientation the app's entry activity declares: true = landscape, false = portrait, null = free / unknown. */

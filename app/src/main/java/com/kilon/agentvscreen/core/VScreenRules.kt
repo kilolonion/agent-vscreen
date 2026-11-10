@@ -270,12 +270,12 @@ internal object VScreenRules {
         }
 
         private fun stopSelfSafely() {
-            runCatching { if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION") stopForeground(true) }
+            com.kilon.agentvscreen.host.quiet("VScreenRules:273") { if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION") stopForeground(true) }
             stopSelf()
         }
 
         override fun onDestroy() {
-            runCatching { wake?.takeIf { it.isHeld }?.release() }
+            com.kilon.agentvscreen.host.quiet("VScreenRules:278") { wake?.takeIf { it.isHeld }?.release() }
             wake = null
             super.onDestroy()
         }
@@ -317,7 +317,7 @@ internal object VScreenRules {
                 if (lastStartError != null) {
                     AppLogger.warning(TAG, "keep service not started: $lastStartError")
                     // At least show what is being watched.
-                    runCatching { ctx.getSystemService(NotificationManager::class.java)?.notify(NOTE_ID, notification(ctx, list)) }
+                    com.kilon.agentvscreen.host.quiet("VScreenRules:320") { ctx.getSystemService(NotificationManager::class.java)?.notify(NOTE_ID, notification(ctx, list)) }
                 }
             }
         }

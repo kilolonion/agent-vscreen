@@ -117,6 +117,15 @@ object ShotStore {
         REF + name
     }.getOrNull()
 
+    /** 1.2: screenshots do not outlive the screen they were taken of: cleared (after a short grace, so the last reply's pictures can still be fetched) when the screen is released. */
+    fun clearLater(ctx: Context, graceMs: Long = 120_000L) {
+        val cut = System.currentTimeMillis()
+        Thread({
+            try { Thread.sleep(graceMs) } catch (e: InterruptedException) { return@Thread }
+            runCatching { dir(ctx).listFiles()?.filter { it.name.startsWith("vscreen_") && it.lastModified() <= cut }?.forEach { it.delete() } }
+        }, "vscreen-shots-clear").apply { isDaemon = true }.start()
+    }
+
     fun file(ctx: Context, name: String): File? = if (NAME.matches(name)) File(dir(ctx), name).takeIf { it.isFile } else null
 
     /** Names referenced in [text], in order of first appearance. */
