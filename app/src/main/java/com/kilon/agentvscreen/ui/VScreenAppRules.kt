@@ -74,7 +74,7 @@ fun VScreenAppRules() {
         fontSize = 12.sp, lineHeight = 17.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     if (rules.isEmpty()) {
-        Text(tr("还没有限制：后台可以打开和操作所有应用（付费、删除等按钮会在手机上请你确认）。", "No rules yet: every app can be opened and operated in the background (payment, delete and similar buttons are confirmed by you on the phone)."), fontSize = 13.sp)
+        Text(tr("还没有限制：后台可以打开和操作所有应用（付款会在手机上请你确认）。", "No rules yet: every app can be opened and operated in the background (payment, delete and similar buttons are confirmed by you on the phone)."), fontSize = 13.sp)
     } else {
         rules.entries.sortedBy { labels[it.key] ?: it.key }.forEach { (pkg, rule) ->
             Row(

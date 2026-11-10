@@ -231,19 +231,24 @@ class MainActivity : ComponentActivity() {
 
             Connect()
 
+            // ── permissions: how freely the agent works, per app, per agent ──
             var tokensOpen by remember { mutableStateOf(false) }
-            Block(tr("令牌与权限", "Tokens and permissions"), onHeader = { tokensOpen = !tokensOpen }, open = tokensOpen) {
+            Block(tr("权限", "Permissions")) {
+                SubTitle(tr("agent 能自己做多少", "How much the agent does on its own"))
+                AutonomyPanel()
+                SubTitle(tr("应用限制", "App rules"))
+                VScreenAppRules()
+                Disclosure(tr("令牌（给每个 agent 单独的权限）", "Tokens (separate permissions per agent)"), tokensOpen) { tokensOpen = !tokensOpen }
                 if (tokensOpen) TokensPanel(ApiConfig.baseUrl) { l, t -> copy(l, t) }
-                else Text(tr("给每个 agent 单独的令牌和权限，开免确认时段，撤销。", "A separate token and permission per agent, no-confirmation periods, revoking."), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
-            // ── settings ──
+            // ── settings: the window and how the screen runs ──
             Block(tr("设置", "Settings")) {
-                Toggle(tr("悬浮窗", "Floating window"), tr("有副屏时在所有应用上方显示", "Shown above all apps while there is a screen"), s.showPreview) { BackgroundOperation.setShowPreview(it); if (it) Overlay.refresh() }
-                Toggle(tr("精确文字识别", "Accurate text recognition"), tr("PP-OCR，在本机运行", "PP-OCR, runs on this phone"), s.accurateOcr) { BackgroundOperation.setAccurateOcr(it) }
-                Toggle(tr("后台录制", "Background recording"), tr("【这段时间】里的拼图", "The picture strip in [Meanwhile]"), s.recording) { BackgroundOperation.setRecording(it) }
+                SubTitle(tr("悬浮窗", "Floating window"))
+                Toggle(tr("显示悬浮窗", "Show the floating window"), tr("有副屏时在所有应用上方显示。拖动移动，双指缩放，贴边收起，长按画面 1 秒接管", "Shown above all apps while there is a screen. Drag to move, pinch to resize, push to an edge to fold, hold the picture 1 s to take over"), s.showPreview) { BackgroundOperation.setShowPreview(it); if (it) Overlay.refresh() }
+                SubTitle(tr("副屏", "Background screen"))
                 val idleSave by com.kilon.agentvscreen.core.VScreenStore.idlePowerSave.collectAsState()
-                Toggle(tr("空闲省电", "Idle power saving"), tr("一轮结束 30 秒后暂停副屏渲染，页面保留，下一条命令自动恢复；个别应用恢复时会重新加载，遇到可以关掉", "Pauses rendering 30 s after a turn ends; the page is kept and the next command resumes it. A few apps reload on resume: turn this off if you see that"), idleSave) {
+                Toggle(tr("空闲省电", "Idle power saving"), tr("一轮结束后暂停副屏渲染，页面保留，下一条命令自动恢复；个别应用恢复时会重新加载，遇到可以关掉", "Pauses rendering after a turn ends; the page is kept and the next command resumes it. A few apps reload on resume: turn this off if you see that"), idleSave) {
                     BackgroundOperation.setIdlePowerSave(it)
                 }
                 Text(tr("一轮的长度", "Turn length"), fontWeight = FontWeight.Medium, fontSize = 14.sp)
@@ -252,12 +257,16 @@ class MainActivity : ComponentActivity() {
                 var quiet by remember { mutableIntStateOf(ApiConfig.quietMinutes) }
                 val opts = listOf(1, 3, 5, 10, 30)
                 Segments(opts.map { tr("${it}分", "$it min") }, opts.indexOf(quiet)) { i -> ApiConfig.quietMinutes = opts[i]; quiet = opts[i] }
+                SubTitle(tr("识别和记录", "Reading and recording"))
+                Toggle(tr("精确文字识别", "Accurate text recognition"), tr("PP-OCR，在本机运行", "PP-OCR, runs on this phone"), s.accurateOcr) { BackgroundOperation.setAccurateOcr(it) }
+                Toggle(tr("后台录制", "Background recording"), tr("【这段时间】里的拼图", "The picture strip in [Meanwhile]"), s.recording) { BackgroundOperation.setRecording(it) }
             }
-            Block(tr("应用限制", "App rules")) { VScreenAppRules() }
+
+            // ── what happened ──
             var auditOpen by remember { mutableStateOf(false) }
             Block(tr("操作日志", "Activity log"), onHeader = { auditOpen = !auditOpen }, open = auditOpen) {
                 if (auditOpen) { AuditPanel { l, t -> copy(l, t) }; EventTargetRow() }
-                else Text(tr("agent 做过的每条命令：谁、什么时候、结果。", "Every command agents ran: who, when, the result."), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else Text(tr("agent 做过的每条命令、每次确认：谁、什么时候、结果。", "Every command and confirmation: who, when, the result."), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             Diagnostics(items)

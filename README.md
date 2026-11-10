@@ -27,7 +27,7 @@ Any agent on the phone can use it: agents with a terminal use the `vscreen` CLI,
 <p align="center"><img src="docs/app.en.png" width="760" alt="Agent-VScreen home, language, setup, agent connection, settings, app rules and diagnostics"></p>
 <p align="center"><sub>The app: language switch, first-time setup, connecting an agent (this phone / Tailscale, CLI / MCP / HTTP), settings, app rules and diagnostics.</sub></p>
 
-- Version: 1.2.0 (versionCode 11) · [Download APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
+- Version: 1.2.0-beta2 (versionCode 12, beta) · [Download APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
 - Package: `com.kilon.agentvscreen`
 - Android 11+ (Android 14+ recommended), arm64
 - Privileges: [Shizuku](https://shizuku.rikka.app/) only, no root
@@ -121,6 +121,16 @@ The Tailscale setup sits right under that choice. Once connected, the message fo
 The app speaks Chinese or English (the **Language** card on the home page: System / 中文 / English), and so does everything it tells the agent.
 
 The token equals control of the phone, so the app never offers a public link.
+
+## What's new in 1.2.0-beta2
+
+Changes after the first real-phone regression of 1.2.0. Still a beta.
+
+- **Hands-off by default**: Permissions in the app has two levels. The default, "hands-off", asks you on the phone only for the step that actually spends money (pay, place order, transfer, top up) and for apps you set to "ask every time"; "careful" also asks for irreversible buttons such as delete, steps toward a purchase, force-stop and taking an app off the main screen. The "clear" button next to an input box is no longer treated as irreversible.
+- **A new page layout**: the home page goes Connect → Permissions → Settings → Activity log; permissions live in one place (level, app rules, tokens) and settings are grouped (floating window / background screen / reading and recording).
+- **A smoother floating window**: its picture is scaled to the size shown at 20 frames a second (30 while you control the screen) instead of the agent's full-size frames; moving the window updates its position once per display frame, so it stays under the finger; after taking over, your finger reaches the screen as it moves, so lists follow it. A landscape screen opens almost as wide as the phone, and each orientation keeps its own size.
+- **Look-only tokens can look**: their `act` (no steps or only waits) looks at the screen in use; `stop --force` and `handoff in` need the "everything" scope.
+- **Other fixes**: `type` in web pages no longer reports missing text; typed text is hidden in the log in `until` too; idle connections make room for new requests; `events` keeps its batch when the caller is gone; `done` pauses the screen at once; the CLI keeps at most 40 pictures and clears them after `done`; the MCP `args` description says it is one string.
 
 ## What's new in 1.2.0
 

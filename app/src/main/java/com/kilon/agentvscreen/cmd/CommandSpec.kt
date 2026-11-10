@@ -37,7 +37,15 @@ internal object CommandSpec {
               /** May take long: `--async` returns a task id at once. */
               val long: Boolean = false,
               /** One line for the MCP tool list. */
-              private val sumZh: String = "", private val sumEn: String = "") {
+              private val sumZh: String = "", private val sumEn: String = "",
+              /**
+               * 1.2.0-beta2: what THIS call needs, when it differs from [scope] (act without action steps only looks;
+               * stop --force and handoff in reach beyond the background screen). Null = [scope].
+               */
+              val scopeOf: ((OffloadArgs) -> Scope)? = null,
+              private val scopeNoteZh: String = "", private val scopeNoteEn: String = "") {
+        val scopeNote: String get() = tr(scopeNoteZh, scopeNoteEn)
+        fun scopeFor(args: OffloadArgs): Scope = scopeOf?.invoke(args) ?: scope
         val positional: String get() = tr(posZh, posEn)
         val body: List<String> get() = if (I18n.en) en else zh
         val summary: String get() = tr(sumZh, sumEn).ifEmpty { body.firstOrNull().orEmpty() }
@@ -49,6 +57,14 @@ internal object CommandSpec {
             body.forEach { add("        $it") }
             allOpts.filter { !it.deprecated }.forEach { add("        ${it.usage()}${tr("：", ": ")}${it.text}") }
         }
+    }
+
+    /** An act that only looks: no steps or only waits, and nothing kept or saved. */
+    private fun looksOnly(a: OffloadArgs): Boolean {
+        if (a.get("keep") != null || a.get("save") != null) return false
+        val body = a.positional.joinToString(" ").trim()
+        if (body.isEmpty()) return true
+        return runCatching { Steps.parseAll(body).all { it.kind == "wait" || it.kind == "sleep" } }.getOrDefault(false)
     }
 
     private val ASYNC = Opt("async", Kind.SWITCH, null, null,
@@ -77,7 +93,7 @@ internal object CommandSpec {
                 "一步没达到预期，这段就停在这一步，后面的不做，结果是失败（退出码 1，outcome=missed/refused）：",
                 "  until 到时间没等到；字画面上找不到；同样的字有好几处（AMBIGUOUS，会列出每一处的坐标，改用坐标）；#N 的元素已经不在原位（STALE_ELEMENT）；",
                 "  type 没有获得焦点的输入框、或输入后框里没有你的字。type 前先点输入框，【现在】里它标“可输入 有焦点”。",
-                "付费、不可撤销的按钮，以及用户设为“每次询问”的应用：手机上会弹出确认，用户点了允许才会做（最多等 60 秒；没答复是 CONFIRM_PENDING，告诉用户去手机上允许，再重发）。",
+                "真正付钱的按钮（支付、提交订单、转账）、用户设为“每次询问”的应用（用户选“谨慎”档时还有删除等不可撤销的按钮）：手机上会弹出确认，用户点了允许才会做（最多等 60 秒；没答复是 CONFIRM_PENDING，告诉用户去手机上允许，再重发）。",
                 "例：act \"tap 搜索; type 耳机; key enter until text:综合\"",
                 "    act \"drag 300 900 800 900\" --watch 2s",
                 "    act --stop \"text:到货\" --keep notify --for 2h"),
@@ -93,7 +109,7 @@ internal object CommandSpec {
                 "A step that does not reach what it expects stops the stretch there, skips the rest, and the result is a failure (exit code 1, outcome=missed/refused):",
                 "  until timed out; text not found on the screen; the same text in several places (AMBIGUOUS, every place is listed with its point: use coordinates); the element of #N is no longer where it was (STALE_ELEMENT);",
                 "  type found no focused input box, or your text is not in the box afterwards. Tap the input box before type; in [Now] it is marked \"input focused\".",
-                "Payment and irreversible buttons, and apps the user set to \"ask every time\": the phone asks the user, and the step is done only after the user allows it (waits up to 60 s; no answer is CONFIRM_PENDING: tell the user to allow it on the phone, then send again).",
+                "Buttons that actually spend money (pay, place order, transfer) and apps the user set to \"ask every time\" (in the user's \"careful\" mode also irreversible buttons such as delete): the phone asks the user, and the step is done only after the user allows it (waits up to 60 s; no answer is CONFIRM_PENDING: tell the user to allow it on the phone, then send again).",
                 "e.g. act \"tap Search; type headphones; key enter until text:All\"",
                 "     act \"drag 300 900 800 900\" --watch 2s",
                 "     act --stop \"text:In stock\" --keep notify --for 2h"),
@@ -107,7 +123,9 @@ internal object CommandSpec {
                 Opt("paused", Kind.SWITCH, null, null, "= --bare", "= --bare", deprecated = true),
                 Opt("confirmed", Kind.SWITCH, null, null, "已不起作用：付费/不可撤销由用户在手机上确认", "no longer has any effect: payment / irreversible steps are confirmed by the user on the phone", deprecated = true)),
             long = true, sumZh = "在副屏上做一段步骤（点、滑、输入、等待），返回现在的画面；不带步骤 = 看一眼",
-            sumEn = "run a stretch of steps on the screen (tap, swipe, type, wait) and return the screen now; no steps = look"),
+            sumEn = "run a stretch of steps on the screen (tap, swipe, type, wait) and return the screen now; no steps = look",
+            scopeOf = { a -> if (looksOnly(a)) Scope.LOOK else Scope.OPERATE },
+            scopeNoteZh = "不带步骤、或只有 wait 的 act 只需要 look", scopeNoteEn = "an act with no steps, or only wait steps, needs just look"),
         Cmd("note", "[文字] | before \"<步骤>\" | after \"<步骤>\" | delete <编号|before|after|段名>", "[text] | before \"<steps>\" | after \"<steps>\" | delete <number|before|after|segment>",
             listOf("给当前应用记笔记（不带参数 = 列出笔记、段和前置/收尾步骤）。下次 launch 会列出来，并标明是谁、在应用哪个版本时记的。",
                 "before / after：每段 act 开始前先做 before 的步骤，做完、观察完再做 after 的步骤（--bare 跳过）。",
@@ -142,12 +160,16 @@ internal object CommandSpec {
         Cmd("stop", "[包名]", "[package]",
             listOf("关掉副屏上的应用。"),
             listOf("close the app on the screen."),
-            listOf(Opt("force", Kind.SWITCH, null, null, "结束整个应用（主屏上的也会被结束）：手机上会请用户确认", "stop the whole app (also on the main screen): the phone asks the user to confirm"))),
+            listOf(Opt("force", Kind.SWITCH, null, null, "结束整个应用（主屏上的也会被结束）：手机上会请用户确认", "stop the whole app (also on the main screen): the phone asks the user to confirm")),
+            scopeOf = { a -> if (a.hasFlag("force")) Scope.SYSTEM else Scope.OPERATE },
+            scopeNoteZh = "--force 需要 system", scopeNoteEn = "--force needs system"),
         Cmd("release", "", "", listOf("立即释放副屏。"), listOf("release the screen now.")),
         Cmd("handoff", "in [包名] | out [包名]", "in [package] | out [package]",
             listOf("in：把用户主屏上的应用移到副屏接着做（返回四段；手机上会请用户确认）；out：交还到主屏，需要用户本人操作时用。"),
             listOf("in: move the app from the user's main screen to the background screen and carry on (returns four blocks; the phone asks the user to confirm); out: hand it back to the main screen when the user must act."),
-            listOf(Opt("note", Kind.VALUE, "说明", "text", "out 时给用户的通知里写什么", "what the notification to the user says on out"))),
+            listOf(Opt("note", Kind.VALUE, "说明", "text", "out 时给用户的通知里写什么", "what the notification to the user says on out")),
+            scopeOf = { a -> if (a.positional.firstOrNull()?.lowercase() == "in") Scope.SYSTEM else Scope.OPERATE },
+            scopeNoteZh = "in 需要 system", scopeNoteEn = "in needs system"),
         Cmd("status", "", "",
             listOf("后台操作是否可用、副屏、权限、应用限制、正在盯守的条件、排队中的命令。"),
             listOf("whether background operation works, the screen, permissions, app rules, watches running, commands in the queue."),
@@ -222,7 +244,7 @@ internal object CommandSpec {
             "- 用户点“接管”时动作会等待（最多 15 秒，之后 USER_TAKEOVER）；交还后第一个 act 会先返回现在的画面（REREAD_REQUIRED），看清再继续。\n" +
             "- 用户在悬浮窗点“停止 AI”后，所有操作返回 USER_STOPPED：停下来，把返回里“怎么解除”那句转告用户，不要重试。\n" +
             "- 用户可以把应用设成“禁止操作”（APP_BLOCKED）、“只读”（APP_READ_ONLY）或“每次询问”（手机上确认）。这是用户的决定，不要绕过，也不要换个入口进同一个应用。\n" +
-            "- 付费、不可撤销的步骤，stop --force、fix、handoff in：由用户在手机上确认（或用户事先给这个令牌开了免确认时段）。你自己加任何参数都不能代替用户确认。\n" +
+            "- 付钱的步骤（用户选“谨慎”档时还有不可撤销的步骤、stop --force、handoff in）：由用户在手机上确认（或用户事先给这个令牌开了免确认时段）。你自己加任何参数都不能代替用户确认。\n" +
             "- 涉及隐私（私信、通讯录、相册、余额）的步骤，先问用户，答复后再做。\n" +
             "- 一个副屏同一时间只属于一个会话（请求头 X-VScreen-Session，默认 default）。别的会话在用时返回 BUSY，写明归谁、多久后自动让出。\n" +
             "- --keep 在你不在时替你盯：告诉用户你在盯什么、盯多久、看到后会怎样、怎么停（keep off）。",
@@ -234,7 +256,7 @@ internal object CommandSpec {
             "- While the user has taken over, actions wait (up to 15 s, then USER_TAKEOVER); the first act after the hand-back returns the screen now (REREAD_REQUIRED): look, then carry on.\n" +
             "- After the user taps \"Stop AI\" on the floating window, every action returns USER_STOPPED: stop, pass on the \"how to undo\" line to the user, don't retry.\n" +
             "- The user can set an app to \"blocked\" (APP_BLOCKED), \"read-only\" (APP_READ_ONLY) or \"ask every time\" (confirmed on the phone). That is the user's decision: don't get around it, and don't enter the same app another way.\n" +
-            "- Payment and irreversible steps, stop --force, fix and handoff in are confirmed by the user on the phone (or the user gave this token a no-confirmation period beforehand). No option you add can stand in for the user's confirmation.\n" +
+            "- Steps that spend money (and, in the user's \"careful\" mode, irreversible steps, stop --force and handoff in) are confirmed by the user on the phone (or the user gave this token a no-confirmation period beforehand). No option you add can stand in for the user's confirmation.\n" +
             "- Steps touching privacy (messages, contacts, photos, balances): ask the user first and act after the answer.\n" +
             "- A screen belongs to one session at a time (header X-VScreen-Session, default \"default\"). When another session is using it you get BUSY, with whose it is and when it frees up.\n" +
             "- --keep watches for you while you are away: tell the user what you watch, for how long, what happens when seen, and how to stop it (keep off).")
@@ -294,6 +316,7 @@ internal object CommandSpec {
             val opts = c.allOpts.filter { !it.deprecated }
             if (opts.isNotEmpty()) { append("\n"); opts.forEach { append("- `").append(it.usage()).append("` ").append(it.text).append('\n') } }
             append("\n").append(tr("权限范围", "scope")).append(": `").append(c.scope.key).append("`")
+            if (c.scopeNote.isNotEmpty()) append(tr("（", " (")).append(c.scopeNote).append(tr("）", ")"))
             if (c.screen) append(tr(" · 在副屏队列里执行", " · runs in the screen queue"))
             append("\n\n")
         }
@@ -302,7 +325,9 @@ internal object CommandSpec {
     /** JSON schema of one command's arguments as an MCP tool input: `args` (the positional part) plus one property per option. */
     fun inputSchema(c: Cmd): JSONObject {
         val props = JSONObject()
-        if (c.positional.isNotEmpty()) props.put("args", JSONObject().put("type", "string").put("description", c.positional))
+        if (c.positional.isNotEmpty()) props.put("args", JSONObject().put("type", "string").put("description",
+            tr("一个字符串（不是数组），写法：", "ONE string (not an array), written as: ") + c.positional.trim('[', ']').replace("\"", "") +
+                (if (c.positional.startsWith("[")) tr("。可以不给", ". Optional") else "")))
         for (o in c.allOpts.filter { !it.deprecated }) props.put(o.name.replace('-', '_'), JSONObject()
             .put("type", if (o.kind == Kind.SWITCH) "boolean" else "string").put("description", o.text))
         props.put("session", JSONObject().put("type", "string").put("description", tr("可选：会话名", "optional: session name")))

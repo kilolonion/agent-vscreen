@@ -94,8 +94,8 @@ fun TokensPanel(base: String, copy: (String, String) -> Unit) {
             }
         }
     }
-    Small(tr("免确认：这段时间里这个令牌的付费、不可撤销、强制结束等步骤不再弹确认（仍会记进日志）。只在你盯着它做事时开。",
-        "No confirmations: during this period this token's payment, irreversible, force-stop and similar steps are not asked about (they are still logged). Turn it on only while you are watching."))
+    Small(tr("免确认：这段时间里这个令牌连付款也不再问你（仍会记进日志）。只在你盯着它付款时开。",
+        "No confirmations: during this period this token is not asked even about payments (they are still logged). Turn it on only while you watch it pay."))
     OutlinedButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) { Text(tr("新建令牌", "New token")) }
 
     if (adding) {
@@ -137,6 +137,34 @@ private fun scopeHint(s: String) = when (s) {
     "look" -> tr("能看状态、应用列表、截图分析；不能打开或操作应用", "can read status, the app list and analyse screenshots; cannot open or operate apps")
     "operate" -> tr("能打开和操作应用；不能改系统设置或强制结束应用", "can open and operate apps; cannot change system settings or force-stop apps")
     else -> tr("和主令牌一样", "the same as the main token")
+}
+
+/**
+ * 1.2.0-beta2: how freely the agent works, chosen once by the user. The default lets it run hands-off; the table of
+ * what still asks comes from Consent.asks, so what is shown is what happens.
+ */
+@Composable
+fun AutonomyPanel() {
+    var level by remember { mutableStateOf(ApiConfig.autonomy) }
+    val levels = listOf(
+        "auto" to (tr("放手跑（推荐）", "Hands-off (recommended)") to tr("agent 自己做完整件事，不打扰你。只有真正付钱的那一步（支付、付款、提交订单、转账、充值）会在手机上问你。",
+            "The agent does the whole job without interrupting you. Only the step that actually spends money (pay, place order, transfer, top up) asks you on the phone.")),
+        "careful" to (tr("谨慎", "Careful") to tr("除了付钱，去购买的步骤、删除和卸载这类不可撤销的按钮、强制结束应用、把你正在用的应用接到后台，也都先问你。",
+            "Besides paying, steps toward a purchase, irreversible buttons such as delete or uninstall, force-stopping an app and taking the app you are using to the background also ask you first.")),
+    )
+    levels.forEach { (key, words) ->
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
+            .background(if (level == key) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh)
+            .padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.material3.RadioButton(selected = level == key, onClick = { level = key; ApiConfig.autonomy = key; Audit.security("autonomy", key) })
+            Column(Modifier.weight(1f)) {
+                Text(words.first, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                Small(words.second)
+            }
+        }
+    }
+    Small(tr("两档都会：每一步记进操作日志；你设为“每次询问”的应用一定先问；悬浮窗上随时可以停止或接管。没答复的确认 60 秒后这一步不做，agent 会来找你。",
+        "Either way: every step goes into the activity log; apps you set to \"ask every time\" always ask; you can stop or take over from the floating window at any time. A confirmation left unanswered for 60 s skips that step and the agent comes to you."))
 }
 
 /** Safety of access from other devices: signed requests only, the allowed devices, a self-hosted name suffix. */

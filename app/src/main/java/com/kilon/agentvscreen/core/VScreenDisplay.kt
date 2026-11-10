@@ -218,6 +218,8 @@ class VScreenDisplay private constructor(
     private val flushPending = Runnable {
         val p = pending ?: return@Runnable
         pending = null
+        // The trailing frame is also the picture the viewer must end on.
+        if (previewIntervalMs != Long.MAX_VALUE) drawPreview(p)
         convert(p)
     }
 
@@ -229,6 +231,7 @@ class VScreenDisplay private constructor(
             val img = runCatching { r.acquireLatestImage() }.getOrNull() ?: return@setOnImageAvailableListener
             val now = SystemClock.elapsedRealtime()
             lastFrameAtMs = now
+            if (now - lastPreviewMs >= previewIntervalMs) drawPreview(img)
             val wait = frameInterval - (now - lastConvertMs)
             if (wait > 0 && latest != null) {
                 // Throttled. Keep this frame as the trailing one instead of dropping it:
@@ -260,7 +263,7 @@ class VScreenDisplay private constructor(
             val padded = Bitmap.createBitmap(
                 img.width + rowPadding / pixelStride, img.height, Bitmap.Config.ARGB_8888,
             )
-            padded.copyPixelsFromBuffer(plane.buffer)
+            padded.copyPixelsFromBuffer(plane.buffer.also { it.rewind() })
             val cut = if (padded.width == img.width) padded
             else Bitmap.createBitmap(padded, 0, 0, img.width, img.height).also { padded.recycle() }
             val turn = bufferTurn
@@ -285,6 +288,89 @@ class VScreenDisplay private constructor(
 
     private val frameLock = Any()
     private val frameSignal = Object()
+
+    // ── 1.2.0-beta2: the picture for the user's eyes (floating window, full-screen page) ─────────────
+    //
+    // The agent's frames are full-size copies made at most every 120 ms; the window used to show those, so it moved
+    // at 8 pictures a second and every one was a full-screen texture upload. The viewer now has its own, light path:
+    // while someone is looking, each incoming frame (at the viewer's rate) is copied into a reused scratch bitmap and
+    // drawn, scaled to the size it is shown at, into one of three reused small bitmaps. No allocation per frame, and
+    // the agent's frames and their timing are untouched.
+
+    /** Milliseconds between viewer pictures; Long.MAX_VALUE = nobody is looking. */
+    @Volatile var previewIntervalMs: Long = Long.MAX_VALUE
+        private set
+    @Volatile private var previewLongSide = 0
+    private val previewRing = arrayOfNulls<Bitmap>(3)
+    private var previewAt = 0
+    @Volatile private var previewBitmap: Bitmap? = null
+    @Volatile private var lastPreviewMs = 0L
+    private var scratch: Bitmap? = null
+    private val previewPaint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+    private val _previewVersion = MutableStateFlow(0L)
+    val previewVersion: StateFlow<Long> = _previewVersion.asStateFlow()
+
+    /** A viewer shows the screen [longSidePx] long, and wants a picture every [intervalMs]. */
+    fun setPreview(intervalMs: Long, longSidePx: Int) {
+        val resized = longSidePx != previewLongSide
+        val first = previewIntervalMs == Long.MAX_VALUE
+        previewLongSide = longSidePx
+        previewIntervalMs = intervalMs.coerceAtLeast(16L)
+        // A still screen sends no frames: paint the viewer's picture from the frame we already have.
+        if (resized || first) pumpHandler?.post { latest?.let { paintPreview(it, it.width, it.height, 0) } }
+    }
+
+    fun clearPreview() { previewIntervalMs = Long.MAX_VALUE }
+
+    /** The viewer's picture (scaled to the size it is shown at); null before the first one. Do not recycle it. */
+    fun previewFrame(): Bitmap? = previewBitmap
+
+    /** Pump thread only. */
+    private fun drawPreview(img: android.media.Image) {
+        try {
+            if (released) return
+            val plane = img.planes[0]
+            val rowPx = plane.rowStride / plane.pixelStride
+            var sc = scratch
+            if (sc == null || sc.width != rowPx || sc.height != img.height) {
+                sc?.recycle()
+                sc = Bitmap.createBitmap(rowPx, img.height, Bitmap.Config.ARGB_8888); scratch = sc
+            }
+            val buf = plane.buffer
+            buf.rewind(); sc!!.copyPixelsFromBuffer(buf); buf.rewind()
+            paintPreview(sc, img.width, img.height, bufferTurn)
+        } catch (t: Throwable) {
+            AppLogger.warning(TAG, "preview frame failed on display $displayId: ${t.message}")
+        }
+    }
+
+    /** Pump thread only: [src]'s top-left [sw]×[sh], turned by [turn], scaled to the viewer's size. */
+    private fun paintPreview(src: Bitmap, sw: Int, sh: Int, turn: Int) {
+        val want = previewLongSide
+        if (want <= 0 || sw <= 0 || sh <= 0 || src.isRecycled) return
+        val k = minOf(1f, want.toFloat() / maxOf(sw, sh))
+        val turned = turn % 180 != 0
+        val ow = ((if (turned) sh else sw) * k).toInt().coerceAtLeast(2)
+        val oh = ((if (turned) sw else sh) * k).toInt().coerceAtLeast(2)
+        previewAt = (previewAt + 1) % previewRing.size
+        var b = previewRing[previewAt]
+        if (b == null || b.width != ow || b.height != oh) {
+            b = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888).also { it.setHasAlpha(false) }
+            previewRing[previewAt] = b
+        }
+        val m = android.graphics.Matrix().apply { setScale(ow.toFloat() / (if (turned) sh else sw), oh.toFloat() / (if (turned) sw else sh)) }
+        if (turn != 0) {
+            m.setScale(k, k); m.postRotate(turn.toFloat())
+            val r = android.graphics.RectF(0f, 0f, sw.toFloat(), sh.toFloat()); m.mapRect(r); m.postTranslate(-r.left, -r.top)
+        }
+        val c = android.graphics.Canvas(b!!)
+        c.concat(m)
+        val box = android.graphics.Rect(0, 0, sw, sh)
+        c.drawBitmap(src, box, box, previewPaint)
+        previewBitmap = b
+        lastPreviewMs = SystemClock.elapsedRealtime()
+        _previewVersion.value = _previewVersion.value + 1
+    }
 
     /**
      * 1.2: wait for a frame newer than [afterVersion], at most [timeoutMs]; true when one came. Waiters are woken by
@@ -416,6 +502,7 @@ class VScreenDisplay private constructor(
         }.getOrDefault(false)
         if (!queued) { runCatching { pending?.close() }; pending = null; runCatching { reader.close() } }
         com.kilon.agentvscreen.host.quiet("VScreenDisplay:418") { thread.quitSafely() }
+        previewIntervalMs = Long.MAX_VALUE; previewBitmap = null
         latestRaw = null
     }
 

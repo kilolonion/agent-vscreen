@@ -55,10 +55,13 @@ object Consent {
      * the same key of the same token for [VALID_MS] (an app set to "ask every time" is asked once per few minutes, not
      * once per tap); otherwise an allow is used up by one pass.
      */
-    fun require(ctx: Context, key: String, title: String, detail: String, reusable: Boolean = false) {
+    fun require(ctx: Context, key: String, title: String, detail: String, reusable: Boolean = false, kind: String = "pay") {
         val call = Call.current()
         val token = call?.tokenId ?: "main"; val name = call?.tokenName ?: "main"; val session = call?.session ?: "default"
         if (call?.trusted == true) { Audit.consent(name, session, "$title — $detail", "pre-authorized"); return }
+        if (!asks(kind, runCatching { com.kilon.agentvscreen.api.ApiConfig.autonomy }.getOrDefault("auto"))) {
+            Audit.consent(name, session, "$title — $detail", "automatic"); return
+        }
         val now = System.currentTimeMillis()
         val ask = synchronized(lock) {
             asks.removeAll { now - it.at > VALID_MS && (it.answer == null || now - it.answeredAt > VALID_MS) }
@@ -79,6 +82,17 @@ object Consent {
             null -> throw ActionError("CONFIRM_PENDING", tr("需要用户在手机上确认：$title（$detail）。已在手机上弹出通知，等了 ${WAIT_MS / 1000} 秒没有答复，这一步没有做。告诉用户去手机通知栏或 Agent-VScreen 里点“允许”；${VALID_MS / 60_000} 分钟内允许后，把这条命令原样重发一次",
                 "The user must confirm on the phone: $title ($detail). A notification is showing; no answer within ${WAIT_MS / 1000} s, so this step was not done. Tell the user to tap Allow in the phone's notifications or in Agent-VScreen; once allowed (within ${VALID_MS / 60_000} minutes), send this command again as it is"))
         }
+    }
+
+    /**
+     * 1.2.0-beta2: which kinds of step ask the user at each autonomy level. One table, shown to the user as it is.
+     * Kinds: "pay" (a button that moves money), "app" (an app the user set to ask every time), "spend" (a step toward
+     * buying), "irreversible" (delete, uninstall …), "system" (force-stop, taking an app off the main screen).
+     * The default level lets the agent run hands-off: only money and the user's own per-app rule stop it.
+     */
+    fun asks(kind: String, level: String): Boolean = when (kind) {
+        "pay", "app" -> true
+        else -> level == "careful"
     }
 
     /** The user's tap (notification action or the card in the app). */

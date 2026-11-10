@@ -20,10 +20,16 @@ object Audit {
     private val TYPE = Regex("(?i)(^|[;；\\n])(\\s*)(type\\+?|输入)\\s+((?:(?!\\s+until\\s)[^;；\\n])*)")
 
     /** A command line with what was typed replaced by its length (passwords and messages never reach the log). */
-    fun redact(argv: List<String>): String = argv.joinToString(" ") { a ->
-        val r = TYPE.replace(a) { m -> "${m.groupValues[1]}${m.groupValues[2]}${m.groupValues[3]} <${m.groupValues[4].trim().length} chars>" }
-        if (r.any { it.isWhitespace() }) "\"$r\"" else r
-    }.take(600)
+    fun redact(argv: List<String>): String {
+        // 1.2.0-beta2: what was typed is removed everywhere in the command, not only after `type`: the same words
+        // usually come back in the step's own `until text:…` and in --stop.
+        val typed = argv.flatMap { a -> TYPE.findAll(a).map { it.groupValues[4].trim() } }.filter { it.isNotEmpty() }.distinct().sortedByDescending { it.length }
+        return argv.joinToString(" ") { a ->
+            var r = TYPE.replace(a) { m -> "${m.groupValues[1]}${m.groupValues[2]}${m.groupValues[3]} <${m.groupValues[4].trim().length} chars>" }
+            for (t in typed) r = r.replace(t, "<${t.length} chars>")
+            if (r.any { it.isWhitespace() }) "\"$r\"" else r
+        }.take(600)
+    }
 
     fun command(token: String, peer: String?, session: String, argv: List<String>, code: String, exit: Int, ms: Long, requestId: String? = null) =
         write(JSONObject().put("kind", "command").put("token", token).put("peer", peer ?: JSONObject.NULL).put("session", session)

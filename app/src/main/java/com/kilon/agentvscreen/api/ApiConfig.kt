@@ -87,6 +87,16 @@ object ApiConfig {
         get() = prefs.getBoolean("remote_signed", true)
         set(v) { prefs.edit().putBoolean("remote_signed", v).apply() }
 
+    /**
+     * 1.2.0-beta2: how much the agent may do without asking the user on the phone. "auto" (default): only steps that
+     * move money ask. "careful": steps toward a purchase, irreversible buttons, force-stop and taking an app off the
+     * main screen ask too. An app the user set to "ask every time" always asks.
+     */
+    var autonomy: String
+        get() = prefs.getString("autonomy", "auto").takeIf { it in AUTONOMY } ?: "auto"
+        set(v) { prefs.edit().putString("autonomy", if (v in AUTONOMY) v else "auto").apply() }
+    val AUTONOMY = listOf("auto", "careful")
+
     /** 1.2: the one app that receives event broadcasts (null = none are sent; events are still queued for `events`). */
     var eventTarget: String?
         get() = prefs.getString("event_target", null)?.takeIf { it.isNotBlank() }

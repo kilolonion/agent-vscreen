@@ -32,7 +32,7 @@
 一步没达到预期，这段就停在这一步，后面的不做，结果是失败（退出码 1，outcome=missed/refused）：
       until 到时间没等到；字画面上找不到；同样的字有好几处（AMBIGUOUS，会列出每一处的坐标，改用坐标）；#N 的元素已经不在原位（STALE_ELEMENT）；
       type 没有获得焦点的输入框、或输入后框里没有你的字。type 前先点输入框，【现在】里它标“可输入 有焦点”。
-付费、不可撤销的按钮，以及用户设为“每次询问”的应用：手机上会弹出确认，用户点了允许才会做（最多等 60 秒；没答复是 CONFIRM_PENDING，告诉用户去手机上允许，再重发）。
+真正付钱的按钮（支付、提交订单、转账）、用户设为“每次询问”的应用（用户选“谨慎”档时还有删除等不可撤销的按钮）：手机上会弹出确认，用户点了允许才会做（最多等 60 秒；没答复是 CONFIRM_PENDING，告诉用户去手机上允许，再重发）。
 例：act "tap 搜索; type 耳机; key enter until text:综合"
         act "drag 300 900 800 900" --watch 2s
         act --stop "text:到货" --keep notify --for 2h
@@ -46,7 +46,7 @@
 - `--save <名字>` 把这段步骤存成这个应用的段，以后 use 名字
 - `--async` 不等它做完：马上返回任务号，之后 task <号> 取结果（长操作、怕连接超时时用）
 
-权限范围: `operate` · 在副屏队列里执行
+权限范围: `operate`（不带步骤、或只有 wait 的 act 只需要 look） · 在副屏队列里执行
 
 ### `note [文字] | before "<步骤>" | after "<步骤>" | delete <编号|before|after|段名>`
 
@@ -98,7 +98,7 @@ before / after：每段 act 开始前先做 before 的步骤，做完、观察�
 
 - `--force` 结束整个应用（主屏上的也会被结束）：手机上会请用户确认
 
-权限范围: `operate` · 在副屏队列里执行
+权限范围: `operate`（--force 需要 system） · 在副屏队列里执行
 
 ### `release`
 
@@ -112,7 +112,7 @@ in：把用户主屏上的应用移到副屏接着做（返回四段；手机上
 
 - `--note <说明>` out 时给用户的通知里写什么
 
-权限范围: `operate` · 在副屏队列里执行
+权限范围: `operate`（in 需要 system） · 在副屏队列里执行
 
 ### `status`
 
@@ -272,7 +272,7 @@ conditions: text:<word> | gone:<word> | change[:x1,y1,x2,y2] | still[:region] (n
 A step that does not reach what it expects stops the stretch there, skips the rest, and the result is a failure (exit code 1, outcome=missed/refused):
       until timed out; text not found on the screen; the same text in several places (AMBIGUOUS, every place is listed with its point: use coordinates); the element of #N is no longer where it was (STALE_ELEMENT);
       type found no focused input box, or your text is not in the box afterwards. Tap the input box before type; in [Now] it is marked "input focused".
-Payment and irreversible buttons, and apps the user set to "ask every time": the phone asks the user, and the step is done only after the user allows it (waits up to 60 s; no answer is CONFIRM_PENDING: tell the user to allow it on the phone, then send again).
+Buttons that actually spend money (pay, place order, transfer) and apps the user set to "ask every time" (in the user's "careful" mode also irreversible buttons such as delete): the phone asks the user, and the step is done only after the user allows it (waits up to 60 s; no answer is CONFIRM_PENDING: tell the user to allow it on the phone, then send again).
 e.g. act "tap Search; type headphones; key enter until text:All"
          act "drag 300 900 800 900" --watch 2s
          act --stop "text:In stock" --keep notify --for 2h
@@ -286,7 +286,7 @@ e.g. act "tap Search; type headphones; key enter until text:All"
 - `--save <name>` save these steps as a segment of this app, later: use <name>
 - `--async` do not wait for it: returns a task id at once, fetch the result later with task <id> (for long operations or short connection timeouts)
 
-scope: `operate` · runs in the screen queue
+scope: `operate` (an act with no steps, or only wait steps, needs just look) · runs in the screen queue
 
 ### `note [text] | before "<steps>" | after "<steps>" | delete <number|before|after|segment>`
 
@@ -338,7 +338,7 @@ close the app on the screen.
 
 - `--force` stop the whole app (also on the main screen): the phone asks the user to confirm
 
-scope: `operate` · runs in the screen queue
+scope: `operate` (--force needs system) · runs in the screen queue
 
 ### `release`
 
@@ -352,7 +352,7 @@ in: move the app from the user's main screen to the background screen and carry 
 
 - `--note <text>` what the notification to the user says on out
 
-scope: `operate` · runs in the screen queue
+scope: `operate` (in needs system) · runs in the screen queue
 
 ### `status`
 

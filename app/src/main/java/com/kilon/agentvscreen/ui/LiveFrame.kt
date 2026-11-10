@@ -111,18 +111,29 @@ fun VScreenLiveFrame(sessionId: String, modifier: Modifier = Modifier, interacti
         }
         return
     }
+    var viewSize by remember { mutableStateOf(IntSize.Zero) }
+    // 1.2.0-beta2: the viewer's own pictures, at the size shown and at a rate made for eyes (30 a second while the
+    // user controls the screen, 20 while watching), instead of the agent's full-size frames at 8 a second.
+    val fast = st.takeoverSessionId == sessionId
+    androidx.compose.runtime.DisposableEffect(display, fast, viewSize) {
+        val long = maxOf(viewSize.width, viewSize.height)
+        if (long > 0) display.setPreview(if (fast) 33L else 50L, long)
+        onDispose { }
+    }
+    androidx.compose.runtime.DisposableEffect(display) { onDispose { display.clearPreview() } }
     // Recompose on each new frame while this composable is on screen.
     val version = display.frameVersion.collectAsState().value
-    val frame = remember(display, version) { display.latestFrame() }
-    // A frame that is one flat colour (app gone, page not drawn yet) reads as a broken white box.
-    val blank = remember(frame) { frame != null && !frame.isRecycled && isBlank(frame) }
+    val shown = display.previewVersion.collectAsState().value
+    val frame = remember(display, version, shown) { display.previewFrame() ?: display.latestFrame() }
+    // A frame that is one flat colour (app gone, page not drawn yet) reads as a broken white box. Checked when the
+    // agent's frame changes (8 a second at most), not for every picture shown.
+    val blank = remember(display, version) { display.latestFrame()?.let { !it.isRecycled && isBlank(it) } == true }
     // v40: a blank frame with no app on the screen is the normal idle state, not a capture problem.
     val noApp = androidx.compose.runtime.produceState(false, blank, display) {
         value = blank && kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching { com.kilon.agentvscreen.core.VScreenShell.topActivity(display.displayId) == null }.getOrDefault(false)
         }
     }.value
-    var viewSize by remember { mutableStateOf(IntSize.Zero) }
 
     Box(
         modifier

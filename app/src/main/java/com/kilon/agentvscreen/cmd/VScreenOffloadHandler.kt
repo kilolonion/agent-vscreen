@@ -98,14 +98,18 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         if (sub == null || sub == "--help" || sub == "-h") return NativeOffloadResult(0, helpFor(null) + "\n")
         if (sub == "help") return NativeOffloadResult(0, helpFor(argv.getOrNull(1)) + "\n")
         if (argv.drop(1).contains("--help")) return NativeOffloadResult(0, helpFor(sub) + "\n")
-        val sid = request.sessionId?.takeIf { it.isNotBlank() } ?: DEFAULT_SESSION
+        // 1.2.0-beta2: a look-only token cannot open a screen of its own, so its commands look at the screen that exists
+        // (whoever owns it) instead of meeting NO_SCREEN / BUSY for ever.
+        val sid = (request.sessionId?.takeIf { it.isNotBlank() } ?: DEFAULT_SESSION).let { own ->
+            if (Call.current()?.scopes == setOf("look")) BackgroundOperation.state.value.ownerSessionId ?: own else own
+        }
         takeAdjusted()
         return try {
             val spec = CommandSpec.of(sub) ?: return unknown(sub)
-            allowed(spec)
             val rest = VScreenOptions.normalize(sub, argv.drop(1))
             checkOptions(sub, rest)
             val args = VScreenOptions.args(sub, rest)
+            allowed(spec, spec.scopeFor(args))
             if (spec.long && args.hasFlag("async")) return Tasks.start(this, sid, sub, argv.filter { it != "--async" })
             queued(spec, sid) {
                 BackgroundOperation.refreshStatus()
@@ -123,11 +127,11 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
     }
 
     /** The caller's token must cover what the command does (look ⊂ operate ⊂ system). */
-    private fun allowed(spec: CommandSpec.Cmd) {
+    private fun allowed(spec: CommandSpec.Cmd, need: CommandSpec.Scope) {
         val call = Call.current() ?: return
-        if (spec.scope.key in call.scopes) return
-        throw ActionError("SCOPE_DENIED", tr("这个令牌（${call.tokenName}）的权限不含“${spec.scope.key}”，${spec.name} 没有执行。权限由用户在 Agent-VScreen › 连接 › 令牌 里定，不要换别的办法绕过；需要的话请用户调整",
-            "This token (${call.tokenName}) does not include \"${spec.scope.key}\", so ${spec.name} did not run. The user sets token permissions in Agent-VScreen › Connect › Tokens; don't work around it, ask the user to change it if needed"))
+        if (need.key in call.scopes) return
+        throw ActionError("SCOPE_DENIED", tr("这个令牌（${call.tokenName}）的权限不含“${need.key}”，这条 ${spec.name} 没有执行。权限由用户在 Agent-VScreen › 权限 › 令牌 里定，不要换别的办法绕过；需要的话请用户调整",
+            "This token (${call.tokenName}) does not include \"${need.key}\", so this ${spec.name} did not run. The user sets token permissions in Agent-VScreen › Permissions › Tokens; don't work around it, ask the user to change it if needed"))
     }
 
     /** Run [block] in the screen queue when the command works on the screen. */

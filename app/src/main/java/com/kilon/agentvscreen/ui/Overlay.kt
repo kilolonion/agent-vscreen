@@ -207,7 +207,9 @@ object Overlay {
 
     internal fun clampWidth(w: Float): Float {
         val a = aspect()
-        val max = minOf(screenW() * 0.85f, screenH() * 0.85f * a)
+        // A landscape screen on an upright phone may use almost the whole width: it is short, and anything narrower
+        // makes its text unreadable.
+        val max = minOf(screenW() * (if (a > 1f) 0.97f else 0.85f), screenH() * 0.85f * a)
         return w.coerceIn(dp(120f).coerceAtMost(max), max)
     }
 
@@ -232,8 +234,8 @@ object Overlay {
             }.getOrElse { c.getSystemService(WindowManager::class.java) }
         val o = OverlayOwner().also { owner = it }
         val p = prefs()
-        val defW = if (aspect() > 1f) screenW() * 0.62f else screenW() * 0.34f
-        widthPx.floatValue = clampWidth(p.getFloat("w", defW))
+        shownLandscape = aspect() > 1f
+        widthPx.floatValue = clampWidth(p.getFloat(widthKey(shownLandscape), defaultWidth(shownLandscape)))
         docked.value = p.getBoolean("docked", false)
         dockRight.value = p.getBoolean("dock_right", true)
         val l = WindowManager.LayoutParams(
@@ -264,19 +266,45 @@ object Overlay {
         stopAnim()
         val v = root ?: return
         runCatching { hostWm?.removeView(v) }.onFailure { AppLogger.warning("Overlay", "removeView: ${it.message}") }
+        placeQueued = false
         root = null; hostWm = null; owner?.destroy(); owner = null
         controls.clear()
+    }
+
+    // 1.2.0-beta2: the window's width is remembered per orientation of the background screen. One number for both
+    // meant a landscape screen opened at the width chosen for a portrait one: a strip a third of the screen wide.
+    private var shownLandscape = false
+    private fun widthKey(landscape: Boolean) = if (landscape) "w_land" else "w"
+    private fun defaultWidth(landscape: Boolean) = if (landscape) minOf(screenW(), screenH()) * 0.92f else minOf(screenW(), screenH()) * 0.34f
+
+    /** The background screen changed between portrait and landscape: use that orientation's own width. */
+    internal fun orientationChanged(landscape: Boolean) {
+        if (root == null || landscape == shownLandscape) return
+        prefs().edit().putFloat(widthKey(shownLandscape), widthPx.floatValue).apply()
+        shownLandscape = landscape
+        widthPx.floatValue = clampWidth(prefs().getFloat(widthKey(landscape), defaultWidth(landscape)))
+        root?.post { if (docked.value) dock(dockRight.value) else settle() }
+    }
+
+    // 1.2.0-beta2: moving the window is one call to the window manager per display frame, with the newest position.
+    // Before, every touch sample (120–240 a second) made that call and waited for it, so the main thread fell behind
+    // the finger and the window trailed it.
+    private var placeQueued = false
+    private val applyPlace = Runnable {
+        placeQueued = false
+        val v = root ?: return@Runnable; val l = lp ?: return@Runnable
+        runCatching { hostWm?.updateViewLayout(v, l) }
     }
 
     internal fun place(x: Int, y: Int) {
         val v = root ?: return; val l = lp ?: return
         l.x = x; l.y = y.coerceIn(if (docked.value) 0 else -(winH() * 0.6f).toInt(), screenH() - dp(48f).toInt())
-        runCatching { hostWm?.updateViewLayout(v, l) }
+        if (!placeQueued) { placeQueued = true; v.postOnAnimation(applyPlace) }
     }
 
     internal fun save() {
         val l = lp ?: return
-        prefs().edit().putFloat("w", widthPx.floatValue).putInt("x", l.x).putInt("y", l.y)
+        prefs().edit().putFloat(widthKey(shownLandscape), widthPx.floatValue).putInt("x", l.x).putInt("y", l.y)
             .putBoolean("docked", docked.value).putBoolean("dock_right", dockRight.value).apply()
     }
 
@@ -504,7 +532,14 @@ internal fun pictureToScreen(lx: Float, ly: Float, frame: RectF): Pair<Int, Int>
  */
 @SuppressLint("ViewConstructor")
 private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
-    private enum class Claim { NONE, MOVE, PINCH, SWIPE, HELD }
+    private enum class Claim { NONE, MOVE, PINCH, LIVE, HELD }
+
+    /** A point of the window as a point of the background screen (kept inside the picture). */
+    private fun onScreen(x: Float, y: Float): Pair<Int, Int>? {
+        val f = Overlay.frameRect
+        if (f.width() <= 1f || f.height() <= 1f) return null
+        return pictureToScreen(x.coerceIn(f.left, f.right - 1), y.coerceIn(f.top, f.bottom - 1), f)
+    }
     private val slop = ViewConfiguration.get(ctx).scaledTouchSlop.toFloat()
     private val main = Handler(Looper.getMainLooper())
     private var claim = Claim.NONE
@@ -585,6 +620,13 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
                 onPill = !docked && Overlay.pillRect.contains(ev.x, ev.y)
                 childGotDown = false
                 if (onControl) { childGotDown = true; super.dispatchTouchEvent(ev) }
+                else if (!docked && takenOver() && !onPill && Overlay.frameRect.contains(ev.x, ev.y)) {
+                    // 1.2.0-beta2: while the user controls the screen, the finger on the picture IS a finger on the
+                    // screen, from the moment it lands (see UserTouch). Nothing is replayed after the fact.
+                    val owner = BackgroundOperation.state.value.ownerSessionId
+                    val p = onScreen(ev.x, ev.y)
+                    if (owner != null && p != null && com.kilon.agentvscreen.core.UserTouch.down(owner, p.first, p.second)) claim = Claim.LIVE
+                }
                 else if (!docked && !takenOver() && Overlay.frameRect.contains(ev.x, ev.y)) {
                     Overlay.holdAt.value = downLocal
                     main.postDelayed(holdTick, 150L)
@@ -594,6 +636,7 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
             MotionEvent.ACTION_POINTER_DOWN -> {
                 if (!docked && ev.pointerCount == 2 && claim != Claim.HELD) {
                     stopHold(); cancelChildren(ev)
+                    if (claim == Claim.LIVE) com.kilon.agentvscreen.core.UserTouch.cancel()
                     claim = Claim.PINCH
                     pinchDist = dist(ev).coerceAtLeast(1f)
                     pinchW = Overlay.widthPx.floatValue
@@ -606,6 +649,7 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
                 val raw = Offset(ev.rawX, ev.rawY)
                 lastLocal = Offset(ev.x, ev.y)
                 when (claim) {
+                    Claim.LIVE -> onScreen(ev.x, ev.y)?.let { com.kilon.agentvscreen.core.UserTouch.move(it.first, it.second) }
                     Claim.PINCH -> if (ev.pointerCount >= 2) {
                         val nw = Overlay.clampWidth(pinchW * dist(ev) / pinchDist)
                         val k = nw / pinchW
@@ -637,7 +681,7 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
                     }
                     Claim.NONE -> if (hypot(raw.x - downRaw.x, raw.y - downRaw.y) > slop) {
                         stopHold(); cancelChildren(ev)
-                        claim = if (!docked && takenOver() && !onControl && !onPill && Overlay.frameRect.contains(downLocal.x, downLocal.y)) Claim.SWIPE else Claim.MOVE
+                        claim = Claim.MOVE
                         if (claim == Claim.MOVE && docked) winX = Overlay.lp?.x ?: 0
                     } else if (onControl) super.dispatchTouchEvent(ev)
                     else -> {}
@@ -661,24 +705,11 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
                         Overlay.resetShrink()
                         if (v != null && hypot(v.first, v.second) > flingMin) Overlay.fling(v.first, v.second, ev.rawY) else Overlay.settle(ev.rawY)
                     }
-                    Claim.SWIPE -> {
-                        val a = pictureToScreen(downLocal.x, downLocal.y, Overlay.frameRect)
-                        val b = pictureToScreen(ev.x.coerceIn(Overlay.frameRect.left, Overlay.frameRect.right - 1), ev.y.coerceIn(Overlay.frameRect.top, Overlay.frameRect.bottom - 1), Overlay.frameRect)
-                        val owner = BackgroundOperation.state.value.ownerSessionId
-                        if (a != null && b != null && owner != null) BackgroundOperation.userSwipe(owner, a.first, a.second, b.first, b.second, ms.toInt().coerceIn(80, 1500))
-                    }
+                    Claim.LIVE -> { val p = onScreen(ev.x, ev.y); com.kilon.agentvscreen.core.UserTouch.up(p?.first ?: -1, p?.second ?: -1) }
                     Claim.HELD -> {}
                     Claim.NONE -> when {
                         onControl -> super.dispatchTouchEvent(ev)
                         docked -> Overlay.undock()
-                        takenOver() && !onPill -> {
-                            val p = pictureToScreen(downLocal.x, downLocal.y, Overlay.frameRect)
-                            val owner = BackgroundOperation.state.value.ownerSessionId
-                            if (p != null && owner != null) {
-                                if (ms >= 450L) vscreenUserInput(owner) { VScreenShell.longPress(it, p.first, p.second, ms.toInt().coerceAtMost(2000)) }
-                                else BackgroundOperation.userTap(owner, p.first, p.second)
-                            }
-                        }
                         else -> Overlay.hintAt.longValue = SystemClock.uptimeMillis()
                     }
                 }
@@ -687,6 +718,7 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
             }
             MotionEvent.ACTION_CANCEL -> {
                 stopHold(); cancelChildren(ev)
+                if (claim == Claim.LIVE) com.kilon.agentvscreen.core.UserTouch.cancel()
                 if (claim == Claim.MOVE) {
                     if (Overlay.docked.value) Overlay.lp?.let { Overlay.dock(Overlay.dockRight.value, it.y) } else { Overlay.resetShrink(); Overlay.settle() }
                 }
@@ -723,6 +755,8 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
     val mode = modeOf(s)
     if (Overlay.docked.value) { DockTab(mode, Overlay.dockRight.value); return }
     val density = LocalDensity.current
+    val landscape = Overlay.aspect() > 1f
+    LaunchedEffect(landscape) { Overlay.orientationChanged(landscape) }
     val w = with(density) { Overlay.widthPx.floatValue.toDp() }
     val h = w / Overlay.aspect()
     val k = (w.value / 200f).coerceIn(0.75f, 1.15f)

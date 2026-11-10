@@ -13,6 +13,7 @@
 #   VSCREEN_SESSION  who owns the screen (default "default"; one session at a time)
 #   VSCREEN_SHOT_DIR where pictures go (default $TMPDIR/vscreen-shots or /tmp/vscreen-shots)
 #   VSCREEN_SHOTS    "none" = do not download pictures (the text keeps their URLs)
+#   VSCREEN_SHOT_KEEP how many downloaded pictures to keep (default 40; all are removed after done / release)
 #   VSCREEN_NO_UPDATE  set = this script never replaces itself when the app is updated
 
 CLI_VERSION="@@VERSION@@"
@@ -197,5 +198,13 @@ if [ -n "$imgs" ] && [ "$VSCREEN_SHOTS" != "none" ]; then
   IFS=$old_ifs
 fi
 mkdir -p "$SHOT_DIR" 2>/dev/null && cp "$tmp/b" "$SHOT_DIR/last.txt" 2>/dev/null
+# Pictures are kept for the recent commands only: at most $VSCREEN_SHOT_KEEP (default 40) files, and none after the
+# turn ends (done / release). They used to pile up without limit in the agent's cache.
+case "$1" in
+  done|release) rm -f "$SHOT_DIR"/vscreen_*.jpg 2>/dev/null ;;
+  *) keep=${VSCREEN_SHOT_KEEP:-40}
+     # shellcheck disable=SC2012
+     ls -1t "$SHOT_DIR"/vscreen_*.jpg 2>/dev/null | tail -n +"$((keep + 1))" | while IFS= read -r f; do rm -f "$f"; done ;;
+esac
 cat "$tmp/b"
 exit "${exitc:-0}"

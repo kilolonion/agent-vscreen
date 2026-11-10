@@ -190,7 +190,7 @@ HTTP / MCP 的回复里同样的内容是结构化的：ok、code、next、steps
 - 稍后重试（retry_later）：BUSY、QUEUE_TIMEOUT、SERVER_BUSY、RATE_LIMITED。
 
 ### 五、这些事由用户决定
-- 付费、下单、发送、删除等不可撤销的按钮，以及用户设为“每次询问”的应用：你照常发步骤，手机上会弹出确认，用户点了“允许”才会执行。你加任何参数都不能代替用户。等不到（CONFIRM_PENDING）就告诉用户去手机上点，然后重发。
+- 有些步骤要用户在手机上点“允许”才会执行：真正付钱的按钮（支付、提交订单、转账、充值）和用户设为“每次询问”的应用；用户选了“谨慎”档时，删除这类不可撤销的按钮、去购买的步骤、stop --force、handoff in 也要。你照常发步骤，手机会问用户。你加任何参数都不能代替用户。等不到（CONFIRM_PENDING）就告诉用户去手机上点，然后重发。
 - 涉及隐私的内容（私信、通讯录、相册、余额），先问用户再看。
 - 需要用户本人做的一步（密码、验证码、人脸）：`vscreen handoff out` 把应用交到用户主屏，告诉用户做什么。
 
@@ -234,7 +234,7 @@ Over HTTP / MCP the same content is structured: ok, code, next, steps[], screen.
 - Retry later (retry_later): BUSY, QUEUE_TIMEOUT, SERVER_BUSY, RATE_LIMITED.
 
 ### 5. What the user decides
-- Buttons that pay, order, send, delete or otherwise can't be undone, and apps the user set to "ask every time": send the step as usual; the phone asks the user, and it runs only after they tap Allow. No option you add can stand in for the user. If no answer comes (CONFIRM_PENDING), tell the user to tap it on the phone, then send the step again.
+- Some steps run only after the user taps Allow on the phone: buttons that actually spend money (pay, place order, transfer, top up) and apps the user set to "ask every time"; when the user chose "careful", also irreversible buttons such as delete, steps toward a purchase, stop --force and handoff in. Send the step as usual; the phone asks the user. No option you add can stand in for the user. If no answer comes (CONFIRM_PENDING), tell the user to tap it on the phone, then send the step again.
 - Private content (messages, contacts, photos, balances): ask the user before looking.
 - A step only the user can do (password, code, face): `vscreen handoff out` puts the app on the user's screen; tell them what to do.
 

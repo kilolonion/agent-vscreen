@@ -160,6 +160,10 @@ class FullscreenActivity : ComponentActivity() {
                             awaitEachGesture {
                                 val down = awaitFirstDown()
                                 val t0 = SystemClock.uptimeMillis()
+                                // 1.2.0-beta2: while the user controls the screen the finger is sent as it moves
+                                // (UserTouch), not replayed as one swipe after it lifts.
+                                val live = takenOver && map(down.position, size.width.toFloat(), size.height.toFloat())
+                                    ?.let { com.kilon.agentvscreen.core.UserTouch.down(session, it.first, it.second) } == true
                                 var end = down.position
                                 var moved = false
                                 var held = false
@@ -177,20 +181,17 @@ class FullscreenActivity : ComponentActivity() {
                                     if (ev == null) continue
                                     val ch = ev.changes.firstOrNull() ?: break
                                     end = ch.position
+                                    if (live && ch.pressed) map(end, size.width.toFloat(), size.height.toFloat())?.let { com.kilon.agentvscreen.core.UserTouch.move(it.first, it.second) }
                                     if (hypot(end.x - down.position.x, end.y - down.position.y) > viewConfiguration.touchSlop) { moved = true; hold = 0f }
                                     if (takenOver) ch.consume()
                                     if (!ch.pressed) break
                                 }
                                 hold = 0f
                                 val ms = SystemClock.uptimeMillis() - t0
-                                if (takenOver) {
-                                    val a = map(down.position, size.width.toFloat(), size.height.toFloat())
+                                if (live) {
                                     val b = map(end, size.width.toFloat(), size.height.toFloat())
-                                    if (a != null && b != null) when {
-                                        moved -> BackgroundOperation.userSwipe(session, a.first, a.second, b.first, b.second, ms.toInt().coerceIn(80, 1500))
-                                        ms >= 450L -> vscreenUserInput(session) { VScreenShell.longPress(it, a.first, a.second, ms.toInt().coerceAtMost(2000)) }
-                                        else -> BackgroundOperation.userTap(session, a.first, a.second)
-                                    }
+                                    com.kilon.agentvscreen.core.UserTouch.up(b?.first ?: -1, b?.second ?: -1)
+                                } else if (takenOver) {
                                 } else if (!held && !moved) hintAt = SystemClock.uptimeMillis()
                             }
                         }) {

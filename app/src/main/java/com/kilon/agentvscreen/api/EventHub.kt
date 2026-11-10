@@ -78,12 +78,28 @@ object EventHub {
     fun take(session: String, waitMs: Long, again: Boolean = false): List<JSONObject> = lock.withLock {
         if (again) return@withLock handed[session].orEmpty()
         if (handed.remove(session) != null) persist()
+        // 1.2.0-beta2: wait in short slices and look whether the caller is still there. A waiter whose connection was
+        // gone used to stay until its time ran out and then took the batch that arrived, to nowhere.
+        val call = com.kilon.agentvscreen.cmd.Call.current()
         var left = TimeUnit.MILLISECONDS.toNanos(waitMs.coerceIn(0, 120_000))
-        while ((queues[session]?.isEmpty() != false) && left > 0) left = arrived.awaitNanos(left)
+        while ((queues[session]?.isEmpty() != false) && left > 0 && call?.cancelled != true) {
+            val slice = minOf(left, TimeUnit.MILLISECONDS.toNanos(500))
+            val rest = arrived.awaitNanos(slice)
+            left -= slice - rest.coerceAtLeast(0)
+        }
+        if (call?.cancelled == true) return@withLock emptyList()
         val q = queues[session] ?: return@withLock emptyList()
         val out = q.toList(); q.clear()
         if (out.isNotEmpty()) { handed[session] = out; persist() }
         out
+    }
+
+    /** The reply carrying the last batch could not be written: the batch goes back to the front of the queue. */
+    fun undelivered(session: String) = lock.withLock {
+        val h = handed.remove(session) ?: return@withLock
+        val q = queues.getOrPut(session) { ArrayDeque() }
+        h.asReversed().forEach { q.addFirst(it) }
+        persist(); arrived.signalAll()
     }
 
     fun pending(session: String): Int = lock.withLock { queues[session]?.size ?: 0 }

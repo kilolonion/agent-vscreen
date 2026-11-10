@@ -58,6 +58,10 @@ class ApiServer(private val ctx: Context) {
     private val pool = ThreadPoolExecutor(4, MAX_CONN, 30, TimeUnit.SECONDS, SynchronousQueue()) { r -> Thread(r, "vscreen-http").apply { isDaemon = true } }
     /** Connections turned away because every worker was busy. */
     @Volatile var refused = 0L; private set
+    /** Silent connections closed to make room for a new one. */
+    @Volatile var evicted = 0L; private set
+    /** Connections whose request has not fully arrived yet, oldest first. */
+    private val reading = java.util.LinkedHashMap<Socket, Long>()
     internal val commandHandler: VScreenOffloadHandler get() = handler
     @Volatile private var server: ServerSocket? = null
 
@@ -190,7 +194,23 @@ class ApiServer(private val ctx: Context) {
             val s = try { ss.accept() } catch (e: SocketException) { break } catch (e: Exception) { continue }
             // 1.2: a bounded pool. When every worker is taken the connection is told so at once (503) instead of
             // one more thread being made for it: a flood of connections can no longer exhaust the app.
-            try { pool.execute { serve(s) } } catch (e: RejectedExecutionException) {
+            // 1.2.0-beta2: a worker waiting for a request that has not come is not doing anything. When every worker
+            // is taken, the connection that has been silent longest is closed and the new one gets its place, so
+            // idle connections cannot keep real commands out.
+            var placed = try { pool.execute { serve(s) }; true } catch (e: RejectedExecutionException) { false }
+            if (!placed) {
+                val victim = synchronized(reading) { reading.keys.firstOrNull()?.also { reading.remove(it) } }
+                if (victim != null) {
+                    quiet("http-evict") { victim.close() }
+                    evicted++
+                    for (i in 0 until 40) {
+                        placed = try { pool.execute { serve(s) }; true } catch (e: RejectedExecutionException) { false }
+                        if (placed) break
+                        try { Thread.sleep(5) } catch (_: InterruptedException) { break }
+                    }
+                }
+            }
+            if (!placed) {
                 refused++
                 quiet("http-busy") { s.soTimeout = 500; write(s.getOutputStream(), Resp.err(503, "SERVER_BUSY", tr("同时进来的连接太多（上限 $MAX_CONN），这个请求没有处理：稍后重试", "Too many connections at once (limit $MAX_CONN); this request was not handled: retry shortly"))) }
                 quiet("http-busy-close") { s.close() }
@@ -262,8 +282,10 @@ class ApiServer(private val ctx: Context) {
                 sock.soTimeout = 5_000
                 val inp = BufferedInputStream(sock.getInputStream())
                 val out = sock.getOutputStream()
+                synchronized(reading) { reading[sock] = System.currentTimeMillis() }
                 val req = try { read(inp) } catch (e: HttpError) { write(out, Resp.err(e.status, e.code, e.message ?: e.code)); return }
-                    catch (e: java.net.SocketTimeoutException) { quiet("http-408") { write(out, Resp.err(408, "REQUEST_TIMEOUT", "the request did not arrive in time")) }; return } ?: return
+                    catch (e: java.net.SocketTimeoutException) { quiet("http-408") { write(out, Resp.err(408, "REQUEST_TIMEOUT", "the request did not arrive in time")) }; return }
+                    finally { synchronized(reading) { reading.remove(sock) } } ?: return
                 req.peer = sock.inetAddress
                 req.sock = sock
                 sock.soTimeout = 0 // a command (act --watch, events --wait) may take minutes

@@ -269,9 +269,19 @@ internal object VScreenGame {
     /** Button words for steps that cannot be taken back. */
     val IRREVERSIBLE = Regex("永久删除|彻底删除|删除|清空|注销|解绑|转账|卸载|恢复出厂|取消订单|申请退款|撤销授权|" +
         "delete|erase|wipe|transfer|unsubscribe|factory reset|remove account", RegexOption.IGNORE_CASE)
-    /** "spend" / "irreversible" for a button label, null for an ordinary one. */
-    fun commitKind(label: String): String? = when {
+    /** 1.2.0-beta2: the words on the button that actually moves money (the last step, not the way to it). */
+    val PAY = Regex("支付|付款|转账|充值|提交订单|确认购买|确认兑换|打赏|赞赏|捐赠|" +
+        "\\bpay\\b|pay now|place order|confirm purchase|send money|transfer|donate", RegexOption.IGNORE_CASE)
+    /** A bare "clear" word: it empties an input box when one is next to it, and is destructive only elsewhere. */
+    private val BARE_CLEAR = Regex("^\\s*(清空|清除|clear)\\s*$", RegexOption.IGNORE_CASE)
+    /**
+     * "pay" (moves money) / "spend" (a step toward buying) / "irreversible" for a button label, null for an ordinary
+     * one. [besideInput]: the button sits on the row of an input box, where a bare "clear" only empties the box.
+     */
+    fun commitKind(label: String, besideInput: Boolean = false): String? = when {
+        PAY.containsMatchIn(label) -> "pay"
         SPEND.containsMatchIn(label) -> "spend"
+        besideInput && BARE_CLEAR.matches(label) -> null
         IRREVERSIBLE.containsMatchIn(label) -> "irreversible"
         else -> null
     }

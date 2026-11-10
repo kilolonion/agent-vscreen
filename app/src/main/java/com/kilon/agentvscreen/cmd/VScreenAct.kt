@@ -500,15 +500,18 @@ internal fun nearMiss(els: List<El>, want: String): String {
  * 1.2: a press on a money / irreversible button is confirmed by the user on the phone (Consent), not by a flag the
  * agent adds itself. The button's words and the app are shown to the user.
  */
-private fun VScreenOffloadHandler.payGuard(d: VScreenDisplay, label: String?, x: Int, y: Int) {
+private fun VScreenOffloadHandler.payGuard(sid: String, d: VScreenDisplay, label: String?, x: Int, y: Int) {
     val l = label ?: return
-    val kind = VScreenGame.commitKind(l) ?: return
+    // A button on the row of an input box (its "clear" ×) acts on the box, not on the user's data.
+    val besideInput = synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] }?.list
+        ?.any { it.editable && y in it.box.top..it.box.bottom } == true
+    val kind = VScreenGame.commitKind(l, besideInput) ?: return
     val pkg = runCatching { VScreenShell.topPackage(d.displayId) }.getOrNull() ?: "?"
     val app = VScreenKnowledge.label(pkg) ?: pkg
     try {
         com.kilon.agentvscreen.host.Consent.require(context, "commit:$pkg:${VScreenOcr.norm(l).take(40)}",
-            if (kind == "spend") tr("点付费/购买按钮“${l.take(20)}”", "tap the payment / purchase button \"${l.take(20)}\"") else tr("点不可撤销的按钮“${l.take(20)}”", "tap the irreversible button \"${l.take(20)}\""),
-            tr("在 $app 里点 ($x,$y) 的“${l.take(30)}”", "tap \"${l.take(30)}\" at ($x,$y) in $app"))
+            if (kind != "irreversible") tr("点付费/购买按钮“${l.take(20)}”", "tap the payment / purchase button \"${l.take(20)}\"") else tr("点不可撤销的按钮“${l.take(20)}”", "tap the irreversible button \"${l.take(20)}\""),
+            tr("在 $app 里点 ($x,$y) 的“${l.take(30)}”", "tap \"${l.take(30)}\" at ($x,$y) in $app"), kind = kind)
     } catch (e: ActionError) { throw StepRefused(e.code, e.message ?: e.code) }
 }
 
@@ -523,7 +526,7 @@ private fun VScreenOffloadHandler.appRule(d: VScreenDisplay, step: Step) {
     if (rule == VScreenStore.Rule.READONLY && step.kind !in setOf("scroll", "key")) throw StepRefused("APP_READ_ONLY", tr("副屏上是 $pkg，用户设为只读：能看、滚动、返回，不能点击/输入/滑动。$hint", "The screen shows $pkg, which the user set to read-only: you can look, scroll and go back, but not tap / type / swipe. $hint"))
     if (rule == VScreenStore.Rule.ASK && step.kind !in setOf("scroll", "key")) {
         val app = VScreenKnowledge.label(pkg) ?: pkg
-        try { com.kilon.agentvscreen.host.Consent.require(context, "app:$pkg", tr("在 $app 里操作", "act in $app"), tr("这一段从“${step.raw.take(40)}”开始；允许后 5 分钟内不再问", "this stretch starts with \"${step.raw.take(40)}\"; once allowed you are not asked again for 5 minutes"), reusable = true) }
+        try { com.kilon.agentvscreen.host.Consent.require(context, "app:$pkg", tr("在 $app 里操作", "act in $app"), tr("这一段从“${step.raw.take(40)}”开始；允许后 5 分钟内不再问", "this stretch starts with \"${step.raw.take(40)}\"; once allowed you are not asked again for 5 minutes"), reusable = true, kind = "app") }
         catch (e: ActionError) { throw StepRefused(e.code, e.message ?: e.code) }
     }
 }
@@ -552,14 +555,14 @@ private fun VScreenOffloadHandler.doAction(sid: String, d: VScreenDisplay, step:
         when (step.kind) {
             "tap" -> {
                 val t = target(sid, dd, step.target!!, ctx)
-                payGuard(dd, t.label, t.x, t.y)
+                payGuard(sid, dd, t.label, t.x, t.y)
                 ctx.focusBefore = com.kilon.agentvscreen.core.VScreenTyping.focusedFieldKey(dd.displayId)
                 okOr(VScreenShell.tap(dd.displayId, t.x, t.y)); pts += intArrayOf(t.x, t.y); ctx.point = t.x to t.y
                 tr("点了 (${t.x},${t.y})", "tapped (${t.x},${t.y})") + there(t)
             }
             "press" -> {
                 val t = target(sid, dd, step.target!!, ctx)
-                payGuard(dd, t.label, t.x, t.y)
+                payGuard(sid, dd, t.label, t.x, t.y)
                 okOr(VScreenShell.longPress(dd.displayId, t.x, t.y, (step.ms ?: 800L).toInt())); pts += intArrayOf(t.x, t.y); ctx.point = t.x to t.y
                 tr("按住 (${t.x},${t.y}) ${step.ms}ms", "held (${t.x},${t.y}) ${step.ms}ms") + there(t)
             }

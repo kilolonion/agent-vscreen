@@ -132,9 +132,17 @@ object VScreenTyping {
             else -> { pasteText(displayId, text); tr("剪贴板粘贴", "clipboard paste") }
         }
         if (!a11y) return TypeFact(method, null, null, null, checked = false)
-        Thread.sleep(250)
-        val after = focusedEditable(displayId, tappedAt) ?: node
-        com.kilon.agentvscreen.host.quiet("VScreenTyping:137") { after?.refresh() }
+        // 1.2.0-beta2: wait until the field shows the text (at most 2 s) instead of reading it once after a fixed
+        // 250 ms: a web page reports its box's new value late, and the single early read called a typed text missing.
+        var after = focusedEditable(displayId, tappedAt) ?: node
+        val until = android.os.SystemClock.elapsedRealtime() + 2_000L
+        while (true) {
+            Thread.sleep(150)
+            after = focusedEditable(displayId, tappedAt) ?: node
+            com.kilon.agentvscreen.host.quiet("VScreenTyping:137") { after?.refresh() }
+            val seen = after?.let { if (it.isPassword) fieldText(it).length != before.length || text.isEmpty() else fieldText(it).contains(text) } ?: true
+            if (seen || android.os.SystemClock.elapsedRealtime() >= until || com.kilon.agentvscreen.cmd.Call.current()?.cancelled == true) break
+        }
         // A password box gives its length only: what is in it never leaves the phone.
         val now = after?.let { if (it.isPassword) "•".repeat(fieldText(it).length) else fieldText(it) }
         val ab = after?.let { n -> Rect().also { n.getBoundsInScreen(it) } }

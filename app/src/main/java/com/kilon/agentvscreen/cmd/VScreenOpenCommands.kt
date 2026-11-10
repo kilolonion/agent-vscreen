@@ -171,7 +171,7 @@ private fun VScreenOffloadHandler.handoffIn(sid: String, pkgArg: String?): Nativ
         throw ActionError("APP_BLOCKED", tr("用户禁止后台操作 ${pick.pkg}（Agent-VScreen › 应用限制），不能接手它", "The user blocked background operation of ${pick.pkg} (Agent-VScreen › App rules); it can't be taken over"))
     // 1.2: taking the app the user is using off their screen is theirs to allow, on the phone.
     run { val app = VScreenKnowledge.label(pick.pkg) ?: pick.pkg
-        com.kilon.agentvscreen.host.Consent.require(context, "handoff:${pick.pkg}", tr("把你正在用的 $app 接到后台副屏", "move $app, which you are using, to the background screen"), tr("它会从主屏消失，停在当前页面，由 Agent 在后台继续操作", "it leaves the main screen, stays on its current page, and the agent carries on in the background")) }
+        com.kilon.agentvscreen.host.Consent.require(context, "handoff:${pick.pkg}", tr("把你正在用的 $app 接到后台副屏", "move $app, which you are using, to the background screen"), tr("它会从主屏消失，停在当前页面，由 Agent 在后台继续操作", "it leaves the main screen, stays on its current page, and the agent carries on in the background"), kind = "system") }
     val want = VScreenShell.appOrientation(context, pick.pkg, null) ?: VScreenMap.profile(pick.pkg)["orientation"]?.let { it == "landscape" }
     var d0 = BackgroundOperation.acquire(sid, create = true, landscape = want)
     if (want != null && BackgroundOperation.nativeLandscape(d0) != want) d0 = BackgroundOperation.rebuild(sid, want)
@@ -237,7 +237,7 @@ internal fun VScreenOffloadHandler.stopCmd(sid: String?, args: OffloadArgs): Nat
     if (force) {
         val target = pkgArg ?: runCatching { BackgroundOperation.previewDisplayFor(s)?.let { VScreenShell.topPackage(it.displayId) } }.getOrNull() ?: "?"
         val app = VScreenKnowledge.label(target) ?: target
-        com.kilon.agentvscreen.host.Consent.require(context, "force-stop:$target", tr("结束整个 $app（force-stop）", "stop the whole of $app (force-stop)"), tr("主屏上的 $app 也会被结束，没保存的内容会丢", "$app on the main screen is stopped too; unsaved content is lost"))
+        com.kilon.agentvscreen.host.Consent.require(context, "force-stop:$target", tr("结束整个 $app（force-stop）", "stop the whole of $app (force-stop)"), tr("主屏上的 $app 也会被结束，没保存的内容会丢", "$app on the main screen is stopped too; unsaved content is lost"), kind = "system")
     }
     val stopped = VScreenKnowledge.journey(s)
     VScreenKnowledge.endJourney(s)
@@ -265,6 +265,7 @@ internal fun VScreenOffloadHandler.releaseCmd(sid: String?): NativeOffloadResult
 /** 1.1 `done`: this session's turn ends now (screen idles, page kept, another session may take it over). */
 internal fun VScreenOffloadHandler.doneCmd(sid: String?): NativeOffloadResult {
     val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
+    BackgroundOperation.parkSoonFor = s
     com.kilon.agentvscreen.api.Turns.doneAfterThis(s)
     BackgroundOperation.setTitle(s, null)
     return text(tr("这一轮结束了：副屏省电暂停，页面保留 10 分钟（下一条命令自动恢复）；别的会话现在可以接手。", "This turn is over: the screen pauses to save power and keeps the page for 10 minutes (the next command resumes it); other sessions can take over now."))

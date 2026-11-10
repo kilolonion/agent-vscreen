@@ -174,10 +174,13 @@ object BackgroundOperation {
         }.apply { isDaemon = true; name = "vscreen-idle-park" }.start()
     }
 
-    private fun scheduleIdlePark() {
+    private fun scheduleIdlePark(afterMs: Long = PARK_AFTER_MS) {
         mainHandler.removeCallbacks(idlePark)
-        if (VScreenStore.idlePowerSave.value) mainHandler.postDelayed(idlePark, PARK_AFTER_MS)
+        if (VScreenStore.idlePowerSave.value) mainHandler.postDelayed(idlePark, afterMs)
     }
+
+    /** The session said `done`: when its turn ends the screen pauses right away, as the reply says, not 30 s later. */
+    @Volatile var parkSoonFor: String? = null
 
     /** Wake a paused screen (display back on, frames flowing). Returns a note when it had been paused. */
     fun unpark(d: VScreenDisplay): String? {
@@ -480,7 +483,8 @@ object BackgroundOperation {
             // A user takeover ends with the turn: nobody is holding the screen any more.
             _state.update { it.copy(takeoverSessionId = null, operating = false, idle = true, agentTitle = null, note = tr("本轮结束，副屏保留 ${IDLE_TTL_MS / 60_000} 分钟", "Turn over; the screen is kept for ${IDLE_TTL_MS / 60_000} minutes")) }
             scheduleIdleRelease()
-            scheduleIdlePark()
+            scheduleIdlePark(if (parkSoonFor == sessionId) 1_500L else PARK_AFTER_MS)
+            parkSoonFor = null
         }
     }
 
