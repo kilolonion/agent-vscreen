@@ -122,6 +122,8 @@ internal object Steps {
             else if (verb != "type" && verb != "type+") throw parsed.exceptionOrNull()!!
         }
         val args = toks.drop(1)
+        if (verb == "until") bad(raw, tr("until 要接在一个动作后面，如 tap 搜索 until text:结果；只想等待就写 wait text:结果",
+            "until goes after an action, e.g. tap Search until text:Results; to only wait, write wait text:Results"))
         return when (verb) {
             "tap", "click", "点" -> Step(raw, "tap", target = target(raw, args, allowDuration = false).first, until = until, untilMs = untilMs)
             "press", "longpress", "hold", "长按" -> {

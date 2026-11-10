@@ -209,7 +209,7 @@ object Overlay {
         val a = aspect()
         // A landscape screen on an upright phone may use almost the whole width: it is short, and anything narrower
         // makes its text unreadable.
-        val max = minOf(screenW() * (if (a > 1f) 0.97f else 0.85f), screenH() * 0.85f * a)
+        val max = minOf(screenW() * (if (a > 1f) 0.94f else 0.85f), screenH() * 0.85f * a)
         return w.coerceIn(dp(120f).coerceAtMost(max), max)
     }
 
@@ -249,6 +249,14 @@ object Overlay {
             y = p.getInt("y", (screenH() * 0.18f).toInt())
         }
         if (docked.value) l.x = if (dockRight.value) screenW() - dp(TAB_W).toInt() else 0
+        else {
+            // 1.2.0: the window opens wholly on screen. The place is remembered for whatever size it had then; a
+            // wider window (landscape, or a larger default) used to open partly off the right edge.
+            val w = (widthPx.floatValue + dp(14f)).toInt()
+            val h = (widthPx.floatValue / aspect() + dp(14f)).toInt()
+            l.x = l.x.coerceIn(0, (screenW() - w).coerceAtLeast(0))
+            l.y = l.y.coerceIn(topMargin().toInt(), (screenH() - h - bottomMargin().toInt()).coerceAtLeast(topMargin().toInt()))
+        }
         lp = l
         val g = GestureFrame(c)
         val v = ComposeView(c).apply {
@@ -258,7 +266,11 @@ object Overlay {
         g.setViewTreeLifecycleOwner(o); g.setViewTreeSavedStateRegistryOwner(o); g.setViewTreeViewModelStoreOwner(o)
         g.addView(v, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT))
         runCatching { wm.addView(g, l); root = g; hostWm = wm; hostedByA11y = a11y }
-            .onSuccess { AppLogger.info("Overlay", "window added (${if (a11y) "accessibility overlay" else "app overlay"})") }
+            .onSuccess {
+                AppLogger.info("Overlay", "window added (${if (a11y) "accessibility overlay" else "app overlay"})")
+                // Once laid out its real size is known: keep all of it on screen.
+                if (!docked.value) g.post { keepOnScreen() }
+            }
             .onFailure { AppLogger.warning("Overlay", "addView: ${it.message}"); o.destroy(); owner = null }
     }
 
@@ -274,8 +286,10 @@ object Overlay {
     // 1.2.0-beta2: the window's width is remembered per orientation of the background screen. One number for both
     // meant a landscape screen opened at the width chosen for a portrait one: a strip a third of the screen wide.
     private var shownLandscape = false
-    private fun widthKey(landscape: Boolean) = if (landscape) "w_land" else "w"
-    private fun defaultWidth(landscape: Boolean) = if (landscape) minOf(screenW(), screenH()) * 0.92f else minOf(screenW(), screenH()) * 0.34f
+    // 1.2.0: a landscape screen opens at about three quarters of the phone's width (readable, and the app behind it
+    // stays usable); the key is new so the larger beta default is not kept.
+    private fun widthKey(landscape: Boolean) = if (landscape) "w_landscape" else "w"
+    private fun defaultWidth(landscape: Boolean) = if (landscape) minOf(screenW(), screenH()) * 0.76f else minOf(screenW(), screenH()) * 0.34f
 
     /** The background screen changed between portrait and landscape: use that orientation's own width. */
     internal fun orientationChanged(landscape: Boolean) {
@@ -283,7 +297,18 @@ object Overlay {
         prefs().edit().putFloat(widthKey(shownLandscape), widthPx.floatValue).apply()
         shownLandscape = landscape
         widthPx.floatValue = clampWidth(prefs().getFloat(widthKey(landscape), defaultWidth(landscape)))
-        root?.post { if (docked.value) dock(dockRight.value) else settle() }
+        // Moved back wholly on screen, never folded: the window grew, the user did not push it to an edge. The new
+        // size is known only after the next layout, so it is checked again then.
+        root?.post { if (docked.value) dock(dockRight.value) else keepOnScreen() }
+        root?.postDelayed({ if (!docked.value) keepOnScreen() }, 120L)
+    }
+
+    /** Move the window the least needed to have all of it on screen. */
+    internal fun keepOnScreen() {
+        val l = lp ?: return
+        val x = l.x.coerceIn(0, (screenW() - winW()).toInt().coerceAtLeast(0))
+        val y = l.y.coerceIn(topMargin().toInt(), (screenH() - winH() - bottomMargin()).toInt().coerceAtLeast(topMargin().toInt()))
+        if (x != l.x || y != l.y) { place(x, y); save() }
     }
 
     // 1.2.0-beta2: moving the window is one call to the window manager per display frame, with the newest position.

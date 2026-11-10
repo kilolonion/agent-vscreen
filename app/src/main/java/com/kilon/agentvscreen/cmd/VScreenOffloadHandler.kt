@@ -117,7 +117,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
                 dispatch(sub, args, sid)
             }
         } catch (e: ActionError) {
-            err(e.code, e.message ?: e.code)
+            err(e.code, e.message ?: e.code, data = e.data)
         } catch (e: OffloadArgs.BadOption) {
             err("INVALID_ARGS", e.message ?: tr("参数不对", "bad arguments"), 2)
         } catch (t: Exception) {
@@ -242,7 +242,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
     }
 
     /** An error reply: the code, what happened, and what to do next (from the code table). */
-    internal fun err(code: String, message: String, exit: Int = if (code in setOf("INVALID_ARGS", "UNKNOWN_OPTION", "INVALID_STEP", "UNKNOWN_COMMAND")) 2 else 1): NativeOffloadResult =
+    internal fun err(code: String, message: String, exit: Int = if (code in setOf("INVALID_ARGS", "UNKNOWN_OPTION", "INVALID_STEP", "UNKNOWN_COMMAND")) 2 else 1, data: JSONObject? = null): NativeOffloadResult =
         NativeOffloadResult(exit, "${Blocks.error}$code${tr("：", ": ")}$message\n", code,
-            JSONObject().put("message", message).put("next", Codes.next(code)))
+            JSONObject().put("message", message).put("next", Codes.next(code)).also { o -> data?.keys()?.forEach { k -> o.put(k, data.get(k)) } })
 }

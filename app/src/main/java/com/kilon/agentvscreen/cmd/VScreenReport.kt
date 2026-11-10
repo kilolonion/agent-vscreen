@@ -507,20 +507,45 @@ private val REPORT_POOL = java.util.concurrent.Executors.newCachedThreadPool { r
 internal fun sameEl(a: El, b: El) = a.key == b.key && Math.abs(a.box.centerX() - b.box.centerX()) <= 24 && Math.abs(a.box.centerY() - b.box.centerY()) <= 24
 
 /**
- * v0.5: numbers stay put on the same page. When most of the elements were in the last list, they keep their numbers
- * and new ones get numbers after the highest; on a new page the list is numbered from 1 in reading order.
+ * 1.2.0: a number names one element for as long as the screen lives. The same element keeps its number from list to
+ * list, also when it moved (a scroll moves everything); an element that was not in the last list gets a number never
+ * given out before on this screen. So an old `#12` can never land on whatever happens to be twelfth now: it is either
+ * the same element (wherever it went) or a number no longer on the screen (STALE_ELEMENT).
+ *
+ * Before, a list that matched less than 60% of the last one (any scroll) was numbered from 1 again, and an agent that
+ * used a number from two looks ago tapped a different element without being told.
  */
 internal fun numbered(sid: String, d: VScreenDisplay, els: List<El>): List<El> {
-    val prev = synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] }?.takeIf { it.generation == d.generation }?.list
-    if (prev.isNullOrEmpty() || els.isEmpty()) return els
-    val match = els.map { e -> prev.firstOrNull { sameEl(it, e) } }
-    if (match.count { it != null } < els.size * 0.6) return els
-    var next = prev.maxOf { it.n }
+    val key = "$sid@${d.generation}"
+    val prev = synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] }?.takeIf { it.generation == d.generation }?.list.orEmpty()
+    val book = synchronized(Numbers) { Numbers.of(key) }
+    if (els.isEmpty()) return els
     val used = HashSet<Int>()
-    return els.mapIndexed { i, e ->
-        val m = match[i]?.takeIf { used.add(it.n) }
-        e.copy(n = m?.n ?: ++next)
+    // Same words in the same place first; then same words that moved, when those words are unique in both lists.
+    val match = arrayOfNulls<El>(els.size)
+    els.forEachIndexed { i, e -> prev.firstOrNull { sameEl(it, e) && it.n !in used }?.let { match[i] = it; used += it.n } }
+    els.forEachIndexed { i, e ->
+        if (match[i] != null || e.placeholder) return@forEachIndexed
+        val inPrev = prev.filter { it.key == e.key && it.n !in used }
+        if (inPrev.size == 1 && els.count { it.key == e.key } == 1) { match[i] = inPrev[0]; used += inPrev[0].n }
     }
+    return synchronized(Numbers) {
+        els.mapIndexed { i, e ->
+            val n = match[i]?.n ?: ++book.max
+            book.labels[n] = e.label.take(40)
+            e.copy(n = n)
+        }
+    }
+}
+
+/** Every number given out on a screen (per session and screen generation), so none is ever reused. */
+internal object Numbers {
+    class Book { var max = 0; val labels = LinkedHashMap<Int, String>() }
+    private val books = LinkedHashMap<String, Book>()
+    fun of(key: String): Book = books.getOrPut(key) { Book() }.also { while (books.size > 16) books.remove(books.keys.first()) }
+    /** What [n] was when it was given out on [key]'s screen, or null when it never was. */
+    fun label(key: String, n: Int): String? = synchronized(this) { books[key]?.labels?.get(n) }
+    internal fun reset() = synchronized(this) { books.clear() }
 }
 
 /**

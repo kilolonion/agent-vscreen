@@ -72,7 +72,7 @@ class V120Test {
 
     @Test fun everyCodeTheSourceUsesIsInTheTable() {
         val root = java.io.File("src/main/java/com/kilon/agentvscreen").takeIf { it.isDirectory } ?: return
-        val re = Regex("""(?:ActionError|StepRefused|err|failed\(r,|notes\.add|Resp\.err\(\d+,)\(?\s*"([A-Z][A-Z_]{2,})"""")
+        val re = Regex("""(?:ActionError|StepRefused|err|failed\(r,|notes\.add|Resp\.err\(\d+,|HttpError\(\d+,)\(?\s*"([A-Z][A-Z_]{2,})"""")
         val used = root.walkTopDown().filter { it.extension == "kt" }.flatMap { f -> re.findAll(f.readText()).map { it.groupValues[1] } }.toSet()
         val missing = used.filter { Codes.of(it) == null }
         assertTrue("codes used but not in Codes: $missing", missing.isEmpty())

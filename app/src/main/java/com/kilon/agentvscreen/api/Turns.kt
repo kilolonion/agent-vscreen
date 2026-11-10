@@ -25,6 +25,7 @@ object Turns {
 
     init {
         BackgroundOperation.describeOwner = { sid -> describe(sid) }
+        BackgroundOperation.ownerFreesInMs = { sid -> leftMs(sid) }
     }
 
     fun begin(sid: String) {

@@ -63,7 +63,7 @@ internal class Probe(private val h: VScreenOffloadHandler, private val d: VScree
     /** The words of [q] seen now (accessibility first, then an OCR reading taken after this probe began). */
     private fun seen(q: String): String? {
         val n = VScreenOcr.norm(q)
-        runCatching { BackgroundOperation.a11yTexts(d.displayId, 400) }.getOrNull()?.firstOrNull { VScreenOcr.norm(it).contains(n) }?.let { return it.take(40) }
+        runCatching { BackgroundOperation.a11yShows(d.displayId, VScreenOcr::norm, n) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
         val r = VScreenPerception.reading(d.displayId, since, 0) ?: return null
         return r.items.firstOrNull { VScreenOcr.norm(it.text).contains(n) }?.text?.take(40)
     }
@@ -71,7 +71,7 @@ internal class Probe(private val h: VScreenOffloadHandler, private val d: VScree
     /** True only when a reading taken after this probe began does not hold [q] (and the accessibility tree does not either). */
     private fun gone(q: String): Boolean {
         val n = VScreenOcr.norm(q)
-        if (runCatching { BackgroundOperation.a11yTexts(d.displayId, 400) }.getOrNull()?.any { VScreenOcr.norm(it).contains(n) } == true) return false
+        if (!runCatching { BackgroundOperation.a11yShows(d.displayId, VScreenOcr::norm, n) }.getOrNull().isNullOrEmpty()) return false
         val r = VScreenPerception.reading(d.displayId, since, 0) ?: return false
         return r.items.none { VScreenOcr.norm(it.text).contains(n) }
     }
@@ -439,7 +439,13 @@ private fun VScreenOffloadHandler.target(sid: String, d: VScreenDisplay, t: Step
         val set = synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] }
             ?: throw StepRefused("NOT_FOUND", tr("还没有元素列表：先 act 看一眼再用 #编号", "No element list yet: look with act first, then use #numbers"))
         if (set.generation != d.generation) throw StepRefused("STALE_ELEMENT", tr("#${t.n} 是上一块副屏的列表（副屏重建过）：先 act 看一眼", "#${t.n} is from the previous screen's list (the screen was rebuilt): look with act first"))
-        val e = set.list.firstOrNull { it.n == t.n } ?: throw StepRefused("NOT_FOUND", tr("上次的列表里没有 #${t.n}（共 ${set.list.size} 个）", "There is no #${t.n} in the last list (${set.list.size} in all)"))
+        val e = set.list.firstOrNull { it.n == t.n } ?: run {
+            // A number from an earlier list: its element left the screen (numbers are never reused, see numbered()).
+            val was = Numbers.label("$sid@${d.generation}", t.n)
+            if (was != null) throw StepRefused("STALE_ELEMENT", tr("#${t.n}（“${was.take(24)}”）是之前列表里的编号，它已经不在画面上了，没点。用最新【现在】里的编号，或用文字、坐标",
+                "#${t.n} (\"${was.take(24)}\") is a number from an earlier list and that element is no longer on the screen; nothing was tapped. Use the numbers of the latest [Now], or text / coordinates"))
+            throw StepRefused("NOT_FOUND", tr("没有 #${t.n} 这个编号（最新列表共 ${set.list.size} 个）", "There is no #${t.n} (the latest list has ${set.list.size})"))
+        }
         val fresh = !ctx.acted && System.currentTimeMillis() - set.atMs <= 3_000L
         if (fresh) Target(e.box.centerX(), e.box.centerY(), e.label)
         else {

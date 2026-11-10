@@ -199,7 +199,7 @@ in：把用户主屏上的应用移到副屏接着做（返回四段；手机上
 | `NO_APP` | `fix_command` | 没有这个应用，或副屏上没有应用。apps <关键词> 查包名。 |
 | `NO_FRAME` | `retry_later` | 副屏还没有画面，稍后再试。 |
 | `NO_SESSION` | `fix_command` | 请求里没有会话名。 |
-| `BUSY` | `retry_later` | 副屏现在归另一个会话。返回里写了归谁、多久后让出。 |
+| `BUSY` | `retry_later` | 副屏现在归另一个会话。返回里写了归谁（owner）、多久后自动让出（frees_in_s 秒；null 表示它正在执行命令）。 |
 | `QUEUE_TIMEOUT` | `retry_later` | 前面的命令还没做完，这条排队超过 60 秒，没有执行。 |
 | `CANCELLED` | `none` | 调用方断开了或取消了任务，命令在下一步之前停下。 |
 | `CONNECTION_LOST` | `ask_user` | 后台特权连接断了（Shizuku 停了），副屏和上面的应用已经没了，不是你的操作造成的。告诉用户；恢复后重新 launch。 |
@@ -234,6 +234,8 @@ in：把用户主屏上的应用移到副屏接着做（返回四段；手机上
 | `NO_SHOT` | `look` | 这张截图已经不在了（只留最近 300 张，副屏释放时清空）。重新看一眼。 |
 | `PEER_DENIED` | `ask_user` | 这台设备不在用户的允许名单里。 |
 | `REPLAYED` | `fix_command` | 这个签名请求已经收到过一次。每个请求用新的 Nonce。 |
+| `BODY_TOO_LARGE` | `fix_command` | 请求体太大（上限 1 MB）。 |
+| `HEADERS_TOO_LARGE` | `fix_command` | 请求头太大。 |
 | `REQUEST_TIMEOUT` | `retry_later` | 请求没有在时限内发完。 |
 | `SIGNATURE_REQUIRED` | `ask_user` | 从其它设备来的请求必须签名（vscreen 命令行会签名）。MCP 等不能签名的客户端：请用户在 其它设备 里关掉“只接受签名请求”。 |
 | `TASK_STARTED` | `none` | 任务已开始，用 task <号> 取结果。 |
@@ -439,7 +441,7 @@ scope: `look`
 | `NO_APP` | `fix_command` | No such app, or no app on the screen. apps <keyword> finds packages. |
 | `NO_FRAME` | `retry_later` | The screen has no picture yet; try again shortly. |
 | `NO_SESSION` | `fix_command` | The request names no session. |
-| `BUSY` | `retry_later` | The screen belongs to another session now. The reply says whose and when it frees up. |
+| `BUSY` | `retry_later` | The screen belongs to another session now. The reply says whose (owner) and when it frees up by itself (frees_in_s seconds; null while it is running a command). |
 | `QUEUE_TIMEOUT` | `retry_later` | Earlier commands are still running; this one waited in the queue for over 60 s and did not run. |
 | `CANCELLED` | `none` | The caller disconnected or cancelled the task; the command stopped before its next step. |
 | `CONNECTION_LOST` | `ask_user` | The privileged background connection broke (Shizuku stopped); the screen and its app are gone, not because of your actions. Tell the user; launch again once it is back. |
@@ -474,6 +476,8 @@ scope: `look`
 | `NO_SHOT` | `look` | That screenshot is gone (only the last 300 are kept; they are cleared when the screen is released). Look again. |
 | `PEER_DENIED` | `ask_user` | This device is not on the user's allow list. |
 | `REPLAYED` | `fix_command` | This signed request was already received once. Use a fresh nonce for every request. |
+| `BODY_TOO_LARGE` | `fix_command` | The request body is too large (at most 1 MB). |
+| `HEADERS_TOO_LARGE` | `fix_command` | The request headers are too large. |
 | `REQUEST_TIMEOUT` | `retry_later` | The request did not arrive in time. |
 | `SIGNATURE_REQUIRED` | `ask_user` | Requests from other devices must be signed (the vscreen CLI signs). For clients that cannot sign, such as MCP: ask the user to turn off "signed requests only" under Other devices. |
 | `TASK_STARTED` | `none` | The task started; fetch its result with task <id>. |

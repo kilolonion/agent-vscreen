@@ -27,7 +27,7 @@ Any agent on the phone can use it: agents with a terminal use the `vscreen` CLI,
 <p align="center"><img src="docs/app.en.png" width="760" alt="Agent-VScreen home, language, setup, agent connection, settings, app rules and diagnostics"></p>
 <p align="center"><sub>The app: language switch, first-time setup, connecting an agent (this phone / Tailscale, CLI / MCP / HTTP), settings, app rules and diagnostics.</sub></p>
 
-- Version: 1.2.0-beta2 (versionCode 12, beta) · [Download APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
+- Version: 1.2.0 (versionCode 13) · [Download APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
 - Package: `com.kilon.agentvscreen`
 - Android 11+ (Android 14+ recommended), arm64
 - Privileges: [Shizuku](https://shizuku.rikka.app/) only, no root
@@ -122,19 +122,9 @@ The app speaks Chinese or English (the **Language** card on the home page: Syste
 
 The token equals control of the phone, so the app never offers a public link.
 
-## What's new in 1.2.0-beta2
-
-Changes after the first real-phone regression of 1.2.0. Still a beta.
-
-- **Hands-off by default**: Permissions in the app has two levels. The default, "hands-off", asks you on the phone only for the step that actually spends money (pay, place order, transfer, top up) and for apps you set to "ask every time"; "careful" also asks for irreversible buttons such as delete, steps toward a purchase, force-stop and taking an app off the main screen. The "clear" button next to an input box is no longer treated as irreversible.
-- **A new page layout**: the home page goes Connect → Permissions → Settings → Activity log; permissions live in one place (level, app rules, tokens) and settings are grouped (floating window / background screen / reading and recording).
-- **A smoother floating window**: its picture is scaled to the size shown at 20 frames a second (30 while you control the screen) instead of the agent's full-size frames; moving the window updates its position once per display frame, so it stays under the finger; after taking over, your finger reaches the screen as it moves, so lists follow it. A landscape screen opens almost as wide as the phone, and each orientation keeps its own size.
-- **Look-only tokens can look**: their `act` (no steps or only waits) looks at the screen in use; `stop --force` and `handoff in` need the "everything" scope.
-- **Other fixes**: `type` in web pages no longer reports missing text; typed text is hidden in the log in `until` too; idle connections make room for new requests; `events` keeps its batch when the caller is gone; `done` pauses the screen at once; the CLI keeps at most 40 pictures and clears them after `done`; the MCP `args` description says it is one string.
-
 ## What's new in 1.2.0
 
-This version rebuilds the command gate, the reply format and the security model. 1.2.0 passes compilation and unit tests but has not yet run on a real phone: verify it first with [docs/TASKS.md](docs/TASKS.md). The upgrade table from 1.1 is in section 9 of [API.md](API.md).
+This version rebuilds the command gate, the reply format, the security model and the guide for agents, and went through two real-phone regression rounds with [docs/TASKS.md](docs/TASKS.md) (Honor Magic 7, MagicOS 11). The upgrade table from 1.1 is in section 9 of [API.md](API.md).
 
 - **Structured results**: every reply carries `ok`, `code` and `next` (look at the screen / fix the command / ask the user / retry later), plus each step's status, the screen's elements and the notes. A stretch that stops at a step is a failure; no reading text to find out. The new API is `/v2`; `/v1` is unchanged and stays for one more version.
 - **One command table**: option checks, help, MCP tool schemas and the docs are generated from it. MCP has one tool per command besides `vscreen`.
@@ -149,6 +139,12 @@ This version rebuilds the command gate, the reply format and the security model.
 - **Events are not lost**: kept until the next fetch, re-fetchable, stored on disk; watches resume after an app restart; the event broadcast goes only to an app you name.
 - **A rewritten guide for agents**: built around one loop (look → act → check), with what to do next for each result code; `vscreen guide` is one page.
 
+- **Hands-off by default**: Permissions in the app has two levels. The default, "hands-off", asks you on the phone only for the step that actually spends money (pay, place order, transfer, top up) and for apps you set to "ask every time"; "careful" also asks for irreversible buttons such as delete, steps toward a purchase, force-stop and taking an app off the main screen. The "clear" button next to an input box is no longer treated as irreversible.
+- **A new page layout**: the home page goes Connect → Permissions → Settings → Activity log; permissions live in one place (level, app rules, tokens) and settings are grouped (floating window / background screen / reading and recording).
+- **A smoother floating window**: its picture is scaled to the size shown at 20 frames a second (30 while you control the screen) instead of the agent's full-size frames; moving the window updates its position once per display frame, so it stays under the finger; after taking over, your finger reaches the screen as it moves, so lists follow it. A landscape screen opens almost as wide as the phone, and each orientation keeps its own size.
+- **Look-only tokens can look**: their `act` (no steps or only waits) looks at the screen in use; `stop --force` and `handoff in` need the "everything" scope.
+- **Numbers never point at the wrong element**: on one screen a number names one element; after a scroll the same element keeps its number and new ones get new numbers. A number whose element left the screen gives STALE_ELEMENT instead of tapping something else.
+- **Floating window**: a landscape screen opens at about three quarters of the phone's width, and the whole window stays on screen when it appears or turns.
 ## Docs
 
 - [API.md](API.md) (Chinese): the full CLI, MCP and HTTP reference, sessions, watches, permissions and security, the floating window, remote access, known limits and upgrading from 1.1.

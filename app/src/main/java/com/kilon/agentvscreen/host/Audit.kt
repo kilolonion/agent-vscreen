@@ -17,6 +17,7 @@ object Audit {
 
     fun init(ctx: Context) { dir = File(ctx.filesDir, "audit").apply { mkdirs() } }
 
+    private val COND = Regex("(?i)\\b((?:text|gone):)((?:(?!\\s+or\\s|\\s+\\d+(?:\\.\\d+)?(?:ms|s|m)?(?:[;；\\n\"]|$))[^;；\\n\"<])+)")
     private val TYPE = Regex("(?i)(^|[;；\\n])(\\s*)(type\\+?|输入)\\s+((?:(?!\\s+until\\s)[^;；\\n])*)")
 
     /** A command line with what was typed replaced by its length (passwords and messages never reach the log). */
@@ -27,6 +28,9 @@ object Audit {
         return argv.joinToString(" ") { a ->
             var r = TYPE.replace(a) { m -> "${m.groupValues[1]}${m.groupValues[2]}${m.groupValues[3]} <${m.groupValues[4].trim().length} chars>" }
             for (t in typed) r = r.replace(t, "<${t.length} chars>")
+            // 1.2.0: the words a condition waits for are often what was typed in an earlier command (a search term,
+            // a message): they are kept as a length too.
+            r = COND.replace(r) { m -> "${m.groupValues[1]}<${m.groupValues[2].length} chars>" }
             if (r.any { it.isWhitespace() }) "\"$r\"" else r
         }.take(600)
     }

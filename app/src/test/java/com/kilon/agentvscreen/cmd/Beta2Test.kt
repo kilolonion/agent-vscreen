@@ -66,4 +66,21 @@ class Beta2Test {
             assertFalse(d, d.startsWith("["))
         } finally { I18n.choice = I18n.Lang.AUTO }
     }
+
+    @Test fun conditionWordsAreHiddenToo() {
+        val line = Audit.redact(listOf("act", "tap 清空 until gone:蛋糕cake测试 2026 3s; wait text:订单已提交 or gone:加载中"))
+        assertFalse(line, line.contains("蛋糕") || line.contains("订单已提交") || line.contains("加载中"))
+        assertTrue(line, line.contains("gone:<"))
+        assertTrue(line, line.contains("tap 清空"))
+    }
+
+    @Test fun untilAloneSaysWhereItGoes() {
+        val e = runCatching { Steps.parseAll("tap 搜索; until text:结果") }.exceptionOrNull()
+        assertTrue(e?.message ?: "no error", e?.message?.contains("wait text:") == true)
+    }
+
+    @Test fun busyCarriesItsOwner() {
+        val r = VScreenOffloadHandler(org.robolectric.RuntimeEnvironment.getApplication()).err("BUSY", "x", data = org.json.JSONObject().put("owner", "A").put("frees_in_s", 120))
+        assertEquals("A", r.data!!.getString("owner")); assertEquals(120, r.data!!.getInt("frees_in_s"))
+    }
 }

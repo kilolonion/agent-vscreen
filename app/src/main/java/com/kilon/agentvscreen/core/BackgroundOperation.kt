@@ -590,7 +590,7 @@ object BackgroundOperation {
 
     // ── agent side ─────────────────────────────────────────────────────────
 
-    class ActionError(val code: String, message: String) : Exception(message)
+    class ActionError(val code: String, message: String, val data: org.json.JSONObject? = null) : Exception(message)
 
     /** Current screen if [sessionId] may act on it; creates one when allowed. */
     @Throws(ActionError::class)
@@ -823,9 +823,14 @@ object BackgroundOperation {
 
     /** Set by the transport: when the owner's turn ends ("它的上一条命令 40 秒前结束，再安静 2 分 20 秒自动让出"). */
     @Volatile var describeOwner: (String) -> String = { "" }
+    /** Set by the transport: milliseconds until the owner's turn ends by itself (null = it is running a command). */
+    @Volatile var ownerFreesInMs: (String) -> Long? = { null }
 
     /** 1.1: BUSY says who owns the screen, when it will be free by itself, and how the owner frees it now. */
     private fun busy(owner: String?): ActionError = ActionError("BUSY",
+        data = org.json.JSONObject().put("owner", owner ?: org.json.JSONObject.NULL)
+            .put("frees_in_s", owner?.let { ownerFreesInMs(it) }?.let { (it + 999) / 1000 } ?: org.json.JSONObject.NULL),
+        message =
         tr("副屏现在归会话“${owner ?: "?"}”", "The screen belongs to session \"${owner ?: "?"}\"") + (owner?.let { describeOwner(it) } ?: "") +
             tr("。要现在接手：在那个会话执行 vscreen done（结束它这一轮，页面留着给你接手）或 vscreen release（关掉副屏）", ". To take it now: in that session run vscreen done (ends its turn, leaves the page for you) or vscreen release (closes the screen)"))
 
@@ -983,6 +988,30 @@ object BackgroundOperation {
 
 
     /** Visible texts / descriptions of [displayId]'s accessibility tree, or null when the service sees nothing there. */
+    /**
+     * 1.2.0: whether a visible node on [displayId] shows [norm] (normalised text) right now. A node whose cached text
+     * matches is refreshed and checked again: the cache of a background screen can keep a cleared box's old text, and
+     * `until gone:` then waited for words that were already gone. Null when the tree cannot be read.
+     */
+    fun a11yShows(displayId: Int, norm: (String) -> String, want: String): String? {
+        val roots = nodeRoots(displayId)
+        if (roots.isEmpty()) return null
+        var hit: String? = null
+        var seen = 0
+        fun walk(n: AccessibilityNodeInfo?, depth: Int) {
+            if (n == null || depth > 40 || hit != null || ++seen > 1500) return
+            val t = (n.text ?: n.contentDescription)?.toString()
+            if (t != null && n.isVisibleToUser && norm(t).contains(want)) {
+                val fresh = runCatching { n.refresh() }.getOrDefault(false)
+                val t2 = if (fresh) (n.text ?: n.contentDescription)?.toString() else t
+                if (t2 != null && (!fresh || n.isVisibleToUser) && norm(t2).contains(want)) { hit = t2.replace('\n', ' ').trim().take(40); return }
+            }
+            for (i in 0 until n.childCount) walk(runCatching { n.getChild(i) }.getOrNull(), depth + 1)
+        }
+        roots.forEach { walk(it, 0) }
+        return hit ?: ""
+    }
+
     fun a11yTexts(displayId: Int, max: Int = 400): List<String>? {
         val roots = nodeRoots(displayId)
         if (roots.isEmpty()) return null
