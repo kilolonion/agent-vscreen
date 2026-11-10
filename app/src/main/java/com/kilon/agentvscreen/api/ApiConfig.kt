@@ -80,16 +80,39 @@ object ApiConfig {
         set(v) { prefs.edit().putString("tailnet_authkey", v?.trim()).apply() }
 
     fun setPort(p: Int) { prefs.edit().putInt("port", p.coerceIn(1024, 65535)).apply() }
-    fun resetToken() { prefs.edit().putString("token", newToken()).apply() }
+    fun resetToken() { prefs.edit().putString("token", newToken()).commit(); Tokens.syncMain() }
+
+    /** 1.2: requests from other devices must be signed (the token never travels). Off = Bearer is accepted there too (MCP clients cannot sign). */
+    var remoteSigned: Boolean
+        get() = prefs.getBoolean("remote_signed", true)
+        set(v) { prefs.edit().putBoolean("remote_signed", v).apply() }
+
+    /** 1.2: the one app that receives event broadcasts (null = none are sent; events are still queued for `events`). */
+    var eventTarget: String?
+        get() = prefs.getString("event_target", null)?.takeIf { it.isNotBlank() }
+        set(v) { prefs.edit().putString("event_target", v?.trim()).apply() }
+
+    /** 1.2: an extra name suffix this phone may be called by over the tailnet (a Headscale domain); ".ts.net" always is. */
+    var tailnetSuffix: String?
+        get() = prefs.getString("tailnet_suffix", null)?.takeIf { it.isNotBlank() }
+        set(v) { prefs.edit().putString("tailnet_suffix", v?.trim()?.lowercase()?.trim('.')?.takeIf { it.isNotEmpty() }).apply() }
+
+    /** 1.2: tailnet peers allowed in through the built-in node (login names or node names, lower case); empty = every peer of the tailnet. */
+    var tailnetPeers: Set<String>
+        get() = prefs.getString("tailnet_peers", "").orEmpty().split(',', '\n', ' ').map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
+        set(v) { prefs.edit().putString("tailnet_peers", v.joinToString(",")).apply() }
+
+    /** Is [host] a name this phone answers to over the tailnet. */
+    fun tailnetHostOk(host: String): Boolean = host.endsWith(".ts.net") || tailnetSuffix?.let { host == it || host.endsWith(".$it") } == true
 
     /** One line that installs the `vscreen` command in Termux / a proot or chroot Linux / adb shell and stores the token. */
     /** 1.1.7: [base] is another address (Tailscale) when the agent runs on another device; the script then keeps it. */
-    fun installLine(base: String = baseUrl): String =
+    fun installLine(base: String = baseUrl, token: String = this.token): String =
         if (base == baseUrl) "curl -fsS $base/cli | sh -s -- install $token"
         else "curl -fsS $base/cli | VSCREEN_URL=$base sh -s -- install $token"
 
     /** MCP client config (streamable HTTP). */
-    fun mcpJson(base: String = baseUrl): String = """{
+    fun mcpJson(base: String = baseUrl, token: String = this.token): String = """{
   "mcpServers": {
     "agent-vscreen": {
       "type": "http",

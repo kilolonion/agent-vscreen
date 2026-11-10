@@ -19,6 +19,7 @@ import com.kilon.agentvscreen.core.VScreenOcr
 import com.kilon.agentvscreen.core.VScreenRules
 import com.kilon.agentvscreen.core.VScreenShell
 import com.kilon.agentvscreen.core.VScreenStore
+import com.kilon.agentvscreen.core.Vendor
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -131,9 +132,9 @@ internal fun VScreenOffloadHandler.status(sid: String?, args: OffloadArgs): Nati
     }
     data.put("capabilities", capabilities(d))
     runCatching {
-        val dv = VScreenShell.device()
+        val dv = Vendor.device
         data.put("device", JSONObject().put("vendor", dv.vendor).put("brand", dv.brand).put("model", dv.model)
-            .put("os", dv.os).put("sdk", dv.sdk).put("tips", JSONArray(VScreenShell.vendorHints())))
+            .put("os", dv.os).put("sdk", dv.sdk).put("tips", JSONArray(Vendor.current.hints())))
     }
     val (deg, sug) = degraded(d)
     data.put("degraded", deg).put("suggestions", sug)

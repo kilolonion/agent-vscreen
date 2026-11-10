@@ -244,7 +244,7 @@ class FullscreenActivity : ComponentActivity() {
                         val t = text.trim(); if (t.isEmpty()) return
                         text = ""
                         vscreenUserInput(session) { id ->
-                            val r = runCatching { BackgroundOperation.typeText(id, t, append = true) }
+                            val r = runCatching { com.kilon.agentvscreen.core.VScreenTyping.typeText(id, t, append = true) }
                             r.exceptionOrNull()?.let { toast(tr("没输进去：${it.message?.take(60)}", "Not typed: ${it.message?.take(60)}")) }
                         }
                     }
@@ -263,7 +263,6 @@ class FullscreenActivity : ComponentActivity() {
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (takenOver) {
                         Circle(Icons.AutoMirrored.Filled.ArrowBack, tr("返回", "Back"), Color(0x22FFFFFF)) { vscreenUserInput(session) { VScreenShell.key(it, "back") } }
-                        Circle(Icons.Filled.Home, tr("桌面", "Home"), Color(0x22FFFFFF)) { vscreenUserInput(session) { VScreenShell.key(it, "home") } }
                         Circle(Icons.Filled.Keyboard, tr("打字", "Type"), if (typing) Palette.brandA else Color(0x22FFFFFF)) { typing = !typing }
                         Circle(Icons.AutoMirrored.Filled.KeyboardReturn, tr("回车", "Enter"), Color(0x22FFFFFF)) { vscreenUserInput(session) { VScreenShell.key(it, "enter") } }
                         Pill(tr("交还 AI", "Hand back"), Icons.Filled.SmartToy, Palette.takeover, Color(0xFF052E1C)) { BackgroundOperation.userResume() }

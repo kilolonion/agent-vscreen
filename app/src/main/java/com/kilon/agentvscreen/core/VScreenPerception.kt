@@ -9,8 +9,8 @@ import com.kilon.agentvscreen.host.AppLogger
 /**
  * [vscreen] v49: the perception thread keeps LOOKING, it does not judge.
  *
- * While a chat works on the background screen, a small thread looks at it about 5 times a second: every new
- * frame goes to the recording track ([VScreenRecorder]), and about once a second (sooner when the picture
+ * While a session works on the background screen, a small thread looks at it whenever a new frame arrives (at most
+ * 10 times a second; a static screen wakes it twice a second): every new frame goes to the recording track ([VScreenRecorder]), and about once a second (sooner when the picture
  * changed, or when someone asks) the words on it are read (OCR + the accessibility texts) and kept with the time.
  * That is all: what appeared, what went, what moved is told by the act return from these readings and the track
  * (facts), and what it means is the model's call. There are no event kinds, no progress, no pulses, no background
@@ -18,7 +18,9 @@ import com.kilon.agentvscreen.host.AppLogger
  */
 object VScreenPerception {
     private const val TAG = "VScreenPerception"
-    private const val PERIOD_MS = 200L
+    /** The shortest time between two looks, and the longest sleep without a new frame. */
+    private const val MIN_GAP_MS = 100L
+    private const val HEARTBEAT_MS = 500L
     private const val IDLE_STOP_MS = 300_000L
     private const val MAX_READINGS = 900
     const val BLANK_MS = 1_500L
@@ -160,13 +162,17 @@ object VScreenPerception {
         var lastVersion = -1L
         var changedSinceOcr = true
         var pkg: String? = null; var pkgAt = 0L
+        var seen = -1L
         while (w.running && !d.released && SystemClock.elapsedRealtime() - w.lastUse < IDLE_STOP_MS) {
             val t0 = SystemClock.elapsedRealtime()
             if (d.parked) { Thread.sleep(500); continue }
-            d.requestFreshFrame()
-            d.awaitFrameAfter(t0, 300)
+            // 1.2: frame-driven. The loop sleeps until the picture changes (or someone asks for a reading, or the
+            // heartbeat is due) instead of waking 5 times a second whatever the screen does.
+            var slept = 0L
+            while (w.running && !w.forceOcr && slept < HEARTBEAT_MS && !d.awaitNewFrame(seen, MIN_GAP_MS)) slept += MIN_GAP_MS
+            seen = d.version
             val fv = d.latestWithVersion()
-            if (fv == null) { Thread.sleep(PERIOD_MS); continue }
+            if (fv == null) { Thread.sleep(MIN_GAP_MS); continue }
             val now = SystemClock.elapsedRealtime()
             if (now - pkgAt > 5_000L || pkg == null) { pkg = VScreenShell.topPackage(d.displayId); pkgAt = now }
             VScreenRecorder.offer(d, fv.first, fv.second, pkg)
@@ -198,7 +204,8 @@ object VScreenPerception {
                 }
             }
             synchronized(w.lock) { w.lock.notifyAll() }
-            val left = PERIOD_MS - (SystemClock.elapsedRealtime() - t0)
+            // Never faster than [MIN_GAP_MS] (a video would otherwise spin this thread at the frame rate).
+            val left = MIN_GAP_MS - (SystemClock.elapsedRealtime() - t0)
             if (left > 0) Thread.sleep(left)
         }
         w.running = false

@@ -275,6 +275,7 @@ class VScreenDisplay private constructor(
                 latestTurn = turn
                 _frameVersion.value = _frameVersion.value + 1
             }
+            synchronized(frameSignal) { frameSignal.notifyAll() }
         } catch (t: Throwable) {
             AppLogger.warning(TAG, "frame convert failed on display $displayId: ${t.message}")
         } finally {
@@ -283,6 +284,27 @@ class VScreenDisplay private constructor(
     }
 
     private val frameLock = Any()
+    private val frameSignal = Object()
+
+    /**
+     * 1.2: wait for a frame newer than [afterVersion], at most [timeoutMs]; true when one came. Waiters are woken by
+     * the frame itself, so loops that watch the screen run when the picture changes instead of on a fixed clock, and a
+     * static screen costs nothing.
+     */
+    fun awaitNewFrame(afterVersion: Long, timeoutMs: Long): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        lastConvertMs = 0L
+        synchronized(frameSignal) {
+            while (!released && _frameVersion.value <= afterVersion) {
+                val left = deadline - SystemClock.elapsedRealtime()
+                if (left <= 0) return false
+                frameSignal.wait(left)
+            }
+        }
+        return !released
+    }
+
+    val version: Long get() = _frameVersion.value
 
     /** The most recent converted frame, or null before the first frame. Do not recycle it. */
     fun latestFrame(): Bitmap? = latest
@@ -367,7 +389,7 @@ class VScreenDisplay private constructor(
         lastConvertMs = 0L
         while (SystemClock.elapsedRealtime() < deadline) {
             if (lastConvertMs >= notOlderThanMs && latest != null) return latest
-            Thread.sleep(30)
+            synchronized(frameSignal) { frameSignal.wait((deadline - SystemClock.elapsedRealtime()).coerceIn(1L, 30L)) }
         }
         // A static screen produces no new frames; the last one is still correct.
         return latest

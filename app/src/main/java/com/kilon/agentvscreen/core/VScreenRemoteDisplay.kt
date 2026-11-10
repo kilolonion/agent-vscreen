@@ -32,7 +32,7 @@ internal object VScreenRemoteDisplay {
 
     private val args by lazy {
         Shizuku.UserServiceArgs(ComponentName(BuildConfig.APPLICATION_ID, VScreenDisplayService::class.java.name))
-            .daemon(true) // survive a Minis restart so the next process can adopt the screen
+            .daemon(true) // survive an app restart so the next process can adopt the screen
             .processNameSuffix("vscreen")
             .debuggable(false)
             .version(BuildConfig.VERSION_CODE * 100 + VScreenDisplayService.PROTOCOL)
@@ -110,6 +110,10 @@ internal object VScreenRemoteDisplay {
     fun injectKey(displayId: Int, keyCode: Int, longPress: Boolean = false): Result<Boolean> =
         call(VScreenDisplayService.INJECT_KEY, { it.writeInt(displayId); it.writeInt(keyCode); it.writeInt(if (longPress) 1 else 0) }) { it.readInt() != 0 }
 
+    /** 1.2: characters typed as key events on [displayId] (ASCII; see VScreenDisplayService.injectText). */
+    fun injectText(displayId: Int, text: String): Result<Boolean> =
+        call(VScreenDisplayService.INJECT_TEXT, { it.writeInt(displayId); it.writeString(text) }) { it.readInt() != 0 }
+
     /** Finger drag (or tap when start == end) on [displayId]; see VScreenDisplayService.injectDrag. */
     fun injectDrag(displayId: Int, x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int, holdMs: Int): Result<Boolean> =
         call(VScreenDisplayService.INJECT_DRAG, {
@@ -162,7 +166,7 @@ internal object VScreenRemoteDisplay {
 
     data class Existing(val displayId: Int, val width: Int, val height: Int, val dpi: Int, val flags: Int)
 
-    /** Displays the service still holds (e.g. left by a previous Minis process). */
+    /** Displays the service still holds (e.g. left by a previous app process). */
     fun list(): Result<List<Existing>> = call(VScreenDisplayService.LIST, {}) { r ->
         val n = r.readInt()
         (0 until n).map { Existing(r.readInt(), r.readInt(), r.readInt(), r.readInt(), r.readInt()) }

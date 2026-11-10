@@ -54,11 +54,11 @@ internal object VScreenDownscale {
      * that will not happen (Honor APS writes are refused without the system permission).
      */
     fun fitHint(pkg: String): String {
-        deniedRc?.let { return tr("本机无法关闭它的降分辨率（荣耀 APS 无写权限，本次已试过）；screen fit 会改用副屏逻辑尺寸适配（wmsize_fit，冷启动一次）。根治办法是用户手动：", "This phone cannot turn off its downscaling (no write permission to Honor APS, tried already); screen fit uses the screen's logical size instead (wmsize_fit, one cold start). The real fix is manual, by the user: ") + VScreenShell.downscaleSettingHint() }
-        val v = VScreenShell.device().vendor
+        deniedRc?.let { return tr("本机无法关闭它的降分辨率（荣耀 APS 无写权限，本次已试过）；screen fit 会改用副屏逻辑尺寸适配（wmsize_fit，冷启动一次）。根治办法是用户手动：", "This phone cannot turn off its downscaling (no write permission to Honor APS, tried already); screen fit uses the screen's logical size instead (wmsize_fit, one cold start). The real fix is manual, by the user: ") + Vendor.current.downscaleHint() }
+        val v = Vendor.device.vendor
         val aps = runCatching { apsRead(pkg).available }.getOrDefault(false)
         if ((v == "honor" || v == "huawei") && aps)
-            return tr("screen fit 会先尝试改 APS 比例（这类机型通常没有写权限）；改不了就把副屏逻辑尺寸设成它的实际渲染尺寸并冷启动一次（wmsize_fit，画面整体等比缩放、不再裁边）。根治办法是用户手动：", "screen fit first tries to change the APS ratio (such phones usually have no write permission); failing that it sets the screen's logical size to the real render size and cold-starts once (wmsize_fit: the picture scales evenly and is no longer cropped). The real fix is manual, by the user: ") + VScreenShell.downscaleSettingHint()
+            return tr("screen fit 会先尝试改 APS 比例（这类机型通常没有写权限）；改不了就把副屏逻辑尺寸设成它的实际渲染尺寸并冷启动一次（wmsize_fit，画面整体等比缩放、不再裁边）。根治办法是用户手动：", "screen fit first tries to change the APS ratio (such phones usually have no write permission); failing that it sets the screen's logical size to the real render size and cold-starts once (wmsize_fit: the picture scales evenly and is no longer cropped). The real fix is manual, by the user: ") + Vendor.current.downscaleHint()
         return tr("screen fit 会尝试关闭它的降分辨率；只有设置确实改成了才冷启动一次，改不了就不重启", "screen fit tries to turn off its downscaling; it cold-starts once only if the setting really changed, otherwise it does not restart")
     }
 

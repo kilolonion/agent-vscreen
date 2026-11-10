@@ -139,6 +139,7 @@ class HostService : Service() {
         }
         if (intent?.action == ACTION_ALLOW) { BackgroundOperation.userResume(); return START_STICKY }
         if (intent?.action == ACTION_SHOW_WINDOW) { BackgroundOperation.showWindow(); return START_STICKY }
+        if (intent?.action == Consent.ACTION) { Consent.answer(applicationContext, intent.getIntExtra("id", -1), intent.getBooleanExtra("allow", false)); return START_STICKY }
         // Started again (the user opened the app, boot, update): whatever failed before gets another go now.
         if (!Liveness.foreground) goForeground()
         if (server?.running != true) server?.start(ApiConfig.port)

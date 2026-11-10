@@ -17,15 +17,16 @@ import com.kilon.agentvscreen.core.VScreenPerception
 import com.kilon.agentvscreen.core.VScreenRemoteDisplay
 import com.kilon.agentvscreen.core.VScreenShell
 import com.kilon.agentvscreen.core.VScreenStore
+import com.kilon.agentvscreen.core.Vendor
 import kotlin.math.roundToInt
 import com.kilon.agentvscreen.cmd.VScreenOffloadHandler.Companion.TAG
 
-// [vscreen] v49: open an app on the background screen (launch), move apps between the screens (handoff), close
+// Open an app on the background screen (launch), move apps between the screens (handoff), close
 // (stop) and give the screen back (release). launch fits the screen to the app (orientation, vendor downscaling)
 // and reports what it did as facts; it does not judge whether the page is "ready" — the four blocks show it.
 
-/** What a launch did ([done]) and what the caller must know ([attention]). */
-internal class LaunchFacts(val done: MutableList<String>, val attention: MutableList<String>)
+/** What a launch did ([done]) and what the caller must know ([notes]). */
+internal class LaunchFacts(val done: MutableList<String>, val notes: Notes)
 
 /** Display id -> package whose real render size the screen's logical size was set to (wmsize fit). */
 internal val wmFitted = HashMap<Int, String>()
@@ -43,7 +44,7 @@ internal fun VScreenOffloadHandler.syncRotation(d: VScreenDisplay): String? =
  * scaling undone / the logical size fitted, and the app started again — each said in [LaunchFacts.done].
  */
 internal fun VScreenOffloadHandler.doLaunch(sid: String, pkg: String, orient: Boolean?, restart: Boolean, depth: Int = 0,
-                                            facts: LaunchFacts = LaunchFacts(ArrayList(), ArrayList())): LaunchFacts {
+                                            facts: LaunchFacts = LaunchFacts(ArrayList(), Notes())): LaunchFacts {
     val declared = VScreenShell.appOrientation(context, pkg, null)
     val ranAs = VScreenMap.profile(pkg)["orientation"]?.let { it == "landscape" }
     val want = orient ?: declared ?: ranAs ?: VScreenShell.naturalLandscape(context)
@@ -70,7 +71,7 @@ internal fun VScreenOffloadHandler.doLaunch(sid: String, pkg: String, orient: Bo
         VScreenPerception.ensure(d)
         // Wait for a still, non-blank picture (at most 10 s): facts, not a readiness verdict.
         val t0 = SystemClock.elapsedRealtime()
-        val p = Probe(this, d, listOf(Cond("stable", "still")))
+        val p = Probe(this, d, listOf(Cond("stable", "stable")))
         var w: WaitOut
         try {
             while (true) {
@@ -81,13 +82,13 @@ internal fun VScreenOffloadHandler.doLaunch(sid: String, pkg: String, orient: Bo
         } finally { p.close() }
         val ms = SystemClock.elapsedRealtime() - t0
         facts.done += if (w.met != null) tr("画面在 ${(ms / 100) / 10.0}s 时稳定", "screen settled at ${(ms / 100) / 10.0}s") else tr("等了 ${(ms / 100) / 10.0}s，画面还在变（加载、动画或视频）", "waited ${(ms / 100) / 10.0}s, still changing (loading, animation or video)")
-        syncRotation(d)?.let { facts.attention += it }
+        syncRotation(d)?.let { facts.notes += it }
         val act = VScreenShell.topActivity(d.displayId)
         landed = act?.substringBefore('/')
         if (act != null) synchronized(VScreenOffloadHandler.lastActivity) { VScreenOffloadHandler.lastActivity[d.displayId] = act }
         if (act != null && VScreenShell.isResolver(act)) throw ActionError("LAUNCH_RESOLVER",
             tr("启动 $pkg 后副屏停在系统的“使用以下方式打开”选择器（$act）：这个包没有桌面入口，apps 关键词 找带图标的包名", "After starting $pkg the screen is on the system's \"Open with\" chooser ($act): this package has no launcher entry; find the package with an icon via apps <keyword>"))
-        if (landed != null && landed != pkg) facts.attention += tr("前台是 $landed，不是 $pkg（被跳转到别的应用或系统页）", "The front app is $landed, not $pkg (redirected to another app or a system page)")
+        if (landed != null && landed != pkg) facts.notes += tr("前台是 $landed，不是 $pkg（被跳转到别的应用或系统页）", "The front app is $landed, not $pkg (redirected to another app or a system page)")
         if (landed == pkg) {
             if (declared == null && orient == null) VScreenMap.setProfile(pkg, mapOf("orientation" to
                 if (BackgroundOperation.nativeLandscape(d) != (d.rotation % 2 == 1)) "landscape" else "portrait"))
@@ -96,7 +97,7 @@ internal fun VScreenOffloadHandler.doLaunch(sid: String, pkg: String, orient: Bo
             val crop = VScreenDownscale.surfaceCrop(pkg)
             if (depth == 0 && needRefit == null && ((gs != null && gs > 1.02) || crop?.cropped == true)) needUnscale = gs ?: 1.0
             if (depth > 0 && ((gs != null && gs > 1.02) || crop?.cropped == true))
-                facts.attention += run { val x = gs?.let { "%.2f".format(it) } ?: "?"; tr("处理后 $pkg 仍被系统缩放（$x 倍），画面右侧/下方可能被裁。用户可手动：", "After the fix $pkg is still scaled by the system (×$x); the right/bottom of the picture may be cut off. The user can do it by hand: ") } + VScreenShell.downscaleSettingHint()
+                facts.notes += run { val x = gs?.let { "%.2f".format(it) } ?: "?"; tr("处理后 $pkg 仍被系统缩放（$x 倍），画面右侧/下方可能被裁。用户可手动：", "After the fix $pkg is still scaled by the system (×$x); the right/bottom of the picture may be cut off. The user can do it by hand: ") } + Vendor.current.downscaleHint()
         }
     }
     needRefit?.let { land ->
@@ -112,7 +113,7 @@ internal fun VScreenOffloadHandler.doLaunch(sid: String, pkg: String, orient: Bo
             return doLaunch(sid, pkg, orient, true, depth + 1, facts)
         }
         wmFit(sid, pkg)?.let { note -> facts.done += note; return doLaunch(sid, pkg, orient, true, depth + 1, facts) }
-        facts.attention += run { val x = "%.2f".format(gs); tr("$pkg 被系统缩放（$x 倍），画面右侧/下方会被裁，这里改不了（${fix.text}）。用户可手动：", "$pkg is scaled by the system (×$x); the right/bottom of the picture gets cut off and this can't be changed here (${fix.text}). The user can do it by hand: ") } + VScreenShell.downscaleSettingHint()
+        facts.notes += run { val x = "%.2f".format(gs); tr("$pkg 被系统缩放（$x 倍），画面右侧/下方会被裁，这里改不了（${fix.text}）。用户可手动：", "$pkg is scaled by the system (×$x); the right/bottom of the picture gets cut off and this can't be changed here (${fix.text}). The user can do it by hand: ") } + Vendor.current.downscaleHint()
     }
     if (landed == pkg && depth == 0) runCatching { VScreenDownscale.watchAfterLaunch(BackgroundOperation.acquire(sid, create = false), pkg) }
     return facts
@@ -168,6 +169,9 @@ private fun VScreenOffloadHandler.handoffIn(sid: String, pkgArg: String?): Nativ
         ?: throw ActionError("HANDOFF_NO_TASK", tr("主屏最近没有可接手的应用（只有桌面和 Agent-VScreen 自己）：请用户先打开那个应用，或说是哪个应用", "No app on the main screen to take over (only the launcher and Agent-VScreen): ask the user to open that app first, or to say which one"))
     if (VScreenStore.ruleFor(pick.pkg) == VScreenStore.Rule.BLOCK)
         throw ActionError("APP_BLOCKED", tr("用户禁止后台操作 ${pick.pkg}（Agent-VScreen › 应用限制），不能接手它", "The user blocked background operation of ${pick.pkg} (Agent-VScreen › App rules); it can't be taken over"))
+    // 1.2: taking the app the user is using off their screen is theirs to allow, on the phone.
+    run { val app = VScreenKnowledge.label(pick.pkg) ?: pick.pkg
+        com.kilon.agentvscreen.host.Consent.require(context, "handoff:${pick.pkg}", tr("把你正在用的 $app 接到后台副屏", "move $app, which you are using, to the background screen"), tr("它会从主屏消失，停在当前页面，由 Agent 在后台继续操作", "it leaves the main screen, stays on its current page, and the agent carries on in the background")) }
     val want = VScreenShell.appOrientation(context, pick.pkg, null) ?: VScreenMap.profile(pick.pkg)["orientation"]?.let { it == "landscape" }
     var d0 = BackgroundOperation.acquire(sid, create = true, landscape = want)
     if (want != null && BackgroundOperation.nativeLandscape(d0) != want) d0 = BackgroundOperation.rebuild(sid, want)
@@ -184,7 +188,7 @@ private fun VScreenOffloadHandler.handoffIn(sid: String, pkgArg: String?): Nativ
     VScreenKnowledge.startJourney(sid, pick.pkg)
     val d = BackgroundOperation.acquire(sid, create = false)
     VScreenPerception.ensure(d)
-    val attention = ArrayList<String>()
+    val attention = Notes()
     attention += tr("这是用户正在用的页面（登录、填了一半的内容都在）：不要 launch 重开；需要用户本人的一步（付款、密码、验证码）用 handoff out 交还", "This is the page the user was using (logins and half-filled content included): don't launch it again; for a step only the user can do (payment, password, code), hand it back with handoff out")
     takeAdjusted().forEach { attention += tr("参数被调整：$it", "options adjusted: $it") }
     return fourBlocks(sid, d, done, attention, start, SystemClock.elapsedRealtime() - t0, "handoff", fullList = true)
@@ -230,13 +234,18 @@ internal fun VScreenOffloadHandler.stopCmd(sid: String?, args: OffloadArgs): Nat
     val main0 = mainTop(); val tasks0 = mainTaskIds()
     val pkgArg = args.positional.getOrNull(0)
     if (pkgArg != null && force && VScreenShell.isProtected(pkgArg)) throw ActionError("PROTECTED_APP", tr("$pkgArg 是 Agent-VScreen 自己、桌面或系统界面，不能 force-stop", "$pkgArg is Agent-VScreen itself, the launcher or system UI, and cannot be force-stopped"))
+    if (force) {
+        val target = pkgArg ?: runCatching { BackgroundOperation.previewDisplayFor(s)?.let { VScreenShell.topPackage(it.displayId) } }.getOrNull() ?: "?"
+        val app = VScreenKnowledge.label(target) ?: target
+        com.kilon.agentvscreen.host.Consent.require(context, "force-stop:$target", tr("结束整个 $app（force-stop）", "stop the whole of $app (force-stop)"), tr("主屏上的 $app 也会被结束，没保存的内容会丢", "$app on the main screen is stopped too; unsaved content is lost"))
+    }
     val stopped = VScreenKnowledge.journey(s)
     VScreenKnowledge.endJourney(s)
     VScreenKnowledge.touch(s, stopped)
     val msg = BackgroundOperation.agentAction(s, null, isRead = false, describe = if (force) tr("结束应用（force-stop）", "stop the app (force-stop)") else tr("关闭副屏上的应用", "close the app on the screen")) { d ->
         if (!force) {
             VScreenShell.closeOnDisplay(d.displayId, pkgArg)?.let { o -> if (o.ok) return@agentAction o.message }
-            throw ActionError("CLOSE_FAILED", tr("没能只关闭副屏里的任务（找不到它的 task）。要结束整个应用加 --force（主屏上的这个应用也会被结束），先征得用户同意", "Could not close just the task on the screen (its task was not found). To stop the whole app add --force (the app on the main screen is stopped too); ask the user first"))
+            throw ActionError("CLOSE_FAILED", tr("没能只关闭副屏里的任务（找不到它的 task）。要结束整个应用加 --force（主屏上的这个应用也会被结束；手机上会请用户确认）", "Could not close just the task on the screen (its task was not found). To stop the whole app add --force (the app on the main screen is stopped too; the user is asked to confirm on the phone)"))
         }
         val o = VScreenShell.stop(d.displayId, pkgArg)
         if (!o.ok) throw ActionError(o.code, o.message)

@@ -19,12 +19,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * [vscreen] v49: keeps — an act's stop condition that goes on watching after the turn (`act --stop C --keep wake|notify`).
+ * Keeps — an act's stop condition that goes on watching after the turn (`act --stop C --keep wake|notify`).
  *
  * Between turns, on the phone only (the same condition evaluator as act, no model calls), for up to 12 hours: when it
  * is seen, wake the chat or notify the user, and end. Nothing is done on the screen by itself. While one runs the idle
  * screen is neither paused nor released, a foreground notification shows what is watched (with a stop button) and a
- * partial wake lock keeps the checks going. They end when Agent-VScreen is force-stopped or restarted.
+ * partial wake lock keeps the checks going. 1.2: they are written to disk and come back when the app restarts
+ * (the screen itself does not: a restored watch waits until its session launches again).
  */
 internal object VScreenRules {
     private const val TAG = "VScreenRules"
@@ -43,6 +44,8 @@ internal object VScreenRules {
     }
 
     class Live(val spec: Spec) {
+        /** Wall-clock end (survives a restart, unlike elapsed time). */
+        val endsAt = System.currentTimeMillis() + spec.forMs
         val startedAt = System.currentTimeMillis()
         val startedElapsed = SystemClock.elapsedRealtime()
         @Volatile var checks = 0
@@ -79,6 +82,10 @@ internal object VScreenRules {
     }
 
     @Volatile private var appContext: Context? = null
+    /** 1.2: builds the evaluator of a kept condition (set by the command layer); with it kept watches come back after a restart. */
+    @Volatile var hostFactory: ((String) -> Host)? = null
+    private var seq = 0
+    fun nextName(): String = synchronized(live) { tr("盯", "watch") + (++seq) }
     private val live = LinkedHashMap<String, Live>()
     private val ended = ArrayDeque<Live>()
 
@@ -95,12 +102,45 @@ internal object VScreenRules {
             if (live.size >= MAX) throw IllegalStateException(tr("最多同时盯 $MAX 个条件，先 keep off 一个", "At most $MAX conditions can be watched at once; turn one off with keep off first"))
             live[spec.name] = l
         }
+        persist()
         BackgroundOperation.hold(true)
         l.thread = Thread { loop(ctx, l, host) }.apply { isDaemon = true; name = "vscreen-rule-${spec.name.take(12)}" }
         l.thread?.start()
         RuleService.refresh(ctx)
         AppLogger.info(TAG, "keep ${spec.name} started: ${spec.describe()}")
         return l
+    }
+
+    // ── 1.2: kept watches survive the app being restarted ───────────────────────────────────────────────────────
+
+    private fun file(): java.io.File? = appContext?.let { java.io.File(java.io.File(it.filesDir, "vscreen").apply { mkdirs() }, "keeps.json") }
+
+    private fun persist() = com.kilon.agentvscreen.host.quiet("keeps-persist") {
+        val arr = JSONArray(synchronized(live) { live.values.map { l -> JSONObject().put("name", l.spec.name).put("sid", l.spec.sid).put("cond", l.spec.cond)
+            .put("app", l.spec.app ?: JSONObject.NULL).put("every", l.spec.everyMs).put("ends_at", l.endsAt).put("wake", l.spec.wake).put("notify", l.spec.notify) } })
+        file()?.writeText(JSONObject().put("seq", seq).put("keeps", arr).toString())
+    }
+
+    /** Start again the watches that were running when the app went down and still have time left. Their count. */
+    fun restore(): Int {
+        val factory = hostFactory ?: return 0
+        val o = com.kilon.agentvscreen.host.quiet("keeps-read") { file()?.takeIf { it.isFile }?.readText()?.let { JSONObject(it) } } ?: return 0
+        synchronized(live) { seq = maxOf(seq, o.optInt("seq")) }
+        val arr = o.optJSONArray("keeps") ?: return 0
+        var n = 0
+        val now = System.currentTimeMillis()
+        for (i in 0 until arr.length()) {
+            val k = arr.optJSONObject(i) ?: continue
+            val left = k.optLong("ends_at") - now
+            val name = k.optString("name")
+            if (left < 10_000L || synchronized(live) { live.containsKey(name) }) continue
+            com.kilon.agentvscreen.host.quiet("keeps-restore") {
+                start(Spec(name, k.optString("sid"), k.optString("cond"), k.optString("app").takeIf { it.isNotEmpty() && it != "null" }, k.optLong("every", 1_000L), left, k.optBoolean("wake"), k.optBoolean("notify")), factory(k.optString("cond")))
+                n++
+            }
+        }
+        if (n > 0) AppLogger.info(TAG, "restored $n kept watches after a restart")
+        return n
     }
 
     fun stop(name: String, reason: String = tr("已按要求停止", "stopped as asked")): Boolean {
@@ -132,7 +172,7 @@ internal object VScreenRules {
             r
         }
         l.thread?.interrupt()
-        if (removed) BackgroundOperation.hold(false)
+        if (removed) { BackgroundOperation.hold(false); persist() }
         appContext?.let { RuleService.refresh(it) }
         AppLogger.info(TAG, "keep ${l.spec.name} ended: $reason")
     }

@@ -33,9 +33,49 @@ import kotlin.math.roundToInt
 //   【注意】       safety (main screen, pay guard, takeover, app rules) and failure facts only.
 // The screenshot and the sheet are one picture handed to the model with the result.
 
-/** One element of the 【现在】 list. [n] is what `tap #N` uses. */
-internal data class El(val n: Int, val label: String, val box: Rect, val flags: String, val fromA11y: Boolean, val editable: Boolean = false)
+/** What an element is when it has no words of its own to show. */
+internal enum class ElKind { TEXT, EMPTY_INPUT, NO_TEXT, LINK }
 
+/**
+ * One element of the 【现在】 list. [n] is what `tap #N` uses. 1.2: what can be done with it is typed (not a localized
+ * flags string), and an element without words says what it is through [kind] / [hint] (not through a label that starts
+ * with a bracket): the text printed for a model and the JSON for a program are both rendered from these fields.
+ */
+internal data class El(val n: Int, val text: String, val box: Rect, val fromA11y: Boolean,
+                       val clickable: Boolean = false, val editable: Boolean = false, val scrollable: Boolean = false,
+                       val checked: Boolean? = null, val focused: Boolean = false, val password: Boolean = false,
+                       val kind: ElKind = ElKind.TEXT,
+                       /** EMPTY_INPUT / NO_TEXT: the view id or class; LINK: the length of the hidden text. */
+                       val hint: String? = null) {
+    val placeholder: Boolean get() = kind != ElKind.TEXT
+    /** Nothing can be done with it: plain words. */
+    val plain: Boolean get() = !clickable && !editable && !scrollable && checked == null && !password
+    /** Same element across two looks, whatever the reply language. */
+    val key: String get() = "${kind.name}|$text|${hint.orEmpty()}"
+    /** The words shown for it. */
+    val label: String get() = when (kind) {
+        ElKind.TEXT -> text
+        ElKind.EMPTY_INPUT -> tr("（空输入框", "(empty input box") + (hint?.let { " $it" } ?: "") + tr("）", ")")
+        ElKind.NO_TEXT -> tr("（无文字", "(no text") + (hint?.let { " $it" } ?: "") + tr("）", ")")
+        ElKind.LINK -> tr("（链接/标识 ${hint ?: "?"} 字）", "(link / id, ${hint ?: "?"} chars)")
+    }
+    val flags: String get() = buildList {
+        if (editable) add(tr("可输入", "input")) else if (clickable) add(tr("可点", "tappable"))
+        if (scrollable) add(tr("可滚动", "scrollable"))
+        checked?.let { add(if (it) tr("已选", "checked") else tr("未选", "unchecked")) }
+        if (focused && editable) add(tr("有焦点", "focused"))
+        if (password) add(tr("密码", "password"))
+    }.joinToString(" ")
+    fun json(): org.json.JSONObject = org.json.JSONObject().put("n", n).put("text", if (placeholder) "" else text)
+        .put("x", box.centerX()).put("y", box.centerY())
+        .put("box", org.json.JSONArray(listOf(box.left, box.top, box.right, box.bottom)))
+        .put("source", if (fromA11y) "accessibility" else "ocr")
+        .also { o ->
+            if (placeholder) o.put("kind", kind.name.lowercase()).put("hint", hint ?: org.json.JSONObject.NULL)
+            if (clickable) o.put("tappable", true); if (editable) o.put("input", true); if (scrollable) o.put("scrollable", true)
+            checked?.let { o.put("checked", it) }; if (focused && editable) o.put("focused", true); if (password) o.put("password", true)
+        }
+}
 /** The elements last shown to a chat, for `#N` (bound to the screen generation they were read on). */
 internal class ElSet(val generation: Long, val atMs: Long, val list: List<El>)
 
@@ -45,6 +85,8 @@ internal class Since(val lines: List<String>, val changed: Boolean, val from: Lo
 internal object Report {
     /** Lines of the 【现在】 list printed at most (all are kept for #N and zoom). */
     const val MAX_ELEMENTS = 160
+    /** Elements given in the structured result at most. */
+    const val MAX_JSON_ELEMENTS = 400
     const val NOW_SIDE = 1280
     const val CELL_SIDE = 300
     const val MAX_CELLS = 8
@@ -57,12 +99,9 @@ internal object Report {
 
 // ── elements ─────────────────────────────────────────────────────────
 
-/** An accessibility node a person could see or act on. */
-internal class RawEl(val label: String, val box: Rect, val flags: String, val a11y: Boolean, val editable: Boolean)
-
-/** The accessibility side of the elements (no OCR): what nodes say, where, and what can be done with them. */
-internal fun a11yRaw(d: VScreenDisplay): List<RawEl> {
-    val raw = ArrayList<RawEl>()
+/** The accessibility side of the elements (no OCR): what nodes say, where, and what can be done with them (n = 0). */
+internal fun a11yRaw(d: VScreenDisplay): List<El> {
+    val raw = ArrayList<El>()
     val screenArea = d.width.toLong() * d.height
     var seen = 0
     // 1.1: a clickable container with no words of its own (a list row, a card, a search box drawn by the app) takes the
@@ -82,37 +121,33 @@ internal fun a11yRaw(d: VScreenDisplay): List<RawEl> {
         val start = raw.size
         for (i in 0 until n.childCount) walk(runCatching { n.getChild(i) }.getOrNull(), depth + 1)
         if (!inside || !(text != null || (actionable && !big) || n.isEditable)) return
-        val flags = buildList {
-            if (n.isEditable) add(tr("可输入", "input")) else if (n.isClickable) add(tr("可点", "tappable"))
-            if (n.isScrollable) add(tr("可滚动", "scrollable"))
-            if (n.isCheckable) add(if (n.isChecked) tr("已选", "checked") else tr("未选", "unchecked"))
-            if (n.isFocused && n.isEditable) add(tr("有焦点", "focused"))
-            if (n.isPassword) add(tr("密码", "password"))
-        }.joinToString(" ")
-        var label = text?.let { tidy(it) }
-        if (label == null && !n.isEditable && (n.isClickable || n.isCheckable)) {
+        var words: Pair<ElKind, String>? = text?.let { tidy(it) }
+        if (words == null && !n.isEditable && (n.isClickable || n.isCheckable)) {
             // Plain words drawn inside this tappable node (not inside a tappable child of it).
-            val inner = (start until raw.size).filter { i -> raw[i].let { it.flags.isEmpty() && !it.editable && !it.label.let { l -> l.startsWith("（") || l.startsWith("(") } && b.contains(it.box.centerX(), it.box.centerY()) } }
+            val inner = (start until raw.size).filter { i -> raw[i].let { it.plain && !it.placeholder && b.contains(it.box.centerX(), it.box.centerY()) } }
             if (inner.isNotEmpty()) {
-                label = inner.map { raw[it].label }.distinct().joinToString(" · ").let { if (it.length > 60) it.take(58) + "…" else it }
+                words = ElKind.TEXT to inner.map { raw[it].text }.distinct().joinToString(" · ").let { if (it.length > 60) it.take(58) + "…" else it }
                 inner.asReversed().forEach { raw.removeAt(it) }
             }
         }
         val id = n.viewIdResourceName?.substringAfterLast('/')?.takeIf { it.length in 2..32 }
-        if (label == null) {
+        var kind = words?.first ?: ElKind.TEXT
+        var hint: String? = if (kind == ElKind.LINK) words!!.second else null
+        if (words == null) {
             if (!n.isEditable && area > screenArea / 40) return
-            label = if (n.isEditable) tr("（空输入框", "(empty input box") + (id?.let { " $it" } ?: "") + tr("）", ")")
-                else tr("（无文字", "(no text") + ((id ?: n.className?.toString()?.substringAfterLast('.')?.takeIf { it.length in 3..24 })?.let { " $it" } ?: "") + tr("）", ")")
+            kind = if (n.isEditable) ElKind.EMPTY_INPUT else ElKind.NO_TEXT
+            hint = if (n.isEditable) id else (id ?: n.className?.toString()?.substringAfterLast('.')?.takeIf { it.length in 3..24 })
         }
-        raw.add(start.coerceAtMost(raw.size), RawEl(label, b, flags, true, n.isEditable))
+        raw.add(start.coerceAtMost(raw.size), El(0, if (kind == ElKind.TEXT) words!!.second else "", b, true,
+            clickable = n.isClickable, editable = n.isEditable, scrollable = n.isScrollable,
+            checked = if (n.isCheckable) n.isChecked else null, focused = n.isFocused, password = n.isPassword, kind = kind, hint = hint))
     }
     BackgroundOperation.nodeRoots(d.displayId).forEach { walk(it, 0) }
-    // Same label at (nearly) the same place: once.
-    val out = ArrayList<RawEl>()
-    for (r in raw) if (out.none { it.label == r.label && Math.abs(it.box.centerX() - r.box.centerX()) <= 20 && Math.abs(it.box.centerY() - r.box.centerY()) <= 20 }) out += r
+    // Same element at (nearly) the same place: once.
+    val out = ArrayList<El>()
+    for (r in raw) if (out.none { it.key == r.key && Math.abs(it.box.centerX() - r.box.centerX()) <= 20 && Math.abs(it.box.centerY() - r.box.centerY()) <= 20 }) out += r
     return out
 }
-
 /** Internal names that are not words on the screen: hex hashes, code identifiers (virtualNode). */
 private val HEXISH = Regex("^[0-9a-fA-F]{5,}$")
 private val CODE_ID = Regex("^[a-z]{3,}[A-Z][a-z]+[A-Za-z0-9]*$")
@@ -126,17 +161,18 @@ private val DIGIT = Regex("[0-9]")
  * that lags behind the picture: a timer, a counter), the picture's text wins — the list says what is drawn.
  * Nothing is cut here; the printer decides how many lines to show.
  */
-internal fun mergeElements(d: VScreenDisplay, a11y: List<RawEl>, ocr: List<VScreenOcr.Item>?): List<El> {
+internal fun mergeElements(d: VScreenDisplay, a11y: List<El>, ocr: List<VScreenOcr.Item>?): List<El> {
     val items = ocr.orEmpty().filter { !VScreenOcr.isJunk(it) && !isJunkLabel(it.text.trim()) && it.text.isNotBlank() }
-    val out = ArrayList<RawEl>()
+    val out = ArrayList<El>()
     val usedOcr = HashSet<VScreenOcr.Item>()
     for (a in a11y) {
-        if (!(a.label.startsWith("（") || a.label.startsWith("(")) && DIGIT.containsMatchIn(a.label) && a.label.length <= 24) {
+        if (!a.placeholder && DIGIT.containsMatchIn(a.text) && a.text.length <= 24) {
             val drawn = items.filter { Rect(a.box).apply { inset(-8, -8) }.contains(it.box.centerX(), it.box.centerY()) && DIGIT.containsMatchIn(it.text) }
             val drawnText = drawn.joinToString(" ") { it.text.trim() }
-            if (drawn.isNotEmpty() && VScreenOcr.norm(drawnText) != VScreenOcr.norm(a.label) && !VScreenOcr.norm(drawnText).contains(VScreenOcr.norm(a.label))) {
+            if (drawn.isNotEmpty() && VScreenOcr.norm(drawnText) != VScreenOcr.norm(a.text) && !VScreenOcr.norm(drawnText).contains(VScreenOcr.norm(a.text))) {
                 usedOcr += drawn
-                out += RawEl(tidy(drawnText), a.box, a.flags, true, a.editable)
+                val w = tidy(drawnText)
+                out += a.copy(text = if (w.first == ElKind.TEXT) w.second else "", kind = w.first, hint = if (w.first == ElKind.LINK) w.second else null)
                 continue
             }
         }
@@ -146,14 +182,12 @@ internal fun mergeElements(d: VScreenDisplay, a11y: List<RawEl>, ocr: List<VScre
         if (it in usedOcr) continue
         val t = it.text.replace('\n', ' ').trim()
         val nt = VScreenOcr.norm(t)
-        val said = out.any { a -> a.a11y && Rect.intersects(a.box, it.box) && VScreenOcr.norm(a.label).let { l -> l.isNotEmpty() && (l.contains(nt) || nt.contains(l)) } }
-        if (!said) out += RawEl(tidy(t), Rect(it.box), "", false, false)
+        val said = out.any { a -> a.fromA11y && !a.placeholder && Rect.intersects(a.box, it.box) && VScreenOcr.norm(a.text).let { l -> l.isNotEmpty() && (l.contains(nt) || nt.contains(l)) } }
+        if (!said) { val w = tidy(t); out += El(0, if (w.first == ElKind.TEXT) w.second else "", Rect(it.box), false, kind = w.first, hint = if (w.first == ElKind.LINK) w.second else null) }
     }
     val row = maxOf(16, d.height / 120)
-    return out.sortedWith(compareBy({ it.box.centerY() / row }, { it.box.centerX() }))
-        .mapIndexed { i, r -> El(i + 1, r.label, r.box, r.flags, r.a11y, r.editable) }
+    return out.sortedWith(compareBy({ it.box.centerY() / row }, { it.box.centerX() })).mapIndexed { i, r -> r.copy(n = i + 1) }
 }
-
 /** One look at the screen: a frame, the OCR words of exactly that frame, the elements, the foreground activity. */
 internal class Snap(val frame: Bitmap?, val version: Long, val items: List<VScreenOcr.Item>?, val els: List<El>,
                     val activity: String?, val ocrReused: Boolean)
@@ -177,7 +211,7 @@ internal fun VScreenOffloadHandler.snapshot(d: VScreenDisplay, freshMs: Long = 1
         d.requestFreshFrame()
         d.awaitFrameAfter(t0, freshMs)
         val fv = d.latestWithVersion()
-        val a11yF = snapPool.submit<List<RawEl>> { runCatching { a11yRaw(d) }.getOrDefault(emptyList()) }
+        val a11yF = snapPool.submit<List<El>> { runCatching { a11yRaw(d) }.getOrDefault(emptyList()) }
         val actF = snapPool.submit<String?> { runCatching { VScreenShell.topActivity(d.displayId) }.getOrNull() }
         var reused = false
         val items: List<VScreenOcr.Item>? = if (fv == null) null else {
@@ -207,18 +241,17 @@ private fun samePicture(a: Bitmap, b: Bitmap): Boolean {
 private val PCT = Regex("%[0-9A-Fa-f]{2}")
 private val URLISH = Regex("^(https?://|[a-z][a-z0-9+.-]*://)|[?&][\\w%]+=")
 
-/** Labels: URL-encoded tracking strings are summarised, long ones cut (and said so). */
-internal fun tidy(raw: String): String {
+/** Words of an element: URL-encoded tracking strings become LINK (with their length), long ones are cut. */
+internal fun tidy(raw: String): Pair<ElKind, String> {
     val t = raw.trim()
-    if (PCT.findAll(t).count() >= 3 || (t.length > 40 && !t.contains(' ') && URLISH.containsMatchIn(t))) return tr("（链接/标识 ${t.length} 字）", "(link / id, ${t.length} chars)")
-    return if (t.length > 40) t.take(40) + tr("…（共 ${t.length} 字）", "… (${t.length} chars)") else t
+    if (PCT.findAll(t).count() >= 3 || (t.length > 40 && !t.contains(' ') && URLISH.containsMatchIn(t))) return ElKind.LINK to t.length.toString()
+    return ElKind.TEXT to (if (t.length > 40) t.take(40) + "…" else t)
 }
 
 internal fun El.line(): String {
     val c = "(${box.centerX()},${box.centerY()})"
-    return "#$n “$label” $c" + if (flags.isNotEmpty()) " $flags" else ""
+    return "#$n “$label” $c" + flags.let { if (it.isNotEmpty()) " $it" else "" }
 }
-
 // ── 这段时间 ──────────────────────────────────────────────────────────
 
 /**
@@ -404,24 +437,39 @@ internal fun pickTrack(displayId: Int, from: Long, to: Long, max: Int, maxSide: 
 
 // ── the four blocks ──────────────────────────────────────────────────
 
-/** The text of a four-block return. [done] and [attention] are lines; the other two are built here. */
-internal fun VScreenOffloadHandler.fourBlocks(sid: String, d: VScreenDisplay, done: List<String>, attention: MutableList<String>,
-                                              segmentStart: Long, actionMs: Long, tag: String, fullList: Boolean = false): NativeOffloadResult {
+/**
+ * The four-block return, as text for a model and as data for a program, both from the same values: [lines] / [steps]
+ * (done), the readings and the track (meanwhile), one snapshot (now), [notes]. [outcome] says how the stretch ended:
+ * done | stopped (a stop condition fired: also fine) | missed | refused | interrupted.
+ */
+internal fun VScreenOffloadHandler.fourBlocks(sid: String, d: VScreenDisplay, lines: List<String>, notes: Notes,
+                                              segmentStart: Long, actionMs: Long, tag: String, fullList: Boolean = false,
+                                              steps: List<StepOut> = emptyList(), outcome: String = "done", stoppedAt: String? = null): NativeOffloadResult {
     // Whoever is handed 【现在】 has seen the current page: that is the re-read a takeover or restart asks for.
     BackgroundOperation.acknowledgeReread(sid)
     val now = System.currentTimeMillis()
     val last = synchronized(VScreenOffloadHandler.lastReturn) { VScreenOffloadHandler.lastReturn[sid] }
     val from = if (last != null && now - last <= 600_000L && last <= segmentStart) last else segmentStart
+    fun finish(sb: StringBuilder, data: org.json.JSONObject, outcome0: String): NativeOffloadResult {
+        sb.append("\n" + Blocks.notes + "\n")
+        if (notes.isEmpty) sb.append(tr("无\n", "none\n")) else notes.list.forEach { sb.append("- ").append(it.line()).append('\n') }
+        val ok = outcome0 == "done" || outcome0 == "stopped"
+        val code = if (ok) "OK" else notes.firstBlocking() ?: "STEP_MISSED"
+        data.put("outcome", outcome0).put("steps", org.json.JSONArray(steps.map { it.json() }))
+            .put("stopped_at", stoppedAt ?: org.json.JSONObject.NULL)
+            .put("done", org.json.JSONArray(lines)).put("notes", org.json.JSONArray(notes.list.map { it.json() }))
+        synchronized(VScreenOffloadHandler.lastReturn) { VScreenOffloadHandler.lastReturn[sid] = System.currentTimeMillis() }
+        return NativeOffloadResult(if (ok) 0 else 1, sb.toString(), code, data, softFail = !ok)
+    }
     // The screen is gone (privileged connection lost): say so instead of describing an empty screen.
     connectionLost(d)?.let { lost ->
-        val sb = StringBuilder(Blocks.done + "\n"); done.forEach { sb.append(it).append('\n') }
-        sb.append("\n" + Blocks.meanwhile + "\n" + tr("（副屏已不存在，没有录屏）", "(the screen no longer exists, no recording)") + "\n\n" + Blocks.now + "\n" + tr("（没有副屏）", "(no screen)") + "\n\n" + Blocks.notes + "\n")
-        (attention + lost).distinct().forEach { sb.append("- ").append(it).append('\n') }
-        synchronized(VScreenOffloadHandler.lastReturn) { VScreenOffloadHandler.lastReturn[sid] = System.currentTimeMillis() }
-        return NativeOffloadResult(0, sb.toString())
+        val sb = StringBuilder(Blocks.done + "\n"); lines.forEach { sb.append(it).append('\n') }
+        sb.append("\n" + Blocks.meanwhile + "\n" + tr("（副屏已不存在，没有录屏）", "(the screen no longer exists, no recording)") + "\n\n" + Blocks.now + "\n" + tr("（没有副屏）", "(no screen)") + "\n")
+        notes.add("CONNECTION_LOST", lost)
+        return finish(sb, org.json.JSONObject().put("screen", org.json.JSONObject.NULL), "interrupted")
     }
     // v0.5: the recording-track work (decoding frames for 【这段时间】 and the sheet) runs while the screen is read.
-    val picF = REPORT_POOL.submit<Pair<List<String>, Boolean>> { runCatching { pictureFacts(d, from, now) }.getOrElse { listOf(tr("（读不到录屏：${it.message}）", "(recording unreadable: ${it.message})")) to false } }
+    val picF = REPORT_POOL.submit<Pair<List<String>, Boolean>>(com.kilon.agentvscreen.I18n.carry { runCatching { pictureFacts(d, from, now) }.getOrElse { listOf(tr("（读不到录屏：${it.message}）", "(recording unreadable: ${it.message})")) to false } })
     val cellsF = REPORT_POOL.submit<List<Pair<Long, Bitmap>>> { runCatching { pickTrack(d.displayId, from, now, Report.MAX_CELLS) }.getOrDefault(emptyList()) }
     val snap = snapshot(d)
     val (picLines, changed) = runCatching { picF.get(5, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault(emptyList<String>() to false)
@@ -434,27 +482,29 @@ internal fun VScreenOffloadHandler.fourBlocks(sid: String, d: VScreenDisplay, do
     synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] = ElSet(d.generation, now, els) }
     val shownCells = if (changed) cells else { cells.forEach { it.second.recycle() }; emptyList() }
     val pic = snap.frame?.let { picture(sid, d, it, since, tag, shownCells) } ?: run { shownCells.forEach { it.second.recycle() }; null }
-    if (snap.activity == null) attention += tr("副屏上没有应用（副屏没有桌面，home 和 back 回不到桌面）：launch <应用名> 打开一个", "No app on the screen (the screen has no launcher; home and back can't reach one): open one with launch <app name>")
-    VScreenPerception.blankFor(d.displayId)?.let { ms -> attention += tr("画面已连续 ${(ms / 100) / 10.0} 秒是一整片纯色（黑屏/白屏）", "The picture has been one solid color for ${(ms / 100) / 10.0} s (black / white screen)") }
+    if (snap.activity == null) notes.add("NO_APP", tr("副屏上没有应用（副屏没有桌面，back 回不到桌面）：launch <应用名> 打开一个", "No app on the screen (the screen has no launcher; back can't reach one): open one with launch <app name>"))
+    VScreenPerception.blankFor(d.displayId)?.let { ms -> notes += tr("画面已连续 ${(ms / 100) / 10.0} 秒是一整片纯色（黑屏/白屏）", "The picture has been one solid color for ${(ms / 100) / 10.0} s (black / white screen)") }
     val sb = StringBuilder()
     sb.append(Blocks.done + "\n")
-    done.forEach { sb.append(it).append('\n') }
+    lines.forEach { sb.append(it).append('\n') }
     sb.append("\n" + Blocks.meanwhile + "\n")
     since.lines.forEach { sb.append(it).append('\n') }
     sb.append("\n" + Blocks.now + " ").append(snap.activity ?: tr("（副屏上没有应用）", "(no app on the screen)")).append(tr("  副屏 ", "  screen ") + "${d.width}x${d.height}")
     if (pic != null) sb.append(tr("  图 ", "  picture ")).append(pic).append(if (since.changed) tr("（左/上是现在，旁边是这段时间的拼图）", " (left / top is now, next to it the strip of meanwhile)") else "")
     sb.append('\n')
-    appendElements(sb, els, prev?.takeIf { it.generation == d.generation }, fullList, snap.items == null)
-    sb.append("\n" + Blocks.notes + "\n")
-    if (attention.isEmpty()) sb.append(tr("无\n", "none\n")) else attention.distinct().forEach { sb.append("- ").append(it).append('\n') }
-    synchronized(VScreenOffloadHandler.lastReturn) { VScreenOffloadHandler.lastReturn[sid] = System.currentTimeMillis() }
-    return NativeOffloadResult(0, sb.toString())
+    val prevSame = prev?.takeIf { it.generation == d.generation }
+    val shown = appendElements(sb, els, prevSame, fullList, snap.items == null)
+    val screen = org.json.JSONObject().put("app", snap.activity?.substringBefore('/') ?: org.json.JSONObject.NULL)
+        .put("activity", snap.activity ?: org.json.JSONObject.NULL).put("width", d.width).put("height", d.height)
+        .put("generation", d.generation).put("image", pic ?: org.json.JSONObject.NULL).put("image_has_strip", since.changed && pic != null)
+        .put("elements", org.json.JSONArray(els.take(Report.MAX_JSON_ELEMENTS).map { e -> e.json().also { o -> if (e !in shown) o.put("unchanged", true) } }))
+        .put("elements_total", els.size)
+    return finish(sb, org.json.JSONObject().put("meanwhile", org.json.JSONArray(since.lines)).put("picture_changed", since.changed).put("screen", screen), outcome)
 }
-
 private val REPORT_POOL = java.util.concurrent.Executors.newCachedThreadPool { r -> Thread(r, "vscreen-report").apply { isDaemon = true } }
 
 /** Same element as last time: same words, centre within 24 px. */
-private fun sameEl(a: El, b: El) = a.label == b.label && Math.abs(a.box.centerX() - b.box.centerX()) <= 24 && Math.abs(a.box.centerY() - b.box.centerY()) <= 24
+internal fun sameEl(a: El, b: El) = a.key == b.key && Math.abs(a.box.centerX() - b.box.centerX()) <= 24 && Math.abs(a.box.centerY() - b.box.centerY()) <= 24
 
 /**
  * v0.5: numbers stay put on the same page. When most of the elements were in the last list, they keep their numbers
@@ -478,8 +528,8 @@ internal fun numbered(sid: String, d: VScreenDisplay, els: List<El>): List<El> {
  * said in one line); [full] (a look without steps) prints everything. At most [Report.MAX_ELEMENTS] lines; all are kept
  * for #N and zoom.
  */
-private fun appendElements(sb: StringBuilder, els: List<El>, prev: ElSet?, full: Boolean, noOcr: Boolean) {
-    if (els.isEmpty()) { sb.append(if (noOcr) tr("（没读到文字：OCR 没有结果）\n", "(no text read: OCR returned nothing)\n") else tr("（画面上没有可读的文字或控件：看图）\n", "(no readable text or widgets on the screen: look at the picture)\n")); return }
+private fun appendElements(sb: StringBuilder, els: List<El>, prev: ElSet?, full: Boolean, noOcr: Boolean): Set<El> {
+    if (els.isEmpty()) { sb.append(if (noOcr) tr("（没读到文字：OCR 没有结果）\n", "(no text read: OCR returned nothing)\n") else tr("（画面上没有可读的文字或控件：看图）\n", "(no readable text or widgets on the screen: look at the picture)\n")); return emptySet() }
     val same = if (full || prev == null) emptyList() else els.filter { e -> prev.list.any { it.n == e.n && sameEl(it, e) } }
     val show = if (same.size >= els.size * 0.6) els - same.toSet() else els
     val keptLine = if (show.size < els.size) tr("（另有 ${els.size - show.size} 个元素和上次【现在】一样，编号不变；act 不带步骤会列出全部）", "(${els.size - show.size} more elements are the same as in the last [Now], numbers unchanged; act without steps lists them all)") else null
@@ -487,6 +537,7 @@ private fun appendElements(sb: StringBuilder, els: List<El>, prev: ElSet?, full:
     show.sortedWith(compareBy({ it.box.centerY() }, { it.box.centerX() })).take(Report.MAX_ELEMENTS).forEach { sb.append(it.line()).append('\n') }
     if (show.size > Report.MAX_ELEMENTS) sb.append(tr("（还有 ${show.size - Report.MAX_ELEMENTS} 个没列出：zoom x1,y1,x2,y2 列出那块的全部元素）\n", "(${show.size - Report.MAX_ELEMENTS} more not listed: zoom x1,y1,x2,y2 lists every element in that area)\n"))
     keptLine?.let { sb.append(it).append(if (gone > 0) tr("；上次的 $gone 个不见了", "; $gone from last time are gone") else "").append('\n') }
+    return show.toSet()
 }
 
 /** 1.1.7: the four block headers (and the error header) in the current language. */

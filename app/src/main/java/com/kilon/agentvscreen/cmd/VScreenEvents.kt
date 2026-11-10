@@ -16,7 +16,9 @@ internal fun VScreenOffloadHandler.eventsCmd(sid: String?, args: OffloadArgs): N
     // anything, so the reply says that at once instead of silently returning early or uselessly blocking.
     val watching = VScreenRules.running().count { it.spec.wake && it.spec.sid == s }
     val t0 = android.os.SystemClock.elapsedRealtime()
-    val evs = EventHub.take(s, if (watching > 0) want else 0L)
+    val again = args.hasFlag("again")
+    val evs = EventHub.take(s, if (watching > 0) want else 0L, again)
+    if (again && evs.isEmpty()) return text(tr("没有上一批：上一次 events 没有取到事件，或那一批已经被之后的 events 确认掉了。", "No previous batch: the last events call returned none, or that batch was already confirmed by a later events call."))
     val waited = android.os.SystemClock.elapsedRealtime() - t0
     if (evs.isEmpty()) return text(when {
         watching == 0 && want > 0 -> tr("没有新事件，也没等：会话 $s 没有正在运行的 --keep wake 盯守，等也不会来事件。先 act --stop \"条件\" --keep wake 开始盯，keep 看列表。", "No new events, and no wait: session $s has no running --keep wake watch, so waiting would bring nothing. Start one with act --stop \"condition\" --keep wake; keep lists them.")
@@ -25,5 +27,7 @@ internal fun VScreenOffloadHandler.eventsCmd(sid: String?, args: OffloadArgs): N
         else -> tr("没有新事件（会话 $s 有 $watching 个盯守在运行；--wait 60s 可以等）。", "No new events (session $s has $watching watches running; --wait 60s waits for one).")
     })
     val fmt = SimpleDateFormat("HH:mm:ss", Locale.ROOT)
-    return text(evs.joinToString("\n\n") { e -> "[${fmt.format(Date(e.optLong("at")))}] ${e.optString("kind")} \"${e.optString("name")}\"\n${e.optString("text")}" })
+    val body = evs.joinToString("\n\n") { e -> "#${e.optLong("seq")} [${fmt.format(Date(e.optLong("at")))}] ${e.optString("kind")} \"${e.optString("name")}\"\n${e.optString("text")}" } +
+        "\n\n" + tr("（这一批会保留到你下一次 events；这次回复没收到就 events --again 重取，按 #编号 去重）", "(this batch is kept until your next events call; if this reply got lost, fetch it again with events --again and de-duplicate by #number)")
+    return NativeOffloadResult(0, body + "\n", "OK", org.json.JSONObject().put("events", org.json.JSONArray(evs)))
 }

@@ -30,37 +30,14 @@ internal object VScreenHandoff {
 
     /** Standard (app) tasks on [displayId], top first. Home/recents/assistant tasks are left out. */
     fun tasksOn(displayId: Int): List<TaskRef> {
-        // v27: the system's own per-display list first (no dumpsys parsing, cannot leak across displays).
+        // The system's own per-display list (through the display service).
         VScreenShell.taskSource(displayId)?.let { list ->
             return list.filter { it.isAppTask }.mapNotNull { t -> t.pkg?.let { TaskRef(t.taskId, it, t.visible) } }
                 .distinctBy { it.taskId }
         }
-        val lines = VScreenShell.displaySection(displayId) ?: return emptyList()
-        val taskRe = Regex("Task(?:Record)?\\{[0-9a-f]+ #(\\d+)")
-        val pkgRe = Regex("A=(?:\\d+:)?([a-zA-Z0-9_.]+)")
-        val actRe = Regex(" ([a-zA-Z][a-zA-Z0-9_.]*)/[a-zA-Z0-9_.$]+")
-        val out = ArrayList<TaskRef>()
-        var pending: Int? = null
-        var pendingVisible = false
-        for (l in lines) {
-            val m = if (VScreenShell.isTaskLine(l)) taskRe.find(l) else null
-            if (m != null) {
-                pending = null
-                val id = m.groupValues[1].toIntOrNull() ?: continue
-                if (Regex("type=(home|recents|assistant|dream)").containsMatchIn(l)) continue
-                val pkg = pkgRe.find(l)?.groupValues?.get(1)
-                if (pkg != null) { if (out.none { it.taskId == id }) out += TaskRef(id, pkg, l.contains("visible=true")) }
-                else { pending = id; pendingVisible = l.contains("visible=true") }
-                continue
-            }
-            val pid = pending ?: continue
-            if (!(l.startsWith("* Hist") || l.startsWith("Hist #"))) continue
-            actRe.find(l)?.let { a ->
-                if (out.none { it.taskId == pid }) out += TaskRef(pid, a.groupValues[1], pendingVisible)
-                pending = null
-            }
-        }
-        return out
+        // 1.2: no dumpsys fallback. Text scraped from dumpsys differs per maker and Android version and mixed up
+        // displays; when the system's own list cannot be read the answer is "unknown" (empty), never a guess.
+        return emptyList()
     }
 
     /** The launcher (home) packages, which are never handed over. */

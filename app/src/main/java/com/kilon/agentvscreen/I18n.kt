@@ -24,14 +24,34 @@ object I18n {
         get() = cached
         set(v) { cached = v; prefs?.edit()?.putString("lang", v.key)?.apply() }
 
-    /** True when the app currently speaks English. */
+    /**
+     * 1.2: a caller may ask for its own reply language (`lang` in the request). It holds for the thread that runs the
+     * command; work handed to another thread keeps it through [carry]. The app's own UI is never affected.
+     */
+    private val forced = ThreadLocal<Boolean?>()
+
+    /** "zh" / "en" → that language for [block] on this thread; anything else → the app's language. */
+    fun <T> with(lang: String?, block: () -> T): T {
+        val want = when (lang?.trim()?.lowercase()?.take(2)) { "zh" -> false; "en" -> true; else -> null }
+        if (want == null) return block()
+        val before = forced.get()
+        forced.set(want)
+        try { return block() } finally { if (before == null) forced.remove() else forced.set(before) }
+    }
+
+    /** A wrapper that runs work on another thread in this thread's reply language. */
+    fun <T> carry(block: () -> T): () -> T {
+        val f = forced.get() ?: return block
+        return { val before = forced.get(); forced.set(f); try { block() } finally { if (before == null) forced.remove() else forced.set(before) } }
+    }
+
+    /** True when the app (or this thread's caller) currently speaks English. */
     val en: Boolean
-        get() = when (cached) {
+        get() = forced.get() ?: when (cached) {
             Lang.EN -> true
             Lang.ZH -> false
             Lang.AUTO -> !Locale.getDefault().language.equals("zh", ignoreCase = true)
         }
-
     val code: String get() = if (en) "en" else "zh"
 }
 

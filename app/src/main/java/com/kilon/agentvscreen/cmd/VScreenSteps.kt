@@ -52,8 +52,9 @@ internal object Steps {
     const val MAX_WAIT_MS = 120_000L
     const val MAX_STEPS = 40
 
-    private val KEYS = setOf("back", "enter", "home", "tab", "del", "delete", "space", "search", "menu", "escape", "esc", "up", "down",
-        "left", "right", "paste", "copy", "cut", "select_all", "page_up", "page_down", "volume_up", "volume_down", "app_switch", "recent")
+    /** 1.2: key names come from the one key table (VScreenShell.KEYS); a number is a keycode. */
+    private fun isKey(k: String): Boolean = com.kilon.agentvscreen.core.VScreenShell.keyCode(k) != null
+    private val KEY_NAMES: String get() = com.kilon.agentvscreen.core.VScreenShell.KEYS.keys.joinToString(" ")
 
     /** Split a segment into step strings: ';' / '；' / new lines, not inside quotes. */
     fun split(body: String): List<String> {
@@ -152,8 +153,9 @@ internal object Steps {
                 Step(raw, "type", text = body, append = verb == "type+", until = until, untilMs = untilMs)
             }
             "key", "press-key", "按键" -> {
-                val k = args.firstOrNull()?.lowercase() ?: bad(raw, tr("key 后面写键名：back / enter / home / tab / del / space / search", "write a key name after key: back / enter / home / tab / del / space / search"))
-                if (k !in KEYS && !k.matches(Regex("keycode_[a-z0-9_]+|[0-9]{1,3}"))) bad(raw, run { val ks = KEYS.joinToString(" "); tr("不认识的键 $k（可用：$ks，或 keycode_XXX）", "unknown key $k (available: $ks, or keycode_XXX)") })
+                val k = args.firstOrNull()?.lowercase() ?: bad(raw, tr("key 后面写键名：$KEY_NAMES", "write a key name after key: $KEY_NAMES"))
+                if (k == "home" || k == "app_switch" || k == "recent" || k == "recents") bad(raw, tr("没有 $k 键：副屏没有桌面和多任务界面（它们在用户的主屏上）。要离开当前应用用 stop，要开别的应用用 launch", "there is no $k key: the background screen has no launcher or recents (those are on the user's main screen). To leave the app use stop; to open another use launch"))
+                if (!isKey(k)) bad(raw, tr("不认识的键 $k（可用：$KEY_NAMES，或数字 keycode）", "unknown key $k (available: $KEY_NAMES, or a numeric keycode)"))
                 Step(raw, "key", text = k, until = until, untilMs = untilMs)
             }
             "back" -> Step(raw, "key", text = "back", until = until, untilMs = untilMs)
@@ -232,7 +234,7 @@ internal object Steps {
             "text", "gone" -> { if (v.isEmpty()) throw ActionError("INVALID_STEP", tr("$kind: 后面写字（$s）", "write text after $kind: ($s)")); Cond(s, kind, text = v) }
             "change", "changed" -> Cond(s, "change", area = area())
             "still" -> Cond(s, "still", area = area())
-            "stable" -> Cond(s, "still")
+            "stable" -> Cond(s, "stable", area = area())
             "app", "activity" -> { if (v.isEmpty()) throw ActionError("INVALID_STEP", tr("app: 后面写包名或界面名（$s）", "write a package or screen name after app: ($s)")); Cond(s, "app", text = v) }
             "color", "colour" -> {
                 val m = Regex("^(\\d+)\\s*[,，]\\s*(\\d+)\\s*=\\s*(#?[0-9a-fA-F]{6})\\s*(?:~\\s*(\\d+))?$").find(v)

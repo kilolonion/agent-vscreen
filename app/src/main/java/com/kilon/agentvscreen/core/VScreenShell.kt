@@ -3,7 +3,6 @@ package com.kilon.agentvscreen.core
 import com.kilon.agentvscreen.tr
 
 import android.content.Context
-import com.kilon.agentvscreen.host.AppLogger
 import com.kilon.agentvscreen.host.ShizukuManager
 
 /**
@@ -11,8 +10,12 @@ import com.kilon.agentvscreen.host.ShizukuManager
  * Shizuku (uid 2000 in ADB mode, no root).
  *
  * Every method takes the display id explicitly; nothing here ever falls
- * back to display 0. A ROM whose `input` cannot target a display gets a
- * clear NOT_SUPPORTED instead of a silent tap on the user's screen.
+ * back to display 0.
+ *
+ * 1.2: one way in for each thing. Touches, keys and typed characters are all injected by the Shizuku display service
+ * with the display id set ([Injector]); the `input` command and its form probing are gone. Which tasks are on which
+ * display comes from the system's own per-display list ([taskSource]); the dumpsys parsers are gone. When the service
+ * is not there the answer is "not connected", never a second, differently behaving path.
  */
 internal object VScreenShell {
     private const val TAG = "VScreenShell"
@@ -25,9 +28,6 @@ internal object VScreenShell {
     /** Test seam. */
     @Volatile internal var runner: (Array<String>, Long) -> ShizukuManager.ProcessResult =
         { argv, t -> ShizukuManager.runProcess(argv, null, null, t) }
-
-    internal enum class InputForm { UNKNOWN, DASH_D, LONG_DISPLAY, NONE }
-    @Volatile private var inputForm: InputForm = InputForm.UNKNOWN
 
     fun run(argv: Array<String>, timeoutMs: Long = 8_000L) = runner(argv, timeoutMs)
 
@@ -137,105 +137,8 @@ internal object VScreenShell {
     @Volatile internal var taskSource: (Int) -> List<VScreenRemoteDisplay.DisplayTask>? =
         { id -> VScreenRemoteDisplay.listTasksIfConnected(id) }
 
-    private val DISPLAY_HDR = Regex("^Display #(\\d+)")
-
-    /**
-     * Split `dumpsys activity activities` into per-display sections (trimmed lines). A section ends at
-     * the next display header or at a line indented no deeper than its header (the dump's global tail:
-     * ResumedActivity, focus, recents …, which belongs to no display).
-     */
-    internal fun sectionsOf(dump: String): Map<Int, List<String>> {
-        val out = LinkedHashMap<Int, ArrayList<String>>()
-        var cur: Int? = null
-        var headerIndent = 0
-        for (raw in dump.lineSequence()) {
-            val line = raw.trim()
-            if (line.isEmpty()) continue
-            val indent = raw.length - raw.trimStart().length
-            if (line.startsWith("Display #")) {
-                cur = DISPLAY_HDR.find(line)?.groupValues?.get(1)?.toIntOrNull()
-                headerIndent = indent
-                cur?.let { out.getOrPut(it) { ArrayList() } }
-                continue
-            }
-            if (cur != null && indent <= headerIndent) cur = null
-            cur?.let { out[it]!!.add(line) }
-        }
-        return out
-    }
-
-    /**
-     * Lines of `dumpsys activity activities` that belong to [displayId]. v27: also drops every task
-     * block (and resumed line) whose task id is listed under another display, because some phones
-     * print a global tail (with the main screen's tasks, e.g. Minis itself) inside the last section.
-     */
-    internal fun displaySection(displayId: Int): List<String>? {
-        val r = run(arrayOf("sh", "-c", "dumpsys activity activities"), 8_000L)
-        if (r.exitCode != 0) return null
-        return isolate(sectionsOf(r.stdout), displayId)
-    }
-
-    internal fun isolate(sections: Map<Int, List<String>>, displayId: Int): List<String> {
-        val mine = sections[displayId] ?: return emptyList()
-        // A task listed in several sections belongs to the first one in dump order (its real display);
-        // later copies are the global tail printed inside the last section.
-        val owner = HashMap<Int, Int>()
-        for ((disp, lines) in sections) for (t in taskIdsIn(lines)) owner.putIfAbsent(t, disp)
-        val others = owner.filterValues { it != displayId }.keys
-        if (others.isEmpty()) return mine
-        val out = ArrayList<String>()
-        var skipping = false
-        for (line in mine) {
-            if (isTaskLine(line)) skipping = TASK_LINE.find(line)?.groupValues?.get(1)?.toIntOrNull() in others
-            if (skipping) continue
-            val t = RECORD_TASK.find(line)?.groupValues?.get(1)?.toIntOrNull()
-            if (t != null && t in others) continue
-            out += line
-        }
-        return out
-    }
-
-    private val TASK_LINE = Regex("Task(?:Record)?\\{[0-9a-f]+ #(\\d+)")
-    private val RECORD_TASK = Regex(" t(\\d+)[ }]")
-
-    /** Task ids listed in a display section (the tasks really on that display). */
-    internal fun taskIdsIn(lines: List<String>): Set<Int> =
-        lines.filter { isTaskLine(it) }.mapNotNull { TASK_LINE.find(it)?.groupValues?.get(1)?.toIntOrNull() }.toSet()
-
-    /** A task's own header line ("* Task{…}"), not a line that merely mentions one (mLastFocusedRootTask=Task{…}). */
-    internal fun isTaskLine(line: String): Boolean = line.startsWith("* Task{") || line.startsWith("* TaskRecord{") ||
-        line.startsWith("Task{") || line.startsWith("TaskRecord{")
-
-    /** "pkg/.Activity" resumed on [displayId], or null. Never the main screen's app (see [taskIdsIn]). */
-    fun topActivity(displayId: Int): String? {
-        taskSource(displayId)?.let { list -> return front(list)?.let { it.rootTop ?: it.component } }
-        val lines = displaySection(displayId) ?: return null
-        val tasks = taskIdsIn(lines)
-        // No task on this display = nothing on it, whatever resumed line the dump prints nearby.
-        if (tasks.isEmpty()) return null
-        for (line in lines) {
-            if (line.startsWith("topResumedActivity=") || line.startsWith("mResumedActivity:") ||
-                line.startsWith("ResumedActivity:")) {
-                val m = Regex("([a-zA-Z0-9_.]+)/([a-zA-Z0-9_.$]+)").find(line) ?: continue
-                // The record names its task (t123): it must be one of this display's tasks. A resumed
-                // line whose task is elsewhere is the dump's global "ResumedActivity" (main screen).
-                val t = RECORD_TASK.find(line)?.groupValues?.get(1)?.toIntOrNull()
-                if (t == null || t !in tasks) continue
-                return "${m.groupValues[1]}/${m.groupValues[2]}"
-            }
-        }
-        // No resumed activity (e.g. still launching): fall back to the top task's real activity.
-        var under: Int? = null
-        for (line in lines) {
-            if (isTaskLine(line)) { under = TASK_LINE.find(line)?.groupValues?.get(1)?.toIntOrNull(); continue }
-            if (under == null || under !in tasks) continue
-            if (line.startsWith("* Hist") || line.startsWith("Hist #") || line.startsWith("* ActivityRecord{")) {
-                val m = Regex("([a-zA-Z0-9_.]+)/([a-zA-Z0-9_.$]+)").find(line) ?: continue
-                return "${m.groupValues[1]}/${m.groupValues[2]}"
-            }
-        }
-        return null
-    }
+    /** "pkg/.Activity" in front on [displayId]; null when nothing is there or the display service is not connected. */
+    fun topActivity(displayId: Int): String? = taskSource(displayId)?.let { list -> front(list)?.let { it.rootTop ?: it.component } }
 
     /**
      * v41: the task really in front. The system's list is not always in z-order (v40 field test: `stop` closed
@@ -281,58 +184,6 @@ internal object VScreenShell {
         ).joinToString(tr("；", "; "))
     }
 
-    /** Phone maker and system, for vendor-specific hints. */
-    data class Device(val vendor: String, val brand: String, val model: String, val os: String, val sdk: Int)
-
-    @Volatile private var deviceCache: Device? = null
-
-    fun device(): Device = deviceCache ?: run {
-        fun prop(k: String) = runCatching { run(arrayOf("getprop", k), 3_000L).combined.trim() }.getOrDefault("")
-        val m = (android.os.Build.MANUFACTURER ?: "").lowercase()
-        val b = (android.os.Build.BRAND ?: "").lowercase()
-        val vendor = when {
-            m.contains("vivo") || b.contains("vivo") || b.contains("iqoo") -> "vivo"
-            m.contains("honor") || b.contains("honor") -> "honor"
-            m.contains("huawei") -> "huawei"
-            m.contains("xiaomi") || b.contains("redmi") || b.contains("poco") -> "xiaomi"
-            m.contains("oppo") || b.contains("oneplus") || b.contains("realme") -> "oppo"
-            m.contains("samsung") -> "samsung"
-            else -> m.ifEmpty { "unknown" }
-        }
-        val os = when (vendor) {
-            "vivo" -> prop("ro.vivo.os.build.display.id").ifEmpty { "OriginOS/FuntouchOS " + prop("ro.vivo.os.version") }
-            "honor", "huawei" -> prop("ro.build.version.magic").ifEmpty { prop("ro.build.version.emui") }
-            "xiaomi" -> prop("ro.mi.os.version.name").ifEmpty { "MIUI " + prop("ro.miui.ui.version.name") }
-            "oppo" -> prop("ro.build.version.oplusrom").ifEmpty { prop("ro.build.version.opporom") }
-            else -> ""
-        }.trim()
-        Device(vendor, android.os.Build.BRAND ?: "", android.os.Build.MODEL ?: "", os, android.os.Build.VERSION.SDK_INT)
-            .also { deviceCache = it }
-    }
-
-    /** Where the user turns off the system's resolution downscaling, by maker. */
-    fun downscaleSettingHint(): String = when (device().vendor) {
-        "vivo" -> tr("vivo/iQOO：设置 › 显示与亮度 › 屏幕分辨率 选最高档（关闭“智能切换”）；游戏还要在 游戏魔盒/电竞模式 里对该游戏关闭“超分辨率/插帧/画质增强”", "vivo/iQOO: Settings › Display and brightness › Screen resolution: choose the highest (turn off \"Smart switch\"); for games also turn off \"super resolution / frame interpolation / picture enhancement\" for that game in Game Cube / e-sports mode")
-        "honor", "huawei" -> tr("荣耀/华为：设置 › 显示和亮度 › 屏幕分辨率 关闭“智能分辨率”或选最高档（这是整机设置；能否去掉该游戏的 0.85 比例未经实测，改完用 screen downscale status 看 aps.resolution 是否变成 1.0）", "Honor/Huawei: Settings › Display and brightness › Screen resolution: turn off \"Smart resolution\" or choose the highest (a phone-wide setting; untested whether it removes this game's 0.85 ratio, check aps.resolution with screen downscale status afterwards)")
-        "xiaomi" -> tr("小米：设置 › 显示 › 屏幕分辨率 选最高档；游戏加速里关闭该游戏的“画质/分辨率”优化", "Xiaomi: Settings › Display › Screen resolution: choose the highest; in Game Turbo turn off the \"quality / resolution\" optimization for that game")
-        "oppo" -> tr("OPPO/一加：设置 › 显示与亮度 › 屏幕分辨率 选最高档（关闭“智能切换”）", "OPPO/OnePlus: Settings › Display and brightness › Screen resolution: choose the highest (turn off \"Smart switch\")")
-        else -> tr("在系统 设置 › 显示 里把屏幕分辨率调到最高档，并关闭系统/游戏助手对该应用的降分辨率", "In Settings › Display set the screen resolution to the highest, and turn off downscaling of this app by the system / game assistant")
-    }
-
-    /** Maker-specific things that commonly break background operation, for status. */
-    fun vendorHints(): List<String> = when (device().vendor) {
-        "vivo" -> listOf(
-            tr("开发者选项里打开“禁止权限监控”：否则 Shizuku 下的输入注入、wm/settings 命令可能被系统拦截（点击无效或命令失败）", "Turn on \"Disable permission monitoring\" in Developer options: otherwise input injection and wm/settings commands under Shizuku may be blocked (taps do nothing or commands fail)"),
-            tr("i管家 › 应用管理 › 权限管理 › 自启动 允许 Agent-VScreen 和 Shizuku；设置 › 电池 › 后台耗电管理 选“允许后台高耗电”，否则后台副屏会被杀", "i Manager › App manager › Permissions › Autostart: allow Agent-VScreen and Shizuku; Settings › Battery › Background power consumption: choose \"Allow high background power use\", or the background screen gets killed"),
-            tr("Shizuku 用无线调试启动时，锁屏久了 OriginOS 可能断开无线调试：status 报 not_connected 时用 fix 重连", "When Shizuku was started via wireless debugging, OriginOS may drop wireless debugging after a long lock: when status reports not_connected, reconnect with fix"),
-            tr("iQOO 电竞模式/游戏魔盒会拦截通知和悬浮窗：在副屏跑游戏时不要对该游戏开“免打扰/极速模式”", "iQOO e-sports mode / Game Cube blocks notifications and floating windows: don't turn on \"Do not disturb / turbo mode\" for a game running on the screen"),
-        )
-        "honor", "huawei" -> listOf(tr("设置 › 应用和服务 › 应用启动管理 把 Agent-VScreen 和 Shizuku 设为手动管理并全部允许", "Settings › Apps & services › App launch: set Agent-VScreen and Shizuku to manual management and allow everything"))
-        "xiaomi" -> listOf(tr("开发者选项里打开“USB 调试（安全设置）”，否则输入注入会被拒绝；省电策略选“无限制”", "Turn on \"USB debugging (Security settings)\" in Developer options, or input injection is refused; set battery saver to \"No restrictions\""))
-        "oppo" -> listOf(tr("设置 › 电池 › 应用耗电管理 允许 Agent-VScreen 和 Shizuku 后台运行", "Settings › Battery › App battery management: allow Agent-VScreen and Shizuku to run in the background"))
-        else -> emptyList()
-    }
-
     /** Undo [disableDownscale]. */
     fun resetDownscale(pkg: String) {
         runCatching { run(arrayOf("am", "compat", "reset", "DOWNSCALED", pkg), 8_000L) }
@@ -362,26 +213,8 @@ internal object VScreenShell {
     }.getOrNull()
 
     /** Id of [pkg]'s task on [displayId] (the background screen's own copy), or null. */
-    fun taskIdOn(displayId: Int, pkg: String): Int? {
-        taskSource(displayId)?.let { list ->
-            return list.firstOrNull { it.pkg == pkg || it.component?.substringBefore('/') == pkg }?.taskId
-        }
-        val lines = displaySection(displayId) ?: return null
-        val re = Regex("Task(?:Record)?\\{[0-9a-f]+ #(\\d+)")
-        for (line in lines) {
-            val m = (if (isTaskLine(line)) re.find(line) else null) ?: continue
-            if (line.contains("A=$pkg") || line.contains(":$pkg ") || line.contains(":$pkg}") || line.contains("A=${pkg} ")) {
-                return m.groupValues[1].toIntOrNull()
-            }
-        }
-        // Older dumps put the package on the activity lines under the task, not on the task line.
-        var current: Int? = null
-        for (line in lines) {
-            if (isTaskLine(line)) re.find(line)?.let { current = it.groupValues[1].toIntOrNull() }
-            if (current != null && (line.startsWith("* Hist") || line.startsWith("Hist #")) && line.contains(" $pkg/")) return current
-        }
-        return null
-    }
+    fun taskIdOn(displayId: Int, pkg: String): Int? =
+        taskSource(displayId)?.firstOrNull { it.pkg == pkg || it.component?.substringBefore('/') == pkg }?.taskId
 
     /**
      * Close [pkg]'s window on the background screen only (remove its task there). The app process
@@ -461,108 +294,83 @@ internal object VScreenShell {
     /** Where a frame point lands in input space (for diagnostics). */
     fun inputPoint(displayId: Int, x: Int, y: Int): Pair<Int, Int> = mx(displayId, x, y)
 
+    /**
+     * 1.2: the one way input reaches a display. The default goes to the Shizuku display service; tests replace it.
+     * Each call answers true (injected), false (the system refused the event) or fails (service not connected).
+     */
+    interface Injector {
+        fun gesture(displayId: Int, x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int, holdMs: Int): Result<Boolean>
+        fun key(displayId: Int, code: Int): Result<Boolean>
+        fun text(displayId: Int, text: String): Result<Boolean>
+        fun pointer(displayId: Int, op: Int, pointerId: Int, x: Float, y: Float): Result<Pair<Boolean, Int>>
+    }
+
+    @Volatile internal var injector: Injector = object : Injector {
+        override fun gesture(displayId: Int, x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int, holdMs: Int) =
+            VScreenRemoteDisplay.injectDrag(displayId, x1, y1, x2, y2, durationMs, holdMs)
+        override fun key(displayId: Int, code: Int) = VScreenRemoteDisplay.injectKey(displayId, code)
+        override fun text(displayId: Int, text: String) = VScreenRemoteDisplay.injectText(displayId, text)
+        override fun pointer(displayId: Int, op: Int, pointerId: Int, x: Float, y: Float) = VScreenRemoteDisplay.pointer(displayId, op, pointerId, x, y)
+    }
+
+    /** How long a tap's finger stays down. */
+    private const val TAP_MS = 60
+
+    private fun injected(what: String, displayId: Int, r: Result<Boolean>): Outcome = when {
+        r.getOrNull() == true -> ok(tr("副屏 $displayId：$what 已注入", "screen $displayId: $what injected"))
+        r.isFailure -> fail("NOT_CONNECTED", tr("副屏服务（Shizuku）不可用，$what 没有做：${r.exceptionOrNull()?.message}。status 看原因，fix not_connected 重连", "The screen service (Shizuku) is unavailable, $what was not done: ${r.exceptionOrNull()?.message}. See status for the cause; fix not_connected reconnects"))
+        else -> fail("INPUT_FAILED", tr("系统拒绝了副屏 $displayId 上的 $what 注入", "The system refused injecting $what on screen $displayId"))
+    }
+
     fun tap(displayId: Int, x: Int, y: Int): Outcome {
         val (ix, iy) = mx(displayId, x, y)
-        return input(displayId, listOf("tap", "$ix", "$iy"))
+        return injected("tap", displayId, injector.gesture(displayId, ix, iy, ix, iy, 0, TAP_MS))
     }
 
     fun longPress(displayId: Int, x: Int, y: Int, ms: Int): Outcome {
         val (ix, iy) = mx(displayId, x, y)
-        return input(displayId, listOf("swipe", "$ix", "$iy", "$ix", "$iy", "${ms.coerceIn(300, 5000)}"))
+        return injected("press", displayId, injector.gesture(displayId, ix, iy, ix, iy, 0, ms.coerceIn(300, 10_000)))
     }
 
+    /** A swipe: the finger moves at an even speed and lifts while moving, so lists fling (hold = -1). */
     fun swipe(displayId: Int, x1: Int, y1: Int, x2: Int, y2: Int, ms: Int): Outcome {
         val (a, b) = mx(displayId, x1, y1); val (c, e) = mx(displayId, x2, y2)
-        return input(displayId, listOf("swipe", "$a", "$b", "$c", "$e", "${ms.coerceIn(50, 5000)}"))
+        return injected("swipe", displayId, injector.gesture(displayId, a, b, c, e, ms.coerceIn(50, 5000), -1))
     }
 
-    /**
-     * Held finger [pointerId] (multi-touch across calls): op "down" | "move" | "up" | "cancel".
-     * Needs the Shizuku display service (protocol 4); there is no `input` fallback for held fingers.
-     */
+    /** A precise drag: eased, with a still hold at the end (no fling). */
+    fun drag(displayId: Int, x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int, holdMs: Int): Outcome {
+        val (a, b) = mx(displayId, x1, y1); val (c, e) = mx(displayId, x2, y2)
+        return injected("drag", displayId, injector.gesture(displayId, a, b, c, e, durationMs.coerceIn(50, 5000), holdMs.coerceIn(0, 3000)))
+    }
+
+    /** Held finger [pointerId] (multi-touch across calls): op "down" | "move" | "up" | "cancel". */
     fun finger(displayId: Int, op: String, pointerId: Int, x: Int, y: Int): Pair<Outcome, Int> {
         val code = when (op) { "down" -> 0; "move" -> 1; "up" -> 2; else -> 3 }
         val (ix, iy) = if (x < 0 || y < 0) (-1 to -1) else mx(displayId, x, y)
-        val r = VScreenRemoteDisplay.pointer(displayId, code, pointerId, ix.toFloat(), iy.toFloat())
-        val v = r.getOrNull() ?: return fail("NOT_SUPPORTED", tr("按住/多指需要副屏服务（Shizuku）：${r.exceptionOrNull()?.message}", "Holding / multi-finger needs the screen service (Shizuku): ${r.exceptionOrNull()?.message}")) to 0
+        val r = injector.pointer(displayId, code, pointerId, ix.toFloat(), iy.toFloat())
+        val v = r.getOrNull() ?: return fail("NOT_CONNECTED", tr("副屏服务（Shizuku）不可用：${r.exceptionOrNull()?.message}", "The screen service (Shizuku) is unavailable: ${r.exceptionOrNull()?.message}")) to 0
         return (if (v.first) ok(tr("手指 $pointerId $op ($x,$y)", "finger $pointerId $op ($x,$y)")) else fail("INPUT_FAILED", tr("手指 $pointerId $op 注入失败（这根手指可能没按下）", "finger $pointerId $op injection failed (this finger may not be down)"))) to v.second
-    }
-
-    /**
-     * Precise drag: injected through the Shizuku service with a still hold
-     * at the end (no fling). Falls back to `input swipe` with the hold folded
-     * into a slower swipe.
-     */
-    fun drag(displayId: Int, x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int, holdMs: Int): Outcome {
-        val (a, b) = mx(displayId, x1, y1); val (c, e) = mx(displayId, x2, y2)
-        val r = VScreenRemoteDisplay.injectDrag(displayId, a, b, c, e, durationMs.coerceIn(50, 5000), holdMs.coerceIn(0, 3000))
-        if (r.getOrNull() == true) return ok(tr("副屏 $displayId：拖动完成（注入）", "screen $displayId: drag done (injected)"))
-        AppLogger.warning(TAG, "injectDrag unavailable (${r.exceptionOrNull()?.message}), using input swipe")
-        return input(displayId, listOf("swipe", "$a", "$b", "$c", "$e", "${(durationMs + holdMs).coerceIn(50, 5000)}"))
     }
 
     data class KeyResult(val outcome: Outcome, val method: String)
 
-    /** Key event on [displayId]: injected with the display id (service), else `input -d`. */
+    /** The keycode of a key name ([KEYS]) or of a number; null when it is neither. */
+    fun keyCode(key: String): Int? = key.trim().lowercase().let { KEYS[it] ?: it.toIntOrNull()?.takeIf { c -> c in 1..400 && c !in FORBIDDEN_KEYS } }
+
+    /** Key event on [displayId], injected with the display id set. */
     fun keyWithMethod(displayId: Int, key: String): KeyResult {
-        val code = KEYS[key.trim().lowercase()] ?: key.trim().toIntOrNull()
-            ?: return KeyResult(fail("INVALID_ARGS", tr("未知按键 $key（可用：${KEYS.keys.joinToString()} 或数字 keycode）", "Unknown key $key (available: ${KEYS.keys.joinToString()} or a numeric keycode)")), "none")
-        val r = VScreenRemoteDisplay.injectKey(displayId, code)
-        if (r.getOrNull() == true) return KeyResult(ok(tr("副屏 $displayId：按键 $key 已注入", "screen $displayId: key $key injected")), "inject(displayId=$displayId)")
-        AppLogger.warning(TAG, "injectKey unavailable (${r.exceptionOrNull()?.message}), using input")
-        return KeyResult(input(displayId, listOf("keyevent", "$code")), "input -d $displayId keyevent")
+        val code = keyCode(key)
+            ?: return KeyResult(fail("INVALID_ARGS", tr("未知按键 $key（可用：${KEYS.keys.joinToString(" ")} 或数字 keycode；没有 home / 多任务键）", "Unknown key $key (available: ${KEYS.keys.joinToString(" ")} or a numeric keycode; there is no home / recents key)")), "none")
+        return KeyResult(injected(tr("按键 $key", "key $key"), displayId, injector.key(displayId, code)), "inject")
     }
 
     fun key(displayId: Int, key: String): Outcome = keyWithMethod(displayId, key).outcome
 
-    /** ASCII only. Chinese goes through accessibility SET_TEXT or clipboard paste (see controller). */
-    fun asciiText(displayId: Int, text: String): Outcome {
-        if (text.any { it.code > 126 || it.code < 32 }) {
-            return fail("NON_ASCII", tr("input text 只能输入 ASCII 字符", "input text can only type ASCII characters"))
-        }
-        // argv goes straight to the `input` process (no shell), so only the
-        // space needs its %s form.
-        val escaped = text.replace(" ", "%s")
-        return input(displayId, listOf("text", escaped))
-    }
-
-    private fun input(displayId: Int, sub: List<String>): Outcome {
-        val form = resolveInputForm(displayId)
-        val argv = when (form) {
-            InputForm.DASH_D -> arrayOf("input", "-d", "$displayId") + sub
-            InputForm.LONG_DISPLAY -> arrayOf("input", "--display", "$displayId") + sub
-            else -> return fail(
-                "NOT_SUPPORTED",
-                tr("这台设备的 input 命令不支持指定显示屏，已拒绝操作（不会改为点击主屏）", "This device's input command cannot target a display, so the action was refused (it will not tap the main screen instead)"),
-            )
-        }
-        val r = run(argv, 10_000L)
-        return if (r.exitCode == 0) ok(tr("副屏 $displayId：${sub.first()} 完成", "screen $displayId: ${sub.first()} done"))
-        else fail("INPUT_FAILED", run { val why = r.combined.ifBlank { "exit=${r.exitCode}" }; tr("副屏 $displayId 输入失败：$why", "screen $displayId input failed: $why") })
-    }
-
-    internal fun resolveInputForm(displayId: Int): InputForm {
-        if (inputForm != InputForm.UNKNOWN) return inputForm
-        val help = run(arrayOf("input"), 5_000L).combined
-        val lower = help.lowercase()
-        var form = when {
-            help.isBlank() -> InputForm.UNKNOWN
-            lower.contains("--display") -> InputForm.LONG_DISPLAY
-            Regex("-d\\s+<?display").containsMatchIn(lower) || Regex("\\[-d ").containsMatchIn(lower) -> InputForm.DASH_D
-            !lower.contains("display") -> InputForm.NONE
-            else -> InputForm.UNKNOWN
-        }
-        if (form == InputForm.UNKNOWN) {
-            // Harmless probe: a no-op key (KEYCODE_UNKNOWN = 0) on OUR display.
-            form = when {
-                run(arrayOf("input", "-d", "$displayId", "keyevent", "0"), 5_000L).exitCode == 0 -> InputForm.DASH_D
-                run(arrayOf("input", "--display", "$displayId", "keyevent", "0"), 5_000L).exitCode == 0 -> InputForm.LONG_DISPLAY
-                else -> InputForm.NONE
-            }
-        }
-        AppLogger.info(TAG, "input display form = $form")
-        inputForm = form
-        return form
+    /** Characters the virtual keyboard can produce (ASCII), typed as key events. Other text goes through accessibility or the clipboard. */
+    fun typeKeys(displayId: Int, text: String): Outcome {
+        if (text.any { it.code > 126 || it.code < 32 }) return fail("NON_ASCII", tr("按键方式只能输入 ASCII 字符", "Key events can only type ASCII characters"))
+        return injected(tr("输入", "typing"), displayId, injector.text(displayId, text))
     }
 
     // ── IME policy (via app_process helper) ───────────────────────────────
@@ -586,13 +394,17 @@ internal object VScreenShell {
         else fail("IME_POLICY_FAILED", tr("设置副屏键盘策略失败：${r.combined.take(300)}", "Setting the screen's keyboard policy failed: ${r.combined.take(300)}"))
     }
 
-    private val KEYS = mapOf(
-        "back" to 4, "enter" to 66, "tab" to 61, "del" to 67, "delete" to 67,
-        "backspace" to 67, "up" to 19, "down" to 20, "left" to 21, "right" to 22,
-        "menu" to 82, "search" to 84, "paste" to 279, "escape" to 111,
-        // HOME / APP_SWITCH are deliberately absent: on a display without
-        // system decorations they can bring up the launcher on the MAIN screen.
+    /**
+     * 1.2: the one key table (the step parser, the help text and the injector all read it).
+     * HOME / APP_SWITCH are deliberately absent, by name and by number: on a display without system decorations they
+     * can bring up the launcher or the task switcher on the MAIN screen.
+     */
+    val KEYS: Map<String, Int> = linkedMapOf(
+        "back" to 4, "enter" to 66, "tab" to 61, "del" to 67, "delete" to 67, "backspace" to 67, "space" to 62,
+        "esc" to 111, "escape" to 111, "search" to 84, "menu" to 82,
+        "up" to 19, "down" to 20, "left" to 21, "right" to 22, "page_up" to 92, "page_down" to 93,
+        "paste" to 279, "copy" to 278, "cut" to 277,
     )
-
-    internal fun resetForTest() { inputForm = InputForm.UNKNOWN }
+    /** HOME 3, POWER 26, APP_SWITCH 187, SLEEP 223, WAKEUP 224, ASSIST 219, VOICE_ASSIST 231, ALL_APPS 284. */
+    val FORBIDDEN_KEYS: Set<Int> = setOf(3, 26, 187, 223, 224, 219, 231, 284)
 }

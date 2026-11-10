@@ -11,10 +11,14 @@ import java.io.File
  *
  *  - notes     lessons in the agent's words (`note <文字>`), shown when the app is launched;
  *  - segments  saved `act` step lists (`act … --save NAME`, replayed with the step `use NAME`);
- *  - profile   how to operate the app, set explicitly: `pause` / `resume` (the steps that pause and resume
- *              a realtime app: with both, every act segment runs resume → steps → watch → pause),
- *              `realtime` (no pause available: a segment looks for 1 s by default), `orientation`
+ *  - profile   how to operate the app, set explicitly: `before` / `after` (steps every act stretch runs first / last:
+ *              resume and pause a moving app, close a popup shown on every visit, …), `orientation`
  *              (how the app really ran, learned at launch when its manifest declares nothing), `record`.
+ *              1.2: `resume` / `pause` of older files are read as `before` / `after`; the `realtime` flag is gone
+ *              (`act --fast` says it per stretch).
+ *
+ * 1.2: a note carries who wrote it (the token's name) and the app's version at that time, so a reader can tell a
+ * lesson about an old version, or another agent's guess, from its own fresh observation.
  *
  * Nothing here is learned behind the agent's back except the orientation (a fact the launch measures).
  * Screens, ways, rules, pause-key colours and page names of earlier builds are not read any more.
@@ -25,8 +29,9 @@ internal object VScreenMap {
     const val MAX_NOTES = 30
     const val MAX_SEGMENTS = 30
 
-    class Note(val id: Int, val text: String, val at: Long) {
+    class Note(val id: Int, val text: String, val at: Long, val by: String? = null, val appVersion: String? = null) {
         fun json(): JSONObject = JSONObject().put("id", id).put("text", text).put("at", at)
+            .also { o -> by?.let { o.put("by", it) }; appVersion?.let { o.put("app_version", it) } }
     }
 
     class Segment(val name: String, val steps: String, val at: Long, var uses: Int) {
@@ -58,9 +63,11 @@ internal object VScreenMap {
         if (f != null && f.isFile) runCatching {
             val o = JSONObject(f.readText())
             m.seq = o.optInt("seq")
-            arr(o, "notes").forEach { n -> m.notes += Note(n.getInt("id"), n.getString("text"), n.optLong("at")) }
+            arr(o, "notes").forEach { n -> m.notes += Note(n.getInt("id"), n.getString("text"), n.optLong("at"), n.optString("by").ifEmpty { null }, n.optString("app_version").ifEmpty { null }) }
             arr(o, "segments").forEach { s -> m.segments += Segment(s.getString("name"), s.getString("steps"), s.optLong("at"), s.optInt("uses")) }
-            o.optJSONObject("profile")?.let { p -> p.keys().forEach { k -> PROFILE_KEYS[k]?.invoke(p.optString(k))?.let { v -> m.profile[k] = v } } }
+            o.optJSONObject("profile")?.let { p -> p.keys().forEach { k0 ->
+                val k = LEGACY_KEYS[k0] ?: k0
+                PROFILE_KEYS[k]?.invoke(p.optString(k0))?.let { v -> if (k !in m.profile || k == k0) m.profile[k] = v } } }
             if (m.seq < (m.notes.maxOfOrNull { it.id } ?: 0)) m.seq = m.notes.maxOf { it.id }
         }.onFailure { AppLogger.warning(TAG, "load($pkg): ${it.message}") }
         return m
@@ -91,13 +98,13 @@ internal object VScreenMap {
     @Synchronized fun notes(pkg: String): List<Note> = load(pkg).notes.toList()
 
     /** Add a note; the same text again only refreshes its time. Oldest dropped past [MAX_NOTES]. */
-    @Synchronized fun addNote(pkg: String, text: String): Note {
+    @Synchronized fun addNote(pkg: String, text: String, by: String? = null, appVersion: String? = null): Note {
         val m = load(pkg)
         val t = text.trim().take(400)
         m.notes.firstOrNull { it.text == t }?.let { old ->
-            m.notes.remove(old); val n = Note(old.id, t, System.currentTimeMillis()); m.notes += n; save(m); return n
+            m.notes.remove(old); val n = Note(old.id, t, System.currentTimeMillis(), by, appVersion); m.notes += n; save(m); return n
         }
-        val n = Note(++m.seq, t, System.currentTimeMillis())
+        val n = Note(++m.seq, t, System.currentTimeMillis(), by, appVersion)
         m.notes += n
         while (m.notes.size > MAX_NOTES) m.notes.removeAt(0)
         save(m)
@@ -141,12 +148,14 @@ internal object VScreenMap {
 
     /** Keys a profile may hold, with a checker returning the normalised value or null (invalid). */
     val PROFILE_KEYS: Map<String, (String) -> String?> = mapOf(
-        "pause" to { v -> v.trim().takeIf { it.isNotEmpty() && it.length <= 300 } },
-        "resume" to { v -> v.trim().takeIf { it.isNotEmpty() && it.length <= 300 } },
-        "realtime" to { v -> bool(v) },
+        "before" to { v -> v.trim().takeIf { it.isNotEmpty() && it.length <= 300 } },
+        "after" to { v -> v.trim().takeIf { it.isNotEmpty() && it.length <= 300 } },
         "record" to { v -> bool(v) },
         "orientation" to { v -> v.trim().lowercase().takeIf { it == "landscape" || it == "portrait" } },
     )
+
+    /** Names of older files: read as the new key, never written again. */
+    val LEGACY_KEYS: Map<String, String> = mapOf("resume" to "before", "pause" to "after")
 
     @Synchronized fun profile(pkg: String): Map<String, String> = load(pkg).profile.toMap()
 

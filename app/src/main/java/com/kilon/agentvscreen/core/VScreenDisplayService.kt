@@ -100,13 +100,13 @@ class VScreenDisplayService : Binder {
             System.exit(0)
             return true
         }
-        if (code !in CREATE..FOCUS_TASK) return super.onTransact(code, data, reply, flags)
+        if (code !in CREATE..INJECT_TEXT) return super.onTransact(code, data, reply, flags)
         data.enforceInterface(DESCRIPTOR)
         val out = reply ?: return true
         try {
             when (code) {
                 CREATE -> {
-                    val name = data.readString() ?: "minis-vscreen"
+                    val name = data.readString() ?: "agent-vscreen"
                     val w = data.readInt(); val h = data.readInt(); val dpi = data.readInt()
                     val requested = data.readInt()
                     val surface = Surface.CREATOR.createFromParcel(data)
@@ -129,6 +129,10 @@ class VScreenDisplayService : Binder {
                 INJECT_KEY -> {
                     val id = data.readInt(); val key = data.readInt(); val longPress = data.readInt() != 0
                     out.writeInt(0); out.writeInt(if (injectKey(id, key, longPress)) 1 else 0)
+                }
+                INJECT_TEXT -> {
+                    val id = data.readInt(); val text = data.readString().orEmpty()
+                    out.writeInt(0); out.writeInt(if (injectText(id, text)) 1 else 0)
                 }
                 INJECT_DRAG -> {
                     val id = data.readInt()
@@ -346,6 +350,23 @@ class VScreenDisplayService : Binder {
         return inject(up, displayId) && ok
     }
 
+    /**
+     * 1.2: characters as key events on [displayId], the way the system's own `input text` makes them (the virtual
+     * keyboard's character map), but sent from here with the display id set. False when a character has no key.
+     */
+    private fun injectText(displayId: Int, text: String): Boolean {
+        if (text.isEmpty()) return true
+        val events = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(text.toCharArray()) ?: return false
+        var ok = true
+        for ((i, e) in events.withIndex()) {
+            val ev = KeyEvent(e.downTime, SystemClock.uptimeMillis(), e.action, e.keyCode, e.repeatCount, e.metaState,
+                KeyCharacterMap.VIRTUAL_KEYBOARD, e.scanCode, e.flags, InputDevice.SOURCE_KEYBOARD)
+            // The last event waits until it is queued, so the caller's read-back sees the whole text.
+            ok = inject(ev, displayId, if (i == events.lastIndex) 1 else 0) && ok
+        }
+        return ok
+    }
+
     private fun motion(downTime: Long, action: Int, x: Float, y: Float): MotionEvent {
         val props = arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER })
         val coords = arrayOf(MotionEvent.PointerCoords().apply { this.x = x; this.y = y; pressure = 1f; size = 1f })
@@ -358,6 +379,7 @@ class VScreenDisplayService : Binder {
      * still for [holdMs] before lifting. The hold brings the velocity to
      * zero, so lists move by exactly the dragged distance instead of
      * flinging on. Same start and end = tap (or long press with a long hold).
+     * 1.2: [holdMs] < 0 = a swipe: even speed, no hold, the finger lifts while moving (lists fling).
      */
     private fun injectDrag(displayId: Int, x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int, holdMs: Int): Boolean {
         val downTime = SystemClock.uptimeMillis()
@@ -376,7 +398,7 @@ class VScreenDisplayService : Binder {
                 Thread.sleep((durationMs / steps).toLong().coerceAtLeast(1))
                 // Ease in-out so the start does not look like a flick.
                 val t = i.toFloat() / steps
-                val e = if (t < 0.5f) 2 * t * t else 1 - (-2 * t + 2) * (-2 * t + 2) / 2
+                val e = if (holdMs < 0) t else if (t < 0.5f) 2 * t * t else 1 - (-2 * t + 2) * (-2 * t + 2) / 2
                 lastX = x1 + (x2 - x1) * e; lastY = y1 + (y2 - y1) * e
                 send(MotionEvent.ACTION_MOVE, lastX, lastY)
             }
@@ -637,12 +659,14 @@ class VScreenDisplayService : Binder {
         const val LIST_TASKS = FIRST_CALL_TRANSACTION + 14
         const val FOCUSED = FIRST_CALL_TRANSACTION + 15
         const val FOCUS_TASK = FIRST_CALL_TRANSACTION + 16
+        /** 1.2 (protocol 10). */
+        const val INJECT_TEXT = FIRST_CALL_TRANSACTION + 17
         /** A held finger with no update for this long is lifted by the service. */
         const val FINGER_MAX_IDLE_MS = 30_000L
         /** A display nobody touched for this long (Minis gone) is released. */
         const val ORPHAN_MS = 20 * 60_000L
         /** Bump when the protocol changes, so Shizuku restarts an old service process. */
-        const val PROTOCOL = 9
+        const val PROTOCOL = 10
         /** Shizuku's reserved "destroy user service" transaction. */
         const val DESTROY_CODE = 16777115
         private const val SHELL_PKG = "com.android.shell"

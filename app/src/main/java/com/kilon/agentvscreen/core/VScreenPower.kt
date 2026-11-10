@@ -138,7 +138,7 @@ internal object VScreenPower {
     }
 
     /** What the user does by hand on this phone when Shizuku is not available. */
-    fun manualSteps(): String = when (VScreenShell.device().vendor.lowercase()) {
+    fun manualSteps(): String = when (Vendor.device.vendor.lowercase()) {
         "honor", "huawei" -> tr("手机管家 › 应用启动管理 › Agent-VScreen：关闭“自动管理”，手动打开“允许后台活动”；设置 › 电池 › 更多电池设置：打开“休眠时始终保持网络连接”", "Phone Manager › App launch › Agent-VScreen: turn off \"Manage automatically\" and turn on \"Run in background\"; Settings › Battery › More battery settings: turn on \"Stay connected while asleep\"")
         "xiaomi", "redmi" -> tr("设置 › 应用设置 › 应用管理 › Agent-VScreen › 省电策略：无限制；并打开“自启动”", "Settings › Apps › Manage apps › Agent-VScreen › Battery saver: No restrictions; and turn on \"Autostart\"")
         "vivo", "iqoo" -> tr("i管家 › 应用管理 › 权限管理 › 自启动 打开 Agent-VScreen；设置 › 电池 › 后台耗电管理 › Agent-VScreen：允许后台高耗电", "i Manager › App manager › Permissions › Autostart: turn on Agent-VScreen; Settings › Battery › Background power consumption › Agent-VScreen: allow high background power use")

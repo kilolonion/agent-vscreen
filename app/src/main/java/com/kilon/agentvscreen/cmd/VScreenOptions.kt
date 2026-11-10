@@ -5,7 +5,7 @@ import com.kilon.agentvscreen.tr
 import com.kilon.agentvscreen.core.BackgroundOperation.ActionError
 
 /**
- * v49: how every vscreen option is written, in one place. The parser ([args]), the option check
+ * How every vscreen option is written. Which options exist is in [CommandSpec]; the parser ([args]), the option check
  * (VScreenOffloadHandler.checkOptions), duration units ([normalize]) and the help test all read this.
  *
  *  - SWITCH: `--x` alone; `--x=v` is refused.
@@ -17,20 +17,19 @@ import com.kilon.agentvscreen.core.BackgroundOperation.ActionError
 internal object VScreenOptions {
     enum class Kind { SWITCH, VALUE }
 
-    /** Options that never take a value. */
-    val SWITCHES: Set<String> = setOf("landscape", "portrait", "restart", "paused", "confirmed", "force", "open")
+    /** 1.2: switches and durations come from the command table ([CommandSpec]). */
+    val SWITCHES: Set<String> get() = CommandSpec.switches
+    val DURATIONS: Set<String> get() = CommandSpec.durations
 
-    /** Options whose value is a duration (milliseconds after [normalize]). */
-    val DURATIONS: Set<String> = setOf("watch", "for", "wait")
-
-    fun kindOf(@Suppress("UNUSED_PARAMETER") sub: String, key: String): Kind = when (key) {
-        in SWITCHES, in OffloadOutput.OUTPUT_FLAGS, "help" -> Kind.SWITCH
+    fun kindOf(sub: String, key: String): Kind = when {
+        key in OffloadOutput.OUTPUT_FLAGS || key == "help" -> Kind.SWITCH
+        CommandSpec.kindOf(sub, key) == CommandSpec.Kind.SWITCH -> Kind.SWITCH
         else -> Kind.VALUE
     }
 
-    fun switchesFor(sub: String): Set<String> = SWITCHES.filterTo(HashSet()) { kindOf(sub, it) == Kind.SWITCH }
+    fun switchesFor(sub: String): Set<String> = CommandSpec.of(sub)?.allOpts?.filter { it.kind == CommandSpec.Kind.SWITCH }?.map { it.name }?.toSet().orEmpty()
 
-    fun isDurationOption(@Suppress("UNUSED_PARAMETER") sub: String, key: String): Boolean = key in DURATIONS
+    fun isDurationOption(sub: String, key: String): Boolean = CommandSpec.kindOf(sub, key) == CommandSpec.Kind.DURATION
 
     /** The parser for [sub]'s arguments (already [normalize]d). */
     fun args(sub: String, rest: List<String>, strict: Boolean = true): OffloadArgs =
