@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "toolpkg_id": "com.kilon.agentvscreen",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "api_version": "1.0.0",
   "author": ["Agent VScreen"],
   "main": "dist/main.js",
