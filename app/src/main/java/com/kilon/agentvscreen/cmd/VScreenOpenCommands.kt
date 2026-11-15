@@ -251,7 +251,7 @@ internal fun VScreenOffloadHandler.stopCmd(sid: String?, args: OffloadArgs): Nat
         if (!o.ok) throw ActionError(o.code, o.message)
         o.message + tr("（force-stop：主屏上的同一个应用也被结束了）", " (force-stop: the same app on the main screen was stopped too)")
     }
-    return text(msg + (mainCheckLines(main0, tasks0)?.let { "\n${Blocks.notes}$it" } ?: ""))
+    return text(msg + (mainCheckLines(main0, tasks0)?.let { "\n${Blocks.notes}${it.code}: ${it.description}" } ?: ""))
 }
 
 /** `release`: give the background screen back now (the connection stays; the next launch builds a new one). */
@@ -259,7 +259,7 @@ internal fun VScreenOffloadHandler.releaseCmd(sid: String?): NativeOffloadResult
     val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
     val main0 = mainTop(); val tasks0 = mainTaskIds()
     BackgroundOperation.releaseNow(s)
-    return text(tr("副屏已释放（连接保留，下次 launch 会新建副屏）", "Screen released (connection kept; the next launch creates a new screen)") + (mainCheckLines(main0, tasks0)?.let { "\n${Blocks.notes}$it" } ?: ""))
+    return text(tr("副屏已释放（连接保留，下次 launch 会新建副屏）", "Screen released (connection kept; the next launch creates a new screen)") + (mainCheckLines(main0, tasks0)?.let { "\n${Blocks.notes}${it.code}: ${it.description}" } ?: ""))
 }
 
 /** 1.1 `done`: this session's turn ends now (screen idles, page kept, another session may take it over). */

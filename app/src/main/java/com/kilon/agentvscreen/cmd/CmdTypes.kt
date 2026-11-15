@@ -65,7 +65,7 @@ class Notes {
     val isEmpty: Boolean get() = list.isEmpty()
     /** The code that decides the reply's outcome: the first coded note that is not mere information. */
     fun firstBlocking(): String? = list.firstOrNull { it.code != null && Codes.of(it.code)?.next != Codes.Next.NONE && it.code !in INFO }?.code
-    companion object { val INFO = setOf("NO_CHANGE", "MAIN_SCREEN_CHANGED", "KEEP_LIMIT") }
+    companion object { val INFO = setOf("NO_CHANGE", "MAIN_APP_SWITCHED", "MAIN_TASK_MOVED_TO_VSCREEN", "MAIN_SCREEN_CHANGED", "KEEP_LIMIT") }
 }
 
 /**

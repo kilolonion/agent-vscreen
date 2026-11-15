@@ -401,7 +401,7 @@ internal fun VScreenOffloadHandler.runSegment(sid: String, d: VScreenDisplay, st
     if (outcome == "done" && stoppedBy != null) outcome = "stopped"
     if (o.stop.isNotEmpty()) lines += if (stoppedBy != null) tr("停止条件触发：$stoppedBy", "stop condition fired: $stoppedBy") else tr("停止条件 ${o.stop.joinToString(" or ") { it.raw }}：这段里没出现", "stop condition ${o.stop.joinToString(" or ") { it.raw }}: did not occur in this stretch")
     if ((beforeSteps != null || afterSteps != null) && !acting) lines += tr("（这个应用记了前置/收尾步骤；这次没带步骤也没 --watch，所以没有做它们，画面保持原状态）", "(this app has before/after steps kept; this time there were no steps and no --watch, so they were not run and the screen stays as it was)")
-    mainCheckLines(main0, tasks0)?.let { notes.add("MAIN_SCREEN_CHANGED", it) }
+    mainCheckLines(main0, tasks0, d.displayId)?.let { notes.add(it.code, it.description) }
     val top = runCatching { VScreenShell.topPackage(d.displayId) }.getOrNull()
     if (app != null && top != null && top != app && top != context.packageName) notes += tr("副屏前台现在是 $top，不是你打开的 $app", "The front app on the screen is now $top, not $app that you opened")
     return SegmentOut(lines, outs.filter { it.status != "refused" || it.code != null }, notes, SystemClock.elapsedRealtime() - t0, start, outcome, stoppedAt)
@@ -667,13 +667,41 @@ private fun drag(d: VScreenDisplay, pts: List<Pair<Int, Int>>, ms: Int) {
     } finally { com.kilon.agentvscreen.host.quiet("drag-cancel") { VScreenShell.finger(d.displayId, "cancel", 0, -1, -1) } }
 }
 
-/** Main-screen facts for the notes: its top activity or its task list changed during the stretch. */
-internal fun VScreenOffloadHandler.mainCheckLines(before: String?, tasksBefore: Set<Int>?): String? {
+/**
+ * Distinguish foreground navigation, verified task migration to the virtual
+ * screen, and actual task loss. Unknown task identity is never treated as safe.
+ */
+internal fun mainScreenChangeCode(
+    before: String?,
+    after: String?,
+    lostTasks: Set<Int>,
+    virtualTasks: Set<Int> = emptySet(),
+): String? = when {
+    (lostTasks - virtualTasks).isNotEmpty() -> "MAIN_SCREEN_CHANGED"
+    lostTasks.isNotEmpty() -> "MAIN_TASK_MOVED_TO_VSCREEN"
+    before != null && after != null && before != after -> "MAIN_APP_SWITCHED"
+    else -> null
+}
+
+internal data class MainScreenChange(val code: String, val description: String)
+
+internal fun VScreenOffloadHandler.mainCheckLines(
+    before: String?,
+    tasksBefore: Set<Int>?,
+    virtualDisplayId: Int? = null,
+): MainScreenChange? {
     val after = mainTop()
     val lost = mainTasksLost(tasksBefore)
-    if (before == after && lost.isEmpty()) return null
-    return tr("主屏在这段前后变了（前台 $before → $after", "The main screen changed during this stretch (front app $before → $after") + (if (lost.isNotEmpty()) tr("；主屏任务 ${lost.joinToString(",")} 不见了", "; main-screen tasks ${lost.joinToString(",")} disappeared") else "") +
-        tr("）。可能是用户自己切的，也可能被打扰了：停下，先告诉用户", "). The user may have switched it, or something interrupted: stop and tell the user first")
+    val virtualTasks = virtualDisplayId?.let { id ->
+        runCatching { VScreenHandoff.tasksOn(id).map { it.taskId }.toSet() }.getOrNull()
+    }.orEmpty()
+    val code = mainScreenChangeCode(before, after, lost, virtualTasks) ?: return null
+    val message = when (code) {
+        "MAIN_APP_SWITCHED" -> tr("主屏切换：$before → $after；原有任务未丢失", "Main-screen app switched: $before → $after; no existing main task lost")
+        "MAIN_TASK_MOVED_TO_VSCREEN" -> tr("主屏任务 ${lost.joinToString(",")} 已确认移到副屏", "Main-screen tasks ${lost.joinToString(",")} were verified on the virtual screen")
+        else -> tr("主屏任务 ${(lost-virtualTasks).joinToString(",")} 消失：请先告知用户", "Main-screen tasks ${(lost-virtualTasks).joinToString(",")} disappeared without appearing on the virtual screen: inform the user before proceeding")
+    }
+    return MainScreenChange(code, message)
 }
 
 // ── the command ──────────────────────────────────────────────────────
@@ -777,7 +805,7 @@ internal fun VScreenOffloadHandler.launchCmd(sid: String?, args: OffloadArgs): N
     val p = m.profile
     if (p["before"] != null || p["after"] != null) done += tr("每段 act 会自动做：", "Every act automatically runs: ") + listOfNotNull(p["before"]?.let { tr("前置“$it”", "before \"$it\"") }, p["after"]?.let { tr("收尾“$it”", "after \"$it\"") }).joinToString(tr("，", ", ")) + tr("（--bare 跳过）", " (--bare skips them)")
     val notes = facts.notes
-    mainCheckLines(main0, tasks0)?.let { notes.add("MAIN_SCREEN_CHANGED", it) }
+    mainCheckLines(main0, tasks0, d.displayId)?.let { notes.add(it.code, it.description) }
     takeAdjusted().forEach { notes += tr("参数被调整：$it", "options adjusted: $it") }
     return fourBlocks(s, d, done, notes, start, SystemClock.elapsedRealtime() - t0, "launch", fullList = true)
 }
