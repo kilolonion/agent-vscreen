@@ -192,6 +192,8 @@ in：把用户主屏上的应用移到副屏接着做（返回四段；手机上
 | `USER_STOPPED` | `ask_user` | 用户按了“停止 AI”。所有操作都被拒绝，只有用户能解除；把返回里怎么解除的那句转告用户。 |
 | `REREAD_REQUIRED` | `look` | 用户刚接管过副屏，页面可能变了。这次的返回就是现在的画面，看清再继续。 |
 | `HOST_RESTARTED` | `look` | Agent-VScreen 进程重启过，上一轮的任务被打断。这次的返回就是现在的画面，不要假设之前的步骤都做完了。 |
+| `MAIN_TASK_MOVED_TO_VSCREEN` | `none` | 主屏的任务已在副屏找到，属于已验证的迁移。 |
+| `MAIN_APP_SWITCHED` | `none` | 只是主屏前台应用切换，已有任务没丢失。 |
 | `MAIN_SCREEN_CHANGED` | `ask_user` | 这段前后主屏的前台应用或任务变了：可能是用户自己切的，也可能被打扰了。先告诉用户。 |
 | `SCOPE_DENIED` | `ask_user` | 这个令牌没有做这件事的权限（用户在 App 里给令牌定的范围）。 |
 | `PROTECTED_APP` | `none` | 这是 Agent-VScreen 自己、桌面或系统界面，不能结束。 |
@@ -434,6 +436,8 @@ scope: `look`
 | `USER_STOPPED` | `ask_user` | The user pressed "Stop AI". Everything is refused and only the user can lift it; pass on the line that says how. |
 | `REREAD_REQUIRED` | `look` | The user just had the screen and the page may have changed. This reply is the screen now: look, then carry on. |
 | `HOST_RESTARTED` | `look` | The Agent-VScreen process restarted and the last task was cut off. This reply is the screen now; don't assume earlier steps completed. |
+| `MAIN_TASK_MOVED_TO_VSCREEN` | `none` | A task missing from the main screen was verified on the virtual screen. |
+| `MAIN_APP_SWITCHED` | `none` | Only the main-screen foreground app changed; no existing task was lost. |
 | `MAIN_SCREEN_CHANGED` | `ask_user` | The main screen's front app or tasks changed during this stretch: the user may have switched, or something disturbed it. Tell the user first. |
 | `SCOPE_DENIED` | `ask_user` | This token is not allowed to do this (the scope the user gave the token in the app). |
 | `PROTECTED_APP` | `none` | This is Agent-VScreen itself, the launcher or system UI; it cannot be stopped. |
