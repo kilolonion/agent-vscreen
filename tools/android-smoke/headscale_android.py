@@ -45,7 +45,7 @@ def fixtures():
     (D / "config.yaml").write_text(s)
     profiles = D / "profiles"
     profiles.mkdir()
-    (profiles / "smoke.yaml").write_text("mode: rule\nhosts:\n  headscale.smoke.test: 10.0.2.2\ndns:\n  enable: true\n  use-hosts: true\n  nameserver: [10.0.2.2]\nproxies: []\nproxy-groups: []\nrules:\n  - MATCH,DIRECT\n")
+    (profiles / "smoke.yaml").write_text("mode: rule\nhosts:\n  headscale.smoke.test: 10.0.2.2\ndns:\n  enable: true\n  use-hosts: true\n  nameserver: [10.0.2.2]\nproxies: []\nproxy-groups:\n  - name: LocalRoute\n    type: select\n    proxies: [DIRECT]\nrules:\n  - MATCH,LocalRoute\n")
     for args in [CLI + ["serve"], [sys.executable, "-m", "http.server", "18082", "--bind", "127.0.0.1", "--directory", str(profiles)]]:
         with open(D / ("process-" + str(len(args)) + ".log"), "w") as out:
             subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=out, stderr=out, start_new_session=True)
@@ -95,7 +95,11 @@ def vpn():
     tap(find(FL,["Confirm","OK","确定","确认"]))
     time.sleep(5)
     sh("am","start","-a",FL+".action.START","-p",FL)
-    for i in range(45):
+    for i in range(55):
+        if i==15:
+            sh("input","keyevent","3")
+            sh("am","start","-a",FL+".action.START","-p",FL)
+
         if i in (2, 7):
             tree=nodes()
             for n in tree:
@@ -105,8 +109,14 @@ def vpn():
         if re.search(r"NetworkAgentInfo[^\n]*(?:VPN|TRANSPORT_VPN)",conn,re.I) and FL in sh("dumpsys","activity","services",FL):
             print("PASS FlClash Android VPN connected",flush=True);return
         time.sleep(1)
-    devs=sh("ip","link","show")
+    devs=sh("ls","/sys/class/net")
     lines=sh("dumpsys","connectivity").splitlines()
+    proc=sh("pidof",FL)
+    output=sh("logcat","-d","--pid",proc.split()[0]).splitlines()
+    for line in output[-450:]:
+        if any(t in line.lower() for t in ("error","exception","failed","profile","config","start service")):
+            if not re.search(r"key[=:]|token|authorization|secret",line,re.I):
+                print("FlClash runtime",re.sub(r"https?://[^ ]+","<url>",line)[:220])
     print("FlClash diagnostic network agents", [re.sub(r"extra:.*","",l.strip())[:220] for l in lines if "NetworkAgentInfo" in l][:8])
     print("FlClash diagnostic TUN devices", re.findall(r"\b(?:tun|utun)\d+",devs))
     for n in nodes():
@@ -126,7 +136,6 @@ def test(mode):
     tap(find(APP,["Advanced","高级选项"]))
     tap(find(APP,typ="android.widget.EditText"))
     sh("input","text",URL)
-    sh("input","keyevent","4")
     tap(find(APP,["Save and reconnect","保存并重连"]))
     print("PASS Headscale advanced sheet saved",flush=True)
     try:
@@ -163,7 +172,7 @@ def device_diagnostics():
         if re.search(r"authorization|token|key[=:]|register/|tskey-|secret",line,re.I): continue
         print(re.sub(r"https?://[^ ]+", "<url>",line)[:260])
     print("Visible packages", sorted({n.get("package","") for n in nodes()}))
-    print("VPN interfaces", sh("ip","link","show")[:450])
+    print("Network interfaces", sh("ls","/sys/class/net")[:450])
 
 if sys.argv[1]=="fixtures":fixtures()
 else:

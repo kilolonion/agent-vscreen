@@ -491,7 +491,7 @@ private fun VpnGuide(host: AppHost, switchTo: (Tailnet.Mode) -> Unit) {
     var how by remember { mutableStateOf(false) }
     InfoCard(Palette.standby, tr("手机开着另一个 VPN", "Another VPN is on"),
         tr("手机上的 VPN 可能影响内置 Tailscale 的连接。如果一直连不上，可以尝试以下办法：",
-            "The built-in Tailscale needs its own connection; another VPN (a proxy, an accelerator or the Tailscale app) takes it over, so it does not connect or keeps dropping. Pick one:"))
+            "A VPN on this phone may affect the built-in Tailscale connection. If it keeps failing, try one of these options:"))
     if (hasApp) ArrowPreference(title = tr("① 改用手机上的 Tailscale App", "① Use the Tailscale app on this phone"),
         summary = tr("你已经装了它。打开它并连上，这里切到“外部 Tailscale App”", "It is installed. Open it and connect; this switches to \"External Tailscale app\""),
         endActions = { Value(tr("切换", "Switch")) }, onClick = { switchTo(Tailnet.Mode.SYSTEM) })

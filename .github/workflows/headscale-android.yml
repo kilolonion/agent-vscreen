@@ -8,6 +8,7 @@ permissions:
   contents: read
 jobs:
   emulator-apk:
+    if: ${{ !contains(github.event.head_commit.message, 'reuse emulator APK') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -39,6 +40,7 @@ jobs:
           retention-days: 2
   android:
     needs: emulator-apk
+    if: ${{ always() && (needs.emulator-apk.result == 'success' || needs.emulator-apk.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 26
     strategy:
@@ -48,6 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v5
+        if: needs.emulator-apk.result == 'success'
         with:
           name: emulator-only
           path: test-apks
@@ -56,6 +59,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p test-apks hs
+          if [[ ! -e test-apks/app-release.apk ]]; then
+            gh run download 44254215896 -n emulator-only -D test-apks
+          fi
           gh release download v0.27.1 -R juanfont/headscale -p headscale_0.27.1_linux_amd64 -p checksums.txt -D hs
           (cd hs && grep '  headscale_0.27.1_linux_amd64$' checksums.txt | sha256sum --check -)
           chmod +x hs/headscale_0.27.1_linux_amd64
@@ -66,7 +72,7 @@ jobs:
       - name: Start private DNS and Headscale
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq dnsmasq-base
-          sudo dnsmasq --no-resolv --no-hosts --bind-interfaces --listen-address=127.0.0.1 --port=53 --address=/headscale.smoke.test/10.0.2.2 --pid-file="$RUNNER_TEMP/smoke-dns.pid"
+          sudo dnsmasq --no-hosts --bind-interfaces --listen-address=127.0.0.1 --port=53 --address=/headscale.smoke.test/10.0.2.2 --pid-file="$RUNNER_TEMP/smoke-dns.pid"
           python3 tools/android-smoke/headscale_android.py fixtures
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
