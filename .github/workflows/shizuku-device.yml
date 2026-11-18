@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
+    if: ${{ !startsWith(github.event.head_commit.message, '[headscale]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:

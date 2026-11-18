@@ -1,0 +1,48 @@
+name: Android Headscale and FlClash verification
+on:
+  push:
+    branches: [ci/verify-headscale-shizuku-20261118]
+    paths: ['tools/android-smoke/headscale*', '.github/workflows/headscale-android.yml']
+permissions:
+  actions: read
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 26
+    strategy:
+      fail-fast: false
+      matrix:
+        vpn: [off, flclash]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Fetch the exact tested APK and public fixtures
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p test-apks hs
+          gh run download 44250792206 --name candidate --dir test-apks
+          gh release download v0.27.1 -R juanfont/headscale -p headscale_0.27.1_linux_amd64 -p checksums.txt -D hs
+          (cd hs && grep '  headscale_0.27.1_linux_amd64$' checksums.txt | sha256sum --check -)
+          chmod +x hs/headscale_0.27.1_linux_amd64
+          curl -fsSL https://raw.githubusercontent.com/juanfont/headscale/v0.27.1/config-example.yaml -o hs/example.yaml
+          if [[ "${{ matrix.vpn }}" == flclash ]]; then
+            gh release download v0.9.3 -R chen08209/FlClash -p '*android-x86_64.apk' -O test-apks/flclash.apk
+          fi
+      - name: Start private DNS and Headscale
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq dnsmasq-base
+          sudo dnsmasq --no-resolv --no-hosts --bind-interfaces --listen-address=127.0.0.1 --port=53 --address=/headscale.smoke.test/10.0.2.2 --pid-file="$RUNNER_TEMP/smoke-dns.pid"
+          python3 tools/android-smoke/headscale_android.py fixtures
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -dns-server 127.0.0.1
+          script: python3 tools/android-smoke/headscale_android.py ${{ matrix.vpn }}
