@@ -71,6 +71,8 @@ def find(package, labels=(), typ=None, wait=40):
     end=time.monotonic()+wait
     while time.monotonic()<end:
         tree=nodes()
+        if labels and "Copy login link" in labels and any(n.get("package","").endswith("nexuslauncher") for n in tree):
+            sh("am","start","-W","-n",APP+"/.ui.MainActivity","--es","page","REMOTE")
         for n in tree:
             if n.get("package")!=package: continue
             val=(n.get("text") or n.get("content-desc","")).strip()
@@ -93,15 +95,29 @@ def vpn():
     tap(find(FL,["Confirm","OK","确定","确认"]))
     time.sleep(5)
     sh("am","start","-a",FL+".action.START","-p",FL)
-    for _ in range(45):
+    for i in range(45):
+        if i in (2, 7):
+            tree=nodes()
+            for n in tree:
+                if n.get("package")=="com.android.vpndialogs" and n.get("resource-id")=="android:id/button1":
+                    tap(n)
         conn=sh("dumpsys","connectivity")
         if re.search(r"NetworkAgentInfo[^\n]*(?:VPN|TRANSPORT_VPN)",conn,re.I) and FL in sh("dumpsys","activity","services",FL):
             print("PASS FlClash Android VPN connected",flush=True);return
         time.sleep(1)
+    devs=sh("ip","link","show")
+    lines=sh("dumpsys","connectivity").splitlines()
+    print("FlClash diagnostic network agents", [re.sub(r"extra:.*","",l.strip())[:220] for l in lines if "NetworkAgentInfo" in l][:8])
+    print("FlClash diagnostic TUN devices", re.findall(r"\b(?:tun|utun)\d+",devs))
+    for n in nodes():
+        if n.get("package")==FL:
+            v=(n.get("text") or n.get("content-desc") or "")
+            if v and not any(x in v.lower() for x in ("http","token","key")):print("FlClash screen",v[:90])
     raise RuntimeError("FlClash VPN did not become active")
 
 
 def test(mode):
+    sh("settings","put","secure","show_ime_with_hard_keyboard","1")
     sh("wm","size","1080x2800");sh("wm","density","240")
     if mode=="flclash":vpn()
     adb("install","test-apks/app-release.apk")
@@ -147,7 +163,7 @@ def device_diagnostics():
         if re.search(r"authorization|token|key[=:]|register/|tskey-|secret",line,re.I): continue
         print(re.sub(r"https?://[^ ]+", "<url>",line)[:260])
     print("Visible packages", sorted({n.get("package","") for n in nodes()}))
-    print("VPN interfaces", sh("ip","-br","link","show")[:450])
+    print("VPN interfaces", sh("ip","link","show")[:450])
 
 if sys.argv[1]=="fixtures":fixtures()
 else:

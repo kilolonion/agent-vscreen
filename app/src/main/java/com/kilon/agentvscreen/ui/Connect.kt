@@ -490,7 +490,7 @@ private fun VpnGuide(host: AppHost, switchTo: (Tailnet.Mode) -> Unit) {
     val hasApp = remember { runCatching { ctx.packageManager.getPackageInfo("com.tailscale.ipn", 0); true }.getOrDefault(false) }
     var how by remember { mutableStateOf(false) }
     InfoCard(Palette.standby, tr("手机开着另一个 VPN", "Another VPN is on"),
-        tr("内置 Tailscale 要自己连网，别的 VPN（代理、加速器或 Tailscale App）会把它的连接截走，所以连不上或连上又断。选一个办法：",
+        tr("手机上的 VPN 可能影响内置 Tailscale 的连接。如果一直连不上，可以尝试以下办法：",
             "The built-in Tailscale needs its own connection; another VPN (a proxy, an accelerator or the Tailscale app) takes it over, so it does not connect or keeps dropping. Pick one:"))
     if (hasApp) ArrowPreference(title = tr("① 改用手机上的 Tailscale App", "① Use the Tailscale app on this phone"),
         summary = tr("你已经装了它。打开它并连上，这里切到“外部 Tailscale App”", "It is installed. Open it and connect; this switches to \"External Tailscale app\""),
@@ -518,12 +518,12 @@ private fun BuiltinState(ts: Tailnet.Status, host: AppHost, open: (String) -> Un
     val ctx = LocalContext.current
     if (!Tailnet.available(ctx)) { InfoCard(Palette.stopped, tr("这个安装包里没有内置 Tailscale", "This package has no built-in Tailscale"), tr("只支持 arm64 手机。", "Only arm64 phones are supported.")); return }
     val phase = Tailnet.phase(ctx)
-    // 1.4.0-beta10 (rainbow: with a VPN on, a one-line hint at the bottom and a block of red errors at the top, not
-    // friendly at all): another VPN on the phone is the cause, so it is the first and only thing said, in plain words,
-    // with what the user can do; the node's own messages are behind 详情.
+    // VPN troubleshooting is relevant only after a failed or stalled connection.
     var vpnOn by remember { mutableStateOf(Tailnet.throughVpn(ctx)) }
     LaunchedEffect(Unit) { while (true) { vpnOn = Tailnet.throughVpn(ctx); delay(2_000) } }
-    if (vpnOn && phase != TsPhase.CONNECTED && phase != TsPhase.SERVICE_OFF) {
+    val loginStalled = (phase == TsPhase.NEEDS_LOGIN || phase == TsPhase.EXPIRED) &&
+        ts.authUrl.isNullOrBlank() && (ts.waitingS >= 15 || !ts.loginError.isNullOrBlank())
+    if (vpnOn && (loginStalled || phase == TsPhase.UNSTABLE || phase == TsPhase.ERROR)) {
         VpnGuide(host, switchTo)
         var more by remember { mutableStateOf(false) }
         ArrowPreference(title = tr("详情", "Details"), endActions = { Value(if (more) tr("收起", "Hide") else tr("查看", "Show")) }, onClick = { more = !more })
