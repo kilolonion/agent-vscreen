@@ -91,18 +91,46 @@ def vpn():
     sh("appops","set",FL,"ACTIVATE_VPN","allow")
     sh("monkey","-p",FL,"1")
     tap(find(FL,["Agree","同意"],wait=55))
-    field=find(FL,typ="android.widget.EditText")
-    texts=[n.get("text") or n.get("content-desc") or "" for n in nodes()]
-    statement=next(x for x in texts if x.startswith("The Software itself does not provide"))
-    tap(field)
-    sh("input","text",shlex.quote(statement.replace(" ","%s")))
-    tap(find(FL,["Confirm","确认"]))
-    print("PASS FlClash initial setup",flush=True)
-
-    time.sleep(5)
+    end=time.monotonic()+65
+    did_type=False
+    while time.monotonic()<end:
+        view=nodes()
+        fields=[n for n in view if n.get("package")==FL and n.get("class")=="android.widget.EditText"]
+        labels=[(n.get("text") or n.get("content-desc") or "").strip() for n in view]
+        statements=[x for x in labels if x.startswith("The Software itself does not provide") and x.endswith("services.")]
+        if did_type and "Restate the statement" not in labels and not statements:
+            break
+        if not statements or not fields:
+            time.sleep(1);continue
+        statement=statements[0]
+        val=fields[0].get("text","")
+        if val.strip()!=statement:
+            print("Restatement input length",len(val),"of",len(statement),flush=True)
+            tap(fields[0])
+            if val and not statement.startswith(val):
+                # Android's keyboard shortcut uses left Ctrl+A; API 30 input lacks keycombination.
+                for _ in range(min(len(val),260)):sh("input","keyevent","67")
+                val=""
+            sh("input","text",shlex.quote(statement[len(val):].replace(" ","%s")))
+            did_type=True
+            time.sleep(1.5)
+            continue
+        for n in view:
+            if n.get("package")==FL and (n.get("text") or n.get("content-desc","")).strip()=="Confirm" and n.get("enabled")=="true":
+                tap(n)
+                break
+        time.sleep(2)
+    else:raise RuntimeError("FlClash did not leave its first-run confirmation")
+    print("PASS FlClash initial setup completed",flush=True)
+    time.sleep(4)
     sh("am","start","-a","android.intent.action.VIEW","-d","flclash://install-config?url=http%3A%2F%2F10.0.2.2%3A18082%2Fsmoke.yaml","-p",FL)
     tap(find(FL,["Confirm","OK","确定","确认"]))
-    time.sleep(5)
+    for _ in range(30):
+        if any("GET /smoke.yaml" in p.read_text(errors="replace") for p in D.glob("process-*.log")):break
+        time.sleep(1)
+    else:raise RuntimeError("FlClash did not fetch the test profile")
+    print("PASS FlClash fetched private test profile",flush=True)
+    time.sleep(4)
     sh("am","start","-a",FL+".action.START","-p",FL)
     for i in range(55):
         if i==15:
@@ -136,7 +164,7 @@ def vpn():
 
 
 def test(mode):
-    sh("settings","put","secure","show_ime_with_hard_keyboard","1")
+    sh("settings","put","secure","show_ime_with_hard_keyboard","0")
     sh("wm","size","1080x2800");sh("wm","density","240")
     if mode=="flclash":vpn()
     adb("install","test-apks/app-release.apk")
@@ -170,7 +198,8 @@ def test(mode):
         time.sleep(1)
     if not code:raise RuntimeError("The copied link did not match the private Headscale server")
     print("PASS received a link from private Headscale",flush=True)
-    run(*CLI,"nodes","register","--user","mobile-ci","--key",code)
+    registered=subprocess.run(CLI+["nodes","register","--user","mobile-ci","--key",code],capture_output=True,timeout=30)
+    if registered.returncode: raise RuntimeError("Headscale rejected the test registration")
     sh("input","keyevent","4")
     for _ in range(35):
         records=json.loads(run(*CLI,"nodes","list","-o","json"))
