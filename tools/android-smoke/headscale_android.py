@@ -87,6 +87,7 @@ def vpn():
     adb("install","test-apks/flclash.apk")
     sh("appops","set",FL,"ACTIVATE_VPN","allow")
     sh("monkey","-p",FL,"1")
+    tap(find(FL,["Agree","同意"],wait=55))
     time.sleep(5)
     sh("am","start","-a","android.intent.action.VIEW","-d","flclash://install-config?url=http%3A%2F%2F10.0.2.2%3A18082%2Fsmoke.yaml","-p",FL)
     tap(find(FL,["Confirm","OK","确定","确认"]))
@@ -136,5 +137,21 @@ def test(mode):
     raise RuntimeError("Registered node did not become online")
 
 
+def device_diagnostics():
+    # Keep test-only failure evidence free of registration URLs and configuration values.
+    relevant = sh("logcat","-d","-t","3500")
+    lines = [ln for ln in relevant.splitlines() if any(t in ln for t in (
+        "Tailnet ", "AndroidRuntime:", "FATAL EXCEPTION", "Fatal signal", "ndk_translation:",
+        "libtsbridge.so", "force finishing", "com.kilon.agentvscreen.ui.MainActivity"))]
+    for line in lines[-60:]:
+        if re.search(r"authorization|token|key[=:]|register/|tskey-|secret",line,re.I): continue
+        print(re.sub(r"https?://[^ ]+", "<url>",line)[:260])
+    print("Visible packages", sorted({n.get("package","") for n in nodes()}))
+    print("VPN interfaces", sh("ip","-br","link","show")[:450])
+
 if sys.argv[1]=="fixtures":fixtures()
-else:test(sys.argv[1])
+else:
+    try:test(sys.argv[1])
+    except Exception:
+        device_diagnostics()
+        raise
