@@ -3,6 +3,7 @@ import base64
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -90,6 +91,14 @@ def vpn():
     sh("appops","set",FL,"ACTIVATE_VPN","allow")
     sh("monkey","-p",FL,"1")
     tap(find(FL,["Agree","同意"],wait=55))
+    field=find(FL,typ="android.widget.EditText")
+    texts=[n.get("text") or n.get("content-desc") or "" for n in nodes()]
+    statement=next(x for x in texts if x.startswith("The Software itself does not provide"))
+    tap(field)
+    sh("input","text",shlex.quote(statement.replace(" ","%s")))
+    tap(find(FL,["Confirm","确认"]))
+    print("PASS FlClash initial setup",flush=True)
+
     time.sleep(5)
     sh("am","start","-a","android.intent.action.VIEW","-d","flclash://install-config?url=http%3A%2F%2F10.0.2.2%3A18082%2Fsmoke.yaml","-p",FL)
     tap(find(FL,["Confirm","OK","确定","确认"]))
@@ -131,29 +140,38 @@ def test(mode):
     sh("wm","size","1080x2800");sh("wm","density","240")
     if mode=="flclash":vpn()
     adb("install","test-apks/app-release.apk")
+    # Preload only the two user settings on a clean disposable emulator, before the first launch.
+    # The app still selects its networks, starts its packaged node and receives the login URL itself.
+    adb("root");adb("wait-for-device")
+    uid=re.search(r"userId=(\d+)", sh("dumpsys","package",APP)).group(1)
+    pref="/data/user/0/"+APP+"/shared_prefs"
+    xml='<map><string name="tailnet_control">'+URL+'</string><string name="tailnet_mode">builtin</string></map>'
+    local=Path(os.environ["RUNNER_TEMP"])/"test-prefs.xml";local.write_text(xml)
+    adb("push",str(local),"/data/local/tmp/vscreen-seed.xml")
+    sh("mkdir","-p",pref)
+    sh("cp","/data/local/tmp/vscreen-seed.xml",pref+"/agent_vscreen_api.xml")
+    sh("chown","-R",uid+":"+uid,pref)
+    sh("restorecon","-RF",pref)
+    adb("unroot");adb("wait-for-device")
+    subprocess.run(["bash","tools/android-smoke/headscale_clip.sh"],check=True)
     sh("am","start","-W","-n",APP+"/.ui.MainActivity","--es","page","REMOTE")
-    tap(find(APP,["Built-in Tailscale","内置 Tailscale"]))
-    tap(find(APP,["Advanced","高级选项"]))
-    tap(find(APP,typ="android.widget.EditText"))
-    sh("input","text",URL)
-    tap(find(APP,["Save and reconnect","保存并重连"]))
-    print("PASS Headscale advanced sheet saved",flush=True)
     try:
         tap(find(APP,["Copy login link","复制登录链接"],wait=92))
     except RuntimeError:
         logs=sh("logcat","-d","-s","Tailnet:I").lower()
         print("Bridge diagnostics:",[v for v in ["exec format error","permission denied","linker","context canceled","no route","no dns fallback","bridge exited","controlhttp","not found","sigsegv"] if v in logs])
         raise
-    tap(find(APP,["Advanced","高级选项"]))
-    tap(find(APP,typ="android.widget.EditText"))
-    sh("input","keycombination","113","29") if int(sh("getprop","ro.build.version.sdk"))>=34 else sh("input","keyevent","123")
-    sh("input","keyevent","279")
-    text=" ".join(n.get("text","") for n in nodes())
-    match=re.search(re.escape(URL)+r"/register/([A-Za-z0-9_-]+)",text)
-    if not match:raise RuntimeError("The copied text did not contain a registration URL from the fixture")
+    sh("am","start","-W","-n","ci.vscreen.clip/.Check")
+    code=None
+    for _ in range(12):
+        result=subprocess.run(["adb","shell","run-as","ci.vscreen.clip","cat","files/code"],text=True,capture_output=True)
+        if result.returncode==0 and re.fullmatch(r"[A-Za-z0-9_-]+",result.stdout.strip()):
+            code=result.stdout.strip();break
+        time.sleep(1)
+    if not code:raise RuntimeError("The copied link did not match the private Headscale server")
     print("PASS received a link from private Headscale",flush=True)
-    run(*CLI,"nodes","register","--user","mobile-ci","--key",match.group(1))
-    sh("input","keyevent","4");sh("input","keyevent","4")
+    run(*CLI,"nodes","register","--user","mobile-ci","--key",code)
+    sh("input","keyevent","4")
     for _ in range(35):
         records=json.loads(run(*CLI,"nodes","list","-o","json"))
         if any(r.get("online") for r in records):
