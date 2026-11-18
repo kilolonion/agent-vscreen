@@ -61,19 +61,22 @@ fun VScreenLiveFrame(sessionId: String, modifier: Modifier = Modifier) {
     // 1.2.0-beta2: the viewer's own pictures, at the size shown and at a rate made for eyes (30 a second while the
     // user controls the screen, 20 while watching), instead of the agent's full-size frames at 8 a second.
     val fast = st.takeoverSessionId == sessionId
+    val viewer = remember { Any() }
     DisposableEffect(display, fast, viewSize) {
         val long = maxOf(viewSize.width, viewSize.height)
-        if (long > 0) display.setPreview(if (fast) 33L else 50L, long)
-        onDispose { }
+        if (long > 0) display.setPreview(viewer, if (fast) 33L else 50L, long)
+        onDispose { display.clearPreview(viewer) }
     }
-    DisposableEffect(display) { onDispose { display.clearPreview() } }
     // Recompose on each new frame while this composable is on screen.
     val version = display.frameVersion.collectAsState().value
     val shown = display.previewVersion.collectAsState().value
     val frame = remember(display, version, shown) { display.previewFrame() ?: display.latestFrame() }
     // A frame that is one flat colour (app gone, page not drawn yet) reads as a broken white box. Checked when the
     // agent's frame changes (8 a second at most), not for every picture shown.
-    val blank = remember(display, version) { display.latestFrame()?.let { !it.isRecycled && isBlank(it) } == true }
+    val blank by produceState(false, display, version) {
+        val sample = display.latestFrame()
+        value = sample != null && withContext(Dispatchers.Default) { isBlank(sample) }
+    }
     // v40: a blank frame with no app on the screen is the normal idle state, not a capture problem.
     val noApp = produceState(false, blank, display) {
         value = blank && withContext(Dispatchers.IO) {
@@ -114,11 +117,15 @@ fun VScreenLiveFrame(sessionId: String, modifier: Modifier = Modifier) {
 /** True when a 47x47 sample of the frame is all (almost) the same colour. */
 private fun isBlank(b: android.graphics.Bitmap): Boolean = runCatching {
     val first = b.getPixel(b.width / 2, b.height / 2)
-    for (i in 1..47) for (j in 1..47) {
-        val c = b.getPixel((b.width * i / 48).coerceAtMost(b.width - 1), (b.height * j / 48).coerceAtMost(b.height - 1))
-        val d = abs(((c shr 16) and 0xff) - ((first shr 16) and 0xff)) +
-            abs(((c shr 8) and 0xff) - ((first shr 8) and 0xff)) + abs((c and 0xff) - (first and 0xff))
-        if (d > 24) return@runCatching false
+    val row = IntArray(b.width)
+    for (j in 1..47) {
+        b.getPixels(row, 0, b.width, 0, b.height * j / 48, b.width, 1)
+        for (i in 1..47) {
+            val c = row[b.width * i / 48]
+            val d = abs(((c shr 16) and 0xff) - ((first shr 16) and 0xff)) +
+                abs(((c shr 8) and 0xff) - ((first shr 8) and 0xff)) + abs((c and 0xff) - (first and 0xff))
+            if (d > 24) return@runCatching false
+        }
     }
     true
 }.getOrDefault(false)

@@ -19,6 +19,7 @@
 #                    without it a remote address follows the usual http_proxy / no_proxy variables
 
 CLI_VERSION="@@VERSION@@"
+umask 077
 CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/agent-vscreen"
 # The file holds the same names as the environment (VSCREEN_URL / VSCREEN_TOKEN); a variable already set wins.
 # It is read line by line, not sourced, so it can never override what the caller set. Old *_SAVED names still work.
@@ -80,6 +81,9 @@ find_port() {
 }
 find_port
 
+# curl may receive an interim response or a proxy CONNECT response before the app's.
+http_status() { awk '/^HTTP\/[0-9.]+ / { code=$2 } END { sub(/\r$/, "", code); print code }' "$1"; }
+
 # req METHOD TARGET BODYFILE HEADERFILE OUTFILE [curl args…]: one request, signed when possible. Returns curl's status;
 # 90 when the reply's proof is wrong.
 req() {
@@ -99,7 +103,7 @@ req() {
   fi
   rq=$?; [ $rq -ne 0 ] && return $rq
   got=$(tr -d '\r' < "$hf" | sed -n 's/^[Xx]-[Vv][Ss]creen-[Pp]roof: *//p' | head -n1)
-  st=$(sed -n '1s/^HTTP\/[0-9.]* \([0-9]*\).*/\1/p' "$hf")
+  st=$(http_status "$hf")
   # Refusals made before the token was checked (401/403/429…) carry no proof; a 200 to a signed request always does.
   if [ "$st" = "200" ]; then
     want=$(printf '%s\n%s\nresp\n%s\n%s' "$K" "$nonce" "$(sha < "$of")" "$K" | sha)
@@ -152,14 +156,13 @@ if [ "$1" = "install" ]; then
 fi
 
 SESSION=$(printf '%s' "$SESSION" | sed 's/[^A-Za-z0-9_.:-]/_/g')
-tmp="${TMPDIR:-/tmp}/vscreen.$$"
-mkdir -p "$tmp" || exit 3
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/vscreen.XXXXXX") || exit 3
 trap 'rm -rf "$tmp"' EXIT INT TERM
 : > "$tmp/empty"
 
 if [ "$1" = "events" ] && [ "$2" = "--raw" ]; then
   req GET "/v2/events?session=$SESSION&wait=${3:-0}" "$tmp/empty" "$tmp/h" "$tmp/b"; rc=$?
-  if [ "$rc" -eq 0 ] && ! grep -q '^HTTP/[0-9.]* 200' "$tmp/h" 2>/dev/null; then rc=1; fi
+  if [ "$rc" -eq 0 ] && [ "$(http_status "$tmp/h")" != 200 ]; then rc=1; fi
   cat "$tmp/b" 2>/dev/null; echo; exit $rc
 fi
 
@@ -294,7 +297,7 @@ if [ $rc -ne 0 ]; then
   esac
   exit 3
 fi
-code=$(sed -n '1s/^HTTP\/[0-9.]* \([0-9]*\).*/\1/p' "$tmp/h")
+code=$(http_status "$tmp/h")
 if [ "$code" = "404" ]; then
   echo "vscreen: «这台手机上的 Agent-VScreen 太旧（没有 /v2）：请用户更新 App。|Agent-VScreen on this phone is too old (no /v2): ask the user to update the app.»" >&2; exit 3
 fi
@@ -314,7 +317,7 @@ if [ -n "$srv" ] && [ "$srv" != "$CLI_VERSION" ] && [ -z "$VSCREEN_NO_UPDATE" ];
   self=$(command -v "$0" 2>/dev/null || echo "$0")
   if [ -n "$NOSIGN" ]; then
     echo "«（App 已更新到 $srv，但这台机器不能签名校验，命令行没有自动更新：装 sha256sum / openssl，或重新执行接入命令）|(the app was updated to $srv, but this machine cannot verify signatures, so the CLI did not update itself: install sha256sum / openssl, or run the connect command again)»" >&2
-  elif [ -w "$self" ] && [ -w "$(dirname "$self")" ] && req GET "/v2/cli" "$tmp/empty" "$tmp/h2" "$tmp/new" && grep -q "^CLI_VERSION=\"$srv\"" "$tmp/new"; then
+  elif [ -w "$self" ] && [ -w "$(dirname "$self")" ] && req GET "/v2/cli" "$tmp/empty" "$tmp/h2" "$tmp/new" && [ "$(http_status "$tmp/h2")" = 200 ] && grep -q "^CLI_VERSION=\"$srv\"" "$tmp/new"; then
     # A new file moved over the old one: this running copy keeps reading the old file safely.
     cp "$tmp/new" "$self.new.$$" && chmod +x "$self.new.$$" && mv -f "$self.new.$$" "$self" &&
       echo "«（vscreen 命令行已随 App 更新到 $srv）|(the vscreen CLI was updated with the app to $srv)»" >&2
@@ -329,7 +332,7 @@ if [ -n "$imgs" ] && [ "$VSCREEN_SHOTS" != "none" ]; then
   for n in $imgs; do
     IFS=$old_ifs
     case "$n" in vscreen_*.jpg) ;; *) continue ;; esac
-    if req GET "/v2/shot/$n" "$tmp/empty" "$tmp/h3" "$tmp/shot" && grep -q '^HTTP/[0-9.]* 200' "$tmp/h3" 2>/dev/null && [ -s "$tmp/shot" ]; then
+    if req GET "/v2/shot/$n" "$tmp/empty" "$tmp/h3" "$tmp/shot" && [ "$(http_status "$tmp/h3")" = 200 ] && [ -s "$tmp/shot" ]; then
       mv -f "$tmp/shot" "$SHOT_DIR/$n" &&
         sed "s|http[s]*://[^ ]*/v2/shot/$n|$SHOT_DIR/$n|g" "$tmp/b" > "$tmp/b2" && mv "$tmp/b2" "$tmp/b"
     fi

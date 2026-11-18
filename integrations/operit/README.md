@@ -25,7 +25,7 @@
 
 - 默认地址 `http://127.0.0.1:18765`。
 - 默认会话名是 `operit`。同一块副屏同一时间只属于一个会话，别的 agent 正在用时会返回 `BUSY`。
-- 包版本 1.4.0，需要 Operit 1.10.0 或更新、Agent-VScreen 1.2.0 或更新（示教、指给我看、步骤里的通配和流程要 1.3.0；端口自动查找要 1.4.0）：走 `/v2` 接口。连本机时用 `Authorization: Bearer`；Agent-VScreen 在别的设备上（填 Tailscale 地址）时自动用签名请求，令牌本身不在网络上传。
+- 包版本见 `manifest.json`，需要 Operit 1.10.0 或更新、Agent-VScreen 1.2.0 或更新（示教、指给我看、步骤里的通配和流程要 1.3.0；端口自动查找要 1.4.0）：走 `/v2` 接口。连本机时用 `Authorization: Bearer`；Agent-VScreen 在别的设备上（填 Tailscale 地址）时自动用签名请求，令牌本身不在网络上传。
 - 付款等高风险步骤由用户在手机上确认，AI 收到 `CONFIRM_PENDING` 会请你去手机上点确认。
 - 令牌等于这台手机的操作权限，不要贴进公开的角色卡、分享的配置或截图。这个包里不含任何令牌。
 
@@ -53,7 +53,7 @@ A ToolPkg for Operit: once installed, Operit's AI gets a `vscreen` tool that ope
 | `usage_advice` | tells the AI when to use vscreen, how to start, and what to ask the user first |
 
 - Default address `http://127.0.0.1:18765`.
-- Package version 1.4.0, needs Operit 1.10.0 or later and Agent-VScreen 1.2.0 or later (lessons, ask-the-user, wildcards and flow in steps need 1.3.0; finding a moved port needs 1.4.0): it uses the `/v2` API. On the same phone it sends `Authorization: Bearer`; when Agent-VScreen runs on another device (a Tailscale address) it signs each request, so the token itself never travels.
+- See `manifest.json` for the package version. Requires Operit 1.10.0 or later and Agent-VScreen 1.2.0 or later (lessons, ask-the-user, wildcards and flow in steps need 1.3.0; finding a moved port needs 1.4.0): it uses the `/v2` API. On the same phone it sends `Authorization: Bearer`; when Agent-VScreen runs on another device (a Tailscale address) it signs each request, so the token itself never travels.
 - High-risk steps such as paying are confirmed by you on the phone; on `CONFIRM_PENDING` the AI asks you to confirm there.
 - The default session is `operit`. A screen belongs to one session at a time; when another agent is using it you get `BUSY`.
 - The token equals control of this phone: don't paste it into public character cards, shared configs or screenshots. This package contains no token.

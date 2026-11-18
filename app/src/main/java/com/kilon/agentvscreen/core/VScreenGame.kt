@@ -92,7 +92,7 @@ internal object VScreenGame {
      */
     fun track(p: Patch, frame: Bitmap, radius: Int = 160): Pair<Rect, Double>? {
         val area = Rect(p.box.left - radius, p.box.top - radius, p.box.right + radius, p.box.bottom + radius)
-        area.intersect(0, 0, frame.width, frame.height)
+        if (!area.intersect(0, 0, frame.width, frame.height)) return null
         val g = gray(frame, area, p.scale) ?: return null
         val (px, aw, ah) = g
         if (aw < p.w || ah < p.h) return null

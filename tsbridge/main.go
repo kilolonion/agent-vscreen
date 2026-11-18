@@ -35,9 +35,10 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"tailscale.com/ipn"
 	"time"
 
+	"tailscale.com/ipn"
+	"tailscale.com/net/dnscache"
 	"tailscale.com/net/netmon"
 	"tailscale.com/tsnet"
 )
@@ -92,44 +93,64 @@ func normalizeControlURL(v string) string {
 	return v
 }
 
-// stopStale ends a bridge an earlier app process left behind: the pid in [path], if it is still a tsbridge and not
-// this process. SIGTERM first (it closes the node cleanly), SIGKILL after 3 s.
-func stopStale(path string) {
-	var pids []int
-	if b, err := os.ReadFile(path); err == nil {
-		if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil {
-			pids = append(pids, pid)
+// Only reap an orphan of this executable in this node's own working directory.
+// A live supervisor owns its child; a competing starter must wait for the file lock.
+func orphanBridge(procDir string, exe, stateDir os.FileInfo) bool {
+	binary, err := os.Stat(filepath.Join(procDir, "exe"))
+	if err != nil || !os.SameFile(binary, exe) {
+		return false
+	}
+	cwd, err := os.Stat(filepath.Join(procDir, "cwd"))
+	if err != nil || !os.SameFile(cwd, stateDir) {
+		return false
+	}
+	status, err := os.ReadFile(filepath.Join(procDir, "status"))
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(status), "\n") {
+		if fields := strings.Fields(line); len(fields) == 2 && fields[0] == "PPid:" {
+			return fields[1] == "1"
 		}
 	}
-	// 1.3.0: bridges of versions before beta8 wrote no pid file; look for them too (only our own uid's processes
-	// are visible to us).
-	if ents, err := os.ReadDir("/proc"); err == nil {
-		for _, e := range ents {
-			if pid, err := strconv.Atoi(e.Name()); err == nil {
-				pids = append(pids, pid)
+	return false
+}
+
+func stopStale(dir string) {
+	exe, err := os.Stat("/proc/self/exe")
+	if err != nil {
+		return
+	}
+	stateDir, err := os.Stat(dir)
+	if err != nil {
+		return
+	}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 1 || pid == os.Getpid() {
+			continue
+		}
+		procDir := filepath.Join("/proc", entry.Name())
+		if !orphanBridge(procDir, exe, stateDir) {
+			continue
+		}
+		proc, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+		if orphanBridge(procDir, exe, stateDir) && proc.Signal(syscall.SIGTERM) == nil {
+			for i := 0; i < 30 && orphanBridge(procDir, exe, stateDir); i++ {
+				time.Sleep(100 * time.Millisecond)
+			}
+			if orphanBridge(procDir, exe, stateDir) {
+				_ = proc.Kill()
 			}
 		}
-	}
-	seen := map[int]bool{}
-	for _, pid := range pids {
-		if seen[pid] || pid <= 1 || pid == os.Getpid() {
-			continue
-		}
-		seen[pid] = true
-		cmd, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
-		if err != nil || !strings.Contains(string(cmd), "tsbridge") {
-			continue
-		}
-		fmt.Fprintf(os.Stderr, "ending the bridge left behind by an earlier app process (pid %d)\n", pid)
-		_ = syscall.Kill(pid, syscall.SIGTERM)
-		gone := false
-		for i := 0; i < 30 && !gone; i++ {
-			time.Sleep(100 * time.Millisecond)
-			gone = syscall.Kill(pid, 0) != nil
-		}
-		if !gone {
-			_ = syscall.Kill(pid, syscall.SIGKILL)
-		}
+		_ = proc.Release()
 	}
 }
 
@@ -192,7 +213,7 @@ func emit(s status) {
 var (
 	logMu   sync.Mutex
 	logSeen = map[string]time.Time{}
-	loginRe = regexp.MustCompile(`https?://\S*/a/\S+`)
+	loginRe = regexp.MustCompile(`https?://\S*/(a|register)/\S+`)
 )
 
 // 1.3 beta6: the backend's own log is mostly noise, but the lines about links, relays and the control connection are
@@ -290,9 +311,13 @@ func env(k, def string) string {
 }
 
 // Android has no /etc/resolv.conf: Go's own resolver would ask 127.0.0.1:53 and fail. Use the resolvers the app read
-// from the phone's networks, then public ones; a UDP query asks all of them at once (dns.go).
-func setupDNS() {
-	net.DefaultResolver = newResolver(dnsServerList(os.Getenv("TSB_DNS")))
+// from the phone’s networks (public defaults only for the standard service when Android supplies none).
+func setupDNS(servers []string) {
+	r := newResolver(servers)
+	net.DefaultResolver = r
+	// controlclient copies this field when tsnet starts. Its default is a
+	// separate net.Resolver and does not pick up a new net.DefaultResolver.
+	dnscache.Get().Forward = r
 }
 
 // Apps targeting Android 11+ may not list interfaces through netlink; net.Interfaces can fail there. Fall back to one
@@ -329,7 +354,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "quit: the app was already gone at start")
 		os.Exit(4)
 	}
-	setupDNS()
+	setupDNS(dnsServerList(os.Getenv("TSB_DNS"), normalizeControlURL(os.Getenv("TSB_CONTROL_URL")) != ""))
 	setupInterfaces()
 	os.Setenv("TS_NO_LOGS_NO_SUPPORT", "true") // no log upload to Tailscale
 
@@ -354,7 +379,7 @@ func main() {
 	// control server and the relay, so each is online for a while and then gone. The second one waits here until the
 	// first has exited, and gives up after 20 s rather than fight it.
 	// 1.3 beta8: a bridge left behind by an earlier app process (its parent gone) is ended first, not waited for.
-	stopStale(filepath.Join(srv.Dir, ".bridge.pid"))
+	stopStale(srv.Dir)
 	if f, err := os.OpenFile(filepath.Join(srv.Dir, ".bridge.lock"), os.O_CREATE|os.O_RDWR, 0o600); err == nil {
 		deadline := time.Now().Add(20 * time.Second)
 		for {
@@ -368,7 +393,9 @@ func main() {
 			time.Sleep(500 * time.Millisecond)
 		}
 		lockFile = f // kept referenced: the lock lasts as long as this process
-		_ = os.WriteFile(filepath.Join(srv.Dir, ".bridge.pid"), []byte(strconv.Itoa(os.Getpid())), 0o600)
+	} else {
+		emit(status{State: "Error", Error: "unable to lock node state: " + err.Error()})
+		os.Exit(3)
 	}
 
 	emit(status{State: "Starting"})

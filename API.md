@@ -140,7 +140,7 @@ Authorization: Bearer <令牌>            （本机；其它设备见 7.2 的签
 1. 选 **内置 Tailscale**，几秒后出现 **在浏览器里登录 Tailscale**，用你电脑上 Tailscale 的同一个账号登录。登录状态会记住，以后不用再登。
    - 1.1.7：如果一直没出现登录按钮（状态停在 NeedsLogin），内置节点每 20 秒会重新向 Tailscale 要一次登录链接，页面上也有 **重新获取登录链接**。等了 15 秒以上还没有，页面会写明原因：多半是手机连不上 `controlplane.tailscale.com`，换个网络或打开能访问它的代理就会出现；也可以用 auth key。
    - 也可以在“高级”里填一个 auth key 代替浏览器登录；key 只在第一次注册时用，注册成功后就从手机上删掉。
-   - “高级”里还可以填自建的控制服务器（例如 Headscale）。1.1.8：地址可以只写域名（`hs.example.com`，会补成 `https://hs.example.com`），要和 Tailscale App 里“登录服务器”填的一样；每个服务器的登录状态分开保存（换服务器不会带着旧登录，换回来也不用重登）；填了 auth key / 预授权 key 会清掉这个服务器的旧状态，用 key 重新注册。Headscale 的注册页一般给出一条命令，在服务器上运行就行。连不上时页面会写出服务器名和节点报告的错误（`status` 的 `remote` 里也有 `control` 和 `login_error`）。
+   - “高级”里还可以填自建的控制服务器（例如 Headscale）。1.1.8：地址可以只写域名（`hs.example.com`，会补成 `https://hs.example.com`），要和 Tailscale App 里“登录服务器”填的一样；每个服务器的登录状态分开保存（换服务器不会带着旧登录，换回来也不用重登）；填了 auth key / 预授权 key 会清掉这个服务器的旧状态，用 key 重新注册。Headscale 的注册页一般给出一条命令，在服务器上运行就行。使用自建控制服务器时，内置节点向 Android 提供的 DNS 并发查询。一个网络先报告域名不存在时，节点会短暂等待其他网络返回地址。请确认手机所在网络可解析自建域名。常规解析或连接失败时，Tailscale 客户端还可能通过其 DERP 节点查询该域名。连不上时页面会写出服务器名和节点报告的错误（`status` 的 `remote` 里也有 `control` 和 `login_error`）。
    - 出口节点：内置节点是用户态的，只转发其它设备发给 Agent-VScreen 的请求，不接管手机自己的上网，所以没有出口节点。手机需要靠出口节点上网时（比如经家里的旁路由），让 Tailscale App 一直开着，选“外部 App”模式即可。
 2. 手机会以一台单独的设备 `agent-vscreen` 出现在你的 Tailscale 网络里，页面上会显示它的地址（`100.x.x.x`）和名字。
 3. 连好后，同一处往下点 **复制给 agent 的话**，发给那台设备上的 agent：里面的安装命令、MCP 配置和能力说明都已经是 Tailscale 地址。手动调用的话，在电脑上（已登录同一个 Tailscale 账号）：

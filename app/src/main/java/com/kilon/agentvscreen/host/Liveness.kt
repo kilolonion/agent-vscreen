@@ -63,7 +63,7 @@ object Liveness {
     @Volatile private var netWatching = false
 
     private fun watchNetwork(ctx: Context) {
-        if (netWatching || android.os.Build.VERSION.SDK_INT < 29) return
+        if (netWatching) return
         val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java) ?: return
         netWatching = quiet("Liveness:net") {
             cm.registerDefaultNetworkCallback(object : android.net.ConnectivityManager.NetworkCallback() {

@@ -8,6 +8,8 @@ import android.content.Intent
 import android.os.Build
 import android.os.PowerManager
 import android.os.SystemClock
+import android.util.AtomicFile
+import androidx.core.util.writeText
 import com.kilon.agentvscreen.core.BackgroundOperation
 import com.kilon.agentvscreen.tr
 import org.json.JSONArray
@@ -67,7 +69,7 @@ object Wake {
         fun runsOn(d: DayOfWeek): Boolean = days and (1 shl (d.value - 1)) != 0
         /** The text that means exactly this (a one-off is stored with its date, whatever word booked it). */
         fun canonical(): String {
-            fun hm(m: Int) = "%02d:%02d".format(m / 60, m % 60)
+            fun hm(m: Int) = "%02d:%02d".format(java.util.Locale.ROOT, m / 60, m % 60)
             return if (date != null) "$date " + times.joinToString(",") { hm(it) } else ""
         }
         fun describe(): String {
@@ -128,12 +130,21 @@ object Wake {
         }
     }
 
+    private fun parseTimes(words: List<String>): List<Int> {
+        val times = words.joinToString(",").split(',').filter { it.isNotBlank() }.map { t ->
+            hhmm(t)?.takeIf { it < 1440 } ?: throw BadSpec(tr("时间写成 HH:MM（收到 $t）", "write times as HH:MM (got $t)"))
+        }.distinct().sorted()
+        if (times.isEmpty()) throw BadSpec(tr("没写时间", "no time given"))
+        if (times.size > 24) throw BadSpec(tr("一条最多 24 个时间点", "at most 24 times per entry"))
+        return times
+    }
+
     fun parse(text: String, nowMs: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): Spec {
         val words = text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.toMutableList()
         if (words.isEmpty()) throw BadSpec(tr("没写时间", "no time given"))
         // A one-off: a day word, then times (no repeat, no days of the week).
         if (words.size >= 2 && (words[0].lowercase() in setOf("today", "tomorrow", "once", "今天", "明天", "一次") || DATE_MD.matches(words[0]) || DATE_YMD.matches(words[0]))) {
-            val times = words.drop(1).joinToString(",").split(',').filter { it.isNotBlank() }.map { t -> hhmm(t)?.takeIf { it < 1440 } ?: throw BadSpec(tr("时间写成 HH:MM（收到 $t）", "write times as HH:MM (got $t)")) }.distinct().sorted()
+            val times = parseTimes(words.drop(1))
             val date = oneDay(words[0], times, nowMs, zone)!!
             val lastAt = ZonedDateTime.of(date.year, date.monthValue, date.dayOfMonth, times.last() / 60, times.last() % 60, 0, 0, zone).toInstant().toEpochMilli()
             if (lastAt <= nowMs) throw BadSpec(tr("${words[0]} ${times.joinToString(",") { "%02d:%02d".format(it / 60, it % 60) }} 已经过去了", "${words[0]} ${times.joinToString(",") { "%02d:%02d".format(it / 60, it % 60) }} is already past"))
@@ -144,7 +155,8 @@ object Wake {
         if (words.first().lowercase() in setOf("every", "每")) {
             val n = words.getOrNull(1) ?: throw BadSpec(tr("every 后面写间隔，例如 every 2h", "every needs an interval, e.g. every 2h"))
             val m = Regex("^(\\d+)(m|min|h)$").find(n.lowercase()) ?: throw BadSpec(tr("间隔写成 30m 或 2h（收到 $n）", "write the interval as 30m or 2h (got $n)"))
-            val every = m.groupValues[1].toInt() * if (m.groupValues[2] == "h") 60 else 1
+            val count = m.groupValues[1].toIntOrNull()?.takeIf { it <= 1440 } ?: 0
+            val every = count * if (m.groupValues[2] == "h") 60 else 1
             if (every < MIN_EVERY_MIN || every > 24 * 60) throw BadSpec(tr("间隔要在 ${MIN_EVERY_MIN} 分钟到 24 小时之间", "the interval must be between $MIN_EVERY_MIN minutes and 24 hours"))
             var from = 0; var to = 24 * 60
             var i = 2
@@ -156,19 +168,20 @@ object Wake {
             if (from >= to) throw BadSpec(tr("from 要早于 to", "from must be before to"))
             return Spec(d, emptyList(), every, from, to)
         }
-        val times = words.joinToString(",").split(',').filter { it.isNotBlank() }.map { t -> hhmm(t)?.takeIf { it < 1440 } ?: throw BadSpec(tr("时间写成 HH:MM（收到 $t）", "write times as HH:MM (got $t)")) }.distinct().sorted()
-        if (times.size > 24) throw BadSpec(tr("一条最多 24 个时间点", "at most 24 times per entry"))
-        return Spec(d, times)
+        return Spec(d, parseTimes(words))
     }
 
     /** The first window start strictly after [afterMs], or null when the spec has no time at all. */
     fun next(spec: Spec, afterMs: Long, zone: ZoneId = ZoneId.systemDefault()): Long? {
         val start = Instant.ofEpochMilli(afterMs).atZone(zone).toLocalDate()
-        for (k in 0..8) {
-            val day: LocalDate = start.plusDays(k.toLong())
-            if (spec.date != null && day != spec.date) continue
+        val firstDay = spec.date ?: start
+        if (firstDay.isBefore(start)) return null
+        val daysAhead = if (spec.date == null) 7 else 0
+        val times = spec.minutesOfDay()
+        for (k in 0..daysAhead) {
+            val day = firstDay.plusDays(k.toLong())
             if (!spec.runsOn(day.dayOfWeek)) continue
-            for (m in spec.minutesOfDay()) {
+            for (m in times) {
                 val at = ZonedDateTime.of(day.year, day.monthValue, day.dayOfMonth, m / 60, m % 60, 0, 0, zone).toInstant().toEpochMilli()
                 if (at > afterMs) return at
             }
@@ -212,7 +225,6 @@ object Wake {
     private val lock = Any()
     private val entries = ArrayList<Entry>()
     @Volatile private var loaded = false
-    @Volatile private var app: Context? = null
 
     private fun file(ctx: Context) = File(File(ctx.filesDir, "vscreen").apply { mkdirs() }, "wake.json")
 
@@ -222,10 +234,11 @@ object Wake {
         if (loaded) return
         synchronized(lock) {
             if (loaded) return
-            app = ctx.applicationContext
             quiet("wake-load") {
-                val f = file(ctx); if (!f.isFile) return@quiet
-                val a = JSONObject(f.readText()).optJSONArray("entries") ?: JSONArray()
+                val json = try {
+                    AtomicFile(file(ctx)).openRead().bufferedReader().use { JSONObject(it.readText()) }
+                } catch (_: java.io.FileNotFoundException) { return@quiet }
+                val a = json.optJSONArray("entries") ?: JSONArray()
                 val byKey = LinkedHashMap<Key, Entry>()
                 for (i in 0 until a.length()) {
                     val o = a.optJSONObject(i) ?: continue
@@ -248,7 +261,9 @@ object Wake {
     }
 
     private fun save(ctx: Context) = quiet("wake-save") {
-        file(ctx).writeText(JSONObject().put("entries", JSONArray(synchronized(lock) { entries.map { it.store() } })).toString(1))
+        synchronized(lock) {
+            AtomicFile(file(ctx)).writeText(JSONObject().put("entries", JSONArray(entries.map { it.store() })).toString())
+        }
     }
 
     /**
@@ -280,10 +295,11 @@ object Wake {
         val f = (forMin ?: DEFAULT_FOR_MIN).coerceIn(1, MAX_FOR_MIN)
         val stored = spec.canonical().ifEmpty { text.trim() }
         val given = name?.trim()?.takeIf { it.isNotEmpty() }?.take(32)
-        if (given == null) synchronized(lock) {
-            entries.firstOrNull { it.agentId == agentId && it.session == session && it.spec == spec && it.forMin == f }
-        }?.let { return Added(it, true) }
+        dropOver(ctx)
         val e = synchronized(lock) {
+            if (given == null) entries.firstOrNull {
+                it.agentId == agentId && it.session == session && it.spec == spec && it.forMin == f
+            }?.let { return Added(it, true) }
             val n = given ?: run {
                 var i = entries.count { it.agentId == agentId } + 1
                 while (entries.any { it.agentId == agentId && it.name == "w$i" }) i++
@@ -325,11 +341,10 @@ object Wake {
         return e
     }
 
-    /** [agent] null: anyone's (the user, in the app); else only that agent's bookings. */
-    fun remove(ctx: Context, name: String, agent: String? = null): Int {
+    /** A null name removes all of this agent's bookings. UI callers pass the exact name. */
+    fun remove(ctx: Context, name: String?, agent: String): Int {
         load(ctx)
-        fun own(e: Entry) = agent == null || e.agentId == agent
-        val n = synchronized(lock) { val before = entries.size; entries.removeAll { own(it) && (name == "all" || it.name == name) }; before - entries.size }
+        val n = synchronized(lock) { val before = entries.size; entries.removeAll { it.agentId == agent && (name == null || it.name == name) }; before - entries.size }
         if (n > 0) { save(ctx); arm(ctx) }
         return n
     }
@@ -343,7 +358,7 @@ object Wake {
         Intent(ctx, WakeAlarmReceiver::class.java).setAction(ACTION_ALARM), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
     /** Work out every entry's next window and set one alarm for the earliest. Called on change, boot, app start and after each alarm. */
-    fun arm(ctx: Context) {
+    @Synchronized fun arm(ctx: Context) {
         load(ctx)
         val am = ctx.getSystemService(AlarmManager::class.java) ?: return
         val now = System.currentTimeMillis()
@@ -385,15 +400,22 @@ object Wake {
         arm(ctx)
     }
 
-    @Volatile private var lockHeld: PowerManager.WakeLock? = null
+    private var lockHeld: PowerManager.WakeLock? = null
+    private var heldUntilElapsed = 0L
+
+    @Synchronized private fun holdWindow(ctx: Context, holdMs: Long) {
+        val until = SystemClock.elapsedRealtime() + holdMs
+        if (until <= heldUntilElapsed && lockHeld?.isHeld == true) return
+        val wake = lockHeld ?: ctx.getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AgentVScreen:wake")
+            .apply { setReferenceCounted(false); lockHeld = this }
+        wake.acquire(holdMs)
+        heldUntilElapsed = until
+    }
 
     private fun openWindow(ctx: Context, due: List<Entry>, untilMs: Long) {
         val holdMs = (untilMs - System.currentTimeMillis()).coerceIn(60_000L, LEAD_MS + MAX_FOR_MIN * 60_000L)
-        quiet("wake-lock") {
-            val pm = ctx.getSystemService(PowerManager::class.java)
-            lockHeld?.let { if (it.isHeld) it.release() }
-            lockHeld = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AgentVScreen:wake").apply { setReferenceCounted(false); acquire(holdMs) }
-        }
+        quiet("wake-lock") { holdWindow(ctx, holdMs) }
         Thread({
             val t0 = SystemClock.elapsedRealtime()
             // Shizuku comes up after us after a boot, and binding takes a moment: give it a minute.
@@ -413,11 +435,15 @@ object Wake {
                 .put("problems", JSONArray(items.map { it.json() })).put("done", JSONArray(did)).put("exact_alarm", exactAllowed(ctx))
             synchronized(lock) { due.forEach { it.last = check } }
             save(ctx)
-            val whenText = due.joinToString(tr("、", ", ")) { "${it.name} " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.ROOT).format(java.util.Date(it.nextAt)) }
-            val text = if (ok) tr("预约窗口 $whenText 已就绪：服务在运行，Shizuku 可用。", "Window $whenText is ready: the service is running and Shizuku is available.") +
+            val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.ROOT)
+            fun windowNames(group: List<Entry>) = group.joinToString(tr("、", ", ")) { "${it.name} ${clock.format(java.util.Date(it.opened))}" }
+            fun eventText(whenText: String) = if (ok) tr("预约窗口 $whenText 已就绪：服务在运行，Shizuku 可用。", "Window $whenText is ready: the service is running and Shizuku is available.") +
                     items.joinToString("") { tr("（提醒：${it.text}）", " (note: ${it.text})") }
                 else tr("预约窗口 $whenText 前的检查没通过：", "The check before window $whenText failed: ") + items.filter { it.blocking }.joinToString(tr("；", "; ")) { it.text }
-            due.map { it.session }.distinct().forEach { s -> quiet("wake-event") { com.kilon.agentvscreen.api.EventHub.post(ctx, s, "wake", due.first { it.session == s }.name, text) } }
+            due.groupBy { it.session }.forEach { (session, group) ->
+                quiet("wake-event") { com.kilon.agentvscreen.api.EventHub.post(ctx, session, "wake", group.first().name, eventText(windowNames(group))) }
+            }
+            val whenText = windowNames(due)
             if (!ok) quiet("wake-alert") {
                 // 1.3 beta4: say plainly what happens to the agent's task and what the user can do, with the one tap
                 // that does it. "Off" is the user's own choice, so it is told as a consequence, not as a fault.
@@ -452,7 +478,7 @@ object Wake {
     }
 
     /** A booked window is open now (the service should stay awake for it). */
-    fun windowOpen(ctx: Context, now: Long): Boolean = list(ctx).any { it.opened > 0 && now <= it.opened + it.forMin * 60_000L }
+    fun windowOpen(ctx: Context, now: Long): Boolean = list(ctx).any { it.on && it.opened > 0 && now in (it.opened - LEAD_MS - 30_000L)..(it.opened + it.forMin * 60_000L) }
 }
 
 /** The schedule's alarm (not exported: only our own PendingIntent sends it). */

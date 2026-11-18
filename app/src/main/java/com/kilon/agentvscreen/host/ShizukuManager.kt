@@ -51,25 +51,23 @@ object ShizukuManager {
         val combined: String get() = if (stderr.isEmpty()) stdout else "$stdout\n$stderr".trimEnd()
     }
 
-    @Volatile private var initialized = false
-    @Volatile private var appContext: Context? = null
-    private var backend: ShizukuBackend? = null
+    @Volatile private var backend: ShizukuBackend? = null
 
     private val _snapshot = MutableStateFlow(Snapshot(State.NOT_INSTALLED))
     val snapshot: StateFlow<Snapshot> = _snapshot.asStateFlow()
 
-    fun init(app: Application) {
-        if (initialized) return
-        initialized = true
-        appContext = app.applicationContext
-        backend = ShizukuBackend(app.applicationContext).also { b ->
-            runCatching { b.registerListeners { recompute("listener") } }
-                .onFailure { AppLogger.warning(TAG, "registerListeners failed: ${it.message}") }
-        }
+    @Synchronized fun init(app: Application) {
+        if (backend != null) return
+        val b = ShizukuBackend(app.applicationContext)
+        backend = b
+        b.registerListeners { recompute("listener") }
         recompute("init")
     }
 
-    fun refresh() = recompute("manual-refresh")
+    fun refresh() {
+        backend?.registerListeners { recompute("listener") }
+        recompute("manual-refresh")
+    }
 
     fun isReady(): Boolean = _snapshot.value.state == State.READY
 
@@ -86,10 +84,27 @@ object ShizukuManager {
     /** First installed Shizuku-protocol manager package, or null. */
     fun installedManagerPackage(): String? = backend?.installedManagerPackage()
 
+    fun diagnostics(ctx: Context): String {
+        val b = backend ?: return "Shizuku: not initialized"
+        val manager = b.installedManagerPackage()
+        val version = manager?.let { runCatching { ctx.packageManager.getPackageInfo(it, 0).versionName }.getOrNull() }
+        val managed = ctx.getSystemService(android.os.UserManager::class.java)?.isManagedProfile
+        return "Shizuku: state=${b.snapshot().state} binder=${b.isBinderAlive()} permission=${b.isPermissionGranted()} " +
+            "manager=${manager ?: "none"} version=${version ?: "-"} appUid=${android.os.Process.myUid()} managedProfile=$managed"
+    }
+
+    fun missingBinderHint() = com.kilon.agentvscreen.tr(
+        "当前应用未连接到 Shizuku。请在同一用户或工作资料中打开 Shizuku，检查运行状态。",
+        "This app has no Shizuku connection. Open Shizuku in the same Android user or work profile and check its status.",
+    )
+
     /** What happened, for the button to say so (it is never silent). The state is re-read either way. */
     fun requestPermission(): ShizukuBackend.Ask {
         val b = backend ?: return ShizukuBackend.Ask.NO_BINDER
-        return b.requestPermission().also { recompute("request-permission") }
+        return b.requestPermission().also {
+            AppLogger.info(TAG, "permission request: $it")
+            recompute("request-permission")
+        }
     }
 
     /** Launch the installed manager app (Shizuku or AXManager). */

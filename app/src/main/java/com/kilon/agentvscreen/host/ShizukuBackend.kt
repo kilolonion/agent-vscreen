@@ -44,7 +44,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 class ShizukuBackend(private val appContext: Context) {
 
     @Volatile private var onStateChanged: (() -> Unit)? = null
-    private var listenersRegistered = false
 
     private val binderReceivedListener = Shizuku.OnBinderReceivedListener {
         AppLogger.info(TAG, "binder received")
@@ -112,19 +111,17 @@ class ShizukuBackend(private val appContext: Context) {
         }
     }
 
-    fun registerListeners(onStateChanged: () -> Unit) {
-        this.onStateChanged = onStateChanged
-        if (listenersRegistered) return
-        listenersRegistered = true
-        runCatching {
-            Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
-            Shizuku.addBinderDeadListener(binderDeadListener)
-            Shizuku.addRequestPermissionResultListener(permissionResultListener)
-        }.onFailure { AppLogger.warning(TAG, "init listeners failed: ${it.message}") }
-    }
+    private val pendingListeners = mutableMapOf<String, () -> Unit>(
+        "binder received" to { Shizuku.addBinderReceivedListenerSticky(binderReceivedListener) },
+        "binder dead" to { Shizuku.addBinderDeadListener(binderDeadListener) },
+        "permission result" to { Shizuku.addRequestPermissionResultListener(permissionResultListener) },
+    )
 
-    fun refresh() {
-        onStateChanged?.invoke()
+    @Synchronized fun registerListeners(onStateChanged: () -> Unit) {
+        this.onStateChanged = onStateChanged
+        pendingListeners.entries.removeAll { (name, register) ->
+            runCatching(register).onFailure { AppLogger.warning(TAG, "register $name listener failed: ${it.message}") }.isSuccess
+        }
     }
 
     /**

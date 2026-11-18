@@ -26,6 +26,9 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
 
 /** 1.4.1-beta1: per-agent (agentId, name) isolation for schedules & keeps, late-downscale notes, runtime I/O fixes, and Operit METADATA escaping. */
 @RunWith(RobolectricTestRunner::class)
@@ -60,6 +63,101 @@ class V141Beta1Test {
         assertEquals(50, com.kilon.agentvscreen.BuildConfig.VERSION_CODE)
         assertEquals("1.4.1-beta1", com.kilon.agentvscreen.BuildConfig.VERSION_NAME)
         assertEquals("1.4.1-beta1", AgentNews.nameOf(50))
+    }
+
+    @Test fun oneOffSurvivesReloadAndUiDeletionUsesTheExactName() {
+        val date = java.time.LocalDate.now().plusMonths(2)
+        val oneOff = Wake.add(app, "all", "$date 10:30", 10, "default", "main").entry
+        Wake.add(app, "daily", "11:00", 10, "default", "main")
+        Wake.resetForTest()
+        assertEquals(oneOff.spec, Wake.list(app).single { it.name == "all" }.spec)
+        assertEquals(1, Wake.remove(app, "all", oneOff.agentId))
+        assertEquals(listOf("daily"), Wake.list(app).map { it.name })
+        assertEquals(1, Wake.remove(app, null, oneOff.agentId))
+    }
+
+    @Test fun pendingAuthKeyStaysWithItsControlServer() {
+        ApiConfig.configureTailnet("first.example.test", "pending")
+        ApiConfig.configureTailnet("https://first.example.test/", null)
+        assertEquals("pending", ApiConfig.tailnetAuthKey)
+        ApiConfig.configureTailnet("second.example.test", "")
+        assertNull(ApiConfig.tailnetAuthKey)
+        ApiConfig.configureTailnet("first.example.test", "replacement")
+        assertEquals("replacement", ApiConfig.tailnetAuthKey)
+        ApiConfig.configureTailnet(null, null)
+        assertNull(ApiConfig.tailnetAuthKey)
+    }
+
+    @Test fun closingOnePreviewPreservesTheOtherViewer() {
+        val display = VScreenDisplay.create(app, "preview-test", 48, 64, 160).getOrThrow()
+        val overlay = Any()
+        val fullscreen = Any()
+        try {
+            display.setPreview(overlay, 50L, 32)
+            display.setPreview(fullscreen, 33L, 64)
+            assertEquals(33L, display.previewIntervalMs)
+            display.clearPreview(fullscreen)
+            assertEquals(50L, display.previewIntervalMs)
+            display.clearPreview(overlay)
+            assertEquals(Long.MAX_VALUE, display.previewIntervalMs)
+        } finally { display.release() }
+    }
+
+    @Test fun taskReadListAndCancelRespectTheOwningSession() {
+        val scopes = setOf("look", "operate", "system")
+        val owner = Call("work", Tokens.MAIN, "main", scopes, "local")
+        val id = Call.with(owner) { Tasks.start(handler, owner.session, "help", listOf("help")).data!!.getString("task") }
+        fun query(c: Call, vararg args: String) = Call.with(c) {
+            handler.handle(NativeOffloadRequest(listOf("vscreen", "task") + args, c.session))
+        }
+        assertTrue(query(owner).output.contains(id))
+        assertEquals(id, query(owner, id).data!!.getString("task"))
+        for (other in listOf(Call("other", Tokens.MAIN, "main", scopes, "local"), Call("work", "other", "other", scopes, "local"))) {
+            assertFalse(query(other).output.contains(id))
+            assertEquals("NOT_FOUND", query(other, id).code)
+            assertEquals("NOT_FOUND", query(other, "cancel", id).code)
+        }
+    }
+
+    @Test fun restoreKeepsTheCompleteSnapshotUntilEveryWatchIsRegistered() {
+        val file = File(app.filesDir, "vscreen/keeps.json")
+        file.parentFile!!.mkdirs()
+        val rows = JSONArray()
+        for (name in listOf("first", "second")) {
+            rows.put(JSONObject().put("name", name).put("sid", "default").put("cond", "text:$name")
+                .put("every", 1_000L).put("ends_at", System.currentTimeMillis() + 600_000L))
+        }
+        file.writeText(JSONObject().put("keeps", rows).toString())
+        val snapshots = mutableListOf<Int>()
+        val host = object : VScreenRules.Host { override fun check(l: VScreenRules.Live, d: VScreenDisplay): String? = null }
+        val editing = CountDownLatch(1)
+        val changes = FutureTask {
+            editing.countDown()
+            assertTrue(VScreenRules.stop(Tokens.MAIN, "first"))
+            for (name in listOf("second", "third")) {
+                val spec = VScreenRules.Spec(name, "default", "text:new-$name", null, 1_000L, 600_000L, false, true)
+                VScreenRules.start(spec, host)
+            }
+        }
+        VScreenRules.hostFactory = {
+            snapshots += JSONObject(file.readText()).getJSONArray("keeps").length()
+            if (snapshots.size == 2) {
+                Thread(changes, "edit-during-restore").apply { isDaemon = true; start() }
+                check(editing.await(5, TimeUnit.SECONDS))
+            }
+            host
+        }
+        assertEquals(2, VScreenRules.restore())
+        changes.get(10, TimeUnit.SECONDS)
+        assertEquals(listOf(2, 2), snapshots)
+        assertEquals(0, VScreenRules.restore())
+        val expected = mapOf("second" to "text:new-second", "third" to "text:new-third")
+        assertEquals(expected, VScreenRules.running().associate { it.spec.name to it.spec.cond })
+        val saved = JSONObject(file.readText()).getJSONArray("keeps")
+        assertEquals(expected, (0 until saved.length()).associate { i ->
+            val row = saved.getJSONObject(i)
+            row.getString("name") to row.getString("cond")
+        })
     }
 
     @Test fun lateDownscaleHintAndNoteConsumeOnce() {

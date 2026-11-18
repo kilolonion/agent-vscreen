@@ -36,6 +36,7 @@ class VScreenApp : Application() {
 /** Boot / app update: bring the service back when the user left it on. (Shizuku itself may still need a manual start.) */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_BOOT_COMPLETED && intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         if (Prefs.serviceOn(context)) HostService.start(context)
         quiet("wake-arm-boot") { Wake.arm(context.applicationContext) }
     }

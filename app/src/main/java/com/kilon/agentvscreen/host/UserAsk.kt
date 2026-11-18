@@ -216,7 +216,7 @@ object UserAsk {
     private fun post(ctx: Context, a: Ask) {
         quiet("ask-notify") {
             val nm = ctx.getSystemService(NotificationManager::class.java) ?: return@quiet
-            if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(CHANNEL) == null)
+            if (nm.getNotificationChannel(CHANNEL) == null)
                 nm.createNotificationChannel(NotificationChannel(CHANNEL, tr("需要你确认或回答的问题", "Questions that need your answer"), NotificationManager.IMPORTANCE_HIGH))
             val b = NotificationCompat.Builder(ctx, CHANNEL)
                 .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)

@@ -50,7 +50,6 @@ object ExitInfo {
             runCatching { AppLogger.error("Crash", "uncaught in ${t.name}: ${e.stackTraceToString().take(4000)}") }
             prev?.uncaughtException(t, e)
         }
-        if (android.os.Build.VERSION.SDK_INT < 30) return
         runCatching {
             val am = ctx.getSystemService(android.app.ActivityManager::class.java) ?: return
             val r = am.getHistoricalProcessExitReasons(ctx.packageName, 0, 1).firstOrNull() ?: return

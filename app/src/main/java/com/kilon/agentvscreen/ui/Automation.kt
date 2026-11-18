@@ -74,7 +74,7 @@ import java.time.LocalDate
  * the lessons the user saved are listed by app, each opening to its steps.
  */
 
-private fun hm(m: Int) = "%02d:%02d".format(m / 60, m % 60)
+private fun hm(m: Int) = "%02d:%02d".format(java.util.Locale.ROOT, m / 60, m % 60)
 
 private val DAY_KEYS = listOf("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 private fun dayLabels() = listOf(tr("一", "M"), tr("二", "T"), tr("三", "W"), tr("四", "T"), tr("五", "F"), tr("六", "S"), tr("日", "S"))

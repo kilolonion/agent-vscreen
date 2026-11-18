@@ -16,7 +16,7 @@ internal fun VScreenOffloadHandler.scheduleCmd(sid: String?, args: OffloadArgs):
     if (p.firstOrNull()?.lowercase() == "off") {
         val name = p.getOrNull(1) ?: throw ActionError("INVALID_ARGS", tr("schedule off <名字|all>", "schedule off <name|all>"))
         // 1.4.0-beta7 / 1.4.1-beta1: only this agent's bookings, keyed by (agentId, name).
-        val n = Wake.remove(context, name, me)
+        val n = Wake.remove(context, name.takeUnless { it == "all" }, me)
         if (n == 0) throw ActionError("NOT_FOUND", tr("没有叫「$name」的预约：schedule 看列表", "no schedule called \"$name\": schedule lists them"))
         return ok(args, JSONObject().put("removed", n).put("schedules", JSONArray(Wake.list(context).filter { it.agentId == me }.map { it.json() })))
     }

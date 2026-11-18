@@ -337,7 +337,7 @@ private fun FixCard(problems: List<Readiness.Item>, setupLeft: Boolean) {
         first != null -> when (first.code) {
             "no_accessibility" -> tr("无障碍服务被关掉了", "Accessibility was turned off")
             "accessibility_cannot_see_display" -> tr("无障碍看不到副屏", "Accessibility cannot see the screen")
-            "no_privilege" -> tr("Shizuku 没有在运行", "Shizuku is not running")
+            "no_privilege" -> tr("Shizuku 尚未就绪", "Shizuku is not ready")
             "service_off" -> tr("服务关着", "The service is off")
             "frozen_in_background" -> tr("系统冻结了后台", "The system froze the app")
             else -> tr("有一项需要处理", "Something needs you")

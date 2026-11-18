@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -55,6 +56,8 @@ import com.kilon.agentvscreen.core.VScreenRules
 import com.kilon.agentvscreen.host.Audit
 import com.kilon.agentvscreen.tr
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -225,12 +228,13 @@ internal fun EmptyState(icon: androidx.compose.ui.graphics.vector.ImageVector, t
 @Composable
 private fun Plans(beat: Int) {
     val app = LocalApp.current
+    val tokens by com.kilon.agentvscreen.api.Tokens.list.collectAsState()
     val watches = remember(beat, app.tick) { VScreenRules.list() }
     SchedulesCards(app.tick, showEmpty = watches.isEmpty())
     if (watches.isNotEmpty()) Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(0.dp)) {
         watches.forEach { l ->
             val running = !l.stopped
-            val who = if (com.kilon.agentvscreen.api.Tokens.list.value.size > 1) " · " + com.kilon.agentvscreen.api.Agents.name(l.spec.agentId) else ""
+            val who = if (tokens.size > 1) " · " + com.kilon.agentvscreen.api.Agents.name(l.spec.agentId) else ""
             BasicComponent(
                 title = tr("盯守 · ", "Watch · ") + l.spec.name + who,
                 summary = l.spec.describe() + " · " + (if (running) l.status + tr(" · 还剩 ${l.json().opt("ends_in_min")} 分钟", " · ${l.json().opt("ends_in_min")} min left") else (l.endReason ?: tr("已结束", "ended"))),
@@ -321,17 +325,31 @@ fun DiagPage() {
     val app = LocalApp.current
     val ctx = LocalContext.current
     var open by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    var collecting by remember { mutableStateOf(false) }
+    fun collectDiagnostics(deliver: (String) -> Unit) {
+        if (collecting) return
+        collecting = true
+        val items = app.items
+        scope.launch {
+            try {
+                deliver(withContext(Dispatchers.IO) { host.diagnostics(items) })
+            } finally {
+                collecting = false
+            }
+        }
+    }
     MiuixPage(tr("诊断", "Diagnostics")) {
         Group {
             ArrowPreference(title = tr("复制诊断信息", "Copy diagnostics"), summary = tr("版本、配置状态和最近日志；不含令牌和你输入的字", "Version, setup state and recent log; no token, nothing you typed"),
-                onClick = { host.copy(tr("诊断信息", "Diagnostics"), host.diagnostics(app.items)) })
-            ArrowPreference(title = tr("分享诊断信息", "Share diagnostics"), onClick = {
+                onClick = { collectDiagnostics { host.copy(tr("诊断信息", "Diagnostics"), it) } })
+            ArrowPreference(title = tr("分享诊断信息", "Share diagnostics"), onClick = { collectDiagnostics { report ->
                 runCatching {
                     ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
                         .putExtra(android.content.Intent.EXTRA_SUBJECT, tr("Agent-VScreen 诊断", "Agent-VScreen diagnostics"))
-                        .putExtra(android.content.Intent.EXTRA_TEXT, host.diagnostics(app.items)), tr("发送诊断", "Send diagnostics")))
+                        .putExtra(android.content.Intent.EXTRA_TEXT, report), tr("发送诊断", "Send diagnostics")))
                 }
-            })
+            } })
             SwitchPreference(checked = open, onCheckedChange = { open = it }, title = tr("显示最近日志", "Show the recent log"))
         }
         if (open) Group(padded = true) {

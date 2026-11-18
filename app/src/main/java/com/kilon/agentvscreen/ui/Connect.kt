@@ -149,7 +149,7 @@ fun NewAgentPage() {
     LaunchedEffect(Unit) { while (true) { mode = ApiConfig.tailnetMode; delay(1_000) } }
     val remoteBase = rememberRemoteBase(mode)
     val remoteReady = where == 1 && remoteBase != null
-    val base = if (remoteReady) remoteBase!! else ApiConfig.baseUrl
+    val base = if (remoteReady) remoteBase else ApiConfig.baseUrl
     val canCopy = where == 0 || remoteReady
 
     var step by rememberSaveable { mutableIntStateOf(0) }
@@ -563,8 +563,8 @@ private fun BuiltinState(ts: Tailnet.Status, host: AppHost, open: (String) -> Un
                 if (phase == TsPhase.EXPIRED) tr("Tailscale 登录过期了，重新登录一次", "The Tailscale login ran out: log in once more") else tr("登录 Tailscale（只要一次）", "Log in to Tailscale (once)"),
                 if (ts.ownServer) tr("打开 ${ts.serverName} 的注册页。Headscale 通常会给出一条注册命令，在服务器上运行它就连上了；也可以在高级选项里填预授权 key。", "Open the registration page of ${ts.serverName}. Headscale usually shows a register command: run it on the server and the node joins. Or put a pre-auth key in Advanced.")
                 else tr("用你电脑上 Tailscale 的同一个账号登录，登录完回到这里会自动连上。手机上不方便登录的话，复制链接到电脑上打开。", "Log in with the same account as Tailscale on your computer; back here it connects by itself. If logging in on the phone is awkward, copy the link and open it on the computer."))
-            CardAction(if (ts.ownServer) tr("打开注册页", "Open the registration page") else tr("在浏览器里登录", "Log in in the browser")) { open(ts.authUrl!!) }
-            CardAction(tr("复制登录链接", "Copy login link"), primary = false) { host.copy(tr("登录链接", "Login link"), ts.authUrl!!) }
+            CardAction(if (ts.ownServer) tr("打开注册页", "Open the registration page") else tr("在浏览器里登录", "Log in in the browser")) { open(ts.authUrl) }
+            CardAction(tr("复制登录链接", "Copy login link"), primary = false) { host.copy(tr("登录链接", "Login link"), ts.authUrl) }
         } else {
             val slow = ts.waitingS >= 15 || ts.loginError != null
             InfoCard(if (slow) Palette.stopped else Palette.standby,

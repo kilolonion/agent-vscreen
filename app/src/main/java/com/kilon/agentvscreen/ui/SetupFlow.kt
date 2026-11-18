@@ -95,7 +95,7 @@ fun SetupFlowPage() {
                     val (label, act) = when {
                         step.key == "shizuku" -> when (sh.state) {
                             ShizukuManager.State.NOT_INSTALLED -> tr("安装 Shizuku", "Install Shizuku") to { ShizukuManager.openInstallPage(ctx) }
-                            ShizukuManager.State.NOT_RUNNING -> tr("打开 Shizuku 启动它", "Open Shizuku to start it") to { ShizukuManager.openShizukuApp(ctx) }
+                            ShizukuManager.State.NOT_RUNNING -> tr("打开 Shizuku", "Open Shizuku") to { ShizukuManager.openShizukuApp(ctx) }
                             else -> tr("授权 Shizuku", "Grant Shizuku") to { host.grantShizuku(); refresh(); Unit }
                         }
                         step.key == "vendor_bg" -> tr("去系统后台管理", "Open background management") to {

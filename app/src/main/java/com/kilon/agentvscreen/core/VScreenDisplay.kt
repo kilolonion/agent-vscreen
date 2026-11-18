@@ -321,17 +321,29 @@ class VScreenDisplay private constructor(
     private val _previewVersion = MutableStateFlow(0L)
     val previewVersion: StateFlow<Long> = _previewVersion.asStateFlow()
 
-    /** A viewer shows the screen [longSidePx] long, and wants a picture every [intervalMs]. */
-    fun setPreview(intervalMs: Long, longSidePx: Int) {
+    private val viewers = mutableMapOf<Any, Pair<Long, Int>>()
+
+    @Synchronized fun setPreview(viewer: Any, intervalMs: Long, longSidePx: Int) {
+        if (released) return
+        viewers[viewer] = intervalMs to longSidePx
+        updatePreview()
+    }
+
+    @Synchronized fun clearPreview(viewer: Any) {
+        viewers.remove(viewer)
+        updatePreview()
+    }
+
+    private fun updatePreview() {
+        val longSidePx = viewers.values.maxOfOrNull { it.second } ?: 0
+        val intervalMs = viewers.values.minOfOrNull { it.first } ?: Long.MAX_VALUE
         val resized = longSidePx != previewLongSide
         val first = previewIntervalMs == Long.MAX_VALUE
         previewLongSide = longSidePx
         previewIntervalMs = intervalMs.coerceAtLeast(16L)
         // A still screen sends no frames: paint the viewer's picture from the frame we already have.
-        if (resized || first) pumpHandler?.post { latest?.let { paintPreview(it, it.width, it.height, 0) } }
+        if (longSidePx > 0 && (resized || first)) pumpHandler?.post { latest?.let { paintPreview(it, it.width, it.height, 0) } }
     }
-
-    fun clearPreview() { previewIntervalMs = Long.MAX_VALUE }
 
     /** The viewer's picture (scaled to the size it is shown at); null before the first one. Do not recycle it. */
     fun previewFrame(): Bitmap? = previewBitmap
@@ -491,7 +503,8 @@ class VScreenDisplay private constructor(
         }.getOrDefault(false)
         if (!queued) { runCatching { pending?.close() }; pending = null; runCatching { reader.close() } }
         com.kilon.agentvscreen.host.quiet("VScreenDisplay:418") { thread.quitSafely() }
-        previewIntervalMs = Long.MAX_VALUE; previewBitmap = null
+        synchronized(this) { viewers.clear(); previewIntervalMs = Long.MAX_VALUE }
+        previewBitmap = null
         latestRaw = null
     }
 

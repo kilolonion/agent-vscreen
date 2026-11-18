@@ -99,7 +99,7 @@ class MainActivity : ComponentActivity(), AppHost {
         }
         when (ShizukuManager.requestPermission()) {
             ShizukuBackend.Ask.ALREADY -> say(tr("Shizuku 已授权", "Shizuku is authorized"))
-            ShizukuBackend.Ask.NO_BINDER -> { ShizukuManager.openShizukuApp(this); say(tr("Shizuku 没在运行：先在 Shizuku 里启动它", "Shizuku is not running: start it in Shizuku first")) }
+            ShizukuBackend.Ask.NO_BINDER -> { ShizukuManager.openShizukuApp(this); say(ShizukuManager.missingBinderHint()) }
             ShizukuBackend.Ask.DENIED_ON_RECORD, ShizukuBackend.Ask.FAILED -> inManager()
             // A dialog should show; if no answer comes within 8 s, the request went nowhere.
             ShizukuBackend.Ask.ASKED -> window.decorView.postDelayed({

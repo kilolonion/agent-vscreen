@@ -46,7 +46,6 @@ class VScreenAccessibilityService : AccessibilityService() {
     override fun onInterrupt() {}
 
     fun rootNodesForDisplay(displayId: Int): List<AccessibilityNodeInfo> {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return emptyList()
         val out = ArrayList<AccessibilityNodeInfo>()
         try {
             val windows = windowsOnAllDisplays.get(displayId) ?: return emptyList()

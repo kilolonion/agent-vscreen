@@ -27,6 +27,7 @@ internal fun diagText(context: android.content.Context): String = buildString {
     append("device: ${dev.vendor} ${dev.brand} ${dev.model}, sdk ${dev.sdk}, vendor layer ${Vendor.current.javaClass.simpleName}, os ${dev.os}\n")
     append("connection: ${st.connection.name}" + (st.connectionError?.let { " ($it)" } ?: "") + ", screen: " + (st.displayId?.let { "display $it" } ?: "none") + ", tasks running: ${Tasks.running()}\n")
     append("queue: " + (VScreenOffloadHandler.queueHolder ?: "idle") + "\n")
+    appendLine(com.kilon.agentvscreen.host.ShizukuManager.diagnostics(context))
     // 1.4.0-beta2: a real reading on this phone, not the state of a flag.
     append("\n" + tr("文字识别自检（本机真实识别一张已知图片）", "text recognition self-test (a real reading of a known picture on this phone)") + ":\n")
     append(runCatching { com.kilon.agentvscreen.core.VScreenOcr.selfTest(context) }.getOrElse { "self-test crashed: ${it.javaClass.simpleName}: ${it.message}" }.prependIndent("  ") + "\n")

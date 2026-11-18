@@ -47,9 +47,17 @@ object ApiConfig {
         set(v) { prefs.edit().putString("tailnet_host", v.trim().lowercase().replace(Regex("[^a-z0-9-]"), "-").trim('-').take(40)).apply() }
 
     /** Optional control server (Headscale); null = Tailscale's own. Stored normalized (see [normalizeControlUrl]). */
-    var tailnetControlUrl: String?
+    val tailnetControlUrl: String?
         get() = normalizeControlUrl(prefs.getString("tailnet_control", null))
-        set(v) { prefs.edit().putString("tailnet_control", normalizeControlUrl(v)).apply() }
+
+
+    fun configureTailnet(control: String?, authKey: String?) {
+        val next = normalizeControlUrl(control)
+        val edit = prefs.edit().putString("tailnet_control", next)
+        if (!authKey.isNullOrBlank()) edit.putString("tailnet_authkey", authKey.trim())
+        else if (next != tailnetControlUrl) edit.remove("tailnet_authkey")
+        edit.apply()
+    }
 
     /**
      * 1.1.8: what a person types for a control server ("hs.example.com", "https://hs.example.com/") becomes the URL the

@@ -39,7 +39,7 @@ object Agents {
         if (id == Tokens.MAIN) return
         Tokens.revoke(id)
         AgentLedger.forget(id)
-        com.kilon.agentvscreen.host.quiet("forget-schedules") { com.kilon.agentvscreen.host.Wake.remove(ctx, "all", id) }
+        com.kilon.agentvscreen.host.quiet("forget-schedules") { com.kilon.agentvscreen.host.Wake.remove(ctx, null, id) }
         com.kilon.agentvscreen.host.quiet("forget-keeps") {
             com.kilon.agentvscreen.core.VScreenRules.running().filter { it.spec.agentId == id }
                 .forEach { com.kilon.agentvscreen.core.VScreenRules.stop(id, it.spec.name, tr("这个 agent 已被忘掉", "this agent was forgotten")) }

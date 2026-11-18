@@ -106,7 +106,6 @@ internal object VScreenHandoff {
     const val ALERT_CHANNEL = "vscreen_alert"
 
     fun ensureAlertChannel(context: Context) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         if (nm.getNotificationChannel(ALERT_CHANNEL) == null)
             nm.createNotificationChannel(NotificationChannel(ALERT_CHANNEL, tr("后台操作提醒", "Background operation alerts"), NotificationManager.IMPORTANCE_HIGH))
@@ -121,16 +120,14 @@ internal object VScreenHandoff {
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
             return@runCatching tr("没有授予通知权限（POST_NOTIFICATIONS）", "Notification permission not granted (POST_NOTIFICATIONS)")
         val ops = context.getSystemService(android.app.AppOpsManager::class.java)
-        if (ops != null && Build.VERSION.SDK_INT >= 29) {
+        if (ops != null) {
             val mode = runCatching { ops.unsafeCheckOpNoThrow("android:post_notification", context.applicationInfo.uid, context.packageName) }.getOrNull()
             if (mode != null && mode != android.app.AppOpsManager.MODE_ALLOWED && mode != android.app.AppOpsManager.MODE_DEFAULT)
                 return@runCatching tr("系统的通知开关（appops POST_NOTIFICATION）是拒绝/忽略", "The system's notification switch (appops POST_NOTIFICATION) is deny/ignore")
         }
-        if (Build.VERSION.SDK_INT >= 26) {
-            ensureAlertChannel(context)
-            val ch = context.getSystemService(NotificationManager::class.java)?.getNotificationChannel(ALERT_CHANNEL)
-            if (ch != null && ch.importance == NotificationManager.IMPORTANCE_NONE) return@runCatching tr("“后台操作提醒”这类通知被关了", "The \"Background operation alerts\" channel is turned off")
-        }
+        ensureAlertChannel(context)
+        val ch = context.getSystemService(NotificationManager::class.java)?.getNotificationChannel(ALERT_CHANNEL)
+        if (ch != null && ch.importance == NotificationManager.IMPORTANCE_NONE) return@runCatching tr("“后台操作提醒”这类通知被关了", "The \"Background operation alerts\" channel is turned off")
         null
     }.getOrNull()
 

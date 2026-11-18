@@ -62,7 +62,7 @@ class HostService : Service() {
             val i = Intent(ctx, HostService::class.java)
             stopWhenUp = false
             if (!isAlive) pendingAt = android.os.SystemClock.elapsedRealtime()
-            runCatching { if (Build.VERSION.SDK_INT >= 26) ctx.startForegroundService(i) else ctx.startService(i) }
+            runCatching { ctx.startForegroundService(i) }
                 .onFailure {
                     // Android 12+ refuses to start a foreground service from the background (e.g. the process was
                     // restarted by the system). Opening the app starts it again (MainActivity.onResume).
@@ -164,7 +164,7 @@ class HostService : Service() {
     private fun stoppedNote(stopped: Boolean) {
         val nm = getSystemService(NotificationManager::class.java) ?: return
         if (!stopped) { nm.cancel(STOP_NOTE_ID); return }
-        if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(STOP_CHANNEL) == null)
+        if (nm.getNotificationChannel(STOP_CHANNEL) == null)
             nm.createNotificationChannel(NotificationChannel(STOP_CHANNEL, tr("AI 已停止", "AI stopped"), NotificationManager.IMPORTANCE_DEFAULT))
         val allow = PendingIntent.getService(this, 3, Intent(this, HostService::class.java).setAction(ACTION_ALLOW), PendingIntent.FLAG_IMMUTABLE)
         val open = PendingIntent.getActivity(this, 4, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE, com.kilon.agentvscreen.ui.MainDisplay.options())
@@ -234,7 +234,7 @@ class HostService : Service() {
 
     private fun notification(): Notification {
         val nm = getSystemService(NotificationManager::class.java)
-        if (Build.VERSION.SDK_INT >= 26 && nm?.getNotificationChannel(CHANNEL) == null)
+        if (nm?.getNotificationChannel(CHANNEL) == null)
             nm?.createNotificationChannel(NotificationChannel(CHANNEL, tr("Agent-VScreen 服务", "Agent-VScreen service"), NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE, com.kilon.agentvscreen.ui.MainDisplay.options())
         val stop = PendingIntent.getService(this, 1, Intent(this, HostService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)

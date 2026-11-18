@@ -52,7 +52,9 @@ internal object Tasks {
         }
         pool.execute {
             val r = try { run() } catch (e: Throwable) { h.err("INTERNAL_ERROR", "${e.javaClass.simpleName}: ${e.message}") }
-            t.result = r; t.endedAt = System.currentTimeMillis()
+            // prune() treats a published result as finished and reads its timestamp.
+            t.endedAt = System.currentTimeMillis()
+            t.result = r
             synchronized(t.lock) { t.lock.notifyAll() }
         }
         val data = JSONObject().put("task", t.id).put("state", "running")
@@ -63,9 +65,8 @@ internal object Tasks {
 
     fun command(sid: String, args: OffloadArgs): NativeOffloadResult {
         val p = args.positional
-        val owner = Call.current()?.tokenId ?: "main"
         if (p.isEmpty()) {
-            val list = synchronized(tasks) { prune(); tasks.values.filter { it.owner == owner }.toList() }
+            val list = synchronized(tasks) { prune(); tasks.values.filter { mine(it, sid) }.toList() }
             if (list.isEmpty()) return NativeOffloadResult(0, tr("没有任务。launch / act / collect 加 --async 会成为任务", "No tasks. launch / act / collect with --async become tasks") + "\n", "OK", JSONObject().put("tasks", JSONArray()))
             val now = System.currentTimeMillis()
             return NativeOffloadResult(0, list.joinToString("\n") { "${it.id}  ${it.state}  ${(((if (it.result == null) now else it.endedAt) - it.startedAt) / 1000)}s  [${it.session}] ${it.line}" } + "\n", "OK",
@@ -73,7 +74,7 @@ internal object Tasks {
         }
         val cancel = p[0] == "cancel"
         val id = (if (cancel) p.getOrNull(1) else p[0]) ?: throw ActionError("INVALID_ARGS", tr("task cancel <任务号>", "task cancel <task id>"))
-        val t = synchronized(tasks) { tasks[id] }?.takeIf { it.owner == owner } ?: throw ActionError("NOT_FOUND", tr("没有任务 $id（结果只保留 30 分钟）：task 看列表", "No task $id (results are kept for 30 minutes): task lists them"))
+        val t = synchronized(tasks) { tasks[id] }?.takeIf { mine(it, sid) } ?: throw ActionError("NOT_FOUND", tr("没有任务 $id（结果只保留 30 分钟）：task 看列表", "No task $id (results are kept for 30 minutes): task lists them"))
         if (cancel) {
             if (t.result == null) t.call.cancelled = true
             return NativeOffloadResult(0, (if (t.result == null) tr("已要求任务 $id 停下：它会在当前这一步之后停。task $id 看它停在哪", "Task $id was asked to stop: it stops after its current step. task $id shows where it stopped") else tr("任务 $id 已经结束了（不一定成功），没有可取消的：task $id 看它的结果", "Task $id has already ended (not necessarily successfully), nothing to cancel: task $id shows its result")) + "\n", "OK", JSONObject().put("task", id).put("state", t.state))

@@ -8,10 +8,11 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
+import android.util.AtomicFile
+import androidx.core.util.writeText
 import androidx.core.app.NotificationCompat
 import com.kilon.agentvscreen.host.AppLogger
 import org.json.JSONArray
@@ -115,24 +116,35 @@ internal object VScreenRules {
 
     fun start(spec: Spec, host: Host): Live {
         val ctx = appContext ?: throw IllegalStateException(tr("后台操作未初始化", "Background operation is not initialized"))
-        val l = Live(spec)
-        synchronized(live) {
-            live[spec.key]?.let { stopInner(it, tr("被同名的新盯守替换", "replaced by a new watch with the same name")) }
-            if (live.values.count { it.spec.agentId == spec.agentId } >= MAX) {
-                throw IllegalStateException(tr("最多同时盯 $MAX 个条件，先 keep off 一个", "At most $MAX conditions can be watched at once; turn one off with keep off first"))
-            }
-            if (live.size >= MAX_TOTAL) {
-                throw IllegalStateException(tr("手机上所有 agent 合计最多同时盯 $MAX_TOTAL 个条件：先 keep off 一个，或请用户在 App 里停掉不用的", "At most $MAX_TOTAL watches on the phone across all agents: turn one off with keep off, or ask the user to stop unused ones in the app"))
-            }
-            live[spec.key] = l
+        val l = synchronized(live) {
+            live[spec.key]?.let { stopInner(it, tr("被同名的新盯守替换", "replaced by a new watch with the same name"), save = false) }
+            register(spec).also { persist() }
         }
-        persist()
-        BackgroundOperation.hold(true)
-        l.thread = Thread { loop(ctx, l, host) }.apply { isDaemon = true; name = "vscreen-rule-${spec.name.take(12)}" }
-        l.thread?.start()
-        RuleService.refresh(ctx)
-        AppLogger.info(TAG, "keep ${spec.agentId}/${spec.name} started: ${spec.describe()}")
+        activate(ctx, l, host)
         return l
+    }
+
+    /** Caller holds live while checking limits and publishing the entry. */
+    private fun register(spec: Spec): Live {
+        if (live.values.count { it.spec.agentId == spec.agentId } >= MAX) {
+            throw IllegalStateException(tr("最多同时盯 $MAX 个条件，先 keep off 一个", "At most $MAX conditions can be watched at once; turn one off with keep off first"))
+        }
+        if (live.size >= MAX_TOTAL) {
+            throw IllegalStateException(tr("手机上所有 agent 合计最多同时盯 $MAX_TOTAL 个条件：先 keep off 一个，或请用户在 App 里停掉不用的", "At most $MAX_TOTAL watches on the phone across all agents: turn one off with keep off, or ask the user to stop unused ones in the app"))
+        }
+        return Live(spec).also { live[spec.key] = it }
+    }
+
+    private fun activate(ctx: Context, l: Live, host: Host) {
+        synchronized(live) {
+            if (live[l.spec.key] !== l) return
+            BackgroundOperation.hold(true)
+            val worker = Thread({ loop(ctx, l, host) }, "vscreen-rule-${l.spec.name.take(12)}").apply { isDaemon = true }
+            l.thread = worker
+            worker.start()
+        }
+        RuleService.refresh(ctx)
+        AppLogger.info(TAG, "keep ${l.spec.agentId}/${l.spec.name} started: ${l.spec.describe()}")
     }
 
     // ── 1.2: kept watches survive the app being restarted ───────────────────────────────────────────────────────
@@ -140,43 +152,56 @@ internal object VScreenRules {
     private fun file(): java.io.File? = appContext?.let { java.io.File(java.io.File(it.filesDir, "vscreen").apply { mkdirs() }, "keeps.json") }
 
     private fun persist() = com.kilon.agentvscreen.host.quiet("keeps-persist") {
-        val arr = JSONArray(synchronized(live) { live.values.map { l -> JSONObject().put("name", l.spec.name).put("agent", l.spec.agentId).put("sid", l.spec.sid).put("cond", l.spec.cond)
-            .put("app", l.spec.app ?: JSONObject.NULL).put("every", l.spec.everyMs).put("ends_at", l.endsAt).put("wake", l.spec.wake).put("notify", l.spec.notify) } })
-        val seqObj = JSONObject().also { o -> synchronized(live) { agentSeq.forEach { (k, v) -> o.put(k, v) } } }
-        file()?.writeText(JSONObject().put("seq", seq).put("agent_seq", seqObj).put("keeps", arr).toString())
+        synchronized(live) {
+            val arr = JSONArray(live.values.map { l -> JSONObject().put("name", l.spec.name).put("agent", l.spec.agentId).put("sid", l.spec.sid).put("cond", l.spec.cond)
+                .put("app", l.spec.app ?: JSONObject.NULL).put("every", l.spec.everyMs).put("ends_at", l.endsAt).put("wake", l.spec.wake).put("notify", l.spec.notify) })
+            val seqObj = JSONObject().also { o -> agentSeq.forEach { (k, v) -> o.put(k, v) } }
+            file()?.let { AtomicFile(it).writeText(JSONObject().put("seq", seq).put("agent_seq", seqObj).put("keeps", arr).toString()) }
+        }
     }
 
     /** Start again the watches that were running when the app went down and still have time left. Their count. */
     fun restore(): Int {
         val factory = hostFactory ?: return 0
-        val o = com.kilon.agentvscreen.host.quiet("keeps-read") { file()?.takeIf { it.isFile }?.readText()?.let { JSONObject(it) } } ?: return 0
+        val ctx = appContext ?: return 0
+        val restored = mutableListOf<Pair<Live, Host>>()
         synchronized(live) {
+            val o = com.kilon.agentvscreen.host.quiet("keeps-read") {
+                val f = file() ?: return@quiet null
+                try {
+                    AtomicFile(f).openRead().bufferedReader().use { JSONObject(it.readText()) }
+                } catch (_: java.io.FileNotFoundException) { null }
+            } ?: return 0
             seq = maxOf(seq, o.optInt("seq"))
             o.optJSONObject("agent_seq")?.let { s ->
                 val keys = s.keys()
                 while (keys.hasNext()) { val k = keys.next(); agentSeq[k] = maxOf(agentSeq[k] ?: 0, s.optInt(k)) }
             }
-        }
-        val arr = o.optJSONArray("keeps") ?: return 0
-        var n = 0
-        val now = System.currentTimeMillis()
-        for (i in 0 until arr.length()) {
-            val k = arr.optJSONObject(i) ?: continue
-            val left = k.optLong("ends_at") - now
-            val name = k.optString("name")
-            // 1.4.1-beta1: keeps from before the explicit agentId belong to the agent their session names (since
-            // 1.4.0-beta7 "<token id>.<session>"); a session without a known prefix is the main token's.
-            val agentId = k.optString("agent").takeIf { it.isNotEmpty() && it != "null" }
-                ?: com.kilon.agentvscreen.api.Agents.ofSession(k.optString("sid"))
-            val key = Key(agentId, name)
-            if (left < 10_000L || synchronized(live) { live.containsKey(key) }) continue
-            com.kilon.agentvscreen.host.quiet("keeps-restore") {
-                start(Spec(name, k.optString("sid"), k.optString("cond"), k.optString("app").takeIf { it.isNotEmpty() && it != "null" }, k.optLong("every", 1_000L), left, k.optBoolean("wake"), k.optBoolean("notify"), agentId), factory(k.optString("cond")))
-                n++
+
+            val arr = o.optJSONArray("keeps") ?: return 0
+            val now = System.currentTimeMillis()
+            for (i in 0 until arr.length()) {
+                val k = arr.optJSONObject(i) ?: continue
+                val left = k.optLong("ends_at") - now
+                val name = k.optString("name")
+                // 1.4.1-beta1: keeps from before the explicit agentId belong to the agent their session names (since
+                // 1.4.0-beta7 "<token id>.<session>"); a session without a known prefix is the main token's.
+                val agentId = k.optString("agent").takeIf { it.isNotEmpty() && it != "null" }
+                    ?: com.kilon.agentvscreen.api.Agents.ofSession(k.optString("sid"))
+                val key = Key(agentId, name)
+                if (left < 10_000L || live.containsKey(key)) continue
+                com.kilon.agentvscreen.host.quiet("keeps-restore") {
+                    val spec = Spec(name, k.optString("sid"), k.optString("cond"), k.optString("app").takeIf { it.isNotEmpty() && it != "null" }, k.optLong("every", 1_000L), left, k.optBoolean("wake"), k.optBoolean("notify"), agentId)
+                    val host = factory(spec.cond)
+                    restored.add(register(spec) to host)
+                }
             }
+            // The old complete file stays intact until every surviving watch is registered.
+            persist()
         }
-        if (n > 0) AppLogger.info(TAG, "restored $n kept watches after a restart")
-        return n
+        restored.forEach { (watch, host) -> activate(ctx, watch, host) }
+        if (restored.isNotEmpty()) AppLogger.info(TAG, "restored ${restored.size} kept watches after a restart")
+        return restored.size
     }
 
     fun stop(agentId: String, name: String, reason: String = tr("已按要求停止", "stopped as asked")): Boolean {
@@ -198,7 +223,7 @@ internal object VScreenRules {
         return all.size
     }
 
-    private fun stopInner(l: Live, reason: String) {
+    private fun stopInner(l: Live, reason: String, save: Boolean = true) {
         val removed = synchronized(live) {
             if (l.stopped) return
             l.stopped = true; l.endReason = reason; l.endedAt = System.currentTimeMillis()
@@ -208,7 +233,10 @@ internal object VScreenRules {
             r
         }
         l.thread?.interrupt()
-        if (removed) { BackgroundOperation.hold(false); persist() }
+        if (removed) {
+            if (l.thread != null) BackgroundOperation.hold(false)
+            if (save) persist()
+        }
         appContext?.let { RuleService.refresh(it) }
         AppLogger.info(TAG, "keep ${l.spec.agentId}/${l.spec.name} ended: $reason")
     }
@@ -311,7 +339,7 @@ internal object VScreenRules {
         }
 
         private fun stopSelfSafely() {
-            com.kilon.agentvscreen.host.quiet("VScreenRules:273") { if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE) else @Suppress("DEPRECATION") stopForeground(true) }
+            com.kilon.agentvscreen.host.quiet("VScreenRules:273") { stopForeground(STOP_FOREGROUND_REMOVE) }
             stopSelf()
         }
 
@@ -331,11 +359,9 @@ internal object VScreenRules {
             private val pending get() = pendingAt > 0 && android.os.SystemClock.elapsedRealtime() - pendingAt < 10_000L
 
             private fun notification(ctx: Context, list: List<Live>): android.app.Notification {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    val nm = ctx.getSystemService(NotificationManager::class.java)
-                    if (nm?.getNotificationChannel(CHANNEL) == null)
-                        nm?.createNotificationChannel(NotificationChannel(CHANNEL, tr("副屏盯守", "Screen watches"), NotificationManager.IMPORTANCE_LOW))
-                }
+                val nm = ctx.getSystemService(NotificationManager::class.java)
+                if (nm?.getNotificationChannel(CHANNEL) == null)
+                    nm?.createNotificationChannel(NotificationChannel(CHANNEL, tr("副屏盯守", "Screen watches"), NotificationManager.IMPORTANCE_LOW))
                 val stop = PendingIntent.getService(ctx, 1, Intent(ctx, RuleService::class.java).setAction(ACTION_STOP),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
                 val body = list.joinToString("\n") { tr("「${it.spec.name}」${it.spec.describe()}", "\"${it.spec.name}\" ${it.spec.describe()}") }
@@ -358,7 +384,7 @@ internal object VScreenRules {
                 if (list.isEmpty()) { if (!pending) runCatching { ctx.stopService(i) }; return }
                 lastStartError = runCatching {
                     pendingAt = android.os.SystemClock.elapsedRealtime()
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i) else ctx.startService(i)
+                    ctx.startForegroundService(i)
                     null
                 }.getOrElse { pendingAt = 0L; "${it.javaClass.simpleName}: ${it.message}" }
                 if (lastStartError != null) {

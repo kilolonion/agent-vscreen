@@ -272,14 +272,13 @@ object Tailnet {
      * with this key": the node's old state for that server is dropped first, or the backend would keep the old login
      * and ignore the key. Another server's login is left alone.
      */
-    fun configure(ctx: Context, control: String?, authKey: String?) {
+    @Synchronized fun configure(ctx: Context, control: String?, authKey: String?) {
         val old = proc
         stop("new settings")
         // Let the old node finish writing its state before it may be deleted.
         com.kilon.agentvscreen.host.quiet("Tailnet:134") { old?.waitFor(3, java.util.concurrent.TimeUnit.SECONDS) }
-        ApiConfig.tailnetControlUrl = control
+        ApiConfig.configureTailnet(control, authKey)
         if (!authKey.isNullOrBlank()) {
-            ApiConfig.tailnetAuthKey = authKey.trim()
             com.kilon.agentvscreen.host.quiet("Tailnet:138") { stateDir(ctx).deleteRecursively() }
         }
         sync(ctx)
@@ -332,11 +331,13 @@ object Tailnet {
         ApiConfig.tailnetAuthKey?.let { env["TSB_AUTHKEY"] = it }
         val p = synchronized(this) {
             if (g != gen || !wanted) return
-            pb.start().also { proc = it }
+            pb.start().also {
+                proc = it
+                stdin = OutputStreamWriter(it.outputStream)
+                if (waitingSince == 0L) waitingSince = android.os.SystemClock.elapsedRealtime()
+                _status.value = _status.value.copy(running = true, error = null)
+            }
         }
-        stdin = OutputStreamWriter(p.outputStream)
-        if (waitingSince == 0L) waitingSince = android.os.SystemClock.elapsedRealtime()
-        _status.value = _status.value.copy(running = true, error = null)
         AppLogger.info(TAG, "bridge started (pid-less child), host=${ApiConfig.tailnetHostname}")
         Thread({
             p.errorStream.bufferedReader().forEachLine { l -> if (l.isNotBlank()) AppLogger.info(TAG, l.take(300)) }
@@ -366,21 +367,27 @@ object Tailnet {
                 problem = o.optString("problem").takeIf { it.isNotBlank() }, downS = o.optInt("down_s"),
                 connecting = o.optBoolean("connecting"),
             )
-            if (st.linkUp) waitingSince = 0L else if (waitingSince == 0L) waitingSince = android.os.SystemClock.elapsedRealtime()
-            if (st.loggedIn && st.linkUp != _status.value.linkUp && _status.value.loggedIn)
-                AppLogger.info(TAG, (if (st.linkUp) "link up (relay ${st.relay})" else "link down: ${st.problem ?: "relay ${st.relay}"}") +
-                    AppFront.awayMs().let { if (it > 0) ", app in background ${it / 1000}s" else ", app in front" })
-            if (st.loggedIn) remember(ctx, st)
-            if (st.state != _status.value.state) AppLogger.info(TAG, "state ${st.state}${st.ip?.let { " $it" } ?: ""}${st.error?.let { " ($it)" } ?: ""}")
-            if (st.loggedIn && ApiConfig.tailnetAuthKey != null) ApiConfig.tailnetAuthKey = null
-            _status.value = st
+            synchronized(this) {
+                if (g != gen) return@forEachLine
+                if (st.linkUp) waitingSince = 0L else if (waitingSince == 0L) waitingSince = android.os.SystemClock.elapsedRealtime()
+                if (st.loggedIn && st.linkUp != _status.value.linkUp && _status.value.loggedIn)
+                    AppLogger.info(TAG, (if (st.linkUp) "link up (relay ${st.relay})" else "link down: ${st.problem ?: "relay ${st.relay}"}") +
+                        AppFront.awayMs().let { if (it > 0) ", app in background ${it / 1000}s" else ", app in front" })
+                if (st.loggedIn) remember(ctx, st)
+                if (st.state != _status.value.state) AppLogger.info(TAG, "state ${st.state}${st.ip?.let { " $it" } ?: ""}${st.error?.let { " ($it)" } ?: ""}")
+                if (st.loggedIn && ApiConfig.tailnetAuthKey != null) ApiConfig.tailnetAuthKey = null
+                _status.value = st
+            }
         }
         val code = runCatching { p.waitFor() }.getOrDefault(-1)
         AppLogger.info(TAG, "bridge exited with code $code" + (if (g != gen) " (replaced)" else if (!wanted) " (stopped)" else ""))
-        if (g != gen) return
-        synchronized(this) { if (proc === p) { proc = null; stdin = null } }
-        _status.value = _status.value.copy(running = false, state = if (wanted) "Restarting" else "Stopped",
-            error = if (code != 0 && wanted) tr("内置 Tailscale 退出（$code）", "Built-in Tailscale exited ($code)") else null)
+        synchronized(this) {
+            if (g != gen || proc !== p) return
+            proc = null
+            stdin = null
+            _status.value = _status.value.copy(running = false, state = if (wanted) "Restarting" else "Stopped",
+                error = if (code != 0 && wanted) tr("内置 Tailscale 退出（$code）", "Built-in Tailscale exited ($code)") else null)
+        }
     }
 
     /** The phone's resolvers: Android has no /etc/resolv.conf for the Go resolver. */

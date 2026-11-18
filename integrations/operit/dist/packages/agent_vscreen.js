@@ -304,6 +304,10 @@ const agentVScreen = (function () {
                 : t("把这句原样转告用户。", "Pass this on to the user as it is.");
             return { ok: false, code: code, text: code + (why ? "：" + why : "") + "\n" + fix };
         }
+        if (res.statusCode !== 200 || !data || typeof data.ok !== "boolean") {
+            const why = data && (data.text || data.error || data.message);
+            return { ok: false, text: "HTTP " + res.statusCode + " · " + (why || t("响应缺少有效的命令结果", "Missing a valid command result")) };
+        }
         let text = String(data.text || data.error || "");
         const images = Array.isArray(data.images) ? data.images.slice(0, MAX_IMAGES) : [];
         const links = [];

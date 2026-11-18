@@ -73,9 +73,9 @@ object VScreenTyping {
 
     /** What the field holds: never its hint (some apps report the hint as text without saying so). */
     private fun fieldText(n: AccessibilityNodeInfo): String {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && n.isShowingHintText) return ""
+        if (n.isShowingHintText) return ""
         val t = n.text?.toString().orEmpty()
-        val hint = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) n.hintText?.toString() else null
+        val hint = n.hintText?.toString()
         return if (!hint.isNullOrEmpty() && t == hint) "" else t
     }
 
@@ -185,8 +185,7 @@ object VScreenTyping {
             how = runCatching {
                 val prev = previous
                 if (prev != null) { cm.setPrimaryClip(prev); "restored" }
-                else if (Build.VERSION.SDK_INT >= 28) { cm.clearPrimaryClip(); "cleared" }
-                else "unchanged"
+                else { cm.clearPrimaryClip(); "cleared" }
             }.getOrDefault("unchanged")
             restore.countDown()
         }

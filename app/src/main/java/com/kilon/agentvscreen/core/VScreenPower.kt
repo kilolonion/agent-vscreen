@@ -61,9 +61,9 @@ internal object VScreenPower {
         val usm = ctx.getSystemService(UsageStatsManager::class.java)
         return Check(
             batteryExempt = runCatching { (ctx.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager).isIgnoringBatteryOptimizations(ctx.packageName) }.getOrDefault(true),
-            backgroundRestricted = if (Build.VERSION.SDK_INT >= 28) runCatching { am?.isBackgroundRestricted == true }.getOrDefault(false) else false,
+            backgroundRestricted = runCatching { am?.isBackgroundRestricted == true }.getOrDefault(false),
             dataSaver = runCatching { cm?.restrictBackgroundStatus ?: 0 }.getOrDefault(0),
-            standbyBucket = if (Build.VERSION.SDK_INT >= 28) runCatching { usm?.appStandbyBucket ?: 0 }.getOrDefault(0) else 0,
+            standbyBucket = runCatching { usm?.appStandbyBucket ?: 0 }.getOrDefault(0),
             foregroundServiceAlive = HostService.isAlive,
         )
     }

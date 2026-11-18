@@ -47,6 +47,22 @@ class V130Test {
         assertEquals(at(2026, 11, 15, 8, 0), Wake.next(ev, at(2026, 11, 14, 20, 0), zone))
     }
 
+    @Test fun oneOffCanBeBookedMonthsAhead() {
+        val now = at(2026, 11, 18, 9, 0)
+        val spec = Wake.parse("2027-02-01 08:00,12:00", now, zone)
+        val first = at(2027, 2, 1, 8, 0)
+        val last = at(2027, 2, 1, 12, 0)
+        assertEquals(first, Wake.next(spec, now, zone))
+        assertEquals(last, Wake.next(spec, first, zone))
+        assertNull(Wake.next(spec, last, zone))
+    }
+
+    @Test fun rejectsEmptyTimeListsAndOversizedIntervals() {
+        for (bad in listOf(",", "today ,", "every 4294967297h", "every 999999999999999999m")) {
+            try { Wake.parse(bad); fail("accepted: $bad") } catch (_: Wake.BadSpec) {}
+        }
+    }
+
     private fun inputs(privilege: String = "READY", connection: String = "READY", serviceOn: Boolean = true, alive: Boolean = true,
                        fg: Boolean = true, stopped: Boolean = false, frozen: Boolean = false, remote: String = "off", up: Boolean = true) =
         Readiness.Inputs(serviceOn, alive, fg, privilege, connection, false, stopped, frozen, remote, up)

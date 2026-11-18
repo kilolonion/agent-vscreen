@@ -44,6 +44,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.material.icons.automirrored.filled.Backspace
 import androidx.compose.runtime.DisposableEffect
@@ -113,14 +114,14 @@ class FullscreenActivity : PageActivity() {
     // The floating window shows the same picture: it steps aside while this page is in front.
 
     /** 1.3 示教: opened from an agent's "show me how" (UserAsk TEACH): take over (1.4.0-beta4: to get ready, not recording yet). */
-    private val teachAsk = mutableStateOf(-1)
+    private val teachAsk = mutableIntStateOf(-1)
     /** 1.4.0-beta4: opened to answer this question (its card comes first). */
-    private val askOpen = mutableStateOf(-1)
+    private val askOpen = mutableIntStateOf(-1)
     /** 1.4.0-beta11: which pane this page shows (the live screen, or saving a lesson). Switching never starts a page. */
     private val pane = mutableStateOf(Pane.LIVE)
     private fun paneOf(i: android.content.Intent?) = runCatching { Pane.valueOf(i?.getStringExtra(Surface.EXTRA) ?: "") }.getOrNull()
     override fun onNewIntent(intent: android.content.Intent) {
-        super.onNewIntent(intent); teachAsk.value = intent.getIntExtra("teach_ask", -1); askOpen.value = intent.getIntExtra("ask", askOpen.value)
+        super.onNewIntent(intent); teachAsk.intValue = intent.getIntExtra("teach_ask", -1); askOpen.intValue = intent.getIntExtra("ask", askOpen.intValue)
         paneOf(intent)?.let { pane.value = it; Surface.report(it) }
         sayNow.value = intent.getBooleanExtra(Surface.SAY, false); if (sayNow.value) BriefPlace.ball = false
     }
@@ -138,8 +139,8 @@ class FullscreenActivity : PageActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (MainDisplay.moved(this)) return
-        teachAsk.value = intent.getIntExtra("teach_ask", -1)
-        askOpen.value = intent.getIntExtra("ask", -1)
+        teachAsk.intValue = intent.getIntExtra("teach_ask", -1)
+        askOpen.intValue = intent.getIntExtra("ask", -1)
         paneOf(intent)?.let { pane.value = it }
         sayNow.value = intent.getBooleanExtra(Surface.SAY, false); if (sayNow.value) BriefPlace.ball = false
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -256,7 +257,7 @@ class FullscreenActivity : PageActivity() {
         val askId by teachAsk
         LaunchedEffect(askId) {
             val a = UserAsk.byId(askId) ?: return@LaunchedEffect
-            teachAsk.value = -1
+            teachAsk.intValue = -1
             Teach.beginFor(a)
         }
 
@@ -551,8 +552,8 @@ private object BriefPlace {
     var open by mutableStateOf(true)
     var bottom by mutableStateOf(false)
     var ball by mutableStateOf(false)
-    var dx by mutableStateOf(0f)
-    var dy by mutableStateOf(0f)
+    var dx by mutableFloatStateOf(0f)
+    var dy by mutableFloatStateOf(0f)
 }
 
 internal fun vscreenUserInput(sessionId: String, op: (Int) -> Unit) {

@@ -50,7 +50,10 @@ android {
     androidResources { noCompress += "onnx" }
     // The built-in Tailscale node is an executable shipped as lib*.so: it must be unpacked into nativeLibraryDir.
     packaging { jniLibs { useLegacyPackaging = true } }
-    lint { checkReleaseBuilds = false; abortOnError = false }
+    lint {
+        abortOnError = true
+        error += "Aligned16KB"
+    }
     // 1.1.7: tests assert the Chinese texts; the system language picks them (English tests set I18n.choice).
     testOptions { unitTests.isReturnDefaultValues = true; unitTests.isIncludeAndroidResources = true
         unitTests.all { it.jvmArgs("-Duser.language=zh", "-Duser.country=CN") } }
@@ -80,7 +83,7 @@ dependencies {
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
-    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.20.0")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.21.1")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20231013")
     testImplementation("org.robolectric:robolectric:4.17")

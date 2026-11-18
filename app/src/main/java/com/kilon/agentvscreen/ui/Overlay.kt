@@ -206,8 +206,15 @@ object Overlay {
 
     fun detach() { job?.cancel(); job = null; hide() }
 
+    private val uiHandler by lazy { Handler(Looper.getMainLooper()) }
+
     /** Re-check after the overlay permission was granted. */
-    fun refresh() { val s = BackgroundOperation.state.value; if (s.displayId != null && s.showPreview && !s.windowHidden && pagesInFront.value == 0) show() }
+    fun refresh() {
+        uiHandler.post {
+            val s = BackgroundOperation.state.value
+            if (job?.isActive == true && s.displayId != null && s.showPreview && !s.windowHidden && pagesInFront.value == 0) show()
+        }
+    }
 
     /** 1.1.6: the × button. One tap, never a lock: see [BackgroundOperation.closeWindow]. */
     fun closeTapped() {
@@ -270,7 +277,8 @@ object Overlay {
         val wm: WindowManager = if (svc != null) svc.getSystemService(WindowManager::class.java)
             else runCatching {
                 val dm = c.getSystemService(android.hardware.display.DisplayManager::class.java)
-                c.createWindowContext(dm.getDisplay(android.view.Display.DEFAULT_DISPLAY), WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
+                c.createDisplayContext(dm.getDisplay(android.view.Display.DEFAULT_DISPLAY))
+                    .createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
                     .getSystemService(WindowManager::class.java)
             }.getOrElse { c.getSystemService(WindowManager::class.java) }
         val o = OverlayOwner().also { owner = it }

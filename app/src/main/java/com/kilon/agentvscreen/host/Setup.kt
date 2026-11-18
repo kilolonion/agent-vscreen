@@ -26,7 +26,7 @@ object Setup {
         return listOf(
             Item("shizuku", tr("Shizuku 授权", "Shizuku permission"), sh.state == ShizukuManager.State.READY, when (sh.state) {
                 ShizukuManager.State.NOT_INSTALLED -> tr("没装 Shizuku（或 Sui）", "Shizuku (or Sui) is not installed")
-                ShizukuManager.State.NOT_RUNNING -> tr("Shizuku 没在运行：打开 Shizuku 启动它", "Shizuku is not running: open Shizuku to start it")
+                ShizukuManager.State.NOT_RUNNING -> ShizukuManager.missingBinderHint()
                 ShizukuManager.State.NEED_PERMISSION -> tr("点“授权 Shizuku”并允许", "Tap \"Grant Shizuku\" and allow")
                 ShizukuManager.State.READY -> if (sh.isSui) "Sui" else "Shizuku v${sh.version}"
             }),

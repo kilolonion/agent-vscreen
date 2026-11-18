@@ -341,12 +341,11 @@ object BackgroundOperation {
         val s = _state.value
         val error: String? = when (s.privilege) {
             Privilege.NOT_INSTALLED -> tr("未安装 Shizuku：请用户安装并启动 Shizuku（或 Sui），再打开 Agent-VScreen 授权", "Shizuku is not installed: ask the user to install and start Shizuku (or Sui), then grant it in Agent-VScreen")
-            Privilege.NOT_RUNNING -> tr("Shizuku 服务未启动，请用无线调试启动后重试", "The Shizuku service is not running: start it (e.g. with wireless debugging) and retry")
+            Privilege.NOT_RUNNING -> com.kilon.agentvscreen.host.ShizukuManager.missingBinderHint()
             Privilege.NOT_AUTHORIZED -> tr("Agent-VScreen 尚未获得 Shizuku 授权", "Agent-VScreen has no Shizuku permission yet")
             Privilege.READY -> {
                 val r = VScreenShell.run(arrayOf("id"), 5_000L)
                 if (r.exitCode != 0) tr("特权通道无响应：${r.combined.take(160)}", "The privileged channel does not answer: ${r.combined.take(160)}")
-                else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) tr("需要 Android 10 及以上（副屏输入定位）", "Needs Android 10 or later (input targeting on the screen)")
                 else null
             }
         }
@@ -980,14 +979,8 @@ object BackgroundOperation {
 
     private fun mainScreenMetrics(context: Context): Triple<Int, Int, Int> {
         val wm = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val b = wm.maximumWindowMetrics.bounds
-            Triple(b.width(), b.height(), context.resources.configuration.densityDpi)
-        } else {
-            val m = DisplayMetrics()
-            @Suppress("DEPRECATION") wm.defaultDisplay.getRealMetrics(m)
-            Triple(m.widthPixels, m.heightPixels, m.densityDpi)
-        }
+        val b = wm.maximumWindowMetrics.bounds
+        return Triple(b.width(), b.height(), context.resources.configuration.densityDpi)
     }
 
     fun Privilege.label(): String = when (this) {

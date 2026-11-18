@@ -30,7 +30,7 @@ object MainDisplay {
 
     /** Call first in onCreate: true when the page came up on another display and was moved (the caller returns). */
     fun moved(a: Activity): Boolean {
-        val id = runCatching { if (android.os.Build.VERSION.SDK_INT >= 30) a.display?.displayId else @Suppress("DEPRECATION") a.windowManager.defaultDisplay.displayId }.getOrNull()
+        val id = runCatching { a.display?.displayId }.getOrNull()
             ?: return false
         if (id == Display.DEFAULT_DISPLAY) return false
         runCatching { a.startActivity(Intent(a.intent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), options()) }

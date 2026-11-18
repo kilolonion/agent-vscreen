@@ -257,7 +257,7 @@ private fun MainTabs(pager: androidx.compose.foundation.pager.PagerState) {
         // for the first time mid-slide (only the neighbours were kept), and every tab's top bar blurring its page live
         // while three pages move under the bar's own blur. All four tabs are now composed once the app has drawn its
         // first page, and a tab's bar blurs only when content is scrolled under it and the pager is still (MiuixPage).
-        var keep by remember { mutableStateOf(1) }
+        var keep by remember { mutableIntStateOf(1) }
         val moving = remember(pager) { { pager.isScrollInProgress } }
         LaunchedEffect(Unit) { delay(700); keep = 3 }
         Box(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
