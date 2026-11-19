@@ -275,9 +275,9 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `APP_WITH_USER` | `ask_user` | 你在用的应用现在在用户手上（主屏）。等 handback 事件，或 launch 别的应用。 |
 | `OCR_DOWN` | `none` | 文字识别不可用（两种引擎都失败）：元素只来自无障碍，画面上的字可能没列出来，以截图为准。 |
 | `APP_READ_ONLY` | `ask_user` | 用户把这个应用设成只读：能看、滚动、返回，不能点击/输入/滑动。 |
-| `USER_TAKEOVER` | `ask_user` | 用户正在自己操作副屏。停下告诉用户，等用户交还。 |
+| `USER_TAKEOVER` | `ask_user` | 用户正在自己操作副屏。停下告诉用户，等用户交还（vscreen events --wait 收 handback）；副屏和页面会留着，不要 release 或重新 launch。 |
 | `USER_STOPPED` | `ask_user` | 用户按了“停止 AI”。所有操作都被拒绝，只有用户能解除；把返回里怎么解除的那句转告用户。 |
-| `REREAD_REQUIRED` | `look` | 用户刚接管过副屏，页面可能变了。这次的返回就是现在的画面，看清再继续。 |
+| `REREAD_REQUIRED` | `look` | 用户刚接管过副屏，页面可能变了，这次没有执行。只拒这一次：act（不带步骤）看一眼现在的画面，再重发。 |
 | `HOST_RESTARTED` | `look` | Agent-VScreen 进程重启过，上一轮的任务被打断。这次的返回就是现在的画面，不要假设之前的步骤都做完了。 |
 | `MAIN_SCREEN_CHANGED` | `ask_user` | 副屏这边的应用或任务跑到了主屏，打扰了用户正在用的主屏。停下告诉用户；handoff in 把它拿回副屏。用户自己在主屏切换应用不会报这条。 |
 | `SCOPE_DENIED` | `ask_user` | 这个令牌没有做这件事的权限（用户在 App 里给令牌定的范围）。 |
@@ -611,9 +611,9 @@ scope: `look`
 | `APP_WITH_USER` | `ask_user` | The app you were using is with the user (main screen). Wait for the handback event, or launch another app. |
 | `OCR_DOWN` | `none` | Text recognition is unavailable (both engines failed): elements come from accessibility only, words on the picture may be missing; trust the screenshot. |
 | `APP_READ_ONLY` | `ask_user` | The user set this app to read-only: you may look, scroll and go back, not tap / type / swipe. |
-| `USER_TAKEOVER` | `ask_user` | The user is operating the screen. Stop, tell the user, and wait for the hand-back. |
+| `USER_TAKEOVER` | `ask_user` | The user is operating the screen. Stop, tell the user, and wait for the hand-back (vscreen events --wait for handback); the screen and its page stay, don't release or launch again. |
 | `USER_STOPPED` | `ask_user` | The user pressed "Stop AI". Everything is refused and only the user can lift it; pass on the line that says how. |
-| `REREAD_REQUIRED` | `look` | The user just had the screen and the page may have changed. This reply is the screen now: look, then carry on. |
+| `REREAD_REQUIRED` | `look` | The user just had the screen and the page may have changed; this was not done. Refused only this once: look with act (no steps), then send it again. |
 | `HOST_RESTARTED` | `look` | The Agent-VScreen process restarted and the last task was cut off. This reply is the screen now; don't assume earlier steps completed. |
 | `MAIN_SCREEN_CHANGED` | `ask_user` | An app or task of ours came to the main screen and disturbed what the user is using. Stop and tell the user; take it back with handoff in. The user switching apps on the main screen is not reported. |
 | `SCOPE_DENIED` | `ask_user` | This token is not allowed to do this (the scope the user gave the token in the app). |

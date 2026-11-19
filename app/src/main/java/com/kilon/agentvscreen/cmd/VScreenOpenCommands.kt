@@ -271,6 +271,9 @@ internal fun VScreenOffloadHandler.doneCmd(sid: String?): NativeOffloadResult {
     BackgroundOperation.parkSoonFor = s
     com.kilon.agentvscreen.api.Turns.doneAfterThis(s)
     BackgroundOperation.setTitle(s, null)
+    // 1.4.2-beta4: the user's takeover outlives the turn: say so instead of promising a pause that does not happen.
+    if (BackgroundOperation.heldByUser(s)) return text(tr("这一轮结束了。用户还在接管副屏：副屏和页面都留着，不会暂停也不会释放；用户交还时会有 handback 事件（vscreen events --wait），之后先看一眼画面再继续。",
+        "This turn is over. The user still holds the screen: it and its page stay, neither paused nor released; a handback event comes when the user hands it back (vscreen events --wait); look at the screen before going on."))
     return text(tr("这一轮结束了：副屏省电暂停，页面保留 10 分钟（下一条命令自动恢复）；别的会话现在可以接手。", "This turn is over: the screen pauses to save power and keeps the page for 10 minutes (the next command resumes it); other sessions can take over now."))
 }
 

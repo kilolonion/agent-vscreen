@@ -387,7 +387,7 @@ class FullscreenActivity : PageActivity() {
                     recording || prepId != null -> {} // ended with 完成 / 不教 on the strip, not by closing the screen
                     mode == Mode.ACTING || mode == Mode.STANDBY -> Pill(tr("停止 AI", "Stop AI"), Icons.Filled.Stop, Palette.stopped, Color.White) { BackgroundOperation.userStop() }
                     else -> Circle(Icons.Filled.Close, tr("关闭副屏", "Close screen"), Color(0x33FFFFFF)) {
-                        BackgroundOperation.releaseNow(session); back()
+                        BackgroundOperation.userRelease(session); back()
                     }
                 }
             }

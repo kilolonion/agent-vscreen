@@ -296,7 +296,7 @@ internal object CommandSpec {
             "规则：\n" +
             "- 副屏不可用时命令直接失败，不会改到主屏执行。\n" +
             "- 命令一条一条排队执行：同一块副屏上不会有两条命令同时动。排队超过 60 秒返回 QUEUE_TIMEOUT，这条没有执行。\n" +
-            "- 用户点“接管”时动作会等待（最多 15 秒，之后 USER_TAKEOVER）；交还后第一个 act 会先返回现在的画面（REREAD_REQUIRED），看清再继续。\n" +
+            "- 用户点“接管”时动作会等待（最多 15 秒，之后 USER_TAKEOVER）。接管只由用户结束，你这一轮结束了副屏也留在用户手上、不会被释放：用 vscreen events --wait 等 handback 事件再继续，不要 release 或重新 launch。交还后第一个改动画面的命令会被拒一次（REREAD_REQUIRED），先 act（不带步骤）看一眼再重发。\n" +
             "- 用户在悬浮窗点“停止 AI”后，所有操作返回 USER_STOPPED：停下来，把返回里“怎么解除”那句转告用户，不要重试。\n" +
             "- 用户可以把应用设成“禁止操作”（APP_BLOCKED）、“只读”（APP_READ_ONLY）或“每次询问”（手机上确认）。这是用户的决定，不要绕过，也不要换个入口进同一个应用。\n" +
             "- 付钱的步骤（用户选“谨慎”档时还有不可撤销的步骤、stop --force、handoff in）：由用户在手机上确认（或用户事先给这个令牌开了免确认时段）。你自己加任何参数都不能代替用户确认。\n" +
@@ -308,7 +308,7 @@ internal object CommandSpec {
             "Rules:\n" +
             "- When the background screen is unavailable, commands fail; they never run on the main screen instead.\n" +
             "- Commands run one at a time, in a queue: two commands never move the same screen at once. After 60 s in the queue a command returns QUEUE_TIMEOUT and has not run.\n" +
-            "- While the user has taken over, actions wait (up to 15 s, then USER_TAKEOVER); the first act after the hand-back returns the screen now (REREAD_REQUIRED): look, then carry on.\n" +
+            "- While the user has taken over, actions wait (up to 15 s, then USER_TAKEOVER). Only the user ends a takeover: when your turn ends the screen stays with the user and is not released; wait for the handback event with vscreen events --wait, don't release or launch again. After the hand-back the first command that changes the screen is refused once (REREAD_REQUIRED): look with act (no steps), then send it again.\n" +
             "- After the user taps \"Stop AI\" on the floating window, every action returns USER_STOPPED: stop, pass on the \"how to undo\" line to the user, don't retry.\n" +
             "- The user can set an app to \"blocked\" (APP_BLOCKED), \"read-only\" (APP_READ_ONLY) or \"ask every time\" (confirmed on the phone). That is the user's decision: don't get around it, and don't enter the same app another way.\n" +
             "- Steps that spend money (and, in the user's \"careful\" mode, irreversible steps, stop --force and handoff in) are confirmed by the user on the phone (or the user gave this token a no-confirmation period beforehand). No option you add can stand in for the user's confirmation.\n" +

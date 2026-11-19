@@ -134,8 +134,9 @@ object BackgroundOperation {
     private val idleRelease = Runnable {
         Thread {
             val owner = _state.value.ownerSessionId
-            val busy = owner != null && synchronized(lock) { tasks.containsKey(owner) }
-            if (!busy && holds == 0) releaseScreen(tr("空闲 ${IDLE_TTL_MS / 60_000} 分钟，已释放画面（保留连接）", "Idle for ${IDLE_TTL_MS / 60_000} minutes, picture released (connection kept)"))
+            // 1.4.2-beta4: never release the screen the user is holding; the hand-back starts the idle time again.
+            val inTurn = owner != null && synchronized(lock) { tasks.containsKey(owner) }
+            if (TakeoverRules.mayIdle(inTurn, holds, _state.value.takeoverSessionId)) releaseScreen(tr("空闲 ${IDLE_TTL_MS / 60_000} 分钟，已释放画面（保留连接）", "Idle for ${IDLE_TTL_MS / 60_000} minutes, picture released (connection kept)"))
             idleReleaseAt = 0L
             // A background rule is watching this screen: keep it, look again later.
             if (holds > 0 && display != null) mainHandler.post { scheduleIdleRelease() }
@@ -411,7 +412,8 @@ object BackgroundOperation {
         val d = display ?: return false
         if (d.released) return false
         val owner = _state.value.ownerSessionId
-        return holds > 0 || synchronized(lock) { owner != null && owner in turns }
+        // 1.4.2-beta4: the user holding the screen is work on it too (it may outlive the agent's turn).
+        return TakeoverRules.needsAwake(synchronized(lock) { owner != null && owner in turns }, holds, _state.value.takeoverSessionId)
     }
 
     private fun restoreDownscale() {
@@ -448,7 +450,7 @@ object BackgroundOperation {
         releaseListeners.forEach { l -> runCatching { l(d.displayId) }.onFailure { AppLogger.warning(TAG, "release listener: ${it.message}") } }
         restoreDownscale()
         // The page the flags were about is gone with the screen: the next screen starts with nothing to re-read.
-        synchronized(lock) { tasks.values.forEach { it.rereadRequired = false; it.rereadReason = null } }
+        synchronized(lock) { tasks.values.forEach { it.rereadRequired = false; it.rereadReason = null }; rereadOwed.clear() }
         // 1.4.0-beta4: the task on a screen ends with the screen, even when its agent never said done.
         _state.value.ownerSessionId?.let { TaskLog.onTurnEnd(it, _state.value.userStopped) }
         _state.update { it.copy(displayId = null, ownerSessionId = null, takeoverSessionId = null, operating = false, note = reason) }
@@ -467,7 +469,10 @@ object BackgroundOperation {
             display?.takeIf { it.parked }?.let { d -> Thread { runCatching { unpark(d) } }.apply { isDaemon = true }.start() }
         }
         synchronized(lock) {
-            tasks[sessionId] = TaskInfo(sessionId)
+            // 1.4.2-beta4: a re-read owed from between turns (hand-back after the turn ended) carries into the new turn.
+            tasks[sessionId] = TaskInfo(sessionId).also { t ->
+                if (rereadOwed.owes(sessionId)) { t.rereadRequired = true; t.rereadReason = rereadOwed.settle(sessionId) }
+            }
             turns.add(sessionId)
         }
         // A window the user hid during the previous turn comes back for the new one.
@@ -492,31 +497,80 @@ object BackgroundOperation {
             Thread { runCatching { VScreenShell.finger(d.displayId, "cancel", 0, -1, -1) } }.apply { isDaemon = true }.start()
         }
         if (_state.value.ownerSessionId == sessionId && display != null) {
-            // A user takeover ends with the turn: nobody is holding the screen any more. 1.4.0-beta11: except while the
-            // user is showing a lesson (getting ready or recording): that is the user's, not the turn's.
-            val lessonOn = com.kilon.agentvscreen.cmd.Teach.lesson.value.let { it is com.kilon.agentvscreen.cmd.Lesson.Ready || it is com.kilon.agentvscreen.cmd.Lesson.Recording }
-            val keep = if (lessonOn) _state.value.takeoverSessionId else null
-            _state.update { it.copy(takeoverSessionId = keep, operating = false, idle = true, agentTitle = null, note = tr("本轮结束，副屏保留 ${IDLE_TTL_MS / 60_000} 分钟", "Turn over; the screen is kept for ${IDLE_TTL_MS / 60_000} minutes")) }
-            scheduleIdleRelease()
-            scheduleIdlePark(if (parkSoonFor == sessionId) 1_500L else PARK_AFTER_MS)
+            // 1.4.2-beta4: a user takeover is NOT ended by the agent's turn ending. Before, an agent that met
+            // USER_TAKEOVER and went quiet ended its turn after Turns.quietMs (3 min): the takeover was dropped under the
+            // user's finger without a hand-back (no handback event, no re-read), the idle screen was then paused and
+            // released, and the agent coming back met NO_SCREEN / a frozen picture and had to rebuild the screen. Only
+            // the user ends a takeover ([userResume], Stop, closing the screen or hiding the window); while they hold it
+            // the screen is neither paused nor released (a lesson being shown was the one case kept before).
+            // The user's own screen (ManualScreen) is the exception: its turn IS the user's, so ending it ends the hold
+            // (handed back, closed, or the launch failed) and the next agent may take the screen over as before.
+            val held = !ManualScreen.isManual(sessionId) && TakeoverRules.survivesTurnEnd(_state.value.takeoverSessionId, sessionId)
+            if (ManualScreen.isManual(sessionId) && _state.value.takeoverSessionId == sessionId) _state.update { it.copy(takeoverSessionId = null) }
+            _state.update { it.copy(operating = false, idle = true, agentTitle = null, note = if (held) tr("本轮结束，你还在接管副屏；交还后 AI 会先看一眼画面再继续", "Turn over; you still hold the screen. Once you hand it back, the AI looks at it before going on")
+                else tr("本轮结束，副屏保留 ${IDLE_TTL_MS / 60_000} 分钟", "Turn over; the screen is kept for ${IDLE_TTL_MS / 60_000} minutes")) }
+            if (!held) {
+                scheduleIdleRelease()
+                scheduleIdlePark(if (parkSoonFor == sessionId) 1_500L else PARK_AFTER_MS)
+            }
             parkSoonFor = null
         }
     }
 
+    /**
+     * 1.4.2-beta4: "look first" owed to a session between its turns. A turn's TaskInfo is dropped when the turn ends and
+     * a new one starts empty, so a hand-back that came after the turn was lost and the agent acted on a page the user
+     * had changed. Guarded by [lock].
+     */
+    private val rereadOwed = RereadDebts()
+
+    /** Mark [sid] as owing a look before its next action, whether or not its turn is running. Caller holds [lock]. */
+    private fun oweReread(sid: String, reason: String? = null) {
+        val t = tasks[sid]
+        if (t != null) { t.rereadRequired = true; if (reason != null) t.rereadReason = reason }
+        else rereadOwed.owe(sid, reason)
+    }
+
     /** `vscreen release`: destroy the screen now (connection kept). */
     fun releaseNow(sessionId: String) {
-        if (_state.value.ownerSessionId == sessionId) releaseScreen(tr("已按要求释放画面（保留连接）", "Picture released as asked (connection kept)"))
+        val s = _state.value
+        // 1.4.2-beta4: the agent cannot close the screen out of the user's hands; the user ends the takeover.
+        if (s.ownerSessionId == sessionId && s.takeoverSessionId != null) throw ActionError("USER_TAKEOVER",
+            tr("用户正在接管副屏，不能现在释放（副屏没有动）。停下来告诉用户，等用户交还后再 release", "The user is controlling the screen, so it cannot be released now (nothing was changed). Stop and tell the user; release once the user hands it back"))
+        if (s.ownerSessionId == sessionId) releaseScreen(tr("已按要求释放画面（保留连接）", "Picture released as asked (connection kept)"))
     }
+
+    /** 1.4.2-beta4: the user's own "close screen" (full screen page): always allowed, a takeover included. */
+    fun userRelease(sessionId: String) {
+        if (_state.value.ownerSessionId == sessionId) releaseScreen(tr("你关闭了副屏", "You closed the screen"))
+    }
+
+    /** 1.4.2-beta4: the user holds [sessionId]'s screen right now (for replies that must not say otherwise). */
+    fun heldByUser(sessionId: String?): Boolean = sessionId != null && _state.value.takeoverSessionId == sessionId
 
     // ── takeover (接管) ────────────────────────────────────────────────────
 
     fun beginTakeover(sessionId: String): Boolean {
         val s = _state.value
         if (s.displayId == null || s.ownerSessionId != sessionId) return false
+        // 1.4.2-beta4: the screen the user holds is never paused or released under them. Before, taking over an idle
+        // screen left its 10-minute release timer running, and the screen went away in the user's hands.
+        cancelIdleRelease()
         mainHandler.removeCallbacks(idlePark)
         display?.takeIf { it.parked }?.let { d -> Thread { runCatching { unpark(d) } }.apply { isDaemon = true }.start() }
         _state.update { it.copy(takeoverSessionId = sessionId) }
+        VScreenAwake.kick(tr("用户接管", "User takeover"))
         return true
+    }
+
+    /**
+     * 1.4.2-beta4: a takeover just ended. When the owner's turn is no longer running the screen idles from now (paused
+     * after [PARK_AFTER_MS], released after [IDLE_TTL_MS]) like any finished turn; while it runs, the turn keeps it.
+     */
+    private fun idleAfterTakeover() {
+        val owner = _state.value.ownerSessionId ?: return
+        if (display == null || synchronized(lock) { owner in turns }) return
+        mainHandler.post { scheduleIdleRelease(); if (holds == 0) scheduleIdlePark() }
     }
 
     /** 1.1: the user's Stop: refuse the agent (USER_STOPPED) until [userResume]; a finger the agent holds is lifted. */
@@ -526,6 +580,8 @@ object BackgroundOperation {
         val wasHeld = _state.value.takeoverSessionId != null
         _state.update { it.copy(userStopped = true, stoppedAt = System.currentTimeMillis(), takeoverSessionId = null, operating = false) }
         if (wasHeld) com.kilon.agentvscreen.cmd.Teach.onTakeoverEnded(appContext)
+        // 1.4.2-beta4: a held screen had no idle timers; once it is only stopped it idles again (the Stop lock stays).
+        if (wasHeld) idleAfterTakeover()
         d?.let { Thread { runCatching { VScreenShell.finger(it.displayId, "cancel", 0, -1, -1) } }.apply { isDaemon = true }.start() }
         AppLogger.info(TAG, "user stop")
     }
@@ -533,19 +589,27 @@ object BackgroundOperation {
     /** 1.1: hand back to the agent after Stop or takeover; its next action is told to look first. */
     fun userResume() {
         val s = _state.value
-        synchronized(lock) { s.ownerSessionId?.let { tasks[it]?.rereadRequired = true } }
+        // 1.4.2-beta4: owed across turns too (the agent's turn may have ended while the user held the screen).
+        synchronized(lock) { s.ownerSessionId?.let { oweReread(it) } }
         _state.update { it.copy(userStopped = false, stoppedAt = 0L, takeoverSessionId = null) }
         if (s.takeoverSessionId != null) com.kilon.agentvscreen.cmd.Teach.onTakeoverEnded(appContext)
-        AppLogger.info(TAG, "user allowed the AI to continue")
+        AppLogger.info(TAG, "user allowed the AI to continue (takeover=${s.takeoverSessionId != null}, stopped=${s.userStopped})")
         // 1.4.2: handing back the user's own screen ends their turn: it idles, and the next agent may take it over.
         if (ManualScreen.isManual(s.ownerSessionId)) { ManualScreen.end(); return }
-        // 1.3.0-beta16: the agent hears it (vscreen events) instead of finding out on its next call.
-        if (s.takeoverSessionId != null || s.userStopped) s.ownerSessionId?.let { sid ->
-            appContext?.let { c -> com.kilon.agentvscreen.host.quiet("handback-event") {
-                com.kilon.agentvscreen.api.EventHub.post(c, sid, "handback", if (s.userStopped) "resume" else "takeover",
-                    tr("用户把副屏交还给你了：先看一眼现在的画面再继续", "The user handed the screen back to you: look at it before going on"))
-            } }
+        if (s.takeoverSessionId != null || s.userStopped) {
+            postHandback(s.ownerSessionId, if (s.userStopped) "resume" else "takeover")
+            idleAfterTakeover()
         }
+    }
+
+    /** 1.3.0-beta16: the agent hears a hand-back (vscreen events) instead of finding out on its next call. */
+    private fun postHandback(sid: String?, what: String) {
+        sid ?: return
+        if (ManualScreen.isManual(sid)) return
+        appContext?.let { c -> com.kilon.agentvscreen.host.quiet("handback-event") {
+            com.kilon.agentvscreen.api.EventHub.post(c, sid, "handback", what,
+                tr("用户把副屏交还给你了：先看一眼现在的画面再继续", "The user handed the screen back to you: look at it before going on"))
+        } }
     }
 
     /**
@@ -572,9 +636,11 @@ object BackgroundOperation {
             return if (s.userStopped) tr("副屏已关闭。AI 仍是停止状态：要让它继续，在通知里点“允许继续”", "Screen closed. The AI is still stopped: to let it go on, tap \"Allow again\" in the notification") else tr("副屏已关闭", "Screen closed")
         }
         if (s.takeoverSessionId != null) {
-            synchronized(lock) { tasks[owner]?.rereadRequired = true }
+            synchronized(lock) { oweReread(owner) }
             _state.update { it.copy(takeoverSessionId = null) }
             com.kilon.agentvscreen.cmd.Teach.onTakeoverEnded(appContext)
+            // 1.4.2-beta4: hiding the window hands a takeover back: the agent hears it like any other hand-back.
+            postHandback(owner, "takeover")
         }
         _state.update { it.copy(windowHidden = true) }
         AppLogger.info(TAG, "window hidden by the user (AI keeps working)")
@@ -645,6 +711,10 @@ object BackgroundOperation {
                 }
                 val ownerBusy = s.ownerSessionId != null && s.ownerSessionId != sid && tasks.containsKey(s.ownerSessionId)
                 if (ownerBusy) throw busy(s.ownerSessionId, sid)
+                // 1.4.2-beta4: the user still holds the screen of a turn that ended: it is not idle, nobody takes it.
+                if (!TakeoverRules.mayAdoptIdle(s.takeoverSessionId, sid)) throw ActionError("USER_TAKEOVER",
+                    tr("用户正在接管副屏（之前是会话“${s.ownerSessionId ?: "?"}”的）。动作没有执行：停下来告诉用户，等用户交还后再用；不要反复重试",
+                        "The user is controlling the screen (it was session \"${s.ownerSessionId ?: "?"}\"'s). The action was not done: stop and tell the user, and use it once the user hands it back. Don't keep retrying"))
                 // The other session's screen is only idling (or its owner is gone): take it over
                 // as it is, page included. Never build a second screen next to it.
                 cancelIdleRelease()
@@ -913,7 +983,7 @@ object BackgroundOperation {
         // 1.2: what the screen is in right now is one derived value (ScreenPhase), and whether an action may run in
         // it is one table (ScreenPhase.refusal), instead of a chain of flag checks in every caller.
         ScreenPhase.of(_state.value, sid).let { ph -> if (ph == ScreenPhase.STOPPED) throw ActionError("USER_STOPPED", userStoppedMessage()) }
-        waitWhileTakenOver(sid)
+        waitWhileTakenOver(sid, isRead, freshPage)
         // 1.4.0-beta2: the app this session was working on is with the user on the main screen. Whatever is under it
         // on the background screen now is not what the agent planned for: refuse, never act on it.
         if (!isRead && !freshPage) Guard.require(Guard.Act.INPUT.takeIf { VScreenOwnership.blocking(sid) != null } ?: Guard.Act.READ, null, sid)
@@ -924,11 +994,20 @@ object BackgroundOperation {
         if (expectedGeneration != null && expectedGeneration != d.generation) {
             throw ActionError("STALE_SCREEN", tr("这个操作是针对旧副屏（第 $expectedGeneration 代）规划的，当前是第 ${d.generation} 代。", "This action was planned for an older screen (generation $expectedGeneration); the current one is generation ${d.generation}."))
         }
-        val task = synchronized(lock) { tasks.getOrPut(sid) { TaskInfo(sid) } }
+        val task = synchronized(lock) {
+            tasks.getOrPut(sid) { TaskInfo(sid) }.also { t ->
+                // 1.4.2-beta4: a re-read owed from between turns applies to a task made without onTaskStarted too.
+                if (rereadOwed.owes(sid)) { t.rereadRequired = true; t.rereadReason = rereadOwed.settle(sid) ?: t.rereadReason }
+            }
+        }
         if (!isRead && !freshPage && task.rereadRequired) {
             val why = task.rereadReason
+            // 1.4.2-beta4: the refusal is said once. Before, only act/look/launch cleared the flag (their reply shows the
+            // screen), so collect, stop and handoff out kept answering REREAD_REQUIRED for ever and the agent ended up
+            // rebuilding the screen. The refused command's reply carries the code; the agent's next command runs.
+            synchronized(lock) { task.rereadRequired = false; task.rereadReason = null }
             if (why != null) throw ActionError("HOST_RESTARTED", tr("$why。动作没有执行：看清现在的画面再继续，不要假设上一轮的步骤已经完成", "$why. The action was not done: look at the screen now before going on, and don't assume the last turn's steps were completed"))
-            throw ActionError("REREAD_REQUIRED", tr("用户刚接管过副屏，页面可能已变化。动作没有执行：看清现在的画面再继续", "The user just took over the screen and the page may have changed. The action was not done: look at the screen now before going on"))
+            throw ActionError("REREAD_REQUIRED", tr("用户刚接管过副屏，页面可能已变化。动作没有执行：先 act（不带步骤）看一眼现在的画面，再重发", "The user just took over the screen and the page may have changed. The action was not done: look first with act (no steps), then send it again"))
         }
         runCatching { ensureUpright(d) }.onFailure { AppLogger.warning(TAG, "orientation check failed: ${it.message}") }
         // 1.4.0-beta14 (test: collect stopped after one screen while the screen had gone to sleep): every command on
@@ -958,6 +1037,7 @@ object BackgroundOperation {
     /** v27: the agent was handed the current page with a REREAD/HOST_RESTARTED error: that counts as the re-read. */
     fun acknowledgeReread(sessionId: String) = synchronized(lock) {
         tasks[sessionId]?.let { it.rereadRequired = false; it.rereadReason = null }
+        rereadOwed.settle(sessionId)
     }
 
     /** Times the guard gave the system focus back to the main screen (status: ime_guard). */
@@ -978,7 +1058,7 @@ object BackgroundOperation {
         AppLogger.info(TAG, "ime guard: focus moved to display $displayId, restored=$ok")
     }
 
-    private fun waitWhileTakenOver(sessionId: String) {
+    private fun waitWhileTakenOver(sessionId: String, isRead: Boolean, freshPage: Boolean) {
         // v27: 15 s, not 10 min: a held tool call blocks the whole turn (android-vdisplay answers 423 at once).
         val deadline = SystemClock.elapsedRealtime() + 15_000L
         var waited = false
@@ -989,7 +1069,10 @@ object BackgroundOperation {
             }
             Thread.sleep(300)
         }
-        if (waited) {
+        // 1.4.2-beta4: a look (or a launch, which opens a new page) that waited out the takeover just runs: it is the
+        // re-read. Before, it was refused too, so even the "look first" the error asked for failed once more.
+        if (TakeoverRules.refuseAfterWait(waited, isRead, freshPage)) {
+            acknowledgeReread(sessionId)
             throw ActionError("REREAD_REQUIRED", tr("用户已交还副屏。页面可能已变化：这次没有执行，先 act（不带步骤）看一眼再继续。", "The user handed the screen back. The page may have changed: this was not done; look first with act (no steps), then go on."))
         }
     }

@@ -13,8 +13,8 @@ android {
         applicationId = "com.kilon.agentvscreen"
         minSdk = 30
         targetSdk = 35
-        versionCode = 54
-        versionName = "1.4.2-beta3"
+        versionCode = 55
+        versionName = "1.4.2-beta4"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     // Release signing is read from keystore.properties (not committed). See keystore.properties.example.
