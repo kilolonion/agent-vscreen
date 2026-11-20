@@ -62,9 +62,16 @@ Agent-VScreen 在一块看不见的虚拟屏上打开和操作别的应用，你
 - **同一个应用会反复用：有固定入口、每次都弹的窗、要先暂停的画面，或对机器节奏敏感**：`vscreen note` 给这个应用记经验、存步骤（`note save`）、设前置/收尾步骤和仿人节奏，下次 launch 会列出来
 - **有一步只能用户本人做（密码、验证码、人脸、扫码），或要用的应用用户正在用**：`vscreen handoff out` 把应用交到用户主屏并告诉他做什么；`vscreen handoff in` 把主屏上的应用接到副屏
 - **应用没声音，或用户要让某个应用静音、恢复声音**：`vscreen sound` 查看，`sound mute|unmute <应用>` 静音或恢复
+- **切换或暂存应用**：`vscreen tasks` 查任务；`launch --keep` 切回原页；`handoff park/unpark` 暂存或取回
 - **画面上的字太小、是图标，或者根本没有字（游戏、画布、图表），或想回看刚才发生了什么**：`vscreen look` 要图：现在的画面、放大一块、回看录像都用它；`vscreen spots` 找可点的色块
 - **连不上手机、命令一直失败或出了怪问题**：先分清是没开还是坏了：没在运行、服务关着或收起是用户的选择，转告用户打开即可，不用修；`vscreen status` 里 ready 为假时才是故障，`vscreen fix` 修它列出的项，也恢复被留下静音的应用
 <!-- abilities:end -->
+
+### 在副屏切换与暂存应用
+
+用 `vscreen tasks` 查看副屏应用的包名、任务 ID 和前台状态。`vscreen launch <应用> --keep` 把已有任务切到前台，不重启应用；如果应用不在副屏上，就正常启动。
+
+用 `vscreen handoff park <应用>` 把任务移到隐藏的停放屏，再用 `vscreen handoff unpark <应用>` 移回副屏前台。`tasks` 不列出停放的任务。如果当前目标仍是被停放的应用，`look` 和 `act` 返回 `APP_PARKED`，直到取回它或切换到其他应用。本轮结束（`done` 或空闲超时）、Stop 或用户接管时会关闭停放任务；停放不是持久保存。
 
 ## 为什么好用
 

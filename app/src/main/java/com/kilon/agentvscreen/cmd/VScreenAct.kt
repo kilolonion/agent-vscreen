@@ -1158,6 +1158,9 @@ internal fun VScreenOffloadHandler.act(sid: String?, args: OffloadArgs): NativeO
         if (stop.isEmpty()) throw ActionError("INVALID_ARGS", tr("--keep 盯的是 --stop 的条件：一起写，如 --stop \"text:到货\" --keep notify", "--keep watches the --stop condition: write them together, e.g. --stop \"text:In stock\" --keep notify"))
     }
     val watch = args.getLong("watch")?.let { bounded("watch", it, 0L, 120_000L) }
+    // handoff park: the app the session works on is on the parking display, so this stretch would act on the wrong
+    // page (or on nothing). Refused here, before the screen is read, with the way out (handoff unpark).
+    BackgroundOperation.requireNotParked(s)
     val d = BackgroundOperation.acquire(s, create = false)
     VScreenPerception.ensure(d)
     // 1.4.0-beta4: a lesson with a starting page checks that page itself before its first step, so the user having had
@@ -1241,6 +1244,12 @@ internal fun VScreenOffloadHandler.launchCmd(sid: String?, args: OffloadArgs): N
     // the background screen. Said plainly instead of a launch that cannot land.
     if (pkg == context.packageName) throw ActionError("APP_NOT_SUPPORTED", tr("Agent-VScreen 自己的页面只开在手机主屏上，不能在副屏打开。要看它的状态用 vscreen status；要用户在 App 里做什么就 ask 用户",
         "Agent-VScreen's own pages open only on the phone's main screen, never on the background screen. For its state use vscreen status; to have the user do something in it, ask the user"))
+    val keep = args.hasFlag("keep")
+    if (keep && (args.hasFlag("landscape") || args.hasFlag("portrait") || args.hasFlag("restart"))) throw ActionError("INVALID_ARGS",
+        tr("--keep 保持副屏现在的方向和尺寸，不能同时用 --landscape / --portrait / --restart", "--keep keeps the screen's orientation and size as it is; it can't be combined with --landscape / --portrait / --restart"))
+    // The app is parked (handoff park): it is on the hidden parking display, not on this screen. Saying so is better
+    // than a launch that would open a second copy of a page the user put aside.
+    BackgroundOperation.requireNotParked(s, pkg)
     com.kilon.agentvscreen.core.Guard.require(com.kilon.agentvscreen.core.Guard.Act.OPEN, pkg, s, asked = args.hasFlag("asked"))
     // The user is using this very app on the main screen right now: a second copy, a cold start or a redirect can
     // disturb what they are doing (log-ins, half-typed text, single-instance apps). Not the agent's call: ask first.
@@ -1255,7 +1264,9 @@ internal fun VScreenOffloadHandler.launchCmd(sid: String?, args: OffloadArgs): N
     val t0 = SystemClock.elapsedRealtime()
     val main0 = mainWatch(s, pkg)
     val orient = when { args.hasFlag("landscape") -> true; args.hasFlag("portrait") -> false; else -> null }
-    val facts = doLaunch(s, pkg, orient, args.hasFlag("restart"))
+    val facts = doLaunch(s, pkg, orient, args.hasFlag("restart"), keep = keep)
+    // The session works on this app now: whatever was parked is no longer what it is on.
+    BackgroundOperation.appSelected(s, pkg)
     com.kilon.agentvscreen.core.VScreenOwnership.agentLaunched(s, pkg)
     val d = BackgroundOperation.acquire(s, create = false)
     VScreenPerception.ensure(d)

@@ -6,15 +6,16 @@
 
 ## 命令
 
-### `launch <应用名|包名> [--landscape] [--portrait] [--restart] [--asked] [--async]`
+### `launch <应用名|包名> [--landscape] [--portrait] [--restart] [--asked] [--keep] [--async]`
 
-打开应用（找不到就 apps 关键词）。副屏方向按应用声明的方向建；被系统缩放会自动处理。
+打开应用（找不到就 apps 关键词）。默认按应用调整副屏；--keep 切回原页且不重建。
 返回四段；【做了什么】里还会列出你以前给这个应用记的 note、存的段、前置/收尾步骤。
 
 - `--landscape` 副屏按横屏建
 - `--portrait` 副屏按竖屏建
 - `--restart` 冷启动（先结束应用）
 - `--asked` 用户正在主屏用这个应用时，已经问过用户并得到同意
+- `--keep` 副屏保持现在的方向和尺寸：不重建、不按应用调整（应用没在上面时也一样）；已经有它的页面就切回原页面。不能和 --landscape/--portrait/--restart 一起用
 - `--async` 不等它做完：马上返回任务号，之后 task <号> 取结果（长操作、怕连接超时时用）
 
 权限范围: `operate` · 在副屏队列里执行
@@ -80,6 +81,12 @@ human on：这个应用以后每段 act 都用仿人节奏（同 act --human）�
 
 权限范围: `look`
 
+### `tasks`
+
+列出副屏上的应用任务（最前面的排第一）：包名、任务号、是不是前台。用来确认应用还在不在、有没有被系统挪走。停到停放屏（handoff park）的应用不在这里。
+
+权限范围: `look` · 在副屏队列里执行
+
 ### `title [文字]`
 
 在悬浮窗上显示你正在做什么（最多 40 字，给用户看；不带文字 = 清除；这一轮结束时自动清除）。
@@ -112,9 +119,10 @@ human on：这个应用以后每段 act 都用仿人节奏（同 act --human）�
 
 权限范围: `operate` · 在副屏队列里执行
 
-### `handoff in [包名] | out [包名] [--note <说明>]`
+### `handoff in [包名] | out [包名] | park <应用> | unpark <应用> [--note <说明>]`
 
 in：把用户主屏上的应用移到副屏接着做（返回四段；手机上会请用户确认）；out：交还到主屏，需要用户本人操作时用。
+handoff park <应用>：把副屏任务移到隐藏的停放屏；handoff unpark <应用>：移回副屏前台。当前目标仍在停放时，look/act 返回 APP_PARKED。轮次结束、Stop 或用户接管时清理停放任务。
 
 - `--note <说明>` out 时给用户的通知里写什么
 
@@ -274,6 +282,7 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `APP_IN_USE` | `ask_user` | 用户正在主屏上用这个应用。先 ask 用户，同意后 launch --asked（另开一份）或 handoff in（接着他的页面）。 |
 | `APP_WITH_USER` | `ask_user` | 你在用的应用现在在用户手上（主屏）。等 handback 事件，或 launch 别的应用。 |
 | `OCR_DOWN` | `none` | 文字识别不可用（两种引擎都失败）：元素只来自无障碍，画面上的字可能没列出来，以截图为准。 |
+| `APP_PARKED` | `fix_command` | 这个应用被停到了停放屏（隐藏的停放显示，不在副屏上）：页面、登录都还在，但现在看不到也不能操作。用 vscreen handoff unpark <应用> 把它取回副屏，再继续；这期间副屏可以放别的应用。 |
 | `APP_READ_ONLY` | `ask_user` | 用户把这个应用设成只读：能看、滚动、返回，不能点击/输入/滑动。 |
 | `USER_TAKEOVER` | `ask_user` | 用户正在自己操作副屏。停下告诉用户，等用户交还。 |
 | `USER_STOPPED` | `ask_user` | 用户按了“停止 AI”。所有操作都被拒绝，只有用户能解除；把返回里怎么解除的那句转告用户。 |
@@ -342,15 +351,16 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 
 ## Commands
 
-### `launch <app name|package> [--landscape] [--portrait] [--restart] [--asked] [--async]`
+### `launch <app name|package> [--landscape] [--portrait] [--restart] [--asked] [--keep] [--async]`
 
-open an app (if not found, apps <keyword>). The screen orientation follows what the app declares; system scaling is handled automatically.
+open an app (if not found, apps <keyword>). By default the screen fits the app; --keep switches to the existing page without rebuilding.
 Returns four blocks; [Done] also lists the notes, saved segments and before/after steps you kept for this app.
 
 - `--landscape` build the screen in landscape
 - `--portrait` build the screen in portrait
 - `--restart` cold start (stops the app first)
 - `--asked` the user is using this app on the main screen and has agreed when asked
+- `--keep` keep the screen's orientation and size as they are: no rebuild and no fitting it to the app (also when the app is not on it yet); an existing page of it is brought back. Not with --landscape/--portrait/--restart
 - `--async` do not wait for it: returns a task id at once, fetch the result later with task <id> (for long operations or short connection timeouts)
 
 scope: `operate` · runs in the screen queue
@@ -416,6 +426,12 @@ look at tasks started with --async: no argument lists this session's tasks; with
 
 scope: `look`
 
+### `tasks`
+
+list the app tasks on the screen now (the front one first): package, task id and whether it is in front. Use it to see whether the app is still there. Apps parked with handoff park are not on this screen and are not listed.
+
+scope: `look` · runs in the screen queue
+
 ### `title [text]`
 
 show what you are doing on the floating window (up to 40 characters, for the user; no text = clear; cleared when this turn ends).
@@ -448,9 +464,10 @@ release the screen now.
 
 scope: `operate` · runs in the screen queue
 
-### `handoff in [package] | out [package] [--note <text>]`
+### `handoff in [package] | out [package] | park <app> | unpark <app> [--note <text>]`
 
 in: move the app from the user's main screen to the background screen and carry on (returns four blocks; the phone asks the user to confirm); out: hand it back to the main screen when the user must act.
+handoff park <app>: move the app task to a hidden parking display; handoff unpark <app>: return it to the foreground. Look and act return APP_PARKED if the current target is still parked. Turn end, Stop or user takeover clears parked tasks.
 
 - `--note <text>` what the notification to the user says on out
 
@@ -610,6 +627,7 @@ scope: `look`
 | `APP_IN_USE` | `ask_user` | The user is using this app on the main screen. Ask the user first; once they agree, launch --asked (a separate copy) or handoff in (from their page). |
 | `APP_WITH_USER` | `ask_user` | The app you were using is with the user (main screen). Wait for the handback event, or launch another app. |
 | `OCR_DOWN` | `none` | Text recognition is unavailable (both engines failed): elements come from accessibility only, words on the picture may be missing; trust the screenshot. |
+| `APP_PARKED` | `fix_command` | This app is parked on the parking display (a hidden display, not the screen): its page and logins are kept, but it is neither visible nor operable now. Bring it back with vscreen handoff unpark <app>, then carry on; the screen can hold another app meanwhile. |
 | `APP_READ_ONLY` | `ask_user` | The user set this app to read-only: you may look, scroll and go back, not tap / type / swipe. |
 | `USER_TAKEOVER` | `ask_user` | The user is operating the screen. Stop, tell the user, and wait for the hand-back. |
 | `USER_STOPPED` | `ask_user` | The user pressed "Stop AI". Everything is refused and only the user can lift it; pass on the line that says how. |

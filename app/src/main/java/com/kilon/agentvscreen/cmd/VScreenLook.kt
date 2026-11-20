@@ -70,6 +70,7 @@ internal fun VScreenOffloadHandler.lookCmd(sid: String?, args: OffloadArgs, `as`
     // A positional that is not a region is named as such, not mistaken for one (beta2: `--layout grid 3x4`).
     if (region != null && !REGION.matches(region.replace(" ", "")))
         throw ActionError("INVALID_ARGS", tr("看不懂“$region”：区域写成 x1,y1,x2,y2；排法写成 --layout 3x4", "Cannot read \"$region\": a region is x1,y1,x2,y2; a layout is --layout 3x4"))
+    BackgroundOperation.requireNotParked(sid)
     val stretch = `as` == "frames" || listOf("last", "from", "to", "count", "every", "page").any { args.get(it) != null }
     return when {
         region != null && stretch -> throw ActionError("INVALID_ARGS", tr("一次只看一样：区域（x1,y1,x2,y2）或一段时间（--last 等），不能同时", "One thing at a time: a region (x1,y1,x2,y2) or a stretch (--last etc.), not both"))

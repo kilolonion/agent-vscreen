@@ -120,6 +120,135 @@ object BackgroundOperation {
         @Volatile var rereadReason: String? = null,
     )
     private val tasks = HashMap<String, TaskInfo>()
+    private val parkingLock = Any()
+    private val parkingOps = Any()
+    private var parking: ParkedApps? = null
+
+    private class ParkedApps(val sessionId: String, val active: VScreenDisplay) {
+        // Only read/written under parkingOps, including cleanup of a detached slot.
+        var displayId: Int? = null
+        // Both fields are protected by parkingLock. A pending move also blocks accidental input.
+        val apps = mutableMapOf<String, Int>()
+        var selected: String? = null
+    }
+
+    internal fun requireNotParked(sessionId: String?, pkg: String? = null) {
+        val blocked = synchronized(parkingLock) {
+            parking?.takeIf { it.sessionId == sessionId }?.let { slot ->
+                (pkg ?: slot.selected)?.takeIf { it in slot.apps }
+            }
+        } ?: return
+        throw ActionError("APP_PARKED", tr("$blocked 已停放，先用 `vscreen handoff unpark $blocked` 移回副屏，或用 launch 切到别的应用。",
+            "$blocked is parked. Bring it back with `vscreen handoff unpark $blocked`, or use launch to select another app."),
+            org.json.JSONObject().put("package", blocked))
+    }
+
+    internal fun hasParkedApps(sessionId: String) = synchronized(parkingLock) {
+        parking?.takeIf { it.sessionId == sessionId }?.apps?.isNotEmpty() == true
+    }
+
+    internal fun appSelected(sessionId: String?, pkg: String) = synchronized(parkingLock) {
+        parking?.takeIf { it.sessionId == sessionId && pkg !in it.apps }?.selected = null
+    }
+
+    // lifecycle callers may be on the UI thread: invalidate synchronously, do binder work off-thread.
+    internal fun clearParkedApps(sessionId: String) = clearParking(sessionId)
+
+    private fun clearParking(sessionId: String? = null) {
+        val slot = synchronized(parkingLock) {
+            parking?.takeIf { sessionId == null || it.sessionId == sessionId }?.also { parking = null }
+        } ?: return
+        val close = Runnable {
+            synchronized(parkingOps) {
+                slot.displayId?.let { id ->
+                    // No force-stop: Android finishes the tasks on this display when it is removed.
+                    VScreenRemoteDisplay.releaseParking(id).onFailure { AppLogger.warning(TAG, "parking cleanup $id: ${it.message}") }
+                }
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) Thread(close, "vscreen-parking-cleanup").apply { isDaemon = true }.start()
+        else close.run()
+    }
+
+    private fun checkParkingOwner(sid: String, d: VScreenDisplay) {
+        val s = _state.value
+        if (s.userStopped) throw ActionError("USER_STOPPED", userStoppedMessage())
+        if (s.takeoverSessionId == sid) throw ActionError("USER_TAKEOVER", tr("用户正在接管副屏", "The user is controlling the screen"))
+        if (s.ownerSessionId != sid || display !== d || d.released)
+            throw ActionError("NO_SCREEN", tr("会话不再持有副屏", "This session no longer owns the screen"))
+    }
+
+    private fun parkingFailure(detail: String? = null) = ActionError("HANDOFF_DENIED",
+        tr("系统未能完成停放或取回任务", "The system could not park or restore the task") + (detail?.takeIf { it.isNotBlank() }?.let { ": $it" } ?: ""))
+
+    private fun missingParkingTask(pkg: String) = ActionError("HANDOFF_NO_TASK",
+        tr("找不到 $pkg 的任务", "No task found for $pkg"))
+
+    internal fun parkApp(sid: String, d: VScreenDisplay, pkg: String): Int = synchronized(parkingOps) {
+        checkParkingOwner(sid, d)
+        requireNotParked(sid, pkg)
+        val task = (VScreenHandoff.tasksOrNull(d.displayId) ?: throw parkingFailure())
+            .firstOrNull { it.pkg == pkg } ?: throw missingParkingTask(pkg)
+        if (VScreenShell.isProtected(pkg)) throw parkingFailure(tr("这是受保护的应用", "This app is protected"))
+        val slot = synchronized(parkingLock) {
+            checkParkingOwner(sid, d)
+            parking?.takeIf { it.sessionId == sid && it.active === d } ?: ParkedApps(sid, d).also { parking = it }
+        }
+        val hidden = slot.displayId ?: VScreenRemoteDisplay.createParking(d.displayId, d.physWidth, d.physHeight, d.dpi)
+            .getOrElse { throw parkingFailure(it.message) }.also { slot.displayId = it }
+        val previous = synchronized(parkingLock) {
+            checkParkingOwner(sid, d)
+            if (parking !== slot) throw parkingFailure()
+            val previous = slot.selected
+            slot.apps[pkg] = task.taskId
+            if (task.foreground) slot.selected = pkg
+            previous
+        }
+        val moved = VScreenRemoteDisplay.moveTask(task.taskId, hidden, source = d.displayId)
+        val landed = VScreenHandoff.tasksOrNull(hidden)?.any { it.taskId == task.taskId }
+        // Keep the record when relocation cannot be verified: a timed-out binder call can still finish.
+        if (landed != true) {
+            if (landed == false && moved.isSuccess) synchronized(parkingLock) {
+                slot.apps.remove(pkg)
+                slot.selected = previous
+            }
+            throw parkingFailure(moved.getOrNull()?.second ?: moved.exceptionOrNull()?.message)
+        }
+        checkParkingOwner(sid, d)
+        if (synchronized(parkingLock) { parking !== slot }) throw parkingFailure()
+        task.taskId
+    }
+
+    internal fun unparkApp(sid: String, d: VScreenDisplay, pkg: String): Int = synchronized(parkingOps) {
+        checkParkingOwner(sid, d)
+        val (slot, task) = synchronized(parkingLock) {
+            val slot = parking?.takeIf { it.sessionId == sid && it.active === d } ?: throw missingParkingTask(pkg)
+            slot to (slot.apps[pkg] ?: throw missingParkingTask(pkg))
+        }
+        val hidden = slot.displayId ?: throw missingParkingTask(pkg)
+        val onActive = VScreenHandoff.tasksOrNull(d.displayId)?.any { it.taskId == task } == true
+        if (!onActive) {
+            val parked = VScreenHandoff.tasksOrNull(hidden) ?: throw parkingFailure()
+            if (parked.none { it.taskId == task }) {
+                synchronized(parkingLock) {
+                    slot.apps.remove(pkg)
+                    if (slot.selected == pkg) slot.selected = null
+                }
+                throw missingParkingTask(pkg)
+            }
+            val moved = VScreenRemoteDisplay.moveTask(task, d.displayId, source = hidden)
+            if (VScreenHandoff.tasksOrNull(d.displayId)?.none { it.taskId == task } != false)
+                throw parkingFailure(moved.getOrNull()?.second ?: moved.exceptionOrNull()?.message)
+        }
+        checkParkingOwner(sid, d)
+        if (!VScreenShell.bringToFront(d.displayId, task)) throw parkingFailure(tr("任务没有回到副屏前台", "The task is not in front on the screen"))
+        synchronized(parkingLock) {
+            if (parking !== slot) throw parkingFailure()
+            slot.apps.remove(pkg)
+            slot.selected = null
+        }
+        task
+    }
     /** Adoption of a screen left by a previous process is tried once per process. */
     @Volatile private var adoptTried = false
     /** Set when this process adopted a screen left by a dead one (shown by status). */
@@ -438,7 +567,9 @@ object BackgroundOperation {
             runCatching { com.kilon.agentvscreen.cmd.Teach.endRecording(appContext, byDone = false, screenGone = true, endWaitMs = 800L) }
         // 1.4.2: the open task keeps the screen as it is left (the home page's resting picture), before it goes.
         _state.value.ownerSessionId?.let { TaskLog.captureNow(it) }
-        val d = synchronized(lock) { display.also { display = null } } ?: return
+        val d = synchronized(lock) { display.also { display = null } }
+        clearParking()
+        if (d == null) return
         // Close whatever app was left on the screen so it does not hop to the
         // main display when its display disappears.
         com.kilon.agentvscreen.host.quiet("BackgroundOperation:439") { VScreenShell.finger(d.displayId, "cancel", 0, -1, -1) }
@@ -482,6 +613,7 @@ object BackgroundOperation {
     fun onTaskFinished(sessionId: String) {
         if (sessionId.isEmpty()) return
         synchronized(lock) { tasks.remove(sessionId); turns.remove(sessionId) }
+        clearParking(sessionId)
         TaskLog.captureNow(sessionId)
         TaskLog.onTurnEnd(sessionId, _state.value.userStopped)
         appContext?.let { c -> com.kilon.agentvscreen.host.UserAsk.withdrawSession(c, sessionId) }
@@ -516,6 +648,7 @@ object BackgroundOperation {
         mainHandler.removeCallbacks(idlePark)
         display?.takeIf { it.parked }?.let { d -> Thread { runCatching { unpark(d) } }.apply { isDaemon = true }.start() }
         _state.update { it.copy(takeoverSessionId = sessionId) }
+        clearParking(sessionId)
         return true
     }
 
@@ -525,6 +658,7 @@ object BackgroundOperation {
         _state.value.ownerSessionId?.let { TaskLog.stoppedByUser(it) }
         val wasHeld = _state.value.takeoverSessionId != null
         _state.update { it.copy(userStopped = true, stoppedAt = System.currentTimeMillis(), takeoverSessionId = null, operating = false) }
+        clearParking()
         if (wasHeld) com.kilon.agentvscreen.cmd.Teach.onTakeoverEnded(appContext)
         d?.let { Thread { runCatching { VScreenShell.finger(it.displayId, "cancel", 0, -1, -1) } }.apply { isDaemon = true }.start() }
         AppLogger.info(TAG, "user stop")
@@ -907,6 +1041,7 @@ object BackgroundOperation {
         isRead: Boolean,
         describe: String,
         freshPage: Boolean = false,
+        allowParked: Boolean = freshPage,
         block: (VScreenDisplay) -> T,
     ): T {
         val sid = sessionId ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
@@ -918,6 +1053,7 @@ object BackgroundOperation {
         // on the background screen now is not what the agent planned for: refuse, never act on it.
         if (!isRead && !freshPage) Guard.require(Guard.Act.INPUT.takeIf { VScreenOwnership.blocking(sid) != null } ?: Guard.Act.READ, null, sid)
         val d = acquire(sid, create = false)
+        if (!allowParked) requireNotParked(sid)
         val startedMs = System.currentTimeMillis()
         if (!isRead) actionStarted[d.displayId] = startedMs
         if (d.shellOwned) runCatching { VScreenRemoteDisplay.touch(d.displayId) }

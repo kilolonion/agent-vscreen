@@ -26,7 +26,7 @@ import com.kilon.agentvscreen.host.AppLogger
 internal object VScreenHandoff {
     private const val TAG = "VScreenHandoff"
 
-    data class TaskRef(val taskId: Int, val pkg: String, val visible: Boolean)
+    data class TaskRef(val taskId: Int, val pkg: String, val visible: Boolean, val foreground: Boolean = visible)
 
     /** Standard (app) tasks on [displayId], top first. Home/recents/assistant tasks are left out. */
     fun tasksOn(displayId: Int): List<TaskRef> = tasksOrNull(displayId).orEmpty()
@@ -35,8 +35,12 @@ internal object VScreenHandoff {
     fun tasksOrNull(displayId: Int): List<TaskRef>? {
         // The system's own per-display list (through the display service).
         VScreenShell.taskSource(displayId)?.let { list ->
-            return list.filter { it.isAppTask }.mapNotNull { t -> t.pkg?.let { TaskRef(t.taskId, it, t.visible) } }
-                .distinctBy { it.taskId }
+            val frontId = list.firstOrNull { it.isAppTask && it.visible }?.taskId
+            return list.filter { it.isAppTask }.mapNotNull { t ->
+                val pkg = (t.component ?: t.rootTop)?.substringBefore('/')?.takeUnless { it == "unknown" }
+                pkg?.let { TaskRef(t.taskId, it, t.visible, t.taskId == frontId) }
+            }
+                .distinctBy { it.taskId }.sortedByDescending { it.foreground }
         }
         // 1.2: no dumpsys fallback. Text scraped from dumpsys differs per maker and Android version and mixed up
         // displays; when the system's own list cannot be read the answer is "unknown" (null), never a guess.

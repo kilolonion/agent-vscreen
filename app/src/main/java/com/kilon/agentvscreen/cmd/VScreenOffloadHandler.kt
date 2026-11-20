@@ -46,7 +46,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         internal val lastElements = HashMap<String, ElSet>()
 
         /** Commands that do not read the app on the screen themselves (act and launch check the app rules per step). */
-        internal val RULE_FREE = setOf("status", "apps", "sound", "release", "stop", "fix", "help", "handoff", "note", "keep", "schedule", "ask", "teach", "launch", "act", "events", "done", "title", "task", "diag")
+        internal val RULE_FREE = setOf("status", "apps", "sound", "release", "stop", "fix", "help", "handoff", "note", "keep", "schedule", "ask", "teach", "launch", "act", "events", "done", "title", "task", "tasks", "diag")
 
         /**
          * 1.2: the screen queue. There is one background screen; commands that work on it run one at a time, in the
@@ -114,6 +114,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
             if (spec.long && args.hasFlag("async")) return Tasks.start(this, sid, sub, argv.filter { it != "--async" })
             queued(spec, sid) {
                 BackgroundOperation.refreshStatus()
+                if (sub == "look") BackgroundOperation.requireNotParked(sid)
                 enforceRules(sub)
                 dispatch(sub, args, sid)
             }.let { r ->
@@ -219,6 +220,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         "stop" -> stopCmd(sid, args)
         "release" -> releaseCmd(sid)
         "handoff" -> handoffCmd(sid, args)
+        "tasks" -> tasksCmd(sid)
         "status" -> status(sid, args)
         "apps" -> apps(args)
         "sound" -> soundCmd(args)

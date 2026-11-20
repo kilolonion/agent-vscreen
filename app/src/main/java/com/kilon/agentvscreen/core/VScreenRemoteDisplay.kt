@@ -137,6 +137,13 @@ internal object VScreenRemoteDisplay {
         }
     }.onFailure { AppLogger.warning(TAG, "remote create failed: ${it.message}") }
 
+    fun createParking(active: Int, width: Int, height: Int, dpi: Int): Result<Int> =
+        call(VScreenDisplayService.CREATE_PARKING, {
+            it.writeInt(active); it.writeInt(width); it.writeInt(height); it.writeInt(dpi)
+        }) { it.readInt() }
+
+    fun releaseParking(displayId: Int): Result<Unit> = call(VScreenDisplayService.RELEASE, { it.writeInt(displayId) }) { }
+
     fun release(displayId: Int) {
         val b = binder?.takeIf { it.isBinderAlive } ?: return
         try {
@@ -261,11 +268,12 @@ internal object VScreenRemoteDisplay {
     /** (displayId, taskId) that has the system's input focus. */
     fun focused(): Result<Pair<Int, Int>> = call(VScreenDisplayService.FOCUSED, {}) { it.readInt() to it.readInt() }
 
-    fun focusTask(taskId: Int): Result<Boolean> = call(VScreenDisplayService.FOCUS_TASK, { it.writeInt(taskId) }) { it.readInt() != 0 }
+    fun focusTask(taskId: Int, expectedDisplay: Int? = null): Result<Boolean> =
+        call(VScreenDisplayService.FOCUS_TASK, { it.writeInt(taskId); expectedDisplay?.let(it::writeInt) }) { it.readInt() != 0 }
 
     /** v22 接力: (moved, system's message when not). */
-    fun moveTask(taskId: Int, displayId: Int): Result<Pair<Boolean, String>> =
-        call(VScreenDisplayService.MOVE_TASK, { it.writeInt(taskId); it.writeInt(displayId) }) { (it.readInt() != 0) to (it.readString() ?: "") }
+    fun moveTask(taskId: Int, displayId: Int, source: Int? = null): Result<Pair<Boolean, String>> =
+        call(VScreenDisplayService.MOVE_TASK, { it.writeInt(taskId); it.writeInt(displayId); source?.let(it::writeInt) }) { (it.readInt() != 0) to (it.readString() ?: "") }
 
     data class Existing(val displayId: Int, val width: Int, val height: Int, val dpi: Int, val flags: Int)
 

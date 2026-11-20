@@ -62,9 +62,16 @@ This list and the note agents receive come from one ability table (`Abilities.kt
 - **the same app comes up again and again: a fixed way in, a popup every visit, a picture to pause first, or machine-like timing upsets it**: `vscreen note` keeps what I learned about the app, saved steps (`note save`), before/after steps and human pacing; the next launch lists them
 - **a step only the user can do (password, code, face, scanning), or the app I need is the one the user is using**: `vscreen handoff out` puts the app on the user's screen with what to do; `vscreen handoff in` takes the app from the user's screen
 - **an app has no sound, or the user wants an app muted or its sound back**: `vscreen sound` shows it, `sound mute|unmute <app>` mutes or unmutes
+- **switch or park apps**: `vscreen tasks` lists tasks; `launch --keep` switches without reopening; `handoff park/unpark` sets aside or restores apps
 - **the text is too small or an icon, or there is no text at all (games, canvas, charts), or I need to see what just happened**: `vscreen look` asks for pictures: the screen now, a region up close, or the recording; `vscreen spots` finds tappable color patches
 - **the phone cannot be reached, commands keep failing, or something odd happens**: First tell off from broken: not running, service off or hidden is the user's choice; tell the user to open it, nothing to repair. Only `vscreen status` with ready false is a fault, and `vscreen fix` repairs what it lists and gives sound back to apps left silent
 <!-- abilities:end -->
+
+### Switch between apps on the background screen
+
+Use `vscreen tasks` to see package names, task IDs, and which app is in front. `vscreen launch <app> --keep` brings an existing task forward without restarting it; if the app is not on the screen, it opens a new task.
+
+Use `vscreen handoff park <app>` to put an app task on a hidden display and `vscreen handoff unpark <app>` to bring it back to the foreground. Parked tasks are not shown by `tasks`. If the parked app is still the current target, `look` and `act` return `APP_PARKED` until you unpark it or select another app. Turn end (`done` or inactivity), Stop, and user takeover close parked tasks; parking is not persistent.
 
 ## Why it works well
 

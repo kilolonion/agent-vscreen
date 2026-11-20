@@ -45,8 +45,9 @@ import android.view.Surface
  *                (v27: refused unless the system says the task is on expectedDisplayId)
  *   LIST_TASKS   in: displayId                                    out: status, n, n × (taskId, component, visible, activityType, rootTop)
  *   FOCUSED      in: -                                            out: status, displayId, taskId (-1 = unknown)
- *   FOCUS_TASK   in: taskId                                       out: status, ok(0/1)
- *   MOVE_TASK    in: taskId, displayId (v22 接力)                   out: status, moved(0/1), detail
+ *   FOCUS_TASK   in: taskId, [expected display]                                       out: status, ok(0/1)
+ *   MOVE_TASK    in: taskId, displayId, [expected source display]                   out: status, moved(0/1), detail
+ *   CREATE_PARKING in: activeDisplayId, width, height, dpi           out: status, displayId
  *   LIST         out: status, n, n x (displayId, w, h, dpi, flags)
  *   SET_SURFACE  in: displayId, Surface                            out: status
  *   PARK         in: displayId (surface -> null: display off, v21)  out: status
@@ -74,6 +75,20 @@ class VScreenDisplayService : Binder {
     private val displays = HashMap<Int, VirtualDisplay>()
     private val meta = HashMap<Int, IntArray>()
     private val touched = HashMap<Int, Long>()
+    // A parking display is never advertised for adoption. Its contents must finish on removal, never hop to the main screen.
+    private var parking: Pair<Int, Int>? = null // active display -> hidden display; protected by displays
+
+    private fun releaseLocked(id: Int) {
+        parking?.let { (active, hidden) ->
+            if (id == active || id == hidden) {
+                parking = null
+                if (id == active) releaseLocked(hidden)
+            }
+        }
+        meta.remove(id)
+        touched.remove(id)
+        displays.remove(id)?.release()
+    }
     @Volatile private var reaperStarted = false
 
     private fun startReaper() {
@@ -85,7 +100,7 @@ class VScreenDisplayService : Binder {
                 val now = SystemClock.elapsedRealtime()
                 val stale = synchronized(displays) { touched.filter { now - it.value > ORPHAN_MS }.keys.toList() }
                 for (id in stale) {
-                    synchronized(displays) { touched.remove(id); meta.remove(id); displays.remove(id) }?.let { runCatching { it.release() } }
+                    synchronized(displays) { if (now - (touched[id] ?: now) > ORPHAN_MS) runCatching { releaseLocked(id) } }
                 }
                 if (stale.isNotEmpty()) sound.check()
             }
@@ -231,7 +246,7 @@ class VScreenDisplayService : Binder {
             System.exit(0)
             return true
         }
-        if (code !in CREATE..EXEC) return super.onTransact(code, data, reply, flags)
+        if (code !in CREATE..CREATE_PARKING) return super.onTransact(code, data, reply, flags)
         data.enforceInterface(DESCRIPTOR)
         val out = reply ?: return true
         try {
@@ -251,9 +266,27 @@ class VScreenDisplayService : Binder {
                     startReaper()
                     out.writeInt(0); out.writeInt(id); out.writeInt(lastFlags)
                 }
+                CREATE_PARKING -> {
+                    val active = data.readInt()
+                    val w = data.readInt(); val h = data.readInt(); val dpi = data.readInt()
+                    val id = synchronized(displays) {
+                        check(active in meta) { "active display $active not found" }
+                        check(parking == null) { "previous parking display is still being cleaned up" }
+                        // Private, own content only, display OFF (no Surface). Don't fall back to flags that
+                        // might transfer its tasks to display 0 when torn down.
+                        val vd = create("agent-vscreen-parking", w, h, dpi,
+                            OWN_CONTENT_ONLY or DESTROY_CONTENT_ON_REMOVAL or TRUSTED, null)
+                        vd.display.displayId.also {
+                            displays[it] = vd
+                            touched[it] = SystemClock.elapsedRealtime()
+                            parking = active to it
+                        }
+                    }
+                    out.writeInt(0); out.writeInt(id)
+                }
                 RELEASE -> {
                     val id = data.readInt()
-                    synchronized(displays) { meta.remove(id); touched.remove(id); displays.remove(id) }?.let { runCatching { it.release() } }
+                    synchronized(displays) { releaseLocked(id) }
                     sound.check()
                     out.writeInt(0)
                 }
@@ -297,7 +330,11 @@ class VScreenDisplayService : Binder {
                     out.writeInt(0); out.writeInt(if (injectDrag(id, x1, y1, x2, y2, dur, hold)) 1 else 0)
                 }
                 LIST -> {
-                    val snap = synchronized(displays) { meta.map { it.key to it.value.copyOf() } }
+                    val snap = synchronized(displays) {
+                        // Host restart: keep the active screen, but never adopt an old session's parked apps.
+                        parking?.second?.let { releaseLocked(it) }
+                        meta.map { it.key to it.value.copyOf() }
+                    }
                     out.writeInt(0); out.writeInt(snap.size)
                     for ((id, m) in snap) { out.writeInt(id); m.forEach { out.writeInt(it) } }
                 }
@@ -311,7 +348,11 @@ class VScreenDisplayService : Binder {
                 }
                 TOUCH -> {
                     val id = data.readInt()
-                    synchronized(displays) { if (displays.containsKey(id)) touched[id] = SystemClock.elapsedRealtime() }
+                    synchronized(displays) {
+                        val now = SystemClock.elapsedRealtime()
+                        if (displays.containsKey(id)) touched[id] = now
+                        parking?.takeIf { it.first == id }?.let { touched[it.second] = now }
+                    }
                     out.writeInt(0)
                 }
                 PARK -> {
@@ -348,7 +389,10 @@ class VScreenDisplayService : Binder {
                     val all = rootTasks()
                     if (all.isNotEmpty() && all.all { it.displayId < 0 }) error(tr("系统任务列表里没有 displayId", "The system task list has no displayId"))
                     val roots = all.filter { it.displayId == id }
-                    val rows = roots.flatMap { r -> r.children.mapIndexed { i, c -> listOf(c.first, c.second, if (r.visible) 1 else 0, r.type, if (i == 0) r.top else null) } }
+                    val rows = roots.flatMap { r ->
+                        // AOSP reports leaf IDs bottom first within each root. Report only the top leaf visible.
+                        r.children.asReversed().mapIndexed { i, c -> listOf(c.first, c.second, if (i == 0 && r.visible) 1 else 0, r.type, if (i == 0) r.top else null) }
+                    }
                     out.writeInt(0); out.writeInt(rows.size)
                     rows.forEach { row ->
                         out.writeInt(row[0] as Int); out.writeString(row[1] as String?); out.writeInt(row[2] as Int)
@@ -361,7 +405,9 @@ class VScreenDisplayService : Binder {
                 }
                 FOCUS_TASK -> {
                     val taskId = data.readInt()
+                    val expected = if (data.dataAvail() >= 4) data.readInt() else null
                     val r = runCatching {
+                        if (expected != null) check(rootTasks().any { r -> r.displayId == expected && r.children.any { it.first == taskId } })
                         val a = atmService()
                         a.javaClass.getMethod("setFocusedTask", Int::class.javaPrimitiveType).invoke(a, taskId); true
                     }.getOrDefault(false)
@@ -369,7 +415,16 @@ class VScreenDisplayService : Binder {
                 }
                 MOVE_TASK -> {
                     val taskId = data.readInt(); val target = data.readInt()
-                    val r = runCatching { moveTask(taskId, target) }
+                    val source = if (data.dataAvail() >= 4) data.readInt() else null
+                    val r = runCatching {
+                        if (source == null) moveTask(taskId, target)
+                        else synchronized(displays) {
+                            check(parking == (source to target) || parking == (target to source)) { "parking display pair no longer exists" }
+                            val root = rootTasks().firstOrNull { r -> r.displayId == source && r.children.any { it.first == taskId } }
+                            check(root != null && root.children.size == 1) { "task moved away or shares a root with other tasks" }
+                            moveTask(taskId, target)
+                        }
+                    }
                     val e = r.exceptionOrNull()?.let { (it as? java.lang.reflect.InvocationTargetException)?.targetException ?: it }
                     out.writeInt(0); out.writeInt(if (r.isSuccess) 1 else 0)
                     out.writeString(e?.let { "${it.javaClass.simpleName}: ${it.message}" } ?: "")
@@ -767,7 +822,7 @@ class VScreenDisplayService : Binder {
         val o = runCatching { a.javaClass.getMethod("getFocusedRootTaskInfo").invoke(a) }
             .getOrElse { a.javaClass.getMethod("getFocusedStackInfo").invoke(a) } ?: return null
         val r = rootOf(o)
-        return r.displayId to (r.children.firstOrNull()?.first ?: -1)
+        return r.displayId to (r.children.lastOrNull()?.first ?: -1)
     }
 
     /** Remove one task (the background screen's own copy of an app) without killing the app. */
@@ -807,7 +862,7 @@ class VScreenDisplayService : Binder {
         return null
     }
 
-    private fun create(name: String, w: Int, h: Int, dpi: Int, requested: Int, surface: Surface): VirtualDisplay {
+    private fun create(name: String, w: Int, h: Int, dpi: Int, requested: Int, surface: Surface?): VirtualDisplay {
         val dm = displayManager()
         val candidates = if (requested != 0) listOf(requested) else defaultFlagLadder()
         var last: Throwable? = null
@@ -879,6 +934,7 @@ class VScreenDisplayService : Binder {
          * out: status, exit code (124 = timed out, the coreutils convention).
          */
         const val EXEC = FIRST_CALL_TRANSACTION + 20
+        const val CREATE_PARKING = FIRST_CALL_TRANSACTION + 21
         /** Apps the service silenced, so a service that was killed gives them back on its next start. Shell-owned. */
         const val FILE = "/data/local/tmp/agent-vscreen-muted.json"
         /** "allow" / "ignore" / "default" … as `appops get` says it, or null when it cannot be read. */
@@ -890,7 +946,7 @@ class VScreenDisplayService : Binder {
         /** A display nobody touched for this long (app gone) is released. */
         const val ORPHAN_MS = 20 * 60_000L
         /** Bump when the protocol changes, so Shizuku restarts an old service process. */
-        const val PROTOCOL = 13
+        const val PROTOCOL = 14
         /** Shizuku's reserved "destroy user service" transaction. */
         const val DESTROY_CODE = 16777115
         private const val SHELL_PKG = "com.android.shell"

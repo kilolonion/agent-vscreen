@@ -36,6 +36,19 @@ internal object VScreenShell {
     /** ROOT: an app already on the background screen goes back to its first page (default). KEEP: just bring it forward. RESTART: force-stop first. */
     enum class LaunchMode { ROOT, KEEP, RESTART }
 
+    @Volatile internal var taskFocus: (Int, Int) -> Result<Boolean> = { taskId, display -> VScreenRemoteDisplay.focusTask(taskId, display) }
+
+    /** Focus this exact task without sending a launcher intent (which can recreate activities). */
+    fun bringToFront(displayId: Int, taskId: Int): Boolean {
+        if (VScreenHandoff.tasksOrNull(displayId)?.any { it.taskId == taskId && it.foreground } == true) return true
+        if (taskFocus(taskId, displayId).getOrNull() != true) return false
+        repeat(8) {
+            if (VScreenHandoff.tasksOrNull(displayId)?.any { it.taskId == taskId && it.foreground } == true) return true
+            Thread.sleep(200)
+        }
+        return false
+    }
+
     fun launch(displayId: Int, pkg: String, activity: String?, mode0: LaunchMode = LaunchMode.ROOT, intent: List<String>? = null): Outcome {
         val clean = pkg.trim()
         if (clean.isEmpty()) return fail("INVALID_ARGS", tr("缺少包名", "Missing package name"))
@@ -43,6 +56,16 @@ internal object VScreenShell {
         // always opened in a fresh task on the background screen (never "keep").
         val mode = if (intent != null && mode0 == LaunchMode.KEEP) LaunchMode.ROOT else mode0
         val explicit = activity?.trim()?.takeIf { it.isNotEmpty() }?.let { if (it.contains('/')) it else "$clean/$it" }
+        if (mode == LaunchMode.KEEP) {
+            val target = explicit?.substringBefore('/') ?: clean
+            val tasks = VScreenHandoff.tasksOrNull(displayId) ?: return fail("LAUNCH_FAILED",
+                tr("无法读取副屏任务列表，不能安全切换 $target", "Cannot read the screen's task list to safely switch to $target"))
+            tasks.firstOrNull { it.pkg == target }?.let { task ->
+                return if (bringToFront(displayId, task.taskId))
+                    ok(tr("已切到副屏 $displayId 上的 $target（保持当前页面）", "Switched to $target on screen $displayId (current page kept)"))
+                else fail("LAUNCH_NOT_ON_TOP", tr("系统没有把 $target 的任务切到副屏前台", "The system did not bring $target's task to the front of the screen"))
+            }
+        }
         val component: String = explicit ?: (if (intent != null) "" else resolveLauncher(clean))
             ?: return fail("APP_NOT_FOUND", tr("找不到 $clean 的启动入口（未安装，或没有桌面图标）", "No launch entry for $clean (not installed, or no launcher icon)"))
         val targetPkg = if (component.isEmpty()) clean else component.substringBefore('/')
@@ -52,13 +75,9 @@ internal object VScreenShell {
             val r = run(arrayOf("am", "force-stop", targetPkg), 8_000L)
             prefix = if (r.exitCode == 0) tr("已结束 $targetPkg 并冷启动；", "Stopped $targetPkg and cold-started it; ") else tr("结束 $targetPkg 失败（${r.combined.take(80)}），仍尝试启动；", "Stopping $targetPkg failed (${r.combined.take(80)}), starting anyway; ")
             Thread.sleep(300)
-        } else {
+        } else if (mode == LaunchMode.ROOT) {
             val taskId = taskIdOn(displayId, targetPkg)
             if (taskId != null) {
-                if (mode == LaunchMode.KEEP) {
-                    run(arrayOf("am", "start", "--display", displayId.toString(), "-n", component), 15_000L)
-                    return ok(tr("$targetPkg 已在副屏 $displayId 上（保持当前页面）", "$targetPkg is already on screen $displayId (current page kept)"))
-                }
                 // Back to the first page: drop the background screen's own task
                 // (the app keeps running, the user's copy on the main screen is
                 // untouched), then start a fresh task below.

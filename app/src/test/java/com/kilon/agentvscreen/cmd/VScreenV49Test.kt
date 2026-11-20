@@ -105,7 +105,7 @@ class VScreenV49Test {
     @Test fun theCommandTableIsTheOptionSource() {
         val h = VScreenOffloadHandler(RuntimeEnvironment.getApplication())
         assertEquals(setOf("stop", "watch", "fast", "bare", "human", "keep", "for", "save", "paused", "confirmed", "async"), h.optionsOf("act"))
-        assertEquals(setOf("landscape", "portrait", "restart", "asked", "async"), h.optionsOf("launch"))
+        assertEquals(setOf("landscape", "portrait", "restart", "asked", "keep", "async"), h.optionsOf("launch"))
         assertNull(h.optionsOf("tap"))
         refused { h.checkOptions("act", listOf("--expect", "x")) }
         refused { h.checkOptions("act", listOf("--fast=1")) }
