@@ -11,7 +11,7 @@ name: Device tests (emulator)
 #    the next app process adopts it, and switching back to Shizuku stops it.
 on:
   push:
-    branches: [main, v1.4, 'beta/**']
+    branches: [main, v1.4, v2.0, 'v2/**', 'beta/**']
   pull_request:
   workflow_dispatch:
 permissions:
