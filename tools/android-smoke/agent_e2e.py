@@ -6,11 +6,15 @@ tools/android-smoke/avsu.c; --root-uid0 makes it refuse `su <uid>`, so the servi
 What it guards: the service comes up with Shizuku, `launch` builds a screen and opens an app there, the user's main
 screen is not touched, `look` and `act` work on it, `release` closes it, and the app process never crashes or loses a
 background thread on the way (status background_thread_deaths).
+1.4.2-beta6 adds the session and control scenarios: `launch --keep` keeps the page, park / unpark, Stop and takeover
+refuse the agent until the hand-back, a takeover outlives the agent's turn, and a long press the user stops midway is
+cancelled (no tap reaches the app).
 """
 import json
 import re
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -270,6 +274,99 @@ def root_extras():
     check("state follows the switch", wait_priv(("shizuku", "NOT_INSTALLED"), 20), str(priv_state()))
 
 
+def control(what):
+    """Do what the user's buttons do (CiHook): takeover, handback, stop, resume, quiet:<ms>."""
+    shell("run-as", APP, "rm", "-f", "files/ci-control.txt")
+    shell("am", "broadcast", "-a", "com.kilon.agentvscreen.CI_SEED", "-p", APP, "--es", "control", what)
+    out = ""
+    for _ in range(40):
+        out = shell("run-as", APP, "cat", "files/ci-control.txt", "2>/dev/null", "||", "true")
+        if out.startswith("done"):
+            break
+        time.sleep(0.5)
+    print("control", what, "->", out, flush=True)
+    return out
+
+
+def why(r):
+    """The code and the start of the message, so a failed step says what the app answered."""
+    return "%s %s" % (r.get("code"), (r.get("error") or r.get("text") or "")[:240].replace("\n", " | "))
+
+
+def activity(r):
+    return (r.get("screen") or {}).get("activity")
+
+
+def session_and_control(target, x=None, y=None):
+    tap = 'act "tap %s"' % target.replace('"', "")
+
+    # launch --keep goes back to the page as it was, without rebuilding the screen.
+    r = api(tap)
+    inner = activity(r)
+    r = api("launch com.android.settings --keep")
+    check("launch --keep keeps the page", r.get("ok") is True and (inner is None or activity(r) == inner),
+          "%s %s -> %s" % (r.get("code"), inner, activity(r)))
+
+    # park / unpark: a parked app is not operable (APP_PARKED) until it is brought back.
+    # (No back key first: on the Settings home page it closes the app, and there is nothing left to park.)
+    r = api("handoff park com.android.settings")
+    check("park", r.get("ok") is True, why(r))
+    r = api("act")
+    check("look at a parked app says APP_PARKED", r.get("code") == "APP_PARKED", why(r))
+    r = api("handoff unpark com.android.settings")
+    check("unpark", r.get("ok") is True, why(r))
+
+    # Stop refuses the agent until the user allows it again; Stop also clears parking.
+    api("handoff park com.android.settings")
+    control("stop")
+    r = api(tap)
+    check("Stop refuses the agent", r.get("code") == "USER_STOPPED", str(r.get("code")))
+    control("resume")
+    r = api("act")
+    check("after Stop and resume the agent can look", r.get("ok") is True and r.get("code") != "APP_PARKED", str(r.get("code")))
+
+    # A takeover refuses the agent, and the agent's turn ending (quiet window) does not drop it.
+    control("quiet:3000")
+    control("takeover")
+    r = api(tap)
+    check("takeover refuses the agent", r.get("code") == "USER_TAKEOVER", str(r.get("code")))
+    time.sleep(8)
+    out = control("quiet:180000")
+    check("takeover outlives the agent's turn", "takeover=None" not in out, out)
+    r = api(tap)
+    check("still refused while the user holds it", r.get("code") == "USER_TAKEOVER", str(r.get("code")))
+    control("handback")
+    r = api("act")
+    check("after the hand-back the agent can look", r.get("ok") is True, str(r.get("code")))
+    r = api(tap)
+    # Not refused is the point: the page may have moved on, so a target that is gone (NOT_FOUND) still counts.
+    check("and act again", r.get("ok") is True or r.get("code") not in ("USER_TAKEOVER", "USER_STOPPED", "CONTROL_CHANGED", None), why(r))
+    # No back key here: on the Settings home page it closes the app, and the press then waits in the system's input
+    # queue for a window that never comes (the emulator run showed a 5 s wait, not a gesture that went on).
+    before = activity(api("act"))
+
+    # A long press the user stops midway ends with a cancel: the call comes back early and no tap reaches the app
+    # (a lift after a long press opens the entry; a cancel does not).
+    res = {}
+    def press():
+        t0 = time.time()
+        # At its coordinates: no reading of the screen before the press, so the Stop lands while it is held.
+        where = "%d %d" % (x, y) if x is not None and y is not None else target.replace('"', "")
+        res["r"] = api('act "press %s 6s"' % where)
+        res["s"] = time.time() - t0
+    th = threading.Thread(target=press)
+    th.start()
+    time.sleep(2.5)
+    control("stop")
+    th.join(60)
+    r = res.get("r") or {}
+    check("a stopped long press comes back early", r.get("code") in ("USER_STOPPED", "CONTROL_CHANGED") and res.get("s", 99) < 5.5,
+          "%s after %.1fs" % (r.get("code"), res.get("s", -1)))
+    control("resume")
+    r = api("act")
+    check("the stopped long press tapped nothing", before is None or activity(r) == before, "%s -> %s" % (before, activity(r)))
+
+
 def main():
     global TOKEN
     setup()
@@ -312,6 +409,10 @@ def main():
     # A second session must be told the screen is busy, not get a second screen.
     r = api("launch com.android.settings", session="other")
     check("second session told BUSY", r.get("code") == "BUSY", str(r.get("code")))
+
+    if target:
+        el = next((e for e in els if e.get("text") == target), {})
+        session_and_control(target, el.get("x"), el.get("y"))
 
     r = api("release")
     check("release", r.get("ok") is True, str(r.get("code")))

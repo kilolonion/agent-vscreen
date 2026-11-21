@@ -394,6 +394,7 @@ internal fun VScreenOffloadHandler.runSegment(sid: String, d: VScreenDisplay, st
     val notes = Notes()
     val main0 = mainWatch(sid)
     VScreenAwake.ensure(d)?.let { notes += it }
+    BackgroundOperation.takeWakeNote(d.displayId)?.let { notes.add("SCREEN_RESUMED", it) }
     VScreenAwake.kick("act")
     VScreenPerception.ensure(d)
     val app = workApp(sid, d)
@@ -641,6 +642,20 @@ internal fun VScreenOffloadHandler.runSegment(sid: String, d: VScreenDisplay, st
                     late.stopped?.let { stoppedBy = it; stoppedAt = label; so.status = "stopped" }
                 }
                 if (same != null) so.changed = !same
+                // 1.4.2-beta6 (test: a menu with moving lines behind it swallowed a tap during its entry animation, and the
+                // reply said the tap was done and the screen settled): where the screen keeps moving by itself, "the picture
+                // changed" proves nothing about a tap. When the tap point is inside an area that moves on its own (or most
+                // of the screen does), the change is not counted as the tap's effect, and the reply says it is unproven.
+                // A drag or swipe on a screen that mostly moves by itself is the same case (test: a drag that never
+                // took was reported as done because the game kept animating).
+                val tapped = so.point?.takeIf { step.kind == StepKind.TAP || step.kind == StepKind.PRESS }
+                val dragged = step.kind == StepKind.DRAG || step.kind == StepKind.SWIPE
+                if (same == false && so.status == "done" && mask != null &&
+                    ((tapped != null && (mask.mostly || mask.covers(tapped.first, tapped.second))) || (dragged && mask.mostly))) {
+                    so.changed = null
+                    notes.add("UNPROVEN", tr("第 $label 步（${step.raw}）做在一直自己在动的画面上，之后的变化可能只是动画：不能说明它生效了（动画中的界面也可能还不接受操作）。看图核对，没生效就等那部分停下（或先暂停应用）再做",
+                        "Step $label (${step.raw}) acted where the screen keeps moving by itself, so the change afterwards may be only the animation: it does not show the step worked (an animating screen may not take input yet). Check the picture; if it did not work, do it again once that part stops (or pause the app first)"))
+                }
                 if (same == true && so.status == "done") notes.add("NO_CHANGE", tr("第 $label 步（${step.raw}）之后画面没有任何变化：可能没点中、控件没响应，或变化不在画面上。看图核对这一步有没有生效", "After step $label (${step.raw}) nothing on the screen changed: it may have missed, the control may not respond, or the effect is not visible. Check the picture to see whether the step took effect"))
             }
             so.text = tr("$label ${step.raw} → $fact；$waitTxt", "$label ${step.raw} → $fact; $waitTxt") + if (so.changed == false) tr("；画面没有变化", "; the screen did not change") else ""

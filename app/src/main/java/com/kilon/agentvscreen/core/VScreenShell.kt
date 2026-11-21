@@ -93,6 +93,11 @@ internal object VScreenShell {
         // display instead of pulling the user's existing task (on the main screen)
         // to the front where it already lives.
         val target = intent ?: listOf("-n", component)
+        // 1.4.2-beta6: the start is a task of its own (MULTIPLE_TASK). When the user has the app open in front on the
+        // main screen, the reply says that copy was not taken over (a tester read "launched" as "got the user's app").
+        val userHasIt = runCatching { topPackage(0) == targetPkg }.getOrDefault(false)
+        val separate = if (userHasIt) tr("（用户主屏上开着的 $targetPkg 没有动：这是在副屏另开的一份，从它自己的首页开始，主屏那份的页面和进度不在这里）",
+            " (the $targetPkg open in front on the user's main screen was not touched: this is a separate copy on the background screen, starting from its own first page; the main screen's page and progress are not here)") else ""
         val argv = arrayOf(
             "am", "start", "-W", "--display", displayId.toString(),
             "--windowingMode", "1", "-f", "0x18000000",
@@ -115,9 +120,10 @@ internal object VScreenShell {
         for (i in 0 until 6) {
             Thread.sleep(300)
             top = topPackage(displayId)
-            if (top == targetPkg) return ok(if (intent != null) tr("${prefix}已在副屏 $displayId 直接打开 $what", "${prefix}opened $what directly on screen $displayId") else tr("${prefix}已在副屏 $displayId 启动 $component（首页）", "${prefix}started $component (home page) on screen $displayId"))
+            if (top == targetPkg) return ok((if (intent != null) tr("${prefix}已在副屏 $displayId 直接打开 $what", "${prefix}opened $what directly on screen $displayId") else tr("${prefix}已在副屏 $displayId 启动 $component（首页）", "${prefix}started $component (home page) on screen $displayId")) + separate)
         }
-        val onMain = topPackage(0) == targetPkg
+        // Not when it was already there before this launch: then it says nothing about where this start went.
+        val onMain = !userHasIt && topPackage(0) == targetPkg
         return if (onMain) {
             val why = VScreenDisplay.lastRemoteError?.let { tr("（Shizuku 副屏服务不可用：$it，只能用 App 自建副屏，系统不允许 shell 往上启动应用）", " (Shizuku screen service unavailable: $it; only the app's own screen can be used, and the system does not let the shell start apps on it)") } ?: ""
             fail("LAUNCHED_ON_MAIN_SCREEN", tr("系统把 $targetPkg 开到了主屏，而不是副屏 $displayId$why。不要在主屏上继续操作，请告诉用户。", "The system opened $targetPkg on the main screen instead of screen $displayId$why. Do not go on operating the main screen; tell the user."))
@@ -347,6 +353,9 @@ internal object VScreenShell {
     }
 
     private fun injectedOutcome(what: String, displayId: Int, r: Result<Boolean>): Outcome = when {
+        // 1.4.2-beta6: an input the screen service cut short because the user took over or stopped meanwhile (it ended
+        // with a cancel) says so (USER_STOPPED / USER_TAKEOVER / CONTROL_CHANGED), not "the system refused".
+        r.getOrNull() == false && !Control.isUser() -> { Control.admitInput(); fail("INPUT_FAILED", tr("系统拒绝了副屏 $displayId 上的 $what 注入", "The system refused injecting $what on screen $displayId")) }
         r.getOrNull() == true -> ok(tr("副屏 $displayId：$what 已注入", "screen $displayId: $what injected"))
         r.isFailure -> fail("NOT_CONNECTED", tr("副屏服务（Shizuku）不可用，$what 没有做：${r.exceptionOrNull()?.message}。多半是 Shizuku 停了：请用户打开 Shizuku 启动它", "The screen service (Shizuku) is unavailable, $what was not done: ${r.exceptionOrNull()?.message}. Most likely Shizuku stopped: ask the user to start it in Shizuku"))
         else -> fail("INPUT_FAILED", tr("系统拒绝了副屏 $displayId 上的 $what 注入", "The system refused injecting $what on screen $displayId"))

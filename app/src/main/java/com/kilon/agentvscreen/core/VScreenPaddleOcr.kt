@@ -146,6 +146,10 @@ internal object VScreenPaddleOcr {
      */
     private val slot = java.util.concurrent.Semaphore(1)
     @Volatile private var busySince = 0L
+    internal const val SLOT_WAIT_MS = 3_000L
+
+    /** A reading is running (maybe one its caller gave up on): it takes CPU from whatever reads the screen meanwhile. */
+    fun busy(): Boolean = slot.availablePermits() == 0
 
     /**
      * Items in frame pixels. Throws on any failure. Not on the main thread.
@@ -160,7 +164,10 @@ internal object VScreenPaddleOcr {
      * the reader that is still running must not read a recycled picture (API 35 CI: "getWidth() on a recycle()'d bitmap").
      */
     fun recognize(context: Context, frame: Bitmap): List<VScreenOcr.Item> {
-        if (!slot.tryAcquire(TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS))
+        // 1.4.2-beta6: a caller waits for the slot only as long as a normal reading takes ([SLOT_WAIT_MS]), not the
+        // whole [TIMEOUT_MS]. A reader past that is one this CPU cannot finish in time (the cold build under emulator
+        // translation took 36 s on API 35 CI); waiting 15 s for it, then giving ML Kit what was left, was the OCR_DOWN.
+        if (!slot.tryAcquire(SLOT_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS))
             error("PP-OCRv6 busy: a reading has not finished for ${(android.os.SystemClock.elapsedRealtime() - busySince) / 1000} s")
         val own: Bitmap
         val task: java.util.concurrent.FutureTask<List<VScreenOcr.Item>>

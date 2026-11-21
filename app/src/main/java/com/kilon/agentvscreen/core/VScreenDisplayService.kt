@@ -249,7 +249,8 @@ class VScreenDisplayService : Binder {
             System.exit(0)
             return true
         }
-        if (code !in CREATE..CREATE_PARKING) return super.onTransact(code, data, reply, flags)
+        // Every call code up to LAST_CALL: a range that stopped short of a newer code made the service refuse it (FENCE did).
+        if (code !in CREATE..LAST_CALL) return super.onTransact(code, data, reply, flags)
         data.enforceInterface(DESCRIPTOR)
         val out = reply ?: return true
         try {
@@ -1013,6 +1014,8 @@ class VScreenDisplayService : Binder {
          * ([InputFence.USER] for the user's own input); see [InputFence].
          */
         const val FENCE = FIRST_CALL_TRANSACTION + 22
+        /** The newest call code; onTransact serves CREATE..LAST_CALL. A new code moves this. */
+        const val LAST_CALL = FENCE
         /** Apps the service silenced, so a service that was killed gives them back on its next start. Shell-owned. */
         const val FILE = "/data/local/tmp/agent-vscreen-muted.json"
         /** "allow" / "ignore" / "default" … as `appops get` says it, or null when it cannot be read. */

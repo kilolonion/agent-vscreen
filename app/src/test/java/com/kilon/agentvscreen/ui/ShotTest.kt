@@ -107,7 +107,7 @@ class OverlayShotTest {
         com.kilon.agentvscreen.api.ApiConfig.init(app)
         val base = com.kilon.agentvscreen.core.BackgroundOperation.State(ownerSessionId = "default", displayId = 5, screenWidth = 1080, screenHeight = 2340)
         val states = listOf(
-            "acting" to base.copy(operating = true, agentTitle = "在比价蓝牙耳机"),
+            "acting" to base.copy(operating = true, titleText = "在比价蓝牙耳机", titleSession = "default"),
             "standby" to base,
             "takeover" to base.copy(takeoverSessionId = "default"),
             "stopped" to base.copy(userStopped = true),

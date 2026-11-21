@@ -23,6 +23,21 @@ class CiHook : BroadcastReceiver() {
                     com.kilon.agentvscreen.host.Privileged.Via.entries.firstOrNull { it.key == v }?.let { com.kilon.agentvscreen.host.Privileged.choose(app, it) }
                     return@Thread
                 }
+                // 1.4.2-beta6: `--es control takeover|handback|stop|resume|quiet:<ms>` does what the user's buttons do
+                // (take over the agent's screen, hand it back, Stop, allow again) or sets the turn's quiet window, so
+                // the emulator tests can check takeover / Stop timing. Answers "done <state>" in files/ci-control.txt.
+                intent.getStringExtra("control")?.let { what ->
+                    val bo = com.kilon.agentvscreen.core.BackgroundOperation
+                    when {
+                        what == "takeover" -> bo.state.value.ownerSessionId?.let { bo.beginTakeover(it) }
+                        what == "handback" || what == "resume" -> bo.userResume()
+                        what == "stop" -> bo.userStop()
+                        what.startsWith("quiet:") -> what.removePrefix("quiet:").toLongOrNull()?.let { com.kilon.agentvscreen.api.Turns.quietMs = it }
+                    }
+                    val st = bo.state.value
+                    File(app.filesDir, "ci-control.txt").writeText("done $what takeover=${st.takeoverSessionId} stopped=${st.userStopped}\n")
+                    return@Thread
+                }
                 com.kilon.agentvscreen.host.Prefs.setServiceOn(app, true)
                 HostService.start(app)
                 // The main token's text (the token list keeps only its hash). Written at once, then again with the port.

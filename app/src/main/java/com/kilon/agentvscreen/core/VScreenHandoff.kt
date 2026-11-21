@@ -49,10 +49,26 @@ internal object VScreenHandoff {
 
     /** The launcher (home) packages, which are never handed over. */
     fun homePackages(): Set<String> {
-        val r = VScreenShell.run(arrayOf("cmd", "package", "query-activities", "--brief",
+        val r = VScreenShell.run(arrayOf("cmd", "package", "query-activities",
             "-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME"), 8_000L)
-        return r.combined.lineSequence().map { it.trim() }.filter { it.contains('/') && !it.contains(' ') }
-            .map { it.substringBefore('/') }.toSet()
+        return homePackagesFrom(r.combined)
+    }
+
+    /**
+     * 1.4.2-beta6: real launchers only. Settings carries a HOME activity too (FallbackHome, shown while the phone
+     * boots, priority -1000), so a plain list of HOME handlers named Settings a launcher and refused to park or hand
+     * it over on every phone. A handler with a negative priority is a fallback, not a launcher.
+     */
+    internal fun homePackagesFrom(out: String): Set<String> {
+        val blocks = out.split(Regex("(?m)^\\s*Activity #\\d+:")).drop(1)
+        if (blocks.isEmpty()) // an older shell without the long form: every listed component
+            return out.lineSequence().map { it.trim() }.filter { it.contains('/') && !it.contains(' ') }
+                .map { it.substringBefore('/') }.toSet()
+        return blocks.mapNotNull { b ->
+            val pkg = Regex("packageName=(\\S+)").find(b)?.groupValues?.get(1) ?: return@mapNotNull null
+            val priority = Regex("priority=(-?\\d+)").find(b)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+            pkg.takeIf { priority >= 0 }
+        }.toSet()
     }
 
     data class Moved(val ok: Boolean, val via: String, val detail: String)

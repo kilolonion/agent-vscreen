@@ -41,8 +41,9 @@ object Turns {
     fun end(sid: String) {
         val now = synchronized(this) {
             val n = ((inFlight[sid] ?: 1) - 1).coerceAtLeast(0)
-            inFlight[sid] = n
-            if (n > 0) return
+            // 1.4.2-beta6: a session with nothing running leaves no entry behind (one per caller ever seen, before).
+            if (n > 0) { inFlight[sid] = n; return }
+            inFlight.remove(sid)
             quietSince[sid] = SystemClock.elapsedRealtime()
             if (doneAsked.remove(sid)) true else {
                 val r = Runnable { finish(sid) }

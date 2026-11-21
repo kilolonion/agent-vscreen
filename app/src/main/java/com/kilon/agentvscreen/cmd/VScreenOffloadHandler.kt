@@ -39,11 +39,21 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         val HELP: String get() = CommandSpec.fullHelp()
 
         /** Last activity observed per display (status shows it). */
-        internal val lastActivity = HashMap<Int, String>()
+        internal val lastActivity: HashMap<Int, String> = recent()
         /** Per session: when its last four-block return was made (epoch ms) — the start of the next "meanwhile". */
-        internal val lastReturn = HashMap<String, Long>()
+        internal val lastReturn: HashMap<String, Long> = recent()
         /** Per session: the element list of its last "now" block (what #N means). */
-        internal val lastElements = HashMap<String, ElSet>()
+        internal val lastElements: HashMap<String, ElSet> = recent()
+
+        /**
+         * 1.4.2-beta6: per-session (and per-display) memory keeps only the [RECENT] keys used last. Before, every caller
+         * ever seen kept its entry (an element list each) for the life of the app. A session older than that simply
+         * starts over: its next return covers no "meanwhile" and numbers its elements afresh, as after a restart.
+         */
+        internal const val RECENT = 32
+        internal fun <K, V> recent(): HashMap<K, V> = object : LinkedHashMap<K, V>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?): Boolean = size > RECENT
+        }
 
         /** Commands that do not read the app on the screen themselves (act and launch check the app rules per step). */
         internal val RULE_FREE = setOf("status", "apps", "sound", "release", "stop", "fix", "help", "handoff", "note", "keep", "schedule", "ask", "teach", "launch", "act", "events", "done", "title", "task", "tasks", "diag")

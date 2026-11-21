@@ -505,7 +505,7 @@ class VScreenDisplay private constructor(
         }
         val woke = lastFrameAtMs >= t0
         return when {
-            woke -> tr("副屏刚从省电暂停中恢复（${SystemClock.elapsedRealtime() - t0}ms），页面保留；应用可能刚回到前台，先 read 确认", "The screen just resumed from its power-save pause (${SystemClock.elapsedRealtime() - t0}ms) with the page kept; the app may have just come back to the front, check with read first")
+            woke -> tr("副屏刚从省电暂停中恢复（${SystemClock.elapsedRealtime() - t0}ms）。暂停时应用不在前台，有的应用（游戏、视频、录音）会自己暂停或弹出菜单：以下面的画面为准，不要按上次看到的操作", "The screen just resumed from its power-save pause (${SystemClock.elapsedRealtime() - t0}ms). While paused the app was not in front, and some apps (games, video, recorders) pause themselves or show a menu then: go by the picture below, not by what you saw last time")
             ok -> tr("副屏已从省电暂停中恢复，但还没收到新画面（静止页面可能不重绘）；先 read 确认", "The screen resumed from its power-save pause but no new frame arrived yet (a still page may not redraw); check with read first")
             else -> tr("副屏从省电暂停恢复失败：画面可能不更新。用 release 后重新 launch", "Resuming the screen from its power-save pause failed: the picture may not update. release, then launch again")
         }
@@ -580,9 +580,11 @@ class VScreenDisplay private constructor(
          * app process: give it a fresh ImageReader surface. Null on failure.
          */
         internal fun adopt(e: VScreenRemoteDisplay.Existing): VScreenDisplay? {
+            // 1.4.2-beta6: the reader first, the thread only once it exists (a reader that failed left a thread behind).
+            val reader = runCatching { ImageReader.newInstance(e.width, e.height, PixelFormat.RGBA_8888, 3) }
+                .onFailure { AppLogger.warning(TAG, "adopt ${e.displayId}: no image reader: ${it.message}") }.getOrNull() ?: return null
             val thread = HandlerThread("minis-vscreen-frames").apply { start() }
-            val reader = ImageReader.newInstance(e.width, e.height, PixelFormat.RGBA_8888, 3)
-            val r = VScreenRemoteDisplay.setSurface(e.displayId, reader.surface)
+            val r = runCatching { VScreenRemoteDisplay.setSurface(e.displayId, reader.surface) }.getOrElse { Result.failure(it) }
             if (r.isFailure) {
                 AppLogger.warning(TAG, "adopt ${e.displayId} failed: ${r.exceptionOrNull()?.message}")
                 runCatching { reader.close() }; thread.quitSafely()
@@ -603,8 +605,9 @@ class VScreenDisplay private constructor(
         fun create(context: Context, name: String, width: Int, height: Int, dpi: Int): Result<VScreenDisplay> {
             val dm = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
                 ?: return Result.failure(IllegalStateException("DisplayManager unavailable"))
+            val reader = runCatching { ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 3) }
+                .getOrElse { return Result.failure(IllegalStateException("ImageReader ${width}x$height: ${it.message}", it)) }
             val thread = HandlerThread("minis-vscreen-frames").apply { start() }
-            val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 3)
             // Preferred: a shell-owned (and on Android 13+ trusted) display made by
             // the Shizuku UserService. An app-owned display is untrusted: the system
             // refuses `am start --display` from the shell uid and silently opens the

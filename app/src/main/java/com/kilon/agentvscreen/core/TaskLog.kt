@@ -44,6 +44,21 @@ object TaskLog {
 
     @Volatile private var dir: File? = null
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "vscreen-tasklog").apply { isDaemon = true } }
+    /**
+     * 1.4.2-beta6: pictures waiting on the worker. The queue itself has no bound and a picture job holds a full-size
+     * frame; on a slow disk (or a worker stuck in one write) they piled up. Past [MAX_PICS_QUEUED] a new picture is
+     * skipped (the task keeps its text, and the next picture comes with the next command).
+     */
+    private val picsQueued = java.util.concurrent.atomic.AtomicInteger()
+    private const val MAX_PICS_QUEUED = 3
+
+    private fun queuePicture(job: () -> Unit, skipped: () -> Unit = {}) {
+        if (picsQueued.incrementAndGet() > MAX_PICS_QUEUED) { picsQueued.decrementAndGet(); skipped(); return }
+        try {
+            worker.execute { try { runCatching(job) } finally { picsQueued.decrementAndGet() } }
+        } catch (e: java.util.concurrent.RejectedExecutionException) { picsQueued.decrementAndGet(); skipped() }
+    }
+    internal fun picturesQueuedForTest(): Int = picsQueued.get()
     private val open = HashMap<String, Task>()
     private val done = ArrayList<Task>()
     @Volatile private var loaded = false
@@ -157,7 +172,7 @@ object TaskLog {
         if (ends) { onTurnEnd(session); return }
         if (now - t.lastFrameAt < FRAME_GAP_MS) return
         t.lastFrameAt = now
-        worker.execute { runCatching { capture(t) } }
+        queuePicture({ capture(t) })
     }
 
     /**
@@ -172,7 +187,7 @@ object TaskLog {
         // which writes the task's record after it (same single thread), so the record lists this picture.
         val copy = d.latestFrame()?.takeIf { !it.isRecycled && it.width > 0 }
             ?.let { runCatching { it.copy(it.config ?: android.graphics.Bitmap.Config.ARGB_8888, false) }.getOrNull() } ?: return
-        worker.execute { try { runCatching { writeFrame(t, copy) } } finally { copy.recycle() } }
+        queuePicture({ try { writeFrame(t, copy) } finally { copy.recycle() } }, skipped = { copy.recycle() })
     }
 
     private fun capture(t: Task) {

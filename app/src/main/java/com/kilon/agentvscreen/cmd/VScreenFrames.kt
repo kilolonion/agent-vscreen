@@ -30,7 +30,7 @@ import java.util.Locale
 internal class Cell(val t: Long, val bmp: Bitmap, val tag: String, val marks: List<VScreenRecorder.Mark>, val nums: List<Int>)
 
 /** What `frames` with no range shows: the stretch the last four-block reply covered, per session. */
-internal val lastWindows = HashMap<String, LongArray>()
+internal val lastWindows: HashMap<String, LongArray> = VScreenOffloadHandler.recent()
 
 private class Pick(val frame: VScreenRecorder.Frame, val tag: StringBuilder = StringBuilder(), val marks: ArrayList<VScreenRecorder.Mark> = ArrayList(), val nums: ArrayList<Int> = ArrayList())
 

@@ -246,7 +246,9 @@ internal object VScreenOcr {
         if (reusable(c, displayId, frame, version)) return c!!
         val t0 = SystemClock.elapsedRealtime()
         return try {
-            val text = mlkit(frame, 10)
+            // 1.4.2-beta6: ML Kit gets longer while an accurate reading still runs beside it (they share the CPU; on
+            // API 35 CI the fallback timed out at 10 s under a PP-OCRv6 cold build and the agent saw OCR_DOWN).
+            val text = mlkit(frame, if (VScreenPaddleOcr.busy()) 25 else 10)
             val items = ArrayList<Item>()
             for (block in text.textBlocks) for (line in block.lines) items += segment(line)
             items.sortWith(compareBy<Item>({ it.box.top / 8 }, { it.box.left }))

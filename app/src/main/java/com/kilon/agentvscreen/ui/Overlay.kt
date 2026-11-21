@@ -122,6 +122,10 @@ import kotlin.math.roundToInt
  *    shows, and the tab takes that very strip (1.3.0-beta17); tap the tab and the window slides back out; pull the tab
  *    inward and the window opens under the finger;
  *  - two fingers pinch to resize, anchored at the point between them (120 dp … 85 % of the screen);
+ *  - 1.4.2-beta6 (rainbow): a tap shows a bar at the bottom of the window, like a phone's navigation bar; press at its
+ *    height and drag up or down to resize the window with one finger (its top edge and centre stay put);
+ *  - drag the window into the top right corner and let go: it becomes a small window parked there (both orientations);
+ *    a tap on the small window opens it large in the middle of the screen;
  *  - hold one finger still for 0.5 s to take over (a ring fills); a light tap only shows these hints;
  *  - while you hold the screen, taps / swipes / long presses on the picture go to the background screen, and you move
  *    the window by its title pill.
@@ -150,6 +154,69 @@ object Overlay {
     internal val docked = mutableStateOf(false)
     internal val dockRight = mutableStateOf(true)
     internal val hintAt = mutableLongStateOf(0L)
+    /** 1.4.2-beta6: the bottom bar (one-finger resize) is showing; it hides [BAR_MS] after the last touch on it. */
+    internal val barShown = mutableStateOf(false)
+    /** 1.4.2-beta6: the small window parked in the top right corner (tap to open it large). */
+    internal val mini = mutableStateOf(false)
+    /** 1.4.2-beta6: a drag has the finger in the top right corner: letting go there makes the small window. */
+    internal val cornerHot = mutableStateOf(false)
+    /** The width before the window became small (what the orientation's width key keeps meanwhile). */
+    private var fullWidth = 0f
+    private const val BAR_MS = 5_000L
+    /** Height of the bottom strip that is the bar's grip (the bar itself is drawn in its middle). */
+    internal const val BAR_ZONE = 30f
+    private const val CORNER_ZONE = 110f
+    private val hideBar = Runnable { barShown.value = false }
+
+    /** A tap on the window: show the bottom bar (again) for [BAR_MS]. */
+    internal fun showBar() {
+        if (mini.value || docked.value) return
+        barShown.value = true
+        uiHandler.removeCallbacks(hideBar); uiHandler.postDelayed(hideBar, BAR_MS)
+    }
+    internal fun holdBar() { uiHandler.removeCallbacks(hideBar) }
+
+    /** Is (x, y), in the window's own coordinates, on the bar's grip strip? */
+    internal fun onBar(x: Float, y: Float): Boolean {
+        if (!barShown.value || mini.value || docked.value) return false
+        val picH = widthPx.floatValue / aspect()
+        return x >= pad() && x <= pad() + widthPx.floatValue && y >= pad() + picH - dp(BAR_ZONE) && y <= pad() + picH + pad()
+    }
+
+    internal fun inCorner(rawX: Float, rawY: Float): Boolean = WindowSizes.inMiniCorner(rawX, rawY, screenW().toFloat(), dp(CORNER_ZONE))
+
+    private fun miniWidth() = WindowSizes.miniWidth(aspect(), screenW().toFloat(), screenH().toFloat(), dp(72f))
+    private fun miniPlace(w: Float): Pair<Int, Int> = (screenW() - w - 2 * pad() - dp(8f)).toInt().coerceAtLeast(0) to topMargin().toInt()
+
+    /** Let go in the corner: shrink into the small window parked there. */
+    internal fun toMini() {
+        cornerHot.value = false
+        if (!mini.value) fullWidth = widthPx.floatValue
+        barShown.value = false
+        val w = miniWidth()
+        val (x, y) = miniPlace(w)
+        mini.value = true
+        animateTo(x, y, width = w, ms = 220L)
+    }
+
+    /** A tap on the small window: open it large, in the middle of the screen. */
+    internal fun fromMini() {
+        if (!mini.value) return
+        mini.value = false
+        val sw = screenW().toFloat(); val sh = screenH().toFloat()
+        val w = clampWidth(WindowSizes.bigWidth(aspect(), sw, sh))
+        fullWidth = w
+        val gw = w + 2 * pad(); val gh = w / aspect() + 2 * pad()
+        val x = ((sw - gw) / 2).coerceAtLeast(0f); val y = ((sh - gh) / 2).clampIn(topMargin().coerceAtMost(sh - gh), (sh - gh - bottomMargin()).coerceAtLeast(0f))
+        animateTo(x.toInt(), y.toInt(), width = w, ms = 240L) { save(); fitGroup() }
+    }
+
+    /** The phone or the background screen turned while small: stay small, in the corner, at that orientation's size. */
+    private fun keepMini() {
+        if (!mini.value) return
+        val w = miniWidth(); widthPx.floatValue = w
+        val (x, y) = miniPlace(w); place(x, y); save()
+    }
     /** 1.3.0-beta16: what the current touch is, said by the picture layer (see GestureFrame). */
     @Volatile internal var pictureDown = false
     @Volatile internal var pictureLive = false
@@ -298,6 +365,9 @@ object Overlay {
         widthPx.floatValue = clampWidth(p.getFloat(widthKey(shownLandscape), defaultWidth(shownLandscape)))
         docked.value = p.getBoolean("docked", false)
         dockRight.value = p.getBoolean("dock_right", true)
+        mini.value = p.getBoolean("mini", false)
+        fullWidth = widthPx.floatValue
+        if (mini.value) widthPx.floatValue = miniWidth()
         val l = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
             if (a11y) WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY else WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -309,6 +379,7 @@ object Overlay {
             y = p.getInt("y", (screenH() * 0.18f).toInt())
         }
         if (docked.value) l.x = if (dockRight.value) screenW() - dp(TAB_W).toInt() else 0
+        else if (mini.value) { val (mx, my) = miniPlace(widthPx.floatValue); l.x = mx; l.y = my }
         else {
             // 1.2.0: the window opens wholly on screen. The place is remembered for whatever size it had then; a
             // wider window (landscape, or a larger default) used to open partly off the right edge.
@@ -355,9 +426,11 @@ object Overlay {
     /** The background screen changed between portrait and landscape: use that orientation's own width. */
     internal fun orientationChanged(landscape: Boolean) {
         if (root == null || landscape == shownLandscape) return
-        prefs().edit().putFloat(widthKey(shownLandscape), widthPx.floatValue).apply()
+        prefs().edit().putFloat(widthKey(shownLandscape), if (mini.value) fullWidth else widthPx.floatValue).apply()
         shownLandscape = landscape
         widthPx.floatValue = clampWidth(prefs().getFloat(widthKey(landscape), defaultWidth(landscape)))
+        fullWidth = widthPx.floatValue
+        if (mini.value) { root?.post { keepMini() }; return }
         // Moved back wholly on screen, never folded: the window grew, the user did not push it to an edge. The new
         // size is known only after the next layout, so it is checked again then.
         root?.post { if (docked.value) dock(dockRight.value) else keepOnScreen() }
@@ -392,8 +465,9 @@ object Overlay {
 
     internal fun save() {
         val l = lp ?: return
-        prefs().edit().putFloat(widthKey(shownLandscape), widthPx.floatValue).putInt("x", l.x).putInt("y", l.y)
-            .putBoolean("docked", docked.value).putBoolean("dock_right", dockRight.value).apply()
+        // While small, the orientation's width key keeps the width it had before (the small size is derived).
+        prefs().edit().putFloat(widthKey(shownLandscape), if (mini.value) fullWidth else widthPx.floatValue).putInt("x", l.x).putInt("y", l.y)
+            .putBoolean("docked", docked.value).putBoolean("dock_right", dockRight.value).putBoolean("mini", mini.value).apply()
     }
 
     // ---- Where the window comes to rest (release, fling, rotation). ----
@@ -437,6 +511,9 @@ object Overlay {
 
     /** After a plain release or a rotation: fold if a good part is past an edge, else keep it fully on screen. */
     internal fun settle(fingerY: Float? = null) { val l = lp ?: return; restAt(l.x.toFloat(), l.y.toFloat(), fingerY) }
+
+    /** The phone turned: the tab stays on its edge, the small window in its corner, the window on screen. */
+    internal fun rotated() { when { docked.value -> dock(dockRight.value); mini.value -> keepMini(); else -> settle() } }
 
     /**
      * The window was let go while moving (raw px/s). It glides on; flung toward a corner it shrinks to the smallest size
@@ -621,7 +698,7 @@ internal fun pictureToScreen(lx: Float, ly: Float, frame: RectF): Pair<Int, Int>
  */
 @SuppressLint("ViewConstructor")
 private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
-    private enum class Claim { NONE, MOVE, PINCH }
+    private enum class Claim { NONE, MOVE, PINCH, RESIZE }
 
     private val slop = ViewConfiguration.get(ctx).scaledTouchSlop.toFloat()
     private val main = Handler(Looper.getMainLooper())
@@ -629,6 +706,8 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
     private var downRaw = Offset.Zero
     private var winX = 0; private var winY = 0
     private var pinchDist = 0f; private var pinchW = 0f; private var pinchMid = Offset.Zero
+    /** 1.4.2-beta6: this touch landed on the small window (a tap opens it large; nothing reaches the content). */
+    private var onMini = false
     private var childGotDown = false
     private var velocity: android.view.VelocityTracker? = null
     private val flingMin = ViewConfiguration.get(ctx).scaledMinimumFlingVelocity.toFloat().coerceAtLeast(Overlay.dp(450f))
@@ -651,7 +730,7 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
         super.onConfigurationChanged(newConfig)
         Overlay.invalidateBounds()
         // The main screen turned: keep the window (or its tab) on screen.
-        post { if (Overlay.docked.value) Overlay.dock(Overlay.dockRight.value) else Overlay.settle() }
+        post { Overlay.rotated() }
     }
 
     override fun onDetachedFromWindow() {
@@ -687,7 +766,16 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
                 winX = Overlay.lp?.x ?: 0; winY = Overlay.lp?.y ?: 0
                 Overlay.pictureDown = false; Overlay.pictureLive = false; Overlay.pictureHeld = false; Overlay.frameClaimed = false
                 childGotDown = false
-                if (!docked) {
+                onMini = !docked && Overlay.mini.value
+                if (!docked && !onMini && Overlay.onBar(ev.x, ev.y)) {
+                    // 1.4.2-beta6: the bottom bar's strip is the window's own from the first moment (never the picture's):
+                    // pressing there and dragging resizes it with one finger.
+                    claim = Claim.RESIZE
+                    pinchW = Overlay.widthPx.floatValue
+                    Overlay.holdBar()
+                    return true
+                }
+                if (!docked && !onMini) {
                     childGotDown = true
                     super.dispatchTouchEvent(ev)
                     main.postDelayed(lift, 400L)
@@ -695,7 +783,7 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
                 return true
             }
             MotionEvent.ACTION_POINTER_DOWN -> {
-                if (!docked && ev.pointerCount == 2 && !Overlay.pictureHeld) {
+                if (!docked && !onMini && claim != Claim.RESIZE && ev.pointerCount == 2 && !Overlay.pictureHeld) {
                     main.removeCallbacks(lift)
                     cancelChildren()
                     claim = Claim.PINCH
@@ -709,6 +797,12 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
             MotionEvent.ACTION_MOVE -> {
                 val raw = Offset(ev.rawX, ev.rawY)
                 when (claim) {
+                    Claim.RESIZE -> {
+                        // The bottom edge follows the finger; the top edge and the centre stay put.
+                        val nw = Overlay.clampWidth(WindowSizes.resized(pinchW, Overlay.aspect(), raw.y - downRaw.y))
+                        Overlay.widthPx.floatValue = nw
+                        Overlay.place((winX + (pinchW - nw) / 2f).roundToInt(), winY)
+                    }
                     Claim.PINCH -> if (ev.pointerCount >= 2) {
                         val nw = Overlay.clampWidth(pinchW * dist(ev) / pinchDist)
                         val k = nw / pinchW
@@ -729,6 +823,12 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
                             // Moving only moves: folding is decided when the finger lifts, never on the way.
                             val d = raw - downRaw
                             Overlay.place(winX + d.x.roundToInt(), winY + d.y.roundToInt())
+                            // 1.4.2-beta6: the finger in the top right corner: letting go makes the small window there.
+                            val hot = Overlay.inCorner(raw.x, raw.y)
+                            if (hot != Overlay.cornerHot.value) {
+                                Overlay.cornerHot.value = hot
+                                if (hot) performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+                            }
                         }
                     }
                     Claim.NONE -> when {
@@ -746,8 +846,9 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
             MotionEvent.ACTION_UP -> {
                 main.removeCallbacks(lift)
                 when (claim) {
+                    Claim.RESIZE -> { Overlay.save(); Overlay.settle(); Overlay.showBar() }
                     Claim.PINCH -> { Overlay.save(); Overlay.settle() }
-                    Claim.MOVE -> if (docked) {
+                    Claim.MOVE -> if (!docked && Overlay.cornerHot.value) Overlay.toMini() else if (docked) {
                         Overlay.lp?.let { Overlay.dock(Overlay.dockRight.value, it.y) }
                     } else {
                         val v = velocity?.let { it.computeCurrentVelocity(1000); it.xVelocity to it.yVelocity }
@@ -755,15 +856,18 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
                     }
                     Claim.NONE -> when {
                         docked -> Overlay.undock()
+                        onMini -> Overlay.fromMini()
                         childGotDown -> super.dispatchTouchEvent(ev)
                     }
                 }
-                claim = Claim.NONE; childGotDown = false
+                claim = Claim.NONE; childGotDown = false; onMini = false; Overlay.cornerHot.value = false
                 velocity?.recycle(); velocity = null
                 return true
             }
             MotionEvent.ACTION_CANCEL -> {
                 main.removeCallbacks(lift); cancelChildren()
+                Overlay.cornerHot.value = false; onMini = false
+                if (claim == Claim.RESIZE) { Overlay.save(); Overlay.settle(); Overlay.showBar() }
                 if (claim == Claim.MOVE) {
                     if (Overlay.docked.value) Overlay.lp?.let { Overlay.dock(Overlay.dockRight.value, it.y) } else Overlay.settle()
                 }
@@ -785,6 +889,15 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
 }
 
 private val PAD = 7.dp
+
+/** Takes every touch (nothing under it gets one), and a plain tap the window did not take for a move runs [onTap]. */
+private fun Modifier.tapOrEat(onTap: () -> Unit): Modifier = this.pointerInput(Unit) {
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false)
+        while (awaitPointerEvent().changes.any { it.pressed }) Unit
+        if (!Overlay.frameClaimed) onTap()
+    }
+}
 /** 1.3.0-beta18: one height for the title pill and the round buttons beside it. */
 private val CHIP_H = 24.dp
 
@@ -801,7 +914,7 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
     // 1.4.0-beta11: getting ready / recording: the lesson strip hangs under the window (same place as a question card).
     val showing = lesson is com.kilon.agentvscreen.cmd.Lesson.Ready || lesson is com.kilon.agentvscreen.cmd.Lesson.Recording
     // Known before any placement, docked or not, so opening from the tab already counts the card.
-    androidx.compose.runtime.SideEffect { Overlay.cardShown.value = waiting.isNotEmpty() || review != null || showing }
+    androidx.compose.runtime.SideEffect { Overlay.cardShown.value = !Overlay.mini.value && (waiting.isNotEmpty() || review != null || showing) }
     if (Overlay.docked.value) { DockTab(mode, Overlay.dockRight.value, waiting.size + if (review != null || showing) 1 else 0); return }
     val density = LocalDensity.current
     val landscape = Overlay.aspect() > 1f
@@ -812,6 +925,19 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
     // short) got the largest controls over the smallest picture height; now both orientations get the same size.
     val k = (minOf(w.value, h.value) / 200f).clampIn(0.75f, 1.15f)
     val corner = (14 + 6 * k).dp
+
+    // 1.4.2-beta6: the small window in the corner is the picture alone (its frame still says who has the screen); a
+    // question waiting shows as the mark on it. A tap opens it large (GestureFrame), so nothing here takes a touch.
+    if (Overlay.mini.value) {
+        Box(Modifier.padding(PAD).width(w).height(h).glowBorder(mode, corner, pad = PAD - 1.dp)) {
+            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(corner)).background(Palette.ink)) {
+                if (picture != null) picture(owner) else VScreenLiveFrame(owner, Modifier.fillMaxSize())
+                val asks = waiting.size + if (review != null || showing) 1 else 0
+                if (asks > 0) Box(Modifier.fillMaxSize().background(Color(0x66000000)), contentAlignment = Alignment.Center) { AskMark(22f, asks) }
+            }
+        }
+        return
+    }
 
     var left by remember { mutableLongStateOf(-1L) }
     LaunchedEffect(owner, mode) {
@@ -860,12 +986,25 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
                 }
                 // A soft scrim under the pill and buttons keeps them readable on white pages (draws only, no touch).
                 Box(Modifier.fillMaxWidth().height((40 * k).dp).background(Brush.verticalGradient(listOf(Color(0x80000000), Color.Transparent))))
+                // 1.4.2-beta6: dragged into the top right corner: say what letting go does.
+                if (Overlay.cornerHot.value) Box(Modifier.fillMaxSize().background(Color(0x99000000)), contentAlignment = Alignment.Center) {
+                    Text(tr("松手收成小窗", "Let go for a small window"), color = Color.White, fontSize = (13 * k).sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            // 1.4.2-beta6 (rainbow): the bottom bar, like a phone's navigation bar. A tap on the window shows it; press at
+            // its height and drag to resize with one finger (the strip is the window's own, see GestureFrame / Overlay.onBar).
+            if (Overlay.barShown.value) {
+                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(Overlay.BAR_ZONE.dp).background(Brush.verticalGradient(listOf(Color.Transparent, Color(0x59000000)))),
+                    contentAlignment = Alignment.Center) {
+                    Box(Modifier.width((w * 0.3f).coerceIn(40.dp, 140.dp)).height(5.dp).clip(RoundedCornerShape(50)).background(Color(0xE6FFFFFF)))
+                }
             }
 
             // Title pill: a handle (drag or hold it to move the window, also while you hold the screen).
             Row(
                 Modifier.align(Alignment.TopStart).padding(start = (7 * k).dp, top = (7 * k).dp).widthIn(max = w - (70 * k).dp)
-                    .height(CHIP_H * k).eatTouches().clip(RoundedCornerShape(50)).background(chip)
+                    .height(CHIP_H * k).tapOrEat { Overlay.showBar() }.clip(RoundedCornerShape(50)).background(chip)
                     .padding(horizontal = (8 * k).dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -896,7 +1035,7 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
             if (action != null) {
                 val dark = action.second == Palette.takeover
                 Row(
-                    Modifier.align(Alignment.BottomCenter).padding(bottom = (8 * k).dp)
+                    Modifier.align(Alignment.BottomCenter).padding(bottom = (8 * k).dp + if (Overlay.barShown.value) Overlay.BAR_ZONE.dp else 0.dp)
                         .clip(RoundedCornerShape(50)).background(action.second).clickable(onClick = action.third)
                         .padding(horizontal = (11 * k).dp, vertical = (5 * k).dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -990,7 +1129,7 @@ private fun PictureLayer(owner: String, k: Float, picture: (@Composable (String)
                         if (!ch.pressed) { up = true; break }
                     }
                 } finally { hold = 0f }
-                if (up && !held && !Overlay.frameClaimed) Overlay.hintAt.longValue = SystemClock.uptimeMillis()
+                if (up && !held && !Overlay.frameClaimed) { Overlay.hintAt.longValue = SystemClock.uptimeMillis(); Overlay.showBar() }
             }
         }
     }) {
@@ -1002,7 +1141,7 @@ private fun PictureLayer(owner: String, k: Float, picture: (@Composable (String)
         val showHint = Overlay.hintAt.longValue > 0 && now - Overlay.hintAt.longValue < 2500
         AnimatedVisibility(showHint, Modifier.align(Alignment.Center), enter = fadeIn(), exit = fadeOut()) {
             // 1.3.0-beta18: one gesture per line (rainbow: three lines, not one run-on line).
-            Text(tr("长按 0.5 秒接管\n双指缩放\n拖出屏幕一半收起", "Hold 0.5 s to take over\nPinch to resize\nDrag half off screen to fold"), color = Color.White, fontSize = (11 * k).sp,
+            Text(tr("长按 0.5 秒接管\n按住底部横条拖动缩放\n拖到右上角收成小窗", "Hold 0.5 s to take over\nDrag the bottom bar to resize\nDrag to the top right for a small window"), color = Color.White, fontSize = (11 * k).sp,
                 lineHeight = (16 * k).sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xDD12141C)).padding(horizontal = 10.dp, vertical = 6.dp))
         }

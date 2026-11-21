@@ -13,7 +13,6 @@ import com.kilon.agentvscreen.host.Privileged
 import com.kilon.agentvscreen.host.RootBackend
 import com.kilon.agentvscreen.host.AppLogger
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 import rikka.shizuku.Shizuku
@@ -43,7 +42,11 @@ internal object VScreenRemoteDisplay {
      * (release, removeTask, moveTask) are safe to repeat; a create that timed out leaves at most an orphan display,
      * which the service's own reaper releases.
      */
-    private val pool = Executors.newCachedThreadPool { r -> Thread(r, "vscreen-call").apply { isDaemon = true } }
+    // 1.4.2-beta6: bounded. A cached pool grows a thread per concurrent call, and calls stuck in a frozen service each
+    // keep theirs; past MAX_CALL_THREADS a new call fails as "not responding" at once instead of adding threads.
+    private const val MAX_CALL_THREADS = 16
+    private val pool = java.util.concurrent.ThreadPoolExecutor(0, MAX_CALL_THREADS, 30L, TimeUnit.SECONDS,
+        java.util.concurrent.SynchronousQueue()) { r -> Thread(r, "vscreen-call").apply { isDaemon = true } }
     @Volatile private var stuckSince = 0L
 
     internal fun notResponding(s: Long) = IllegalStateException(tr("副屏服务 $s 秒没有响应（可能被系统冻结），稍后重试；一直这样就在 App 里重连 Shizuku", "The screen service has not responded for $s s (the system may have frozen it); retry shortly, and reconnect Shizuku in the app if it keeps happening"))
@@ -54,13 +57,16 @@ internal object VScreenRemoteDisplay {
             val s = (android.os.SystemClock.elapsedRealtime() - since) / 1000
             if (s * 1000 >= CALL_TIMEOUT_MS) throw notResponding(s)
         }
-        val f = pool.submit<T> {
+        val f = try { pool.submit<T> {
             val t0 = android.os.SystemClock.elapsedRealtime()
             try { block() } finally {
                 val took = android.os.SystemClock.elapsedRealtime() - t0
                 if (took > CALL_TIMEOUT_MS + extraMs) AppLogger.warning(TAG, "$what returned after ${took}ms")
                 synchronized(pool) { if (stuckSince != 0L && stuckSince >= t0) stuckSince = 0L }
             }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            AppLogger.warning(TAG, "$what: $MAX_CALL_THREADS calls already waiting on the service")
+            throw notResponding(CALL_TIMEOUT_MS / 1000)
         }
         val start = android.os.SystemClock.elapsedRealtime()
         return try {

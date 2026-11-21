@@ -416,7 +416,13 @@ internal fun wordFacts(d: VScreenDisplay, from: Long, to: Long): List<String> {
         val appeared = now.filter { val k = VScreenOcr.norm(it); k !in thenN && !partOf(k, nowN) }
         val gone = then.filter { val k = VScreenOcr.norm(it); k !in nowN && !partOf(k, nowN) }
         val between = LinkedHashMap<String, String>()
-        for (r in rs.drop(1).dropLast(1)) for (w in r.words) { val k = VScreenOcr.norm(w); if (k !in thenN && k !in nowN && !partOf(k, nowN) && !partOf(k, thenN)) between.putIfAbsent(k, w) }
+        // 1.4.2-beta6 (test: an animated screen listed "周-, 0', K, 6, R, 个" here): a short piece read once, in one
+        // reading only, is the OCR catching a moving picture mid-frame, not a word that came and went. A word counts
+        // when it was read in two readings, or is long enough to be a real word read once (a toast seen briefly).
+        val seen = HashMap<String, Int>()
+        for (r in rs.drop(1).dropLast(1)) for (k in r.words.map { VScreenOcr.norm(it) }.toSet()) seen[k] = (seen[k] ?: 0) + 1
+        fun real(k: String) = (seen[k] ?: 0) >= 2 || k.length >= 4
+        for (r in rs.drop(1).dropLast(1)) for (w in r.words) { val k = VScreenOcr.norm(w); if (real(k) && k !in thenN && k !in nowN && !partOf(k, nowN) && !partOf(k, thenN)) between.putIfAbsent(k, w) }
         if (appeared.isNotEmpty()) lines += tr("出现了：", "appeared: ") + list(appeared, 20)
         if (gone.isNotEmpty()) lines += tr("不见了：", "disappeared: ") + list(gone, 20)
         if (between.isNotEmpty()) lines += tr("中途出现过又消失：", "appeared and disappeared meanwhile: ") + list(between.values.toList(), 12)
@@ -688,13 +694,23 @@ internal fun numbered(sid: String, d: VScreenDisplay, els: List<El>, activity: S
             val n = match[i]?.n ?: ++book.max
             book.labels[n] = e.label.take(40)
             e.copy(n = n)
-        }
+        }.also { book.trim() }
     }
 }
 
 /** Every number given out on a screen (per session and screen generation), so none is ever reused. */
 internal object Numbers {
-    class Book { var max = 0; val labels = LinkedHashMap<Int, String>() }
+    /**
+     * 1.4.2-beta6: [labels] keeps the [MAX_LABELS] numbers seen most recently (access order: every look re-puts what is
+     * on the screen). Before, one long session that scrolled through a long list grew it without end. A number older
+     * than that is still never reused ([max] only rises); it is just reported as unknown instead of by its old words.
+     */
+    class Book {
+        var max = 0
+        val labels = LinkedHashMap<Int, String>(64, 0.75f, true)
+        fun trim() { val it = labels.keys.iterator(); while (labels.size > MAX_LABELS && it.hasNext()) { it.next(); it.remove() } }
+    }
+    const val MAX_LABELS = 2_000
     private val books = LinkedHashMap<String, Book>()
     fun of(key: String): Book = books.getOrPut(key) { Book() }.also { while (books.size > 16) books.remove(books.keys.first()) }
     /** What [n] was when it was given out on [key]'s screen, or null when it never was. */

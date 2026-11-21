@@ -99,9 +99,17 @@ object BackgroundOperation {
          * from the notification (显示小窗).
          */
         val windowHidden: Boolean = false,
-        /** 1.1: what the agent says it is doing (`vscreen title`), shown on the window's pill; cleared with the turn. */
-        val agentTitle: String? = null,
-    )
+        /**
+         * 1.1: what the agent says it is doing (`vscreen title`), shown on the window's pill; cleared with the turn.
+         * 1.4.2-beta6: kept with the session that set it ([titleSession]) and shown only while that session owns the
+         * screen. Before, it was one field for the whole app: a turn that ended after its screen was gone, or another
+         * agent taking the screen over, left the last agent's title on the window for the next one.
+         */
+        val titleText: String? = null,
+        val titleSession: String? = null,
+    ) {
+        val agentTitle: String? get() = titleText?.takeIf { titleSession != null && titleSession == ownerSessionId }
+    }
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
@@ -315,8 +323,18 @@ object BackgroundOperation {
         if (!d.parked) return null
         val r = d.unpark()
         _state.update { it.copy(powerSaving = false) }
+        wakeNote = d.displayId to r
         return r
     }
+
+    /**
+     * 1.4.2-beta6 (test: after `done` the screen paused to save power; the game lost focus and showed its own pause
+     * menu, and the next four taps landed on that menu with nothing said): the note made when a paused screen wakes
+     * reached only the app's own window. Now the next reply on that screen carries it, whichever path woke it (the
+     * turn starting, or the command itself).
+     */
+    @Volatile private var wakeNote: Pair<Int, String>? = null
+    fun takeWakeNote(displayId: Int): String? = wakeNote?.takeIf { it.first == displayId }?.let { wakeNote = null; it.second }
 
     /** The settings switch: turning it off wakes a paused screen at once. */
     fun setIdlePowerSave(on: Boolean) {
@@ -625,14 +643,16 @@ object BackgroundOperation {
         if (sessionId.isEmpty()) return
         synchronized(lock) { tasks.remove(sessionId); turns.remove(sessionId) }
         clearParking(sessionId)
+        // 1.4.2-beta6: the turn's title goes with the turn, whether or not its screen is still there.
+        _state.update { if (it.titleSession == sessionId) it.copy(titleText = null, titleSession = null) else it }
         TaskLog.captureNow(sessionId)
         TaskLog.onTurnEnd(sessionId, _state.value.userStopped)
         appContext?.let { c -> com.kilon.agentvscreen.host.UserAsk.withdrawSession(c, sessionId) }
         // 1.4.0-beta10: a lesson the user took is theirs to finish; the agent's turn ending does not end it (withdraw
         // above leaves the question the lesson answers alone).
-        // A finger the agent left down (run … --keep without a release) never outlives the turn. Not while the user
-        // holds the screen: "cancel" lifts every pointer, the user's finger included.
-        if (_state.value.ownerSessionId == sessionId && _state.value.takeoverSessionId == null) display?.let { d ->
+        // A finger the agent left down (run … --keep without a release) never outlives the turn. 1.4.2-beta6: the
+        // cancel takes only the agent's own pointers (InputFence.cancels), so it is safe under the user's finger too.
+        if (_state.value.ownerSessionId == sessionId) display?.let { d ->
             Thread { runCatching { VScreenShell.finger(d.displayId, "cancel", 0, -1, -1) } }.apply { isDaemon = true }.start()
         }
         if (_state.value.ownerSessionId == sessionId && display != null) {
@@ -646,7 +666,7 @@ object BackgroundOperation {
             // (handed back, closed, or the launch failed) and the next agent may take the screen over as before.
             val held = !ManualScreen.isManual(sessionId) && TakeoverRules.survivesTurnEnd(_state.value.takeoverSessionId, sessionId)
             if (ManualScreen.isManual(sessionId) && _state.value.takeoverSessionId == sessionId) controlChange(agentAllowedAfter = true) { it.copy(takeoverSessionId = null) }
-            _state.update { it.copy(operating = false, idle = true, agentTitle = null, note = if (held) tr("本轮结束，你还在接管副屏；交还后 AI 会先看一眼画面再继续", "Turn over; you still hold the screen. Once you hand it back, the AI looks at it before going on")
+            _state.update { it.copy(operating = false, idle = true, note = if (held) tr("本轮结束，你还在接管副屏；交还后 AI 会先看一眼画面再继续", "Turn over; you still hold the screen. Once you hand it back, the AI looks at it before going on")
                 else tr("本轮结束，副屏保留 ${IDLE_TTL_MS / 60_000} 分钟", "Turn over; the screen is kept for ${IDLE_TTL_MS / 60_000} minutes")) }
             if (!held) {
                 scheduleIdleRelease()
@@ -838,7 +858,8 @@ object BackgroundOperation {
 
     fun setTitle(sessionId: String, title: String?) {
         if (_state.value.ownerSessionId != null && _state.value.ownerSessionId != sessionId) return
-        _state.update { it.copy(agentTitle = title?.trim()?.take(40)?.takeIf { t -> t.isNotEmpty() }) }
+        val t = title?.trim()?.take(40)?.takeIf { it.isNotEmpty() }
+        _state.update { it.copy(titleText = t, titleSession = t?.let { sessionId }) }
     }
 
     // ── agent side ─────────────────────────────────────────────────────────
