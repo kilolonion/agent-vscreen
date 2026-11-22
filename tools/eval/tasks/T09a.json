@@ -10,7 +10,7 @@
     [
       "act",
       "--fast",
-      "repeat 3 { wait text:点我 5s; try { tap 点我 } } until text:命中*"
+      "wait text:点我 5s; tap 点我"
     ]
   ],
   "expect": [

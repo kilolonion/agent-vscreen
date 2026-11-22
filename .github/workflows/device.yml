@@ -207,7 +207,7 @@ jobs:
           profile: pixel_6
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: mkdir -p eval-out && { python3 tools/eval/run.py --apk test-apks/torture-debug.apk --out eval-out > eval-out/eval.log 2>&1 || { rc=$?; cat eval-out/eval.log; adb logcat -d > eval-out/logcat.txt; exit "$rc"; }; cat eval-out/eval.log; }
+          script: mkdir -p eval-out && { python3 tools/eval/run.py --apk test-apks/torture-debug.apk --out eval-out --repeat-check > eval-out/eval.log 2>&1 || { rc=$?; cat eval-out/eval.log; adb logcat -d > eval-out/logcat.txt; exit "$rc"; }; cat eval-out/eval.log; }
       - if: always()
         uses: actions/upload-artifact@v5
         with:

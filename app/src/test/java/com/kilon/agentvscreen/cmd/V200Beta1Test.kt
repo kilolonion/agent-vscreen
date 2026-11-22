@@ -170,6 +170,40 @@ class V200Beta1Test {
     }
 
     @Test
+    fun meterSentDimensionsIsStrictlyReadOnlyAndPrefersExistingCompact() {
+        val bmp = Bitmap.createBitmap(1280, 720, Bitmap.Config.ARGB_8888)
+        // Save with sent=false so no compact copy is pre-written on disk.
+        val shotRef = ShotStore.save(ctx, bmp, "readonly_test", Pictures.Use.LOOK, sent = false)
+        bmp.recycle()
+        assertNotNull(shotRef)
+        val shotName = ShotStore.refs(shotRef!!).single()
+        val compactName = "vscreen_c" + shotName.removePrefix("vscreen")
+        val compactFile = java.io.File(ShotStore.dir(ctx), compactName)
+        assertFalse("compact file must not exist yet", compactFile.exists())
+
+        val res = NativeOffloadResult(
+            exitCode = 0,
+            output = shotRef,
+            code = "OK",
+            data = JSONObject().put("picture_changed", true).put("steps", org.json.JSONArray().put(JSONObject().put("n", "1"))),
+        )
+        // Without compact file on disk, sentDimensions reads original 1280x720 and never writes compactFile.
+        val dimsBefore = Meter.sentDimensions(ctx, res, listOf(shotName))
+        assertFalse("sentDimensions must never create compact file", compactFile.exists())
+        assertEquals(1, dimsBefore.size)
+        assertEquals(1280, dimsBefore[0][0])
+        assertEquals(720, dimsBefore[0][1])
+
+        // Once compact file exists (written by save/ApiServer/Mcp), sentDimensions reads compact 1024x576.
+        com.kilon.agentvscreen.api.ImagePolicy.compact(ctx, shotName)
+        assertTrue("compact file exists after ImagePolicy.compact", compactFile.exists())
+        val dimsAfter = Meter.sentDimensions(ctx, res, listOf(shotName))
+        assertEquals(1, dimsAfter.size)
+        assertEquals(1024, dimsAfter[0][0])
+        assertEquals(576, dimsAfter[0][1])
+    }
+
+    @Test
     fun evalTasksCoverAllThirteenScenesAndCurrentStageStepsParse() {
         val dir = java.io.File("../tools/eval/tasks")
         if (!dir.isDirectory) return

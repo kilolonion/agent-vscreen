@@ -2,7 +2,7 @@
 """Agent-VScreen 2.0 scripted evaluation runner (stdlib only).
 
 Usage:
-  python3 tools/eval/run.py --apk <torture.apk> --out <dir> [--app-apk <app-debug.apk>] [--baseline <baseline.json>]
+  python3 tools/eval/run.py --apk <scene-debug.apk> --out <dir> [--repeat-check]
 """
 import argparse
 import json
@@ -68,7 +68,7 @@ def press_text(package, labels, tries=20):
 
 
 def ensure_host_setup(app_apk, shizuku_apk):
-    """Ensure Agent-VScreen debug APK + Shizuku are installed and granted (mirrors agent_e2e.py)."""
+    """Ensure Agent-VScreen debug APK + Shizuku are installed and granted."""
     installed = adb_shell("pm", "list", "packages", APP_PKG)
     if f"package:{APP_PKG}" not in installed or shizuku_state() != "READY":
         if shizuku_apk and Path(shizuku_apk).is_file():
@@ -144,7 +144,7 @@ def version_allows(app_version, since):
     return int(m_cur.group(1)) >= need_beta
 
 
-def find_torture_display_id():
+def find_scene_display_id():
     out = adb_shell("dumpsys", "activity", "activities")
     cur_display = None
     for line in out.splitlines():
@@ -172,6 +172,18 @@ def read_avst_events(scene):
     return events
 
 
+def normalize_avst_event(ev):
+    """Ignore timestamp `t` and `touch` x/y coordinates for repeat-determinism checks."""
+    out = {k: v for k, v in ev.items() if k != "t"}
+    if out.get("ev") == "touch" and isinstance(out.get("data"), dict):
+        out["data"] = {k: v for k, v in out["data"].items() if k not in ("x", "y")}
+    return out
+
+
+def normalize_avst_sequence(events):
+    return [normalize_avst_event(e) for e in events]
+
+
 def matches_pattern(event_obj, pattern):
     for k, v in pattern.items():
         if k not in event_obj:
@@ -194,7 +206,20 @@ def evaluate_events(events, expect_list, forbid_list):
     return True
 
 
-def run_task(token, task):
+def check_baseline_regressions(rows, baseline):
+    """Return task IDs that passed in `baseline` but failed or were missing in `rows`."""
+    if not baseline or "tasks" not in baseline:
+        return []
+    cur_ok = {r["id"]: bool(r.get("ok")) for r in rows}
+    regressed = []
+    for bt in baseline.get("tasks") or []:
+        tid = bt.get("id")
+        if tid and bt.get("ok") and not cur_ok.get(tid, False):
+            regressed.append(tid)
+    return regressed
+
+
+def run_task(token, task, return_events=False):
     task_id = task["id"]
     scene = task["scene"]
     seed_val = int(task.get("seed", 7))
@@ -203,7 +228,6 @@ def run_task(token, task):
     forbid_list = task.get("forbid") or []
     session = f"eval_{task_id}"
 
-    # Ensure previous state is clean (not counted in task metrics).
     adb_shell("am", "force-stop", TORTURE_PKG)
     adb_shell(
         "am", "broadcast", "-W", "--include-stopped-packages",
@@ -240,22 +264,20 @@ def run_task(token, task):
             image_tokens += int(meter.get("image_tokens", 0))
             phone_ms += int((reply.get("timing") or {}).get("phone_ms", 0))
 
-            # Fallback if launch did not pass scene extras (Section 1.3).
             if idx == 0 and argv and argv[0] == "launch":
-                evs = read_avst_events(scene)
-                if not any(e.get("ev") == "enter" for e in evs):
-                    disp_id = find_torture_display_id()
-                    if disp_id:
-                        adb_shell("logcat", "-c")
-                        adb_shell(
-                            "am", "start", "-W", "--activity-clear-top",
-                            "--display", str(disp_id),
-                            "-n", f"{TORTURE_PKG}/.SceneActivity",
-                            "--es", "scene", scene,
-                            "--ei", "seed", str(seed_val),
-                        )
+                m_disp = re.search(r"(?:副屏|screen)\s+(\d+)", reply.get("text", ""))
+                disp_id = int(m_disp.group(1)) if m_disp else find_scene_display_id()
+                if disp_id:
+                    adb_shell("logcat", "-c")
+                    adb_shell(
+                        "am", "start", "-W", "--activity-clear-top",
+                        "--display", str(disp_id),
+                        "-n", f"{TORTURE_PKG}/.SceneActivity",
+                        "--es", "scene", scene,
+                        "--ei", "seed", str(seed_val),
+                    )
+                    time.sleep(0.15)
 
-        # Allow brief settle window for async AVST events within max_seconds.
         events = read_avst_events(scene)
         settle_deadline = min(t0 + max_seconds, time.monotonic() + 2.0)
         while not evaluate_events(events, expect_list, forbid_list) and time.monotonic() < settle_deadline:
@@ -272,7 +294,7 @@ def run_task(token, task):
         adb_shell("am", "force-stop", TORTURE_PKG)
 
     ok = (not timed_out) and (not error_detail) and evaluate_events(events, expect_list, forbid_list)
-    return {
+    row = {
         "id": task_id,
         "scene": scene,
         "seed": seed_val,
@@ -285,6 +307,9 @@ def run_task(token, task):
         "reply_est_tokens": reply_est_tokens,
         "error": error_detail,
     }
+    if return_events:
+        return row, events
+    return row
 
 
 def compute_totals(rows):
@@ -311,7 +336,7 @@ def fmt_diff(val, is_float=False):
     return f"{val:+d}"
 
 
-def render_markdown(app_version, rows, skipped, totals, diff):
+def render_markdown(app_version, rows, skipped, totals, diff, regressed, repeat_rows=None):
     lines = [
         f"# Agent-VScreen 评测结果（{app_version}）",
         "",
@@ -330,38 +355,66 @@ def render_markdown(app_version, rows, skipped, totals, diff):
         f"**{totals['est_tokens']}** | **{totals['image_tokens']}** | **{totals['phone_ms']}** |"
     )
     if diff is not None:
+        gate_txt = "无退化" if not regressed else f"退化: {', '.join(regressed)}"
         lines.append(
-            f"| **与 baseline 差值** | **{fmt_diff(diff['pass_rate'], is_float=True)}** | — | "
+            f"| **与 baseline 差值** | **{fmt_diff(diff['pass_rate'], is_float=True)}** | **{gate_txt}** | "
             f"**{fmt_diff(diff['turns'])}** | **{fmt_diff(diff['chars'])}** | "
             f"**{fmt_diff(diff['est_tokens'])}** | **{fmt_diff(diff['image_tokens'])}** | "
             f"**{fmt_diff(diff['phone_ms'])}** |"
         )
     if skipped:
         lines.extend(["", f"跳过未到阶段的任务（{len(skipped)} 个）：" + ", ".join(f"{s['id']}({s['since']})" for s in skipped)])
+
+    if repeat_rows is not None:
+        matched_cnt = sum(1 for item in repeat_rows if item["matched"])
+        lines.extend([
+            "",
+            f"## 重复一致性检查（`--repeat-check`：{matched_cnt}/{len(repeat_rows)} 一致）",
+            "",
+            "| 任务 | 场景 | seed | 第 1 次事件数 | 第 2 次事件数 | 序列一致 | 事件摘要 |",
+            "| --- | --- | ---: | ---: | ---: | --- | --- |",
+        ])
+        for item in repeat_rows:
+            summary = " -> ".join(
+                f"{e['ev']}({e['data']['a']})" if e.get("ev") == "touch" and isinstance(e.get("data"), dict) and "a" in e["data"]
+                else str(e.get("ev"))
+                for e in item["seq1"]
+            )
+            if len(summary) > 96:
+                summary = summary[:93] + "..."
+            lines.append(
+                f"| {item['id']} | {item['scene']} | {item['seed']} | {len(item['seq1'])} | "
+                f"{len(item['seq2'])} | {'一致' if item['matched'] else '不一致'} | `{summary}` |"
+            )
     return "\n".join(lines) + "\n"
 
 
 def main():
     repo_root = Path(__file__).resolve().parents[2]
-    parser = argparse.ArgumentParser(description="Run Agent-VScreen torture evaluation suite.")
-    parser.add_argument("--apk", required=True, help="Path to torture debug APK")
+    parser = argparse.ArgumentParser(description="Run Agent-VScreen evaluation suite.")
+    parser.add_argument("--apk", required=True, help="Path to scene debug APK")
     parser.add_argument("--out", required=True, help="Output directory for result.json and result.md")
     parser.add_argument("--app-apk", default=None, help="Optional path to Agent-VScreen debug APK")
     parser.add_argument("--shizuku-apk", default=None, help="Optional path to Shizuku APK")
     parser.add_argument("--tasks-dir", default=str(repo_root / "tools" / "eval" / "tasks"))
     parser.add_argument("--baseline", default=str(repo_root / "tools" / "eval" / "baseline.json"))
     parser.add_argument("--write-baseline", action="store_true", help="Copy result.json to baseline path")
+    parser.add_argument(
+        "--repeat-check",
+        action="store_true",
+        help="Run every base (a) task twice with the same seed and verify normalized AVST event sequences match",
+    )
     args = parser.parse_args()
 
-    torture_apk = Path(args.apk)
-    if not torture_apk.is_file():
-        raise SystemExit(f"Missing torture APK: {torture_apk}")
+    scene_apk = Path(args.apk)
+    if not scene_apk.is_file():
+        raise SystemExit(f"Missing APK: {scene_apk}")
 
-    app_apk = args.app_apk or str(torture_apk.parent / "app-debug.apk")
-    shizuku_apk = args.shizuku_apk or str(torture_apk.parent / "shizuku.apk")
+    app_apk = args.app_apk or str(scene_apk.parent / "app-debug.apk")
+    shizuku_apk = args.shizuku_apk or str(scene_apk.parent / "shizuku.apk")
 
     ensure_host_setup(app_apk, shizuku_apk)
-    run_cmd("adb", "install", "-r", "-g", str(torture_apk), timeout=240)
+    run_cmd("adb", "install", "-r", "-g", str(scene_apk), timeout=240)
     token = seed_token()
     info = ping()
     app_version = info.get("version", "2.0.0-beta1")
@@ -372,13 +425,15 @@ def main():
 
     rows = []
     skipped = []
+    repeat_rows = [] if args.repeat_check else None
+
     for tf in task_files:
         task = json.loads(tf.read_text(encoding="utf-8"))
         since = task.get("since")
         if not version_allows(app_version, since):
             skipped.append({"id": task["id"], "scene": task["scene"], "since": since})
             continue
-        res = run_task(token, task)
+        res, evs1 = run_task(token, task, return_events=True)
         print(
             f"[{'PASS' if res['ok'] else 'FAIL'}] {res['id']} ({res['scene']}) "
             f"turns={res['turns']} est_tokens={res['est_tokens']} img_tokens={res['image_tokens']} phone_ms={res['phone_ms']}"
@@ -387,9 +442,32 @@ def main():
         )
         rows.append(res)
 
+        if args.repeat_check and not since:
+            _, evs2 = run_task(token, task, return_events=True)
+            seq1 = normalize_avst_sequence(evs1)
+            seq2 = normalize_avst_sequence(evs2)
+            matched = seq1 == seq2
+            print(
+                f"[REPEAT {'PASS' if matched else 'FAIL'}] {task['id']} ({task['scene']}) "
+                f"seed={task.get('seed', 7)} len1={len(seq1)} len2={len(seq2)}",
+                flush=True,
+            )
+            if not matched:
+                print(f"  seq1={json.dumps(seq1, ensure_ascii=False)}", flush=True)
+                print(f"  seq2={json.dumps(seq2, ensure_ascii=False)}", flush=True)
+            repeat_rows.append({
+                "id": task["id"],
+                "scene": task["scene"],
+                "seed": int(task.get("seed", 7)),
+                "matched": matched,
+                "seq1": seq1,
+                "seq2": seq2,
+            })
+
     totals = compute_totals(rows)
     baseline_path = Path(args.baseline)
     baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.is_file() else None
+    regressed = check_baseline_regressions(rows, baseline)
     diff = None
     if baseline and "totals" in baseline:
         bt = baseline["totals"]
@@ -409,23 +487,40 @@ def main():
         "skipped_tasks": skipped,
         "totals": totals,
         "diff_vs_baseline": diff,
+        "regressed_tasks": regressed,
     }
+    if repeat_rows is not None:
+        result_obj["repeat_check"] = {
+            "total": len(repeat_rows),
+            "matched": sum(1 for item in repeat_rows if item["matched"]),
+            "tasks": repeat_rows,
+        }
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "result.json").write_text(json.dumps(result_obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    md = render_markdown(app_version, rows, skipped, totals, diff)
+    md = render_markdown(app_version, rows, skipped, totals, diff, regressed, repeat_rows=repeat_rows)
     (out_dir / "result.md").write_text(md, encoding="utf-8")
     print("\n" + md, flush=True)
 
     if args.write_baseline:
-        baseline_path.write_text(json.dumps(result_obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        base_copy = dict(result_obj)
+        base_copy["diff_vs_baseline"] = None
+        base_copy["regressed_tasks"] = []
+        base_copy.pop("repeat_check", None)
+        baseline_path.write_text(json.dumps(base_copy, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    if baseline and "totals" in baseline:
-        base_rate = float(baseline["totals"].get("pass_rate", 0.0))
-        if totals["pass_rate"] + 1e-9 < base_rate:
-            print(f"FAIL: pass_rate {totals['pass_rate']:.2%} < baseline {base_rate:.2%}", file=sys.stderr)
-            sys.exit(1)
+    failed_gate = False
+    if regressed:
+        print(f"FAIL: baseline-passing task(s) failed or missing: {', '.join(regressed)}", file=sys.stderr)
+        failed_gate = True
+    if repeat_rows is not None:
+        mismatched = [item["id"] for item in repeat_rows if not item["matched"]]
+        if mismatched:
+            print(f"FAIL: repeat-check AVST sequence mismatch in: {', '.join(mismatched)}", file=sys.stderr)
+            failed_gate = True
+    if failed_gate:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

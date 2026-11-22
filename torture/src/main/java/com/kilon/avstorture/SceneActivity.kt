@@ -572,6 +572,7 @@ class SceneActivity : Activity() {
 
         val cycleRunnable = object : Runnable {
             override fun run() {
+                if (goalEmitted) return
                 round++
                 activeRound = round
                 val minX = dp(24f)
@@ -591,7 +592,7 @@ class SceneActivity : Activity() {
                     data = JSONObject().put("round", round).put("x", x + btnW / 2).put("y", y + btnH / 2),
                 )
                 handler.postDelayed(missRunnable, S09_STAY_MS)
-                handler.postDelayed(this, S09_PERIOD_MS)
+                if (!goalEmitted) handler.postDelayed(this, S09_PERIOD_MS)
             }
         }
         handler.postDelayed(cycleRunnable, S09_INITIAL_DELAY_MS)
@@ -639,7 +640,7 @@ class SceneActivity : Activity() {
         val dm = resources.displayMetrics
         val w = dm.widthPixels
         val h = dm.heightPixels
-        val fullMs = if (currentSeed == PresetReceiver.DEFAULT_SEED) S11_DEFAULT_FULL_MS else rng.nextRange(2800, 4200).toLong()
+        val fullMs = rng.nextRange(S11_MIN_FULL_MS, S11_MAX_FULL_MS).toLong()
         val layer = FrameLayout(this).apply { setBackgroundColor(Color.WHITE) }
 
         val title = label("按住充能至 90%–100% 松手", sp = 20f, bold = true).apply { gravity = Gravity.CENTER }
@@ -677,7 +678,7 @@ class SceneActivity : Activity() {
                     barView.setProgress(100, Color.rgb(220, 38, 38))
                     pctLabel.text = "过载"
                     pctLabel.setTextColor(Color.rgb(220, 38, 38))
-                    AvstLog.emit("S11", "fail", ok = false, data = JSONObject().put("percent", percent))
+                    AvstLog.emit("S11", "fail", ok = false, data = JSONObject().put("reason", "overload"))
                     return
                 }
                 barView.setProgress(percent, if (percent >= S11_MIN_OK) Color.rgb(22, 163, 74) else Color.rgb(37, 99, 235))
@@ -714,12 +715,12 @@ class SceneActivity : Activity() {
                                 barView.setProgress(100, Color.rgb(220, 38, 38))
                                 pctLabel.text = "过载"
                                 pctLabel.setTextColor(Color.rgb(220, 38, 38))
-                                AvstLog.emit("S11", "fail", ok = false, data = JSONObject().put("percent", percent))
+                                AvstLog.emit("S11", "fail", ok = false, data = JSONObject().put("reason", "overload"))
                             } else if (percent in S11_MIN_OK..S11_MAX_OK) {
                                 done = true
                                 pctLabel.text = "${percent}%"
                                 barView.setProgress(percent, Color.rgb(22, 163, 74))
-                                AvstLog.emit("S11", "goal", ok = true, data = JSONObject().put("percent", percent))
+                                AvstLog.emit("S11", "goal", ok = true)
                             } else {
                                 percent = 0
                                 pctLabel.text = "0%"
@@ -839,7 +840,8 @@ class SceneActivity : Activity() {
         const val S10_TOL = 2
         const val S11_MIN_OK = 90
         const val S11_MAX_OK = 100
-        const val S11_DEFAULT_FULL_MS = 4000L
+        const val S11_MIN_FULL_MS = 2800
+        const val S11_MAX_FULL_MS = 4200
         const val S12_PERIOD_MS = 2000L
         const val S13_ITEM_COUNT = 200
         const val S13_TARGET_INDEX = 147
@@ -933,8 +935,7 @@ private class DragBoardView(
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (w <= 0 || h <= 0 || slots.isNotEmpty()) return
-        val jitter = if (seed == PresetReceiver.DEFAULT_SEED) 0 else 14
-        fun j(): Float = if (jitter == 0) 0f else rng.nextRange(-jitter, jitter).toFloat()
+        fun j(): Float = rng.nextRange(-14, 14).toFloat()
         slots += Slot(w * (220f / 1080f) + j(), h * (600f / 2400f) + j())
         slots += Slot(w * (540f / 1080f) + j(), h * (600f / 2400f) + j())
         slots += Slot(w * (860f / 1080f) + j(), h * (600f / 2400f) + j())
@@ -1124,8 +1125,8 @@ private class MovingShapesView(
             Color.parseColor("#8E24AA"), // 4: purple hexagon
         )
         for (i in 0 until 5) {
-            val jx = if (i == 0 && seed == PresetReceiver.DEFAULT_SEED) 0f else (rng.nextFloat() - 0.5f) * w * 0.08f
-            val jy = if (i == 0 && seed == PresetReceiver.DEFAULT_SEED) 0f else (rng.nextFloat() - 0.5f) * h * 0.08f
+            val jx = (rng.nextFloat() - 0.5f) * w * 0.05f
+            val jy = (rng.nextFloat() - 0.5f) * h * 0.03f
             shapes += Shape(
                 kind = i,
                 color = palette[i],
