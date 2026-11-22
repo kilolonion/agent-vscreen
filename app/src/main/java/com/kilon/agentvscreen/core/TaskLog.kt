@@ -82,9 +82,11 @@ object TaskLog {
      * agent was told (pictures left out), and a small copy of the picture it got (the reply's own pictures are cleared
      * with the screen, so a copy is kept here, at most [STEP_FRAMES] per task).
      */
-    private fun saveStep(t: Task, n: Int, argv: List<String>, code: String, exit: Int, ms: Long, output: String) {
+    private fun saveStep(t: Task, n: Int, argv: List<String>, code: String, exit: Int, ms: Long, output: String,
+                         res: com.kilon.agentvscreen.cmd.NativeOffloadResult? = null) {
         val f = stepsFile(t.id) ?: return
-        val shot = com.kilon.agentvscreen.cmd.ShotStore.refs(output).firstOrNull()
+        val allShots = com.kilon.agentvscreen.cmd.ShotStore.refs(output)
+        val shot = allShots.firstOrNull()
         var frame: String? = null
         if (shot != null && n <= STEP_FRAMES) runCatching {
             val c = app ?: return@runCatching
@@ -93,9 +95,16 @@ object TaskLog {
             val name = "t${t.id}_s$n.jpg"
             Pictures.write(b, File(f.parentFile, name), Pictures.Use.STEP); b.recycle(); frame = name
         }
+        val sentShots = if (res != null) com.kilon.agentvscreen.api.ImagePolicy.pick(res, allShots) else allShots.take(com.kilon.agentvscreen.api.ImagePolicy.MAX)
+        val meteredText = com.kilon.agentvscreen.cmd.ShotStore.IN_TEXT.replace(output) { m ->
+            val sn = m.groupValues[1]
+            if (sn in sentShots) com.kilon.agentvscreen.api.ApiConfig.baseUrl + "/v2/shot/" + sn else com.kilon.agentvscreen.api.ImagePolicy.leftOut()
+        }
+        val cost = Meter.of(meteredText, Meter.sentDimensions(app, res, sentShots))
         val text = com.kilon.agentvscreen.cmd.ShotStore.IN_TEXT.replace(output, "").trim().take(STEP_TEXT)
         val o = JSONObject().put("n", n).put("at", System.currentTimeMillis()).put("cmd", com.kilon.agentvscreen.host.Audit.redact(argv))
             .put("code", code).put("exit", exit).put("ms", ms).put("text", text).put("frame", frame ?: JSONObject.NULL)
+            .put("chars", cost.chars).put("est_tokens", cost.estTokens).put("images", cost.imagesJson()).put("image_tokens", cost.imageTokens)
         f.appendText(o.toString() + "\n")
     }
 
@@ -147,7 +156,8 @@ object TaskLog {
     }
 
     /** A command of [session] finished with [code] (called for every audited command). */
-    fun onCommand(session: String, token: String, argv: List<String>, code: String, exit: Int, ms: Long = 0L, output: String = "") {
+    fun onCommand(session: String, token: String, argv: List<String>, code: String, exit: Int, ms: Long = 0L, output: String = "",
+                  res: com.kilon.agentvscreen.cmd.NativeOffloadResult? = null) {
         val sub = argv.firstOrNull() ?: return
         if (sub in setOf("status", "guide", "help", "remembered", "events", "diag", "version")) return
         val now = System.currentTimeMillis()
@@ -168,7 +178,7 @@ object TaskLog {
             }
         }
         val n = t.commands
-        worker.execute { runCatching { saveStep(t, n, argv, code, exit, ms, output) } }
+        worker.execute { runCatching { saveStep(t, n, argv, code, exit, ms, output, res) } }
         if (ends) { onTurnEnd(session); return }
         if (now - t.lastFrameAt < FRAME_GAP_MS) return
         t.lastFrameAt = now

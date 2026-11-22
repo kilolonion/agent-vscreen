@@ -2,6 +2,10 @@
 
 For [1.4.2-beta3 (versionCode 54)](../README.md#whats-new-in-142-beta3), see the current beta notes. Changes on `main` since then come first.
 
+## 2.0.0-beta1 (`v2.0` branch)
+
+- Added the evaluation harness (`:torture` 13 deterministic scenes and `tools/eval/` task runner) and reply cost metering (`meter` in JSON replies and step logs for characters, estimated tokens and image tokens), leaving text replies unchanged.
+
 ## On `main` since 1.4.2-beta3 (not released yet)
 
 - **Fewer false "the screen did not change" from slow apps**: when the picture after an action's first wait still matches the one before, `act` looks up to 1.5 s longer (also for the last step under `--fast`). A late change is waited out and both moments are counted from the action: "the screen changed late, 2.0s after the action, and settled at 2.6s", or "… was still changing when time was up at 5.0s". A `--stop` condition met meanwhile stops the stretch at that step, without `NO_CHANGE`. "The screen did not change" (`NO_CHANGE`) now means no change was seen within that window, about 1.5 s later than before. If the screen changes only after the observation window closes, the step can still report `NO_CHANGE`; and the check compares a sampled picture, so it does not prove a tap missed.

@@ -1,0 +1,28 @@
+{
+  "id": "T04b",
+  "scene": "S04",
+  "seed": 7,
+  "since": "beta4",
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "drag 200 1500 540 600 hold until color:540,600=#4CAF50 2s"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "snap",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 60
+}

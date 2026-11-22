@@ -5,3 +5,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "AgentVScreen"
 include(":app")
+include(":torture")

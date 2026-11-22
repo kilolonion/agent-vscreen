@@ -124,10 +124,12 @@ internal object Mcp {
             val f = ShotStore.file(server.ctxFiles(), ImagePolicy.sendName(server.ctxFiles(), res, n)) ?: continue
             content.put(JSONObject().put("type", "image").put("mimeType", "image/jpeg").put("data", Base64.encodeToString(f.readBytes(), Base64.NO_WRAP)))
         }
+        val meter = com.kilon.agentvscreen.core.Meter.of(text, com.kilon.agentvscreen.core.Meter.sentDimensions(server.ctxFiles(), res, sent))
         val structured = JSONObject()
         res.data?.let { d -> for (k in d.keys()) structured.put(k, d.get(k)) }
         structured.put("ok", res.exitCode == 0).put("code", res.codeOrDefault).put("exit", res.exitCode)
             .put("next", if (res.exitCode == 0) "none" else com.kilon.agentvscreen.cmd.Codes.next(res.codeOrDefault))
+            .put("meter", meter.json())
         if (replayed) structured.put("replayed", true)
         return JSONObject().put("content", content).put("structuredContent", structured).put("isError", res.exitCode != 0)
     }

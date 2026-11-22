@@ -1,0 +1,27 @@
+{
+  "id": "T04a",
+  "scene": "S04",
+  "seed": 7,
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "drag 200 1500 540 600 600ms"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "snap",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 60
+}
