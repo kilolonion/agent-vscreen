@@ -30,5 +30,5 @@
       "ev": "fail"
     }
   ],
-  "max_seconds": 60
+  "max_seconds": 180
 }

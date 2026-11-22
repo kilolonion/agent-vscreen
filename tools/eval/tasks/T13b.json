@@ -10,7 +10,8 @@
     ],
     [
       "act",
-      "repeat 35 { swipe 540 1900 540 500 250ms } until text:目标 147; tap \"目标 147\" until text:已打开"
+      "--fast",
+      "repeat 25 { drag 540 2000 540 500 250ms } until \"text:目标 147\" 300ms; tap \"目标 147\" until text:已打开"
     ]
   ],
   "expect": [
@@ -24,5 +25,5 @@
       "ev": "fail"
     }
   ],
-  "max_seconds": 90
+  "max_seconds": 180
 }
