@@ -975,4 +975,135 @@ class V200Beta2Test {
             ),
         )
     }
+
+    @Test
+    fun relayClosedWithoutReplyWhileAppAliveClosesClientWithout503OrWake() {
+        val now = AtomicLong(1_000L)
+        val upstream = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
+        val probeCount = AtomicInteger(0)
+        val wakeShellCalls = AtomicInteger(0)
+
+        // First connection sends 0x06, reads request, then closes without reply (e.g. ApiServer http-evict).
+        // Second connection (Gate's liveness probe) receives 0x06 immediately, proving the app is still alive.
+        val tUpstream = Thread {
+            runCatching {
+                upstream.accept().use { s ->
+                    s.soTimeout = 3_000
+                    s.getOutputStream().apply { write(Gate.ACCEPT_ACK_BYTE); flush() }
+                    val n = s.getInputStream().read(ByteArray(4096))
+                    assertTrue("upstream must read client request before closing", n > 0)
+                }
+                upstream.soTimeout = 3_000
+                upstream.accept().use { probe ->
+                    probeCount.incrementAndGet()
+                    probe.getOutputStream().apply { write(Gate.ACCEPT_ACK_BYTE); flush() }
+                }
+            }
+        }.apply { isDaemon = true; start() }
+
+        val gate = Gate(
+            service = null,
+            clock = { now.get() },
+            shell = { _, _ -> wakeShellCalls.incrementAndGet(); 0 },
+            startWatchThread = false,
+        )
+        try {
+            val gp = gate.start(freePort(), upstream.localPort, "com.kilon.agentvscreen", "com.kilon.agentvscreen", 34)
+            assertTrue(gp > 0)
+            val rawReq = "POST /v2/run HTTP/1.1\r\nHost: 127.0.0.1:$gp\r\nContent-Length: 16\r\n\r\n{\"cmd\":\"status\"}"
+            val reply = readHttpRaw(gp, rawReq)
+            tUpstream.join(3_000)
+
+            assertEquals("client must see closed connection with 0 bytes, not 503", "", reply)
+            assertFalse("must not contain HOST_RESTARTED", reply.contains("HOST_RESTARTED"))
+            assertEquals("Gate must probe internal port once after silent close", 1, probeCount.get())
+            assertEquals("must not invoke wake shell when app is alive", 0, wakeShellCalls.get())
+            val st = gate.statusJson()
+            assertEquals(0L, st.getLong("stale_count"))
+            assertEquals(0L, st.getLong("wake_ok"))
+            assertEquals(0L, st.getLong("wake_fail"))
+            assertEquals(0L, st.getLong("not_ready"))
+        } finally {
+            gate.stop()
+            runCatching { upstream.close() }
+        }
+    }
+
+    @Test
+    fun relayClosedWithoutReplyWhenConnectionRefusedReturns503HostRestartedAndWakes() {
+        val now = AtomicLong(1_000L)
+        val crashingUpstream = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
+        val wokenUpstream = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
+        val wokenConnections = AtomicInteger(0)
+        val wakeCalls = AtomicInteger(0)
+        val bgWakeRan = CountDownLatch(1)
+
+        // Upstream sends 0x06, reads request, closes the listening socket (so follow-up probe gets Connection Refused),
+        // then closes the request socket without writing any response bytes.
+        val tCrash = Thread {
+            runCatching {
+                crashingUpstream.accept().use { s ->
+                    s.soTimeout = 3_000
+                    s.getOutputStream().apply { write(Gate.ACCEPT_ACK_BYTE); flush() }
+                    val n = s.getInputStream().read(ByteArray(4096))
+                    assertTrue("upstream must read client request before crashing", n > 0)
+                    runCatching { crashingUpstream.close() }
+                }
+            }
+        }.apply { isDaemon = true; start() }
+
+        val tWoken = Thread {
+            runCatching {
+                wokenUpstream.soTimeout = 600
+                wokenUpstream.accept().use {
+                    wokenConnections.incrementAndGet()
+                }
+            }
+        }.apply { isDaemon = true; start() }
+
+        lateinit var gate: Gate
+        val wantPort = freePort()
+        gate = Gate(
+            service = null,
+            clock = { now.get() },
+            shell = { cmd, _ ->
+                if (cmd.contains("start-foreground-service")) {
+                    wakeCalls.incrementAndGet()
+                    gate.start(wantPort, wokenUpstream.localPort, "com.kilon.agentvscreen", "com.kilon.agentvscreen", 34)
+                    bgWakeRan.countDown()
+                }
+                0
+            },
+            startWatchThread = false,
+        )
+        try {
+            val gp = gate.start(wantPort, crashingUpstream.localPort, "com.kilon.agentvscreen", "com.kilon.agentvscreen", 34)
+            assertEquals(wantPort, gp)
+            val rawReq = "POST /v2/run HTTP/1.1\r\nHost: 127.0.0.1:$gp\r\nContent-Length: 19\r\n\r\n{\"cmd\":\"act tap 1\"}"
+            val reply = readHttpRaw(gp, rawReq)
+            tCrash.join(3_000)
+            assertTrue("background wake must run when probe is refused", bgWakeRan.await(3, TimeUnit.SECONDS))
+            val deadline = System.currentTimeMillis() + 3_000L
+            while (gate.statusJson().getLong("wake_ok") < 1L && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20)
+            }
+            tWoken.join(1_500)
+
+            assertTrue("must return HTTP 503, got: $reply", reply.startsWith("HTTP/1.1 503 Service Unavailable\r\n"))
+            val json = JSONObject(reply.substringAfter("\r\n\r\n"))
+            assertFalse(json.getBoolean("ok"))
+            assertEquals("HOST_RESTARTED", json.getString("code"))
+            assertEquals(1, json.getInt("exit"))
+            assertEquals("look", json.getString("next"))
+            assertEquals(Gate.HOST_RESTARTED_TEXT, json.getString("text"))
+            assertEquals("must trigger exactly one wake", 1, wakeCalls.get())
+            assertEquals(1L, gate.statusJson().getLong("wake_ok"))
+            assertEquals(1L, gate.statusJson().getLong("stale_count"))
+            assertEquals("command must NOT be resent to woken upstream", 0, wokenConnections.get())
+        } finally {
+            gate.stop()
+            runCatching { crashingUpstream.close() }
+            runCatching { wokenUpstream.close() }
+        }
+    }
 }

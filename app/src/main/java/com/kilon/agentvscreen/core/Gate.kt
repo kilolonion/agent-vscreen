@@ -442,8 +442,12 @@ internal class Gate(
     /**
      * Pure byte-level bidirectional relay after the internal server confirmed `accept()` with `0x06`.
      * Zero buffering, zero replay:
-     * - If upstream disconnects before emitting its first response byte (app exited mid-command), trigger a
-     *   background single-flight wake and answer HTTP 503 `HOST_RESTARTED` (`next="look"`).
+     * - If upstream disconnects before emitting its first response byte, probe the internal port once via
+     *   [connectInternalWithAck] (and immediately close the probe socket on success):
+     *   - If the probe succeeds, the app is still alive (e.g. `ApiServer` evicted an idle/slow connection), so
+     *     simply close the client connection without returning `HOST_RESTARTED` or waking.
+     *   - If the probe fails, the app exited mid-command: trigger a background single-flight wake and answer
+     *     HTTP 503 `HOST_RESTARTED` (`next="look"`).
      * - If upstream disconnects after emitting at least one response byte, simply close both sockets.
      */
     private fun relayConfirmed(client: Socket, upstream: Socket) {
@@ -507,15 +511,21 @@ internal class Gate(
             openSockets.remove(upstream)
         }
 
-        if (!upstreamReplied.get() && !(clientClosed.get() && !clientWroteAny.get())) {
-            val beatGapMs = if (hasBeat) (clock.nowMs() - lastBeatMs).coerceAtLeast(0L) else -1L
-            logWarn("upstream closed after accept-ack before first response byte (beat_gap_ms=$beatGapMs); waking in background and returning HOST_RESTARTED")
-            Thread({ runCatching { ensureAwake(requireNewBeat = true) } }, "vscreen-gate-bg-wake")
-                .apply { isDaemon = true }.start()
-            runCatching {
-                val out = client.getOutputStream()
-                out.write(hostRestartedHttpBytes())
-                out.flush()
+        if (!stopped && !upstreamReplied.get() && !(clientClosed.get() && !clientWroteAny.get())) {
+            val probe = connectInternalWithAck()
+            if (probe != null) {
+                runCatching { probe.close() }
+                logInfo("upstream closed without reply but app alive")
+            } else {
+                val beatGapMs = if (hasBeat) (clock.nowMs() - lastBeatMs).coerceAtLeast(0L) else -1L
+                logWarn("upstream closed after accept-ack before first response byte (beat_gap_ms=$beatGapMs); waking in background and returning HOST_RESTARTED")
+                Thread({ runCatching { ensureAwake(requireNewBeat = true) } }, "vscreen-gate-bg-wake")
+                    .apply { isDaemon = true }.start()
+                runCatching {
+                    val out = client.getOutputStream()
+                    out.write(hostRestartedHttpBytes())
+                    out.flush()
+                }
             }
         }
         runCatching { client.close() }
