@@ -1,6 +1,6 @@
 {
   "app_version": "2.0.0-beta1",
-  "note": "Initial baseline schema (100% pass_rate gate); replace with CI eval-results/result.json artifact after first device.yml eval run.",
+  "generated_at": 1795316101,
   "tasks": [
     {
       "id": "T01a",
@@ -8,14 +8,14 @@
       "seed": 7,
       "ok": true,
       "turns": 3,
-      "chars": 0,
-      "est_tokens": 0,
-      "image_tokens": 0,
-      "phone_ms": 0,
+      "chars": 5790,
+      "est_tokens": 3384,
+      "image_tokens": 2219,
+      "phone_ms": 40460,
       "reply_est_tokens": [
-        0,
-        0,
-        0
+        2331,
+        502,
+        551
       ],
       "error": ""
     },
@@ -25,13 +25,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 0,
-      "est_tokens": 0,
-      "image_tokens": 0,
-      "phone_ms": 0,
+      "chars": 1483,
+      "est_tokens": 775,
+      "image_tokens": 1428,
+      "phone_ms": 27759,
       "reply_est_tokens": [
-        0,
-        0
+        249,
+        526
       ],
       "error": ""
     },
@@ -41,13 +41,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 0,
-      "est_tokens": 0,
-      "image_tokens": 0,
-      "phone_ms": 0,
+      "chars": 1136,
+      "est_tokens": 576,
+      "image_tokens": 1428,
+      "phone_ms": 20942,
       "reply_est_tokens": [
-        0,
-        0
+        219,
+        357
       ],
       "error": ""
     },
@@ -57,13 +57,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 0,
-      "est_tokens": 0,
-      "image_tokens": 0,
-      "phone_ms": 0,
+      "chars": 1202,
+      "est_tokens": 588,
+      "image_tokens": 1428,
+      "phone_ms": 19691,
       "reply_est_tokens": [
-        0,
-        0
+        221,
+        367
       ],
       "error": ""
     },
@@ -73,13 +73,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 0,
-      "est_tokens": 0,
-      "image_tokens": 0,
-      "phone_ms": 0,
+      "chars": 1176,
+      "est_tokens": 588,
+      "image_tokens": 1428,
+      "phone_ms": 17419,
       "reply_est_tokens": [
-        0,
-        0
+        213,
+        375
       ],
       "error": ""
     },
@@ -89,14 +89,14 @@
       "seed": 7,
       "ok": true,
       "turns": 3,
-      "chars": 0,
-      "est_tokens": 0,
-      "image_tokens": 0,
-      "phone_ms": 0,
+      "chars": 1491,
+      "est_tokens": 787,
+      "image_tokens": 1530,
+      "phone_ms": 79204,
       "reply_est_tokens": [
-        0,
-        0,
-        0
+        221,
+        6,
+        560
       ],
       "error": ""
     },
@@ -106,13 +106,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 0,
-      "est_tokens": 0,
-      "image_tokens": 0,
-      "phone_ms": 0,
+      "chars": 1092,
+      "est_tokens": 559,
+      "image_tokens": 1428,
+      "phone_ms": 20201,
       "reply_est_tokens": [
-        0,
-        0
+        211,
+        348
       ],
       "error": ""
     },
@@ -122,13 +122,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 0,
-      "est_tokens": 0,
-      "image_tokens": 0,
-      "phone_ms": 0,
+      "chars": 1655,
+      "est_tokens": 869,
+      "image_tokens": 1428,
+      "phone_ms": 18841,
       "reply_est_tokens": [
-        0,
-        0
+        261,
+        608
       ],
       "error": ""
     },
@@ -138,13 +138,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 0,
-      "est_tokens": 0,
-      "image_tokens": 0,
-      "phone_ms": 0,
+      "chars": 1256,
+      "est_tokens": 668,
+      "image_tokens": 1428,
+      "phone_ms": 27559,
       "reply_est_tokens": [
-        0,
-        0
+        164,
+        504
       ],
       "error": ""
     },
@@ -154,13 +154,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 0,
-      "est_tokens": 0,
-      "image_tokens": 0,
-      "phone_ms": 0,
+      "chars": 1319,
+      "est_tokens": 649,
+      "image_tokens": 1428,
+      "phone_ms": 16497,
       "reply_est_tokens": [
-        0,
-        0
+        232,
+        417
       ],
       "error": ""
     },
@@ -168,15 +168,15 @@
       "id": "T11a",
       "scene": "S11",
       "seed": 7,
-      "ok": true,
+      "ok": false,
       "turns": 2,
-      "chars": 0,
-      "est_tokens": 0,
-      "image_tokens": 0,
-      "phone_ms": 0,
+      "chars": 1310,
+      "est_tokens": 671,
+      "image_tokens": 1428,
+      "phone_ms": 31748,
       "reply_est_tokens": [
-        0,
-        0
+        211,
+        460
       ],
       "error": ""
     },
@@ -186,13 +186,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 0,
-      "est_tokens": 0,
-      "image_tokens": 0,
-      "phone_ms": 0,
+      "chars": 1143,
+      "est_tokens": 578,
+      "image_tokens": 1428,
+      "phone_ms": 56232,
       "reply_est_tokens": [
-        0,
-        0
+        212,
+        366
       ],
       "error": ""
     },
@@ -202,13 +202,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 0,
-      "est_tokens": 0,
-      "image_tokens": 0,
-      "phone_ms": 0,
+      "chars": 2867,
+      "est_tokens": 1260,
+      "image_tokens": 1530,
+      "phone_ms": 69086,
       "reply_est_tokens": [
-        0,
-        0
+        375,
+        885
       ],
       "error": ""
     }
@@ -282,15 +282,15 @@
   ],
   "totals": {
     "total": 13,
-    "passed": 13,
-    "failed": 0,
-    "pass_rate": 1.0,
+    "passed": 12,
+    "failed": 1,
+    "pass_rate": 0.9231,
     "turns": 28,
-    "chars": 0,
-    "est_tokens": 0,
-    "image_tokens": 0,
-    "phone_ms": 0,
-    "median_reply_est_tokens": 0.0
+    "chars": 22920,
+    "est_tokens": 11952,
+    "image_tokens": 19559,
+    "phone_ms": 445639,
+    "median_reply_est_tokens": 361.5
   },
   "diff_vs_baseline": null
 }
