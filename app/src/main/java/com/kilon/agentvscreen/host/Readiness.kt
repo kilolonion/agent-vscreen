@@ -61,6 +61,8 @@ object Readiness {
         val powerProblems: List<String>? = null,
         val ownFocus: Boolean? = null,
         val shellOwned: Boolean? = null,
+        /** 2.0.0-beta2: OCR engines that crashed during self-test and are disabled for this app versionCode. */
+        val ocrCrashedEngines: Set<String> = emptySet(),
     )
 
     fun evaluate(i: Inputs): List<Item> = buildList {
@@ -98,6 +100,18 @@ object Readiness {
             add(Item("no_display_focus", false, tr("副屏没有独立输入焦点（需要 Android 14+）：key back/enter 可能送不到；无效时直接 tap 页面上的返回/搜索按钮。", "The screen has no input focus of its own (needs Android 14+): key back/enter may not arrive; if they do nothing, tap the page's back / search buttons.")))
         if (i.shellOwned == false)
             add(Item("app_owned_display", false, tr("Shizuku 副屏服务不可用，只能用 App 自建副屏：系统可能把应用开到主屏。请用户在设置里重新连接后台操作。", "The Shizuku screen service is unavailable, so only the app's own screen can be used: the system may open apps on the main screen. Ask the user to reconnect background operation in settings.")))
+        val mlCrashed = com.kilon.agentvscreen.core.VScreenOcr.ENGINE_MLKIT in i.ocrCrashedEngines
+        val pdCrashed = com.kilon.agentvscreen.core.VScreenOcr.ENGINE_PADDLE in i.ocrCrashedEngines
+        if (mlCrashed && pdCrashed) {
+            add(Item("ocr_unavailable", false, tr("OCR 不可用：PP-OCRv6 与 ML Kit 在自检时均崩溃，本版本已禁用；画面上的文字仅能靠无障碍和截图识别（运行 diag 或升级应用后重试）",
+                "OCR is unavailable: both PP-OCRv6 and ML Kit crashed during self-test and are disabled for this version; text on screen relies on accessibility and screenshots only (run diag or update the app to retry)")))
+        } else if (mlCrashed) {
+            add(Item("ocr_degraded", false, tr("ML Kit 在自检时崩溃，本版本已禁用，改由 PP-OCRv6 接手（运行 diag 或升级应用后重试）",
+                "ML Kit crashed during self-test and is disabled for this version; PP-OCRv6 took over (run diag or update the app to retry)")))
+        } else if (pdCrashed) {
+            add(Item("ocr_degraded", false, tr("PP-OCRv6 在自检时崩溃，本版本已禁用，改由 ML Kit 接手（运行 diag 或升级应用后重试）",
+                "PP-OCRv6 crashed during self-test and is disabled for this version; ML Kit took over (run diag or update the app to retry)")))
+        }
     }
 
     fun inputs(ctx: Context): Inputs {
@@ -116,6 +130,7 @@ object Readiness {
             userStopped = s.userStopped, frozen = Liveness.frozenUnresolved(), remoteMode = mode.key, remoteUp = remoteUp,
             remoteWhy = if (!remoteUp && phase != null) runCatching { Tailnet.line(ctx) }.getOrNull() else null,
             liveWhy = Liveness.problem(),
+            ocrCrashedEngines = com.kilon.agentvscreen.core.VScreenOcr.crashedEngines(ctx),
         )
     }
 

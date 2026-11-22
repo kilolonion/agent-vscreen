@@ -33,9 +33,10 @@ internal class Gate(
     private val service: VScreenDisplayService?,
     private val clock: Clock = SystemClockImpl,
     private val shell: Shell = ProcessShell,
-    private val cancelAgentFingers: () -> Unit = { service?.cancelAgentFingersOnAllDisplays() },
+    private val cancelAgentFingers: () -> Int = { service?.cancelAgentFingersOnAllDisplays() ?: 0 },
     private val sleepFn: (Long) -> Unit = { Thread.sleep(it) },
     private val startWatchThread: Boolean = true,
+    private val appResponsive: (() -> Boolean)? = null,
 ) {
     constructor(service: VScreenDisplayService) : this(service, SystemClockImpl, ProcessShell)
 
@@ -191,15 +192,59 @@ internal class Gate(
         cooldownUntilMs > 0L && nowMs < cooldownUntilMs
     }
 
+    private fun isAppResponsive(): Boolean = appResponsive?.invoke() ?: defaultProbeAppResponsive()
+
     /**
-     * 2.5: if the heartbeat is stale past [BEAT_STALE_MS], cancel held agent fingers on all displays created
-     * by [VScreenDisplayService]. Fires at most once per stale episode; resets on the next [beat].
+     * Probe whether the app's internal ApiServer is still alive and unfrozen.
+     * - Killed app: TCP connect immediately fails with ConnectException -> false.
+     * - Frozen app: kernel accepts TCP, but frozen process never reads/answers -> SocketTimeoutException -> false.
+     * - Alive & busy app: ApiServer answers `/v2/ping` with `HTTP/1.1 200 OK` -> true.
+     */
+    private fun defaultProbeAppResponsive(): Boolean {
+        val port = internalPort
+        if (port !in 1..65535) return false
+        return try {
+            Socket().use { s ->
+                s.connect(InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), CONNECT_TIMEOUT_MS)
+                s.soTimeout = PROBE_READ_TIMEOUT_MS
+                s.getOutputStream().apply {
+                    write("GET /v2/ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n".toByteArray(Charsets.US_ASCII))
+                    flush()
+                }
+                val buf = ByteArray(16)
+                val n = s.getInputStream().read(buf)
+                n >= 7 && String(buf, 0, n, Charsets.US_ASCII).startsWith("HTTP/1.")
+            }
+        } catch (_: IOException) {
+            false
+        }
+    }
+
+    private fun logInfo(msg: String) {
+        runCatching { android.util.Log.i(TAG, msg) }
+    }
+
+    private fun logWarn(msg: String) {
+        runCatching { android.util.Log.w(TAG, msg) }
+    }
+
+    /**
+     * 2.5: if the heartbeat is stale past [BEAT_STALE_MS] AND the internal port is unresponsive (killed or frozen),
+     * cancel held agent fingers on all displays created by [VScreenDisplayService]. Fires at most once per stale
+     * episode; resets on the next [beat].
      */
     internal fun checkStaleFingers(): Boolean {
         if (boundPort <= 0 || !hasBeat) return false
-        if (!isBeatStale(clock.nowMs())) return false
+        val now = clock.nowMs()
+        if (!isBeatStale(now)) return false
+        if (cancelledForCurrentStale.get()) return false
+        if (isAppResponsive()) return false
         if (!cancelledForCurrentStale.compareAndSet(false, true)) return false
-        runCatching { cancelAgentFingers() }
+        val beatGapMs = (now - lastBeatMs).coerceAtLeast(0L)
+        val cancelled = runCatching { cancelAgentFingers() }.getOrDefault(0)
+        if (cancelled > 0) {
+            logWarn("cancelled $cancelled stale agent finger(s) (beat_gap_ms=$beatGapMs)")
+        }
         return true
     }
 
@@ -288,11 +333,16 @@ internal class Gate(
     internal fun ensureAwake(requireNewBeat: Boolean = false): Boolean {
         val myGen: Long
         val beatBefore: Long
+        val beatGapMs: Long
         wakeLock.withLock {
             staleCount++
             val now = clock.nowMs()
+            beatGapMs = if (hasBeat) (now - lastBeatMs).coerceAtLeast(0L) else -1L
             if (cooldownUntilMs > 0L) {
-                if (now < cooldownUntilMs) return false
+                if (now < cooldownUntilMs) {
+                    logWarn("wake skipped in cooldown (beat_gap_ms=$beatGapMs, wake_fail=$wakeFail)")
+                    return false
+                }
                 cooldownUntilMs = 0L
                 consecutiveWakeFails = 0
             }
@@ -320,6 +370,7 @@ internal class Gate(
         try {
             val cmds = buildWakeCommands()
             lastWakeCmds = cmds.map { it.joinToString(" ") }
+            logInfo("wake start (beat_gap_ms=$beatGapMs, require_new_beat=$requireNewBeat, cmds=${lastWakeCmds.joinToString("; ")})")
             for (cmd in cmds) {
                 runCatching { shell.run(cmd, SHELL_TIMEOUT_MS) }
             }
@@ -341,8 +392,11 @@ internal class Gate(
                 woke = beatArrived()
             }
         } finally {
+            var took = 0L
+            var okNow = 0L
+            var failNow = 0L
             wakeLock.withLock {
-                val took = (clock.nowMs() - t0).coerceAtLeast(0L)
+                took = (clock.nowMs() - t0).coerceAtLeast(0L)
                 lastWakeMs = took
                 if (woke) {
                     wakeOk++
@@ -355,10 +409,13 @@ internal class Gate(
                         cooldownUntilMs = clock.nowMs() + COOLDOWN_MS
                     }
                 }
+                okNow = wakeOk
+                failNow = wakeFail
                 lastWakeSucceeded = woke
                 if (wakeGen == myGen) wakeInProgress = false
                 wakeCond.signalAll()
             }
+            logInfo("wake ${if (woke) "ok" else "fail"} in ${took}ms (beat_gap_ms=$beatGapMs, wake_ok=$okNow, wake_fail=$failNow)")
         }
         return woke
     }
@@ -436,9 +493,11 @@ internal class Gate(
     }
 
     companion object {
+        private const val TAG = "Gate"
         const val MAX_CONN = 64
         const val BEAT_STALE_MS = 2_500L
         const val CONNECT_TIMEOUT_MS = 500
+        const val PROBE_READ_TIMEOUT_MS = 500
         const val COPY_BUF_SIZE = 16_384
         const val WAKE_POLL_MS = 100L
         const val WAKE_WAIT_MS = 3_000L

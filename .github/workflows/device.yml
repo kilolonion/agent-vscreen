@@ -207,7 +207,7 @@ jobs:
           profile: pixel_6
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: mkdir -p eval-out && { python3 tools/eval/run.py --apk test-apks/torture-debug.apk --out eval-out --repeat-check > eval-out/eval.log 2>&1 || { rc=$?; cat eval-out/eval.log; adb logcat -d > eval-out/logcat.txt; exit "$rc"; }; cat eval-out/eval.log; }
+          script: mkdir -p eval-out && { python3 tools/eval/run.py --apk test-apks/torture-debug.apk --out eval-out --repeat-check > eval-out/eval.log 2>&1; rc=$?; adb logcat -d > eval-out/logcat.txt; cat eval-out/eval.log; exit "$rc"; }
       - if: always()
         uses: actions/upload-artifact@v5
         with:
@@ -224,9 +224,15 @@ jobs:
       matrix:
         include:
           - api: 34
+            mode: shizuku
             profile: pixel_6
             flag: ""
+          - api: 34
+            mode: root
+            profile: pixel_6
+            flag: "--root"
           - api: 30
+            mode: shizuku
             profile: pixel_2
             flag: "--api30"
     steps:
@@ -235,12 +241,16 @@ jobs:
         with:
           name: candidate
           path: test-apks
-      - name: Fetch Shizuku
+      - name: Prepare artifacts
         env:
           GH_TOKEN: ${{ github.token }}
+          GATE_MODE: ${{ matrix.mode }}
         run: |
-          find test-apks -name '*.apk' -exec mv {} test-apks/ \;
-          gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --output test-apks/shizuku.apk
+          find test-apks -type f -exec mv {} test-apks/ \; 2>/dev/null || true
+          if [[ "$GATE_MODE" == shizuku ]]; then
+            gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --output test-apks/shizuku.apk
+          fi
+          ls -la test-apks
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -258,7 +268,7 @@ jobs:
       - if: failure()
         uses: actions/upload-artifact@v5
         with:
-          name: gate-${{ matrix.api }}-logs
+          name: gate-${{ matrix.api }}-${{ matrix.mode }}-logs
           path: |
             gate.log
             logcat.txt

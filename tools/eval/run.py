@@ -339,7 +339,7 @@ def fmt_diff(val, is_float=False):
     return f"{val:+d}"
 
 
-def render_markdown(app_version, rows, skipped, totals, diff, regressed, repeat_rows=None):
+def render_markdown(app_version, rows, skipped, totals, diff, regressed, repeat_rows=None, gate=None):
     lines = [
         f"# Agent-VScreen 评测结果（{app_version}）",
         "",
@@ -389,6 +389,17 @@ def render_markdown(app_version, rows, skipped, totals, diff, regressed, repeat_
                 f"| {item['id']} | {item['scene']} | {item['seed']} | {len(item['seq1'])} | "
                 f"{len(item['seq2'])} | {'一致' if item['matched'] else '不一致'} | `{summary}` |"
             )
+
+    lines.extend(["", "## 守门人统计（`status.host.gate`）", ""])
+    if isinstance(gate, dict):
+        lines.extend([
+            "| port | stale_count | wake_ok | wake_fail | not_ready | last_wake_ms |",
+            "| ---: | ---: | ---: | ---: | ---: | ---: |",
+            f"| {gate.get('port', 0)} | {gate.get('stale_count', 0)} | {gate.get('wake_ok', 0)} | "
+            f"{gate.get('wake_fail', 0)} | {gate.get('not_ready', 0)} | {gate.get('last_wake_ms', 0)} |",
+        ])
+    else:
+        lines.append("`null`（未启用守门人或状态未取回）")
     return "\n".join(lines) + "\n"
 
 
@@ -467,6 +478,16 @@ def main():
                 "seq2": seq2,
             })
 
+    gate_status = None
+    try:
+        st_resp = call_api(token, ["status"], "eval-gate", timeout=30)
+        res_obj = st_resp.get("result") if isinstance(st_resp, dict) and isinstance(st_resp.get("result"), dict) else st_resp
+        host_obj = res_obj.get("host") if isinstance(res_obj, dict) and isinstance(res_obj.get("host"), dict) else None
+        if isinstance(host_obj, dict) and isinstance(host_obj.get("gate"), dict):
+            gate_status = host_obj["gate"]
+    except Exception as e:
+        print(f"WARN: failed to read status.host.gate at end of eval: {e}", flush=True)
+
     totals = compute_totals(rows)
     baseline_path = Path(args.baseline)
     baseline = json.loads(baseline_path.read_text(encoding="utf-8")) if baseline_path.is_file() else None
@@ -491,6 +512,7 @@ def main():
         "totals": totals,
         "diff_vs_baseline": diff,
         "regressed_tasks": regressed,
+        "gate": gate_status,
     }
     if repeat_rows is not None:
         result_obj["repeat_check"] = {
@@ -502,7 +524,7 @@ def main():
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "result.json").write_text(json.dumps(result_obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    md = render_markdown(app_version, rows, skipped, totals, diff, regressed, repeat_rows=repeat_rows)
+    md = render_markdown(app_version, rows, skipped, totals, diff, regressed, repeat_rows=repeat_rows, gate=gate_status)
     (out_dir / "result.md").write_text(md, encoding="utf-8")
     print("\n" + md, flush=True)
 
@@ -511,6 +533,7 @@ def main():
         base_copy["diff_vs_baseline"] = None
         base_copy["regressed_tasks"] = []
         base_copy.pop("repeat_check", None)
+        base_copy.pop("gate", None)
         baseline_path.write_text(json.dumps(base_copy, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     failed_gate = False

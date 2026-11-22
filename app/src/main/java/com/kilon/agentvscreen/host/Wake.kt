@@ -448,7 +448,7 @@ object Wake {
                 // 1.3 beta4: say plainly what happens to the agent's task and what the user can do, with the one tap
                 // that does it. "Off" is the user's own choice, so it is told as a consequence, not as a fault.
                 val tap = Needs.open(ctx, Needs.Page.HOME, 5)
-                val on = android.app.PendingIntent.getForegroundService(ctx, 7704, Intent(ctx, HostService::class.java).setAction(HostService.ACTION_ON), android.app.PendingIntent.FLAG_IMMUTABLE)
+                val on = android.app.PendingIntent.getBroadcast(ctx, 7704, Intent(ctx, NoteActions::class.java).setAction(HostService.ACTION_ON), android.app.PendingIntent.FLAG_IMMUTABLE)
                 if (items.any { it.blocking && it.code == "service_off" })
                     com.kilon.agentvscreen.core.VScreenHandoff.alert(ctx, 7702,
                         tr("agent 预约的 $whenText 到了，但服务是关闭的", "The agent's booking $whenText is due, but the service is off"),

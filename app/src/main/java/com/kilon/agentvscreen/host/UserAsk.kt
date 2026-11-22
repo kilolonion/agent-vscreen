@@ -223,8 +223,8 @@ object UserAsk {
                 .setPriority(NotificationCompat.PRIORITY_HIGH).setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setAutoCancel(false).setTimeoutAfter(a.validMs)
             if (a.kind == Kind.CONFIRM) {
-                fun pi(allow: Boolean) = PendingIntent.getService(ctx, a.id * 2 + (if (allow) 1 else 0),
-                    Intent(ctx, HostService::class.java).setAction(ACTION).putExtra("id", a.id).putExtra("allow", allow),
+                fun pi(allow: Boolean) = PendingIntent.getBroadcast(ctx, a.id * 2 + (if (allow) 1 else 0),
+                    Intent(ctx, NoteActions::class.java).setAction(ACTION).putExtra("id", a.id).putExtra("allow", allow),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
                 val open = Needs.open(ctx, Needs.Page.HOME, 6)
                 val body = tr("${a.detail}\n来自：${a.tokenName}（会话 ${a.session}）", "${a.detail}\nFrom: ${a.tokenName} (session ${a.session})")

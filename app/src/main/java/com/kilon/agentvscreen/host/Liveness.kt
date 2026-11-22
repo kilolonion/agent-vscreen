@@ -167,6 +167,7 @@ object Liveness {
         .put("background_thread_deaths", com.kilon.agentvscreen.core.ThreadGuard.deaths)
         .put("last_background_thread_death", com.kilon.agentvscreen.core.ThreadGuard.last ?: JSONObject.NULL)
         .put("gate", gateJson() ?: JSONObject.NULL)
+        .put("ocr_selftest", com.kilon.agentvscreen.core.VScreenOcr.selfTestStatusJson(app))
 
     /**
      * Open the vendor page where an app is allowed to keep running in the background (launch manager / autostart);

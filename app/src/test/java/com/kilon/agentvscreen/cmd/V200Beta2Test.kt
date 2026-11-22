@@ -388,15 +388,17 @@ class V200Beta2Test {
     }
 
     @Test
-    fun staleHeartbeatCancelsAgentFingersOncePerEpisode() {
+    fun staleHeartbeatCancelsAgentFingersOncePerEpisodeOnlyWhenAppUnresponsive() {
         val now = AtomicLong(1_000L)
         val cancels = AtomicInteger(0)
+        val responsive = java.util.concurrent.atomic.AtomicBoolean(true)
         val gate = Gate(
             service = null,
             clock = { now.get() },
             shell = { _, _ -> 0 },
             cancelAgentFingers = { cancels.incrementAndGet() },
             startWatchThread = false,
+            appResponsive = { responsive.get() },
         )
         try {
             val gp = gate.start(freePort(), 18775, "com.kilon.agentvscreen", "com.kilon.agentvscreen", 34)
@@ -404,8 +406,14 @@ class V200Beta2Test {
             assertFalse(gate.checkStaleFingers())
             assertEquals(0, cancels.get())
 
+            // Stale heartbeat alone, while internal port still responds, must NOT cancel fingers.
             now.addAndGet(Gate.BEAT_STALE_MS + 1L)
-            assertTrue("first check after stale cancels fingers", gate.checkStaleFingers())
+            assertFalse("stale heartbeat with responsive app must not cancel fingers", gate.checkStaleFingers())
+            assertEquals(0, cancels.get())
+
+            // Once both signals hold (stale + unresponsive), cancel fires once for this stale episode.
+            responsive.set(false)
+            assertTrue("first check with stale + unresponsive cancels fingers", gate.checkStaleFingers())
             assertEquals(1, cancels.get())
             assertFalse("second check in same stale episode does not repeat", gate.checkStaleFingers())
             assertEquals(1, cancels.get())
@@ -476,11 +484,191 @@ class V200Beta2Test {
 
     @Test
     fun livenessJsonAndDiagReportGateNullWhenOff() {
-        val j = Liveness.json()
-        assertTrue("Liveness.json contains gate key", j.has("gate"))
-        assertTrue("gate is null when Gate is off", j.isNull("gate"))
-        val diag = diagText(ctx)
-        assertTrue("diagText includes gate line", diag.contains("gate: off"))
+        com.kilon.agentvscreen.core.VScreenOcr.resetSelfTestForTests(ctx)
+        try {
+            val j = Liveness.json()
+            assertTrue("Liveness.json contains gate key", j.has("gate"))
+            assertTrue("gate is null when Gate is off", j.isNull("gate"))
+            assertTrue("Liveness.json contains ocr_selftest key", j.has("ocr_selftest"))
+            val diag = diagText(ctx)
+            assertTrue("diagText includes gate line", diag.contains("gate: off"))
+        } finally {
+            com.kilon.agentvscreen.core.VScreenOcr.resetSelfTestForTests(ctx)
+        }
+    }
+
+    @Test
+    fun manifestExportsHostServiceWithDumpAndKeepsNoteActionsPrivate() {
+        val pm = ctx.packageManager
+        val svcInfo = pm.getServiceInfo(android.content.ComponentName(ctx, com.kilon.agentvscreen.host.HostService::class.java), 0)
+        assertTrue("HostService must be exported for uid 2000 wake", svcInfo.exported)
+        assertEquals("android.permission.DUMP", svcInfo.permission)
+        val rcvInfo = pm.getReceiverInfo(android.content.ComponentName(ctx, com.kilon.agentvscreen.host.NoteActions::class.java), 0)
+        assertFalse("NoteActions must NOT be exported", rcvInfo.exported)
+    }
+
+    @Test
+    fun hostServiceBlockedOnCreateExitsCleanlyWithoutStartingServerOrSelfTest() {
+        com.kilon.agentvscreen.core.VScreenOcr.resetSelfTestForTests(ctx)
+        val ocrCalls = AtomicInteger(0)
+        com.kilon.agentvscreen.core.VScreenOcr.mlkitSelfTestRunner = { ocrCalls.incrementAndGet(); "ok" to "ML Kit: ok" }
+        com.kilon.agentvscreen.core.VScreenOcr.paddleSelfTestRunner = { ocrCalls.incrementAndGet(); "ok" to "PP-OCRv6: ok" }
+        com.kilon.agentvscreen.host.HostService.dropServer()
+        com.kilon.agentvscreen.host.Prefs.setServiceOn(ctx, false)
+        com.kilon.agentvscreen.host.Prefs.setBlocked(ctx, true)
+        try {
+            val controller = org.robolectric.Robolectric.buildService(com.kilon.agentvscreen.host.HostService::class.java)
+            controller.create()
+            assertFalse("BLOCKED HostService must not mark isAlive", com.kilon.agentvscreen.host.HostService.isAlive)
+            assertEquals("BLOCKED HostService must not start ApiServer", null, com.kilon.agentvscreen.host.HostService.server)
+            val startRes = controller.get().onStartCommand(android.content.Intent(ctx, com.kilon.agentvscreen.host.HostService::class.java), 0, 1)
+            assertEquals(android.app.Service.START_NOT_STICKY, startRes)
+            assertEquals("BLOCKED HostService must not start OCR self-test", 0, ocrCalls.get())
+            controller.destroy()
+            assertFalse(com.kilon.agentvscreen.host.Liveness.foreground)
+        } finally {
+            com.kilon.agentvscreen.host.Prefs.setBlocked(ctx, false)
+            com.kilon.agentvscreen.host.Prefs.setServiceOn(ctx, true)
+            com.kilon.agentvscreen.core.VScreenOcr.resetSelfTestForTests(ctx)
+        }
+    }
+
+    @Test
+    fun hostServiceIgnoresSpoofedActionsWhileNoteActionsHandlesThem() {
+        com.kilon.agentvscreen.host.Prefs.setBlocked(ctx, false)
+        com.kilon.agentvscreen.host.Prefs.setServiceOn(ctx, true)
+        com.kilon.agentvscreen.host.UserAsk.reset()
+        com.kilon.agentvscreen.core.VScreenOcr.resetSelfTestForTests(ctx)
+        com.kilon.agentvscreen.core.VScreenOcr.mlkitSelfTestRunner = { "ok" to "ML Kit: ok" }
+        com.kilon.agentvscreen.core.VScreenOcr.paddleSelfTestRunner = { "ok" to "PP-OCRv6: ok" }
+        val controller = org.robolectric.Robolectric.buildService(com.kilon.agentvscreen.host.HostService::class.java)
+        try {
+            controller.create()
+            val ask = com.kilon.agentvscreen.host.UserAsk.create(ctx, com.kilon.agentvscreen.host.UserAsk.Kind.CONFIRM, "k", "Approve?", "detail")
+            // Spoofed Consent.ACTION delivered to exported HostService must be ignored.
+            controller.get().onStartCommand(
+                android.content.Intent(ctx, com.kilon.agentvscreen.host.HostService::class.java)
+                    .setAction(com.kilon.agentvscreen.host.Consent.ACTION)
+                    .putExtra("id", ask.id)
+                    .putExtra("allow", true),
+                0,
+                1,
+            )
+            assertEquals("HostService must not answer Consent.ACTION", null, ask.answer)
+
+            // Spoofed ACTION_STOP delivered to exported HostService must be ignored.
+            controller.get().onStartCommand(
+                android.content.Intent(ctx, com.kilon.agentvscreen.host.HostService::class.java)
+                    .setAction(com.kilon.agentvscreen.host.HostService.ACTION_STOP),
+                0,
+                2,
+            )
+            assertNotEquals(com.kilon.agentvscreen.host.ServiceControl.State.BLOCKED, com.kilon.agentvscreen.host.ServiceControl.now(ctx))
+            assertTrue(com.kilon.agentvscreen.host.HostService.isAlive)
+
+            // Non-exported NoteActions DOES answer Consent.ACTION.
+            com.kilon.agentvscreen.host.NoteActions().onReceive(
+                ctx,
+                android.content.Intent(ctx, com.kilon.agentvscreen.host.NoteActions::class.java)
+                    .setAction(com.kilon.agentvscreen.host.Consent.ACTION)
+                    .putExtra("id", ask.id)
+                    .putExtra("allow", true),
+            )
+            assertEquals(true, ask.answer)
+        } finally {
+            controller.destroy()
+            com.kilon.agentvscreen.host.HostService.dropServer()
+            com.kilon.agentvscreen.host.Prefs.setBlocked(ctx, false)
+            com.kilon.agentvscreen.host.Prefs.setServiceOn(ctx, true)
+            com.kilon.agentvscreen.host.UserAsk.reset()
+            com.kilon.agentvscreen.core.VScreenOcr.resetSelfTestForTests(ctx)
+        }
+    }
+
+    @Test
+    fun ocrSelfTestResidualRunningMarkRecordsCrashedAndDisablesEngine() {
+        com.kilon.agentvscreen.core.VScreenOcr.resetSelfTestForTests(ctx)
+        val ver = AtomicInteger(59)
+        val mlCalls = AtomicInteger(0)
+        val pdCalls = AtomicInteger(0)
+        com.kilon.agentvscreen.core.VScreenOcr.versionCodeProvider = { ver.get() }
+        com.kilon.agentvscreen.core.VScreenOcr.mlkitSelfTestRunner = { mlCalls.incrementAndGet(); "ok" to "ML Kit: ok 4/4" }
+        com.kilon.agentvscreen.core.VScreenOcr.paddleSelfTestRunner = { pdCalls.incrementAndGet(); "ok" to "PP-OCRv6: ok 4/4" }
+        try {
+            // Simulate a native crash (SIGABRT) while ML Kit was running on versionCode 59.
+            val prefs = ctx.getSharedPreferences("agent_vscreen_ocr_selftest", android.content.Context.MODE_PRIVATE)
+            prefs.edit().putInt("ver", 59).putString("running", "mlkit@59").commit()
+
+            com.kilon.agentvscreen.core.VScreenOcr.recoverIfNeeded(ctx)
+            assertTrue("ML Kit must be disabled after residual running mark", com.kilon.agentvscreen.core.VScreenOcr.isMlkitDisabled(ctx))
+            assertFalse("PP-OCRv6 must stay enabled", com.kilon.agentvscreen.core.VScreenOcr.isPaddleDisabled(ctx))
+            assertTrue("report records ML Kit CRASHED", com.kilon.agentvscreen.core.VScreenOcr.selfTestReport.orEmpty().contains("ML Kit: CRASHED"))
+            assertEquals(null, prefs.getString("running", null))
+
+            // Startup self-test should skip crashed ML Kit and run only PP-OCRv6.
+            val started = com.kilon.agentvscreen.core.VScreenOcr.maybeStartSelfTest(ctx)
+            assertTrue(started)
+            val deadline = System.currentTimeMillis() + 5_000L
+            while (com.kilon.agentvscreen.core.VScreenOcr.selfTestStatusJson(ctx).getString("state") == "running" && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20)
+            }
+            assertEquals("crashed ML Kit must not be re-run", 0, mlCalls.get())
+            assertEquals("PP-OCRv6 should run once", 1, pdCalls.get())
+            val st = com.kilon.agentvscreen.core.VScreenOcr.selfTestStatusJson(ctx)
+            assertEquals("crashed", st.getString("state"))
+            assertEquals("mlkit", st.getString("engine"))
+            assertTrue("engineInfo mentions ML Kit crash", com.kilon.agentvscreen.core.VScreenOcr.engineInfo().contains("ML Kit"))
+            val readiness = com.kilon.agentvscreen.host.Readiness.now(ctx)
+            assertTrue("Readiness reports ocr_degraded", readiness.any { it.code == "ocr_degraded" && !it.blocking })
+
+            // Subsequent startup on same versionCode must NOT re-run self-test.
+            assertFalse("completed versionCode must not re-run self-test", com.kilon.agentvscreen.core.VScreenOcr.maybeStartSelfTest(ctx))
+            assertEquals(0, mlCalls.get())
+            assertEquals(1, pdCalls.get())
+
+            // Both engines crashed -> OCR unavailable in Readiness and recognize() refuses both.
+            prefs.edit().putInt("ver", 59).putString("running", "paddle@59").commit()
+            com.kilon.agentvscreen.core.VScreenOcr.resetSelfTestForTests(ctx, clearPrefs = false)
+            com.kilon.agentvscreen.core.VScreenOcr.versionCodeProvider = { ver.get() }
+            com.kilon.agentvscreen.core.VScreenOcr.mlkitSelfTestRunner = { mlCalls.incrementAndGet(); "ok" to "ML Kit: ok 4/4" }
+            com.kilon.agentvscreen.core.VScreenOcr.paddleSelfTestRunner = { pdCalls.incrementAndGet(); "ok" to "PP-OCRv6: ok 4/4" }
+            com.kilon.agentvscreen.core.VScreenOcr.recoverIfNeeded(ctx)
+            assertTrue(com.kilon.agentvscreen.core.VScreenOcr.isMlkitDisabled(ctx))
+            assertTrue(com.kilon.agentvscreen.core.VScreenOcr.isPaddleDisabled(ctx))
+            assertFalse(com.kilon.agentvscreen.core.VScreenOcr.accurateEnabled())
+            val bothReadiness = com.kilon.agentvscreen.host.Readiness.now(ctx)
+            assertTrue("Readiness reports ocr_unavailable", bothReadiness.any { it.code == "ocr_unavailable" && !it.blocking })
+            val bmp = android.graphics.Bitmap.createBitmap(16, 16, android.graphics.Bitmap.Config.ARGB_8888)
+            try {
+                val res = com.kilon.agentvscreen.core.VScreenOcr.recognize(1, bmp, 1L, accurate = true)
+                assertTrue("recognize returns error when both engines crashed", !res.error.isNullOrBlank())
+            } finally {
+                bmp.recycle()
+            }
+
+            // Manual diag (`selfTest`) clears crashed state and re-runs both engines.
+            val manualReport = com.kilon.agentvscreen.core.VScreenOcr.selfTest(ctx)
+            assertTrue(manualReport.contains("ML Kit: ok"))
+            assertTrue(manualReport.contains("PP-OCRv6: ok"))
+            assertFalse(com.kilon.agentvscreen.core.VScreenOcr.isMlkitDisabled(ctx))
+            assertFalse(com.kilon.agentvscreen.core.VScreenOcr.isPaddleDisabled(ctx))
+            assertEquals("done", com.kilon.agentvscreen.core.VScreenOcr.selfTestStatusJson(ctx).getString("state"))
+            assertEquals(1, mlCalls.get())
+            assertEquals(2, pdCalls.get())
+
+            // Version upgrade (59 -> 60) clears previous results and allows self-test to run again.
+            ver.set(60)
+            assertTrue("new versionCode should run self-test again", com.kilon.agentvscreen.core.VScreenOcr.maybeStartSelfTest(ctx))
+            val dl2 = System.currentTimeMillis() + 5_000L
+            while (com.kilon.agentvscreen.core.VScreenOcr.selfTestStatusJson(ctx).getString("state") == "running" && System.currentTimeMillis() < dl2) {
+                Thread.sleep(20)
+            }
+            assertEquals("done", com.kilon.agentvscreen.core.VScreenOcr.selfTestStatusJson(ctx).getString("state"))
+            assertEquals(2, mlCalls.get())
+            assertEquals(3, pdCalls.get())
+        } finally {
+            com.kilon.agentvscreen.core.VScreenOcr.resetSelfTestForTests(ctx)
+        }
     }
 
     @Test
