@@ -26,20 +26,39 @@ class VScreenApp : Application() {
         com.kilon.agentvscreen.api.AgentLedger.init(this)
         Privileged.init(this)
         BackgroundOperation.init(this)
-        if (!Prefs.blocked(this)) {
-            if (Prefs.serviceOn(this)) {
-                // 2.0.0-beta2: when Privileged is already ready (e.g. Shizuku cold wake by Gate), start ApiServer +
-                // gateStart off the main thread immediately in parallel with HostService.onCreate() to cut wake latency.
-                if (Privileged.isReady()) quiet("server-early") { HostService.ensureServer(this) }
-                HostService.start(this)
-            } else {
-                // 1.4.0-beta5: on demand, listen from the start: an agent's request wakes the service (HostService.wakeFor).
-                quiet("server-on-demand") { HostService.ensureServer(this) }
-            }
+        val st = ServiceControl.now(this)
+        val alreadyUp = HostService.server?.let { it.running || it.starting } == true
+        if (shouldStartServerEarly(st, Privileged.isReady(), alreadyUp)) {
+            // 2.0.0-beta2: start the shared HostService.ensureServer instance off the main thread in parallel
+            // with HostService.onCreate() so Gate receives gateStart faster on cold wake.
+            val app = applicationContext
+            Thread({
+                quiet("server-early") {
+                    if (ServiceControl.now(app) == ServiceControl.State.ON) {
+                        HostService.ensureServer(app)
+                    }
+                }
+            }, "vscreen-early-server").apply { isDaemon = true }.start()
         }
+        if (st == ServiceControl.State.ON) HostService.start(this)
+        // 1.4.0-beta5: on demand, listen from the start: an agent's request wakes the service (HostService.wakeFor).
+        else if (st == ServiceControl.State.HIDDEN) quiet("server-on-demand") { HostService.ensureServer(this) }
         // 1.4.2: the phone's app list, read once in the background (pickers, sound page, launch by name).
         com.kilon.agentvscreen.core.AppCatalog.init(this)
         quiet("wake-arm") { Wake.arm(this) }
+    }
+
+    companion object {
+        /**
+         * 2.0.0-beta2: whether [VScreenApp.onCreate] may pre-start the shared [ApiServer] + `gateStart`
+         * off the main thread before [HostService.onCreate] runs. Never starts when [ServiceControl.State.BLOCKED],
+         * when privileged access is not ready, or when an instance is already running / starting.
+         */
+        internal fun shouldStartServerEarly(
+            state: ServiceControl.State,
+            privilegedReady: Boolean,
+            serverRunningOrStarting: Boolean,
+        ): Boolean = state == ServiceControl.State.ON && privilegedReady && !serverRunningOrStarting
     }
 }
 

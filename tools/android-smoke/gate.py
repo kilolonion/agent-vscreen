@@ -6,8 +6,8 @@ Usage (inside android-emulator-runner):
 API 34 Shizuku (default, uid 2000):
   1) `am freeze --sticky <proc>` + wait 3s (past BEAT_STALE_MS) -> `status` succeeds within 3.5s,
      with `wake_ok >= 1` and `am unfreeze` in `last_wake_cmds`.
-  2) `am force-stop <pkg>` -> wait dead -> `status` returns 200 OK (with `last_wake_ms <= 3000`) or
-     503 NOT_READY within 3.5s (never times out).
+  2) `am force-stop <pkg>` -> wait dead -> `GET /v2/ping` through Gate returns 200 OK (with `last_wake_ms <= 3000`)
+     or 503 NOT_READY within 3.5s (never times out), then `status` reads Gate stats.
   4) `am start-foreground-service -n <pkg>/.host.HostService -a com.kilon.agentvscreen.STOP` ->
      `status` still returns 200 OK and HostService stays running (exported entry ignores actions/extras).
 
@@ -20,8 +20,8 @@ API 34 Root (`--root`, avsu via `su 2000` -> RootMain runs as uid 2000, adb star
 API 30 Shizuku (`--api30` or SDK < 34):
   - Waits for `host.ocr_selftest.state` to become `done` or `crashed` (one first-boot crash under x86_64
     arm64 translation is expected and persisted; no further crashes afterwards).
-  - `am force-stop <pkg>` -> wait dead -> `status` returns 200 OK (`last_wake_ms <= 3000`) or 503 NOT_READY
-    within 3.5s.
+  - `am force-stop <pkg>` -> wait dead -> `GET /v2/ping` returns 200 OK (`last_wake_ms <= 3000`) or
+    503 NOT_READY within 3.5s, then `status` reads Gate stats.
   - `host.gate.last_wake_cmds` confirms `am start-foreground-service` ran and `am unfreeze` did NOT run.
 """
 import json
@@ -215,6 +215,26 @@ def seed():
     raise SystemExit("FAIL service never reported its port")
 
 
+def ping_raw(timeout=15):
+    req = urllib.request.Request(f"http://127.0.0.1:{LOCAL_PORT}/v2/ping", method="GET")
+    t0 = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            dt = time.monotonic() - t0
+            return r.status, json.loads(r.read().decode("utf-8")), dt
+    except urllib.error.HTTPError as e:
+        dt = time.monotonic() - t0
+        raw = e.read().decode("utf-8", errors="replace")
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = {"raw": raw}
+        return e.code, parsed, dt
+    except Exception as e:
+        dt = time.monotonic() - t0
+        return -1, {"error": repr(e)}, dt
+
+
 def api_raw(cmd, timeout=15):
     body = json.dumps({"cmd": cmd, "session": "gate-ci"}).encode("utf-8")
     req = urllib.request.Request(
@@ -320,27 +340,30 @@ def run_freeze_and_force_stop(label):
         f"gate={gate1}",
     )
 
-    # 2) am force-stop -> wait dead -> status returns 200 (last_wake_ms <= 3000) or 503 NOT_READY within 3.5s.
+    # 2) am force-stop -> wait dead -> GET /v2/ping (no token) returns 200 or 503 NOT_READY within 3.5s;
+    #    then call status to inspect gate stats (last_wake_ms <= 3000 when 200).
     shell("am", "force-stop", APP)
     dead2 = wait_app_dead(3.0)
     print("force-stop dead:", dead2, flush=True)
-    code2, body2, dt2 = api_raw("status", timeout=15)
-    gate2 = gate_of(body2) or {}
+    code2, body2, dt2 = ping_raw(timeout=15)
     ok2 = (code2 == 200 and body2.get("ok") is True) or (
         code2 == 503 and body2.get("code") == "NOT_READY" and body2.get("next") == "ask_user"
     )
     check(
-        f"[{label}] force-stop status returns 200 or 503 NOT_READY within 3.5s",
+        f"[{label}] force-stop ping returns 200 or 503 NOT_READY within 3.5s",
         ok2 and dt2 <= 3.5,
-        f"http={code2} dt={dt2:.2f}s code={body2.get('code')} last_wake_ms={gate2.get('last_wake_ms')} body_err={body2.get('error')}",
+        f"http={code2} dt={dt2:.2f}s code={body2.get('code')} body_err={body2.get('error')}",
     )
+    st_code, st_body, st_dt = api_raw("status", timeout=15)
+    gate2 = gate_of(st_body) or {}
+    print(f"[{label}] post-force-stop status: http={st_code} dt={st_dt:.2f}s gate={gate2}", flush=True)
     if code2 == 200:
         check(
             f"[{label}] force-stop wake completed within 3000ms",
-            0 < int(gate2.get("last_wake_ms", 0)) <= 3000,
-            f"last_wake_ms={gate2.get('last_wake_ms')} gate={gate2}",
+            st_code == 200 and 0 < int(gate2.get("last_wake_ms", 0)) <= 3000,
+            f"status_http={st_code} last_wake_ms={gate2.get('last_wake_ms')} gate={gate2}",
         )
-    return code2
+    return st_code
 
 
 def run_api30():
@@ -352,25 +375,31 @@ def run_api30():
     shell("am", "force-stop", APP)
     dead = wait_app_dead(3.0)
     print("API 30 force-stop dead:", dead, flush=True)
-    code, body, dt = api_raw("status", timeout=15)
-    gate_after = gate_of(body) if code == 200 else None
+    code, body, dt = ping_raw(timeout=15)
     ok_resp = (code == 200 and body.get("ok") is True) or (
         code == 503 and body.get("code") == "NOT_READY" and body.get("next") == "ask_user"
     )
     check(
-        "API 30 force-stop status returns 200 or 503 NOT_READY within 3.5s",
+        "API 30 force-stop ping returns 200 or 503 NOT_READY within 3.5s",
         ok_resp and dt <= 3.5,
-        f"http={code} dt={dt:.2f}s code={body.get('code')} last_wake_ms={(gate_after or {}).get('last_wake_ms')} body_err={body.get('error')}",
+        f"http={code} dt={dt:.2f}s code={body.get('code')} body_err={body.get('error')}",
     )
+
+    # Read gate stats via status (retry briefly if ping returned 503 while app was still starting).
+    gate_after = None
+    st_code, st_body, st_dt = api_raw("status", timeout=15)
+    print(f"API 30 post-force-stop status: http={st_code} dt={st_dt:.2f}s gate={gate_of(st_body)}", flush=True)
+    if st_code == 200 and st_body.get("ok") is True:
+        gate_after = gate_of(st_body)
     if code == 200:
         check(
             "API 30 force-stop wake completed within 3000ms",
-            0 < int((gate_after or {}).get("last_wake_ms", 0)) <= 3000,
+            gate_after is not None and 0 < int(gate_after.get("last_wake_ms", 0)) <= 3000,
             f"gate={gate_after}",
         )
 
     # Confirm via GATE STATUS last_wake_cmds that am unfreeze was never executed on SDK < 34.
-    if gate_after is None:
+    if gate_after is None or not gate_after.get("last_wake_cmds"):
         for _ in range(20):
             time.sleep(1)
             c2, b2, _ = api_raw("status", timeout=10)

@@ -205,7 +205,7 @@ class ApiServer(private val ctx: Context) {
         }
         if (ss == null || intPort <= 0) return false
         server = ss; internalPort = intPort
-        Thread({ acceptLoop(ss) }, "vscreen-http-accept").apply { isDaemon = true }.start()
+        Thread({ acceptLoop(ss, sendAcceptAck = true) }, "vscreen-http-accept").apply { isDaemon = true }.start()
         val gp = com.kilon.agentvscreen.core.VScreenRemoteDisplay.gateStart(
             port, intPort, ctx.packageName, processName(), android.os.Build.VERSION.SDK_INT
         ).onFailure { AppLogger.warning(TAG, "gateStart failed: ${it.message}") }.getOrDefault(-1)
@@ -359,9 +359,38 @@ class ApiServer(private val ctx: Context) {
         }, "vscreen-tailnet-watch").apply { isDaemon = true }.also { it.start() }
     }
 
-    private fun acceptLoop(ss: ServerSocket) {
+    /** 2.0.0-beta2 test helper: bind a loopback port directly in internal-Gate mode (writes 0x06 accept-ack). */
+    internal fun startInternalForTests(port: Int): Boolean = synchronized(bindLock) {
+        closeLocalLocked()
+        val ss = ServerSocket()
+        try {
+            ss.reuseAddress = true
+            ss.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 50)
+        } catch (_: Exception) {
+            quiet("ApiServer:test-internal") { ss.close() }
+            return@synchronized false
+        }
+        server = ss; boundPort = port; internalPort = port; usingGate = true
+        Thread({ acceptLoop(ss, sendAcceptAck = true) }, "vscreen-http-accept").apply { isDaemon = true }.start()
+        true
+    }
+
+    private fun acceptLoop(ss: ServerSocket, sendAcceptAck: Boolean = false) {
         while (!ss.isClosed) {
             val s = try { ss.accept() } catch (e: SocketException) { break } catch (e: Exception) { continue }
+            if (sendAcceptAck) {
+                // 2.0.0-beta2: prove the app process itself ran accept() (not a dying/frozen kernel listen queue)
+                // before Gate forwards any client bytes. Only sent on the internal port behind Gate.
+                try {
+                    s.getOutputStream().apply {
+                        write(com.kilon.agentvscreen.core.Gate.ACCEPT_ACK_BYTE)
+                        flush()
+                    }
+                } catch (_: Exception) {
+                    quiet("http-ack-close") { s.close() }
+                    continue
+                }
+            }
             // 1.2: a bounded pool. When every worker is taken the connection is told so at once (503) instead of
             // one more thread being made for it: a flood of connections can no longer exhaust the app.
             // 1.2.0-beta2: a worker waiting for a request that has not come is not doing anything. When every worker

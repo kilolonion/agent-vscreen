@@ -86,6 +86,7 @@ class V200Beta2Test {
             runCatching {
                 upstream.accept().use { s ->
                     s.soTimeout = 3_000
+                    s.getOutputStream().apply { write(Gate.ACCEPT_ACK_BYTE); flush() }
                     val buf = ByteArray(4096)
                     val n = s.getInputStream().read(buf)
                     if (n > 0) seenReq.append(String(buf, 0, n, Charsets.UTF_8))
@@ -122,6 +123,7 @@ class V200Beta2Test {
             runCatching {
                 upstream.accept().use { s ->
                     s.soTimeout = 3_000
+                    s.getOutputStream().apply { write(Gate.ACCEPT_ACK_BYTE); flush() }
                     s.getInputStream().read(ByteArray(1024))
                     val body = """{"ok":true}"""
                     s.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body".toByteArray())
@@ -213,6 +215,7 @@ class V200Beta2Test {
             runCatching {
                 newUpstream.accept().use { s ->
                     s.soTimeout = 3_000
+                    s.getOutputStream().apply { write(Gate.ACCEPT_ACK_BYTE); flush() }
                     s.getInputStream().read(ByteArray(1024))
                     val body = """{"ok":true,"reborn":true}"""
                     s.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body".toByteArray())
@@ -672,7 +675,7 @@ class V200Beta2Test {
     }
 
     @Test
-    fun apiServerBehindGatePreservesAuthentication() {
+    fun apiServerBehindGatePreservesAuthenticationAndDirectModeOmitsAcceptAck() {
         ApiConfig.init(ctx)
         com.kilon.agentvscreen.api.Tokens.init(ctx)
         com.kilon.agentvscreen.host.Audit.init(ctx)
@@ -680,11 +683,13 @@ class V200Beta2Test {
         val wasAlive = aliveField.getBoolean(null)
         aliveField.setBoolean(null, true)
         val srv = ApiServer(ctx)
+        val directSrv = ApiServer(ctx)
         val gate = Gate(service = null, clock = { System.currentTimeMillis() }, shell = { _, _ -> 0 }, startWatchThread = false)
         try {
-            srv.start(freePort())
-            assertTrue(srv.boundPort > 0)
-            val gp = gate.start(freePort(), srv.boundPort, ctx.packageName, ctx.packageName, 34)
+            // Internal-port mode emits 0x06 accept-ack for Gate and preserves HTTP authentication.
+            assertTrue(srv.startInternalForTests(freePort()))
+            assertTrue(srv.internalPort > 0)
+            val gp = gate.start(freePort(), srv.internalPort, ctx.packageName, ctx.packageName, 34)
             assertTrue(gp > 0)
 
             // Unauthenticated /v2/run through Gate must still be rejected 401 by ApiServer.
@@ -697,47 +702,57 @@ class V200Beta2Test {
             unauth.outputStream.use { it.write("""{"args":["status"]}""".toByteArray()) }
             assertEquals(401, unauth.responseCode)
 
-            // Authenticated /v2/ping through Gate succeeds.
+            // Unauthenticated /v2/ping through Gate succeeds cleanly (0x06 consumed by Gate, never leaked to client).
             val ping = (URL("http://127.0.0.1:$gp/v2/ping").openConnection(java.net.Proxy.NO_PROXY) as HttpURLConnection).apply {
                 setRequestProperty("Host", "127.0.0.1:$gp")
             }
             assertEquals(200, ping.responseCode)
             val body = JSONObject(ping.inputStream.bufferedReader().readText())
             assertTrue(body.getBoolean("ok"))
+
+            // Direct public-port mode (without Gate) must NOT write 0x06 accept-ack.
+            directSrv.start(freePort())
+            assertTrue(directSrv.boundPort > 0)
+            val directRaw = readHttpRaw(directSrv.boundPort)
+            assertTrue("direct public port must start with HTTP/1.1, not 0x06", directRaw.startsWith("HTTP/1.1 200 OK"))
         } finally {
             gate.stop()
             srv.stop()
+            directSrv.stop()
             aliveField.setBoolean(null, wasAlive)
         }
     }
 
     @Test
-    fun upstreamEarlyDeathBeforeFirstByteWakesAndReplaysRequestUntouched() {
+    fun acceptAckScenarioA_disconnectBeforeAckSendsZeroBytesToFirstUpstreamAndFullRequestToSecond() {
         val now = AtomicLong(1_000L)
-        val dyingUpstream = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
-        val newUpstream = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
-        val replayed = StringBuilder()
+        val firstUpstream = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
+        val secondUpstream = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
+        val firstBytesRead = AtomicInteger(0)
+        val secondReq = StringBuilder()
 
-        // Dying upstream accepts TCP handshake (simulating SIGKILL exit_mm/exit_files window) and closes without writing any bytes.
-        val dyingThread = Thread {
+        // First upstream accepts TCP (SIGKILL teardown window), waits 50ms to verify 0 client bytes arrive, then closes without sending 0x06.
+        val t1 = Thread {
             runCatching {
-                val s = dyingUpstream.accept()
-                dyingUpstream.close()
-                Thread.sleep(30)
-                s.close()
+                firstUpstream.accept().use { s ->
+                    firstUpstream.close()
+                    s.soTimeout = 50
+                    val n = try { s.getInputStream().read(ByteArray(64)) } catch (_: java.net.SocketTimeoutException) { 0 }
+                    if (n > 0) firstBytesRead.addAndGet(n)
+                }
             }
         }.apply { isDaemon = true; start() }
 
-        val newThread = Thread {
+        val t2 = Thread {
             runCatching {
-                newUpstream.accept().use { s ->
+                secondUpstream.accept().use { s ->
                     s.soTimeout = 3_000
+                    s.getOutputStream().apply { write(Gate.ACCEPT_ACK_BYTE); flush() }
                     val buf = ByteArray(4096)
                     val n = s.getInputStream().read(buf)
-                    if (n > 0) replayed.append(String(buf, 0, n, Charsets.UTF_8))
-                    val body = """{"ok":true,"replayed":true}"""
-                    val resp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body"
-                    s.getOutputStream().write(resp.toByteArray(Charsets.UTF_8))
+                    if (n > 0) secondReq.append(String(buf, 0, n, Charsets.UTF_8))
+                    val body = """{"ok":true,"upstream":2}"""
+                    s.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body".toByteArray())
                     s.getOutputStream().flush()
                 }
             }
@@ -751,8 +766,8 @@ class V200Beta2Test {
             shell = { cmd, _ ->
                 if (cmd.contains("start-foreground-service")) {
                     Thread {
-                        Thread.sleep(30)
-                        gate.start(wantPort, newUpstream.localPort, "com.kilon.agentvscreen", "com.kilon.agentvscreen", 34)
+                        Thread.sleep(20)
+                        gate.start(wantPort, secondUpstream.localPort, "com.kilon.agentvscreen", "com.kilon.agentvscreen", 34)
                     }.start()
                 }
                 0
@@ -760,21 +775,204 @@ class V200Beta2Test {
             startWatchThread = false,
         )
         try {
-            val gp = gate.start(wantPort, dyingUpstream.localPort, "com.kilon.agentvscreen", "com.kilon.agentvscreen", 34)
+            val gp = gate.start(wantPort, firstUpstream.localPort, "com.kilon.agentvscreen", "com.kilon.agentvscreen", 34)
             assertEquals(wantPort, gp)
-            // Heartbeat is still fresh when client connects during SIGKILL teardown!
             val rawReq = "POST /v2/run HTTP/1.1\r\nHost: 127.0.0.1:$gp\r\nX-VScreen-Tailnet: sec\r\nContent-Length: 16\r\n\r\n{\"cmd\":\"status\"}"
             val reply = readHttpRaw(gp, rawReq)
-            dyingThread.join(3_000)
-            newThread.join(3_000)
-            assertTrue("expected 200 OK after wake+replay, got: $reply", reply.contains("200 OK"))
-            assertTrue(reply.contains("\"replayed\":true"))
-            assertEquals("replayed bytes must match original request untouched", rawReq, replayed.toString())
+            t1.join(3_000)
+            t2.join(3_000)
+            assertEquals("first upstream must receive 0 client bytes before ack", 0, firstBytesRead.get())
+            assertEquals("second upstream must receive full request untouched", rawReq, secondReq.toString())
+            assertTrue("expected 200 OK from second upstream, got: $reply", reply.startsWith("HTTP/1.1 200 OK"))
+            assertTrue(reply.contains("\"upstream\":2"))
             assertEquals(1L, gate.statusJson().getLong("wake_ok"))
         } finally {
             gate.stop()
-            runCatching { dyingUpstream.close() }
-            runCatching { newUpstream.close() }
+            runCatching { firstUpstream.close() }
+            runCatching { secondUpstream.close() }
         }
+    }
+
+    @Test
+    fun acceptAckScenarioB_disconnectAfterAckBeforeReplyReturns503HostRestartedWithoutResend() {
+        val now = AtomicLong(1_000L)
+        val crashingUpstream = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
+        val wokenUpstream = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
+        val wokenConnections = AtomicInteger(0)
+        val bgWakeRan = CountDownLatch(1)
+
+        // Upstream sends 0x06, reads the client's command, then exits before writing any response byte.
+        val tCrash = Thread {
+            runCatching {
+                crashingUpstream.accept().use { s ->
+                    s.soTimeout = 3_000
+                    s.getOutputStream().apply { write(Gate.ACCEPT_ACK_BYTE); flush() }
+                    val n = s.getInputStream().read(ByteArray(4096))
+                    assertTrue("upstream must read client request before crashing", n > 0)
+                    // Crash without sending any response bytes!
+                }
+            }
+        }.apply { isDaemon = true; start() }
+
+        // Background-woken upstream must NEVER receive the failed command again.
+        val tWoken = Thread {
+            runCatching {
+                wokenUpstream.soTimeout = 600
+                wokenUpstream.accept().use {
+                    wokenConnections.incrementAndGet()
+                }
+            }
+        }.apply { isDaemon = true; start() }
+
+        lateinit var gate: Gate
+        val wantPort = freePort()
+        gate = Gate(
+            service = null,
+            clock = { now.get() },
+            shell = { cmd, _ ->
+                if (cmd.contains("start-foreground-service")) {
+                    gate.start(wantPort, wokenUpstream.localPort, "com.kilon.agentvscreen", "com.kilon.agentvscreen", 34)
+                    bgWakeRan.countDown()
+                }
+                0
+            },
+            startWatchThread = false,
+        )
+        try {
+            val gp = gate.start(wantPort, crashingUpstream.localPort, "com.kilon.agentvscreen", "com.kilon.agentvscreen", 34)
+            assertEquals(wantPort, gp)
+            val rawReq = "POST /v2/run HTTP/1.1\r\nHost: 127.0.0.1:$gp\r\nContent-Length: 19\r\n\r\n{\"cmd\":\"act tap 1\"}"
+            val reply = readHttpRaw(gp, rawReq)
+            tCrash.join(3_000)
+            assertTrue("background single-flight wake must run", bgWakeRan.await(3, TimeUnit.SECONDS))
+            tWoken.join(1_500)
+
+            assertTrue("must return HTTP 503, got: $reply", reply.startsWith("HTTP/1.1 503 Service Unavailable\r\n"))
+            assertTrue("has Content-Length", reply.contains("Content-Length: "))
+            val json = JSONObject(reply.substringAfter("\r\n\r\n"))
+            assertEquals(5, json.length())
+            assertFalse(json.getBoolean("ok"))
+            assertEquals("HOST_RESTARTED", json.getString("code"))
+            assertEquals(1, json.getInt("exit"))
+            assertEquals("look", json.getString("next"))
+            assertEquals(Gate.HOST_RESTARTED_TEXT, json.getString("text"))
+            assertEquals("command must NOT be resent to woken upstream", 0, wokenConnections.get())
+        } finally {
+            gate.stop()
+            runCatching { crashingUpstream.close() }
+            runCatching { wokenUpstream.close() }
+        }
+    }
+
+    @Test
+    fun acceptAckScenarioC_frozenUpstreamAcceptsWithoutAckAndTriggersWake() {
+        val now = AtomicLong(1_000L)
+        val frozenUpstream = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
+        val wokenUpstream = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
+        val cmds = Collections.synchronizedList(ArrayList<List<String>>())
+        val frozenHeld = Collections.synchronizedList(ArrayList<Socket>())
+
+        // Frozen upstream accepts TCP in kernel backlog (or holds socket silent) and never sends 0x06.
+        val tFrozen = Thread {
+            runCatching {
+                val s = frozenUpstream.accept()
+                frozenHeld += s
+                // Stay silent past ACCEPT_ACK_MS (300ms) to simulate frozen process.
+                Thread.sleep(1_000)
+            }
+        }.apply { isDaemon = true; start() }
+
+        val tWoken = Thread {
+            runCatching {
+                wokenUpstream.accept().use { s ->
+                    s.soTimeout = 3_000
+                    s.getOutputStream().apply { write(Gate.ACCEPT_ACK_BYTE); flush() }
+                    s.getInputStream().read(ByteArray(4096))
+                    val body = """{"ok":true,"unfrozen":true}"""
+                    s.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body".toByteArray())
+                    s.getOutputStream().flush()
+                }
+            }
+        }.apply { isDaemon = true; start() }
+
+        lateinit var gate: Gate
+        val wantPort = freePort()
+        gate = Gate(
+            service = null,
+            clock = { now.get() },
+            shell = { cmd, _ ->
+                cmds += cmd
+                if (cmd.contains("start-foreground-service")) {
+                    Thread {
+                        Thread.sleep(20)
+                        gate.start(wantPort, wokenUpstream.localPort, "com.kilon.agentvscreen", "com.kilon.agentvscreen", 34)
+                    }.start()
+                }
+                0
+            },
+            startWatchThread = false,
+        )
+        try {
+            val gp = gate.start(wantPort, frozenUpstream.localPort, "com.kilon.agentvscreen", "com.kilon.agentvscreen", 34)
+            assertEquals(wantPort, gp)
+            assertFalse("heartbeat is still fresh when frozen", gate.isBeatStale())
+            val reply = readHttpRaw(gp)
+            tWoken.join(3_000)
+            assertTrue("expected 200 OK after waking frozen upstream, got: $reply", reply.startsWith("HTTP/1.1 200 OK"))
+            assertTrue(reply.contains("\"unfrozen\":true"))
+            assertTrue("wake must run am unfreeze on SDK 34", cmds.any { it.contains("unfreeze") })
+            assertTrue("wake must run start-foreground-service", cmds.any { it.contains("start-foreground-service") })
+            assertEquals(1L, gate.statusJson().getLong("wake_ok"))
+        } finally {
+            gate.stop()
+            frozenHeld.forEach { runCatching { it.close() } }
+            runCatching { frozenUpstream.close() }
+            runCatching { wokenUpstream.close() }
+            tFrozen.interrupt()
+        }
+    }
+
+    @Test
+    fun shouldStartServerEarlyCoversBlockedPrivilegeAndAlreadyRunning() {
+        assertFalse(
+            "BLOCKED must never start server early",
+            com.kilon.agentvscreen.host.VScreenApp.shouldStartServerEarly(
+                state = com.kilon.agentvscreen.host.ServiceControl.State.BLOCKED,
+                privilegedReady = true,
+                serverRunningOrStarting = false,
+            ),
+        )
+        assertFalse(
+            "HIDDEN uses on-demand path, not early ON pre-start",
+            com.kilon.agentvscreen.host.VScreenApp.shouldStartServerEarly(
+                state = com.kilon.agentvscreen.host.ServiceControl.State.HIDDEN,
+                privilegedReady = true,
+                serverRunningOrStarting = false,
+            ),
+        )
+        assertFalse(
+            "not ready privilege must not pre-start",
+            com.kilon.agentvscreen.host.VScreenApp.shouldStartServerEarly(
+                state = com.kilon.agentvscreen.host.ServiceControl.State.ON,
+                privilegedReady = false,
+                serverRunningOrStarting = false,
+            ),
+        )
+        assertFalse(
+            "already running or starting server must not pre-start again",
+            com.kilon.agentvscreen.host.VScreenApp.shouldStartServerEarly(
+                state = com.kilon.agentvscreen.host.ServiceControl.State.ON,
+                privilegedReady = true,
+                serverRunningOrStarting = true,
+            ),
+        )
+        assertTrue(
+            "ON + privilegedReady + not running may pre-start off main thread",
+            com.kilon.agentvscreen.host.VScreenApp.shouldStartServerEarly(
+                state = com.kilon.agentvscreen.host.ServiceControl.State.ON,
+                privilegedReady = true,
+                serverRunningOrStarting = false,
+            ),
+        )
     }
 }

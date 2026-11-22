@@ -98,8 +98,13 @@ class HostService : Service() {
          * the service left agents a refused connection they could do nothing about. Now the process keeps listening and
          * the first request wakes the service ([wakeFor]).
          */
-        fun ensureServer(ctx: Context): ApiServer = synchronized(this) {
-            server ?: ApiServer(ctx.applicationContext).also { server = it; it.start(ApiConfig.port) }
+        fun ensureServer(ctx: Context): ApiServer {
+            var created = false
+            val srv = synchronized(this) {
+                server ?: ApiServer(ctx.applicationContext).also { server = it; created = true }
+            }
+            if (created && synchronized(this) { server === srv }) srv.start(ApiConfig.port)
+            return srv
         }
 
         fun dropServer() = synchronized(this) { server?.onChange = null; server?.stop(); server = null }
