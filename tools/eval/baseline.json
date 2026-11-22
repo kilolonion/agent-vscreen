@@ -202,12 +202,12 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 2867,
-      "est_tokens": 1260,
+      "chars": 2838,
+      "est_tokens": 1248,
       "image_tokens": 1530,
-      "phone_ms": 69086,
+      "phone_ms": 76315,
       "reply_est_tokens": [
-        375,
+        363,
         885
       ],
       "error": ""
@@ -286,10 +286,10 @@
     "failed": 1,
     "pass_rate": 0.9231,
     "turns": 28,
-    "chars": 22464,
-    "est_tokens": 11690,
+    "chars": 22435,
+    "est_tokens": 11678,
     "image_tokens": 19522,
-    "phone_ms": 439641,
+    "phone_ms": 446870,
     "median_reply_est_tokens": 355.0
   },
   "diff_vs_baseline": null

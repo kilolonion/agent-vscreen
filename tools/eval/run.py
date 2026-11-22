@@ -169,7 +169,11 @@ def read_avst_events(scene):
             continue
         if obj.get("scene") == scene:
             events.append(obj)
-    return events
+    # The run starts at the scene's first `enter`. Anything logged before it comes from the instance the
+    # app's own launch opened, still ticking until the seeded restart replaces it (seen: S09 target_shown
+    # between `logcat -c` and the restart), and must not count toward the task or its repeat sequence.
+    first_enter = next((i for i, e in enumerate(events) if e.get("ev") == "enter"), None)
+    return events[first_enter:] if first_enter is not None else events
 
 
 def normalize_avst_event(ev):
