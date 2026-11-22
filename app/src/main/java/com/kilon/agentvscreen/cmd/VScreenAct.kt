@@ -1008,7 +1008,12 @@ private fun VScreenOffloadHandler.doAction(sid: String, d: VScreenDisplay, step:
                 // Human pacing: the hand is a little off at each turn (3 px: a drag usually has to land somewhere).
                 val path = if (hu != null) step.points.map { hu.drift(it, 3, dd.width, dd.height) } else step.points
                 val ms = hu?.vary(step.ms ?: 600L, 0.15) ?: (step.ms ?: 600L)
-                drag(dd, path, ms.toInt())
+                // 2.0.0-beta1: a straight drag is one gesture timed inside the screen service (eased, still at the end),
+                // like scroll: the page moves by what was dragged every time. Driving it from here one move per binder
+                // call moved the page by a varying distance under load (S13 on the emulator: the same scroll-until search
+                // took 7 to 13 identical drags from run to run). A path through more points still goes finger by finger.
+                if (path.size == 2) okOr(VScreenShell.drag(dd.displayId, path[0].first, path[0].second, path[1].first, path[1].second, ms.toInt(), DRAG_END_HOLD_MS))
+                else drag(dd, path, ms.toInt())
                 path.forEach { pts += intArrayOf(it.first, it.second) }
                 tr("按住拖过 ", "held and dragged through ") + path.joinToString(" → ") { "(${it.first},${it.second})" } + ", ${ms}ms" + (if (hu != null) Human.said(pause ?: 0) else "")
             }
@@ -1110,6 +1115,9 @@ private fun bounds(d: VScreenDisplay, pts: List<Pair<Int, Int>>) {
  * One finger down at the first point, still 150 ms (apps pick a thing up only after a hold), glide through the
  * points over [ms], still 120 ms, lift.
  */
+/** How long a drag's finger rests at the end before lifting, so the page takes it as a drag and not a fling. */
+private const val DRAG_END_HOLD_MS = 120
+
 private fun drag(d: VScreenDisplay, pts: List<Pair<Int, Int>>, ms: Int) {
     val lens = pts.zipWithNext { a, b -> hypot((b.first - a.first).toDouble(), (b.second - a.second).toDouble()) }
     val total = lens.sum().coerceAtLeast(1.0)
@@ -1129,7 +1137,7 @@ private fun drag(d: VScreenDisplay, pts: List<Pair<Int, Int>>, ms: Int) {
             if (f >= 1.0) break
             Thread.sleep(16)
         }
-        Thread.sleep(120)
+        Thread.sleep(DRAG_END_HOLD_MS.toLong())
         VScreenShell.finger(d.displayId, "up", 0, pts.last().first, pts.last().second)
     } finally { com.kilon.agentvscreen.host.quiet("drag-cancel") { VScreenShell.finger(d.displayId, "cancel", 0, -1, -1) } }
 }
