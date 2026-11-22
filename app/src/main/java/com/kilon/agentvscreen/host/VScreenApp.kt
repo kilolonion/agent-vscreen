@@ -26,11 +26,19 @@ class VScreenApp : Application() {
         com.kilon.agentvscreen.api.AgentLedger.init(this)
         Privileged.init(this)
         BackgroundOperation.init(this)
+        if (!Prefs.blocked(this)) {
+            if (Prefs.serviceOn(this)) {
+                // 2.0.0-beta2: when Privileged is already ready (e.g. Shizuku cold wake by Gate), start ApiServer +
+                // gateStart off the main thread immediately in parallel with HostService.onCreate() to cut wake latency.
+                if (Privileged.isReady()) quiet("server-early") { HostService.ensureServer(this) }
+                HostService.start(this)
+            } else {
+                // 1.4.0-beta5: on demand, listen from the start: an agent's request wakes the service (HostService.wakeFor).
+                quiet("server-on-demand") { HostService.ensureServer(this) }
+            }
+        }
         // 1.4.2: the phone's app list, read once in the background (pickers, sound page, launch by name).
         com.kilon.agentvscreen.core.AppCatalog.init(this)
-        if (Prefs.serviceOn(this)) HostService.start(this)
-        // 1.4.0-beta5: on demand, listen from the start: an agent's request wakes the service (HostService.wakeFor).
-        else if (!Prefs.blocked(this)) quiet("server-on-demand") { HostService.ensureServer(this) }
         quiet("wake-arm") { Wake.arm(this) }
     }
 }

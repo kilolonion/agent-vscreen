@@ -78,6 +78,7 @@ class ApiServer(private val ctx: Context) {
     @Volatile var lastCaller: String? = null; private set
 
     val running: Boolean get() = server?.isClosed == false
+    @Volatile var starting = false; private set
 
     /** 1.2: the extra socket on this phone's Tailscale address (null: off, or no tailnet address now). */
     @Volatile private var tailServer: ServerSocket? = null
@@ -98,6 +99,7 @@ class ApiServer(private val ctx: Context) {
      * Tailscale node keeps answering on the set port and forwards to wherever the service is. Nobody is killed.
      */
     fun start(port: Int) {
+        if (starting && wantedPort == port) return
         wantedPort = port
         if (!com.kilon.agentvscreen.host.Privileged.isReady()) {
             rebindGen.incrementAndGet()
@@ -109,11 +111,16 @@ class ApiServer(private val ctx: Context) {
             return
         }
         val gen = rebindGen.incrementAndGet()
+        starting = true
         val task = {
-            synchronized(bindLock) {
-                if (gen == rebindGen.get() && wantedPort == port) {
-                    startWithGateOrFallbackLocked(port)
+            try {
+                synchronized(bindLock) {
+                    if (gen == rebindGen.get() && wantedPort == port) {
+                        startWithGateOrFallbackLocked(port)
+                    }
                 }
+            } finally {
+                if (gen == rebindGen.get()) starting = false
             }
         }
         val onMain = runCatching { android.os.Looper.myLooper() == android.os.Looper.getMainLooper() }.getOrDefault(false)
@@ -125,6 +132,7 @@ class ApiServer(private val ctx: Context) {
         val port = wantedPort
         if (port <= 0) return
         val gen = rebindGen.incrementAndGet()
+        starting = false
         Thread({
             synchronized(bindLock) {
                 if (gen != rebindGen.get() || wantedPort != port) return@synchronized
@@ -314,6 +322,7 @@ class ApiServer(private val ctx: Context) {
 
     fun stop(stopGate: Boolean = true) {
         rebindGen.incrementAndGet()
+        starting = false
         val shouldStopGate = synchronized(bindLock) {
             wantedPort = 0
             val wasGate = usingGate

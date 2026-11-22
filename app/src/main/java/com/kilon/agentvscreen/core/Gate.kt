@@ -34,7 +34,7 @@ internal class Gate(
     private val clock: Clock = SystemClockImpl,
     private val shell: Shell = ProcessShell,
     private val cancelAgentFingers: () -> Int = { service?.cancelAgentFingersOnAllDisplays() ?: 0 },
-    private val sleepFn: (Long) -> Unit = { Thread.sleep(it) },
+    private val sleepFn: ((Long) -> Unit)? = null,
     private val startWatchThread: Boolean = true,
     private val appResponsive: (() -> Boolean)? = null,
 ) {
@@ -503,7 +503,16 @@ internal class Gate(
                 if (elapsed >= WAKE_WAIT_MS) break
                 val step = minOf(WAKE_POLL_MS, WAKE_WAIT_MS - elapsed)
                 try {
-                    sleepFn(step)
+                    val customSleep = sleepFn
+                    if (customSleep != null) {
+                        customSleep(step)
+                    } else {
+                        wakeLock.withLock {
+                            if (!beatArrived() && !stopped) {
+                                wakeCond.await(step, TimeUnit.MILLISECONDS)
+                            }
+                        }
+                    }
                 } catch (_: InterruptedException) {
                     break
                 }

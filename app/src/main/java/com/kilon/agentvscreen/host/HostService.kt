@@ -220,7 +220,7 @@ class HostService : Service() {
         // through the non-exported NoteActions BroadcastReceiver so uid 2000 callers cannot spoof user actions.
         // Started again (the user opened the app, boot, update): whatever failed before gets another go now.
         if (!Liveness.foreground) goForeground()
-        if (server?.running != true) server?.start(ApiConfig.port)
+        if (server?.running != true && server?.starting != true) server?.start(ApiConfig.port)
         startGateBeat()
         Presence.start(applicationContext) // the overlay permission may have arrived since
         Tailnet.sync(applicationContext)
