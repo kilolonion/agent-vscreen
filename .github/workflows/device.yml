@@ -44,13 +44,14 @@ jobs:
           "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --target=x86_64-linux-android30 -O2 -Wall \
             -o "$AVS_BUILD_DIR/avsu" tools/android-smoke/avsu.c
       # Debug: carries the CI hook (src/debug) that hands the test its token; release APKs never do.
-      - run: ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease
+      - run: ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease :torture:assembleDebug
       - uses: actions/upload-artifact@v5
         with:
           name: candidate
           path: |
             ${{ env.AVS_BUILD_DIR }}/app/outputs/apk/debug/app-debug.apk
             ${{ env.AVS_BUILD_DIR }}/app/outputs/apk/release/app-release.apk
+            ${{ env.AVS_BUILD_DIR }}/torture/outputs/apk/debug/torture-debug.apk
             ${{ env.AVS_BUILD_DIR }}/avsu
           retention-days: 3
   agent-e2e:
@@ -177,3 +178,40 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
           script: python3 tools/android-smoke/shizuku.py ${{ matrix.path }}
+  eval:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: candidate
+          path: test-apks
+      - name: Fetch Shizuku
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find test-apks -name '*.apk' -exec mv {} test-apks/ \;
+          gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --output test-apks/shizuku.apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          disable-animations: true
+          script: mkdir -p eval-out && python3 tools/eval/run.py --apk test-apks/torture-debug.apk --out eval-out 2>&1 | tee eval-out/eval.log; rc=${PIPESTATUS[0]}; [ "$rc" -eq 0 ] || { adb logcat -d > eval-out/logcat.txt; exit "$rc"; }
+      - if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: eval-results
+          path: eval-out/*
+          if-no-files-found: warn
+          retention-days: 7

@@ -1,0 +1,27 @@
+{
+  "id": "T13a",
+  "scene": "S13",
+  "seed": 7,
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "repeat 35 { swipe 540 1900 540 500 250ms } until text:目标 147; tap \"目标 147\""
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 90
+}

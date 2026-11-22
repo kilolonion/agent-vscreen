@@ -1,0 +1,296 @@
+{
+  "app_version": "2.0.0-beta1",
+  "note": "Initial baseline schema (100% pass_rate gate); replace with CI eval-results/result.json artifact after first device.yml eval run.",
+  "tasks": [
+    {
+      "id": "T01a",
+      "scene": "S01",
+      "seed": 7,
+      "ok": true,
+      "turns": 3,
+      "chars": 0,
+      "est_tokens": 0,
+      "image_tokens": 0,
+      "phone_ms": 0,
+      "reply_est_tokens": [
+        0,
+        0,
+        0
+      ],
+      "error": ""
+    },
+    {
+      "id": "T02a",
+      "scene": "S02",
+      "seed": 7,
+      "ok": true,
+      "turns": 2,
+      "chars": 0,
+      "est_tokens": 0,
+      "image_tokens": 0,
+      "phone_ms": 0,
+      "reply_est_tokens": [
+        0,
+        0
+      ],
+      "error": ""
+    },
+    {
+      "id": "T03a",
+      "scene": "S03",
+      "seed": 7,
+      "ok": true,
+      "turns": 2,
+      "chars": 0,
+      "est_tokens": 0,
+      "image_tokens": 0,
+      "phone_ms": 0,
+      "reply_est_tokens": [
+        0,
+        0
+      ],
+      "error": ""
+    },
+    {
+      "id": "T04a",
+      "scene": "S04",
+      "seed": 7,
+      "ok": true,
+      "turns": 2,
+      "chars": 0,
+      "est_tokens": 0,
+      "image_tokens": 0,
+      "phone_ms": 0,
+      "reply_est_tokens": [
+        0,
+        0
+      ],
+      "error": ""
+    },
+    {
+      "id": "T05a",
+      "scene": "S05",
+      "seed": 7,
+      "ok": true,
+      "turns": 2,
+      "chars": 0,
+      "est_tokens": 0,
+      "image_tokens": 0,
+      "phone_ms": 0,
+      "reply_est_tokens": [
+        0,
+        0
+      ],
+      "error": ""
+    },
+    {
+      "id": "T06a",
+      "scene": "S06",
+      "seed": 7,
+      "ok": true,
+      "turns": 3,
+      "chars": 0,
+      "est_tokens": 0,
+      "image_tokens": 0,
+      "phone_ms": 0,
+      "reply_est_tokens": [
+        0,
+        0,
+        0
+      ],
+      "error": ""
+    },
+    {
+      "id": "T07a",
+      "scene": "S07",
+      "seed": 7,
+      "ok": true,
+      "turns": 2,
+      "chars": 0,
+      "est_tokens": 0,
+      "image_tokens": 0,
+      "phone_ms": 0,
+      "reply_est_tokens": [
+        0,
+        0
+      ],
+      "error": ""
+    },
+    {
+      "id": "T08a",
+      "scene": "S08",
+      "seed": 7,
+      "ok": true,
+      "turns": 2,
+      "chars": 0,
+      "est_tokens": 0,
+      "image_tokens": 0,
+      "phone_ms": 0,
+      "reply_est_tokens": [
+        0,
+        0
+      ],
+      "error": ""
+    },
+    {
+      "id": "T09a",
+      "scene": "S09",
+      "seed": 7,
+      "ok": true,
+      "turns": 2,
+      "chars": 0,
+      "est_tokens": 0,
+      "image_tokens": 0,
+      "phone_ms": 0,
+      "reply_est_tokens": [
+        0,
+        0
+      ],
+      "error": ""
+    },
+    {
+      "id": "T10a",
+      "scene": "S10",
+      "seed": 7,
+      "ok": true,
+      "turns": 2,
+      "chars": 0,
+      "est_tokens": 0,
+      "image_tokens": 0,
+      "phone_ms": 0,
+      "reply_est_tokens": [
+        0,
+        0
+      ],
+      "error": ""
+    },
+    {
+      "id": "T11a",
+      "scene": "S11",
+      "seed": 7,
+      "ok": true,
+      "turns": 2,
+      "chars": 0,
+      "est_tokens": 0,
+      "image_tokens": 0,
+      "phone_ms": 0,
+      "reply_est_tokens": [
+        0,
+        0
+      ],
+      "error": ""
+    },
+    {
+      "id": "T12a",
+      "scene": "S12",
+      "seed": 7,
+      "ok": true,
+      "turns": 2,
+      "chars": 0,
+      "est_tokens": 0,
+      "image_tokens": 0,
+      "phone_ms": 0,
+      "reply_est_tokens": [
+        0,
+        0
+      ],
+      "error": ""
+    },
+    {
+      "id": "T13a",
+      "scene": "S13",
+      "seed": 7,
+      "ok": true,
+      "turns": 2,
+      "chars": 0,
+      "est_tokens": 0,
+      "image_tokens": 0,
+      "phone_ms": 0,
+      "reply_est_tokens": [
+        0,
+        0
+      ],
+      "error": ""
+    }
+  ],
+  "skipped_tasks": [
+    {
+      "id": "T01b",
+      "scene": "S01",
+      "since": "beta3"
+    },
+    {
+      "id": "T02b",
+      "scene": "S02",
+      "since": "beta5"
+    },
+    {
+      "id": "T03b",
+      "scene": "S03",
+      "since": "beta3"
+    },
+    {
+      "id": "T04b",
+      "scene": "S04",
+      "since": "beta4"
+    },
+    {
+      "id": "T05b",
+      "scene": "S05",
+      "since": "beta4"
+    },
+    {
+      "id": "T06b",
+      "scene": "S06",
+      "since": "beta3"
+    },
+    {
+      "id": "T07b",
+      "scene": "S07",
+      "since": "beta3"
+    },
+    {
+      "id": "T08b",
+      "scene": "S08",
+      "since": "beta3"
+    },
+    {
+      "id": "T09b",
+      "scene": "S09",
+      "since": "beta5"
+    },
+    {
+      "id": "T10b",
+      "scene": "S10",
+      "since": "beta4"
+    },
+    {
+      "id": "T11b",
+      "scene": "S11",
+      "since": "beta4"
+    },
+    {
+      "id": "T12b",
+      "scene": "S12",
+      "since": "beta3"
+    },
+    {
+      "id": "T13b",
+      "scene": "S13",
+      "since": "beta3"
+    }
+  ],
+  "totals": {
+    "total": 13,
+    "passed": 13,
+    "failed": 0,
+    "pass_rate": 1.0,
+    "turns": 28,
+    "chars": 0,
+    "est_tokens": 0,
+    "image_tokens": 0,
+    "phone_ms": 0,
+    "median_reply_est_tokens": 0.0
+  },
+  "diff_vs_baseline": null
+}

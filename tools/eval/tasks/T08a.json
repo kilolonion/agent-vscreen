@@ -1,0 +1,27 @@
+{
+  "id": "T08a",
+  "scene": "S08",
+  "seed": 7,
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "tap 540 1740; type 测试内容; key back; tap 提交"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 60
+}

@@ -1,0 +1,32 @@
+{
+  "id": "T05b",
+  "scene": "S05",
+  "seed": 7,
+  "since": "beta4",
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "press 540 1200 hold until text:菜单已打开 in 280,760,800,1060 3s"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "menu_shown",
+      "ok": true
+    },
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 60
+}

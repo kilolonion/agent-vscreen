@@ -1,0 +1,35 @@
+{
+  "id": "T09b",
+  "scene": "S09",
+  "seed": 7,
+  "since": "beta5",
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "--on",
+      "text:点我 => tap 点我 x3",
+      "--watch",
+      "10s"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "target_hit",
+      "ok": true
+    },
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 60
+}

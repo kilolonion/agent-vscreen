@@ -1,0 +1,34 @@
+{
+  "id": "T06a",
+  "scene": "S06",
+  "seed": 7,
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "spots"
+    ],
+    [
+      "act",
+      "tap 540 1200"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "target_hit",
+      "ok": true
+    },
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 60
+}

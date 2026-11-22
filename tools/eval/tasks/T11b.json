@@ -1,0 +1,28 @@
+{
+  "id": "T11b",
+  "scene": "S11",
+  "seed": 7,
+  "since": "beta4",
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "press 540 1600 hold until text:9* in 300,1400,800,1500 8s"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 60
+}

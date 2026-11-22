@@ -1,0 +1,27 @@
+{
+  "id": "T11a",
+  "scene": "S11",
+  "seed": 7,
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "press 540 1600 3760ms"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 60
+}

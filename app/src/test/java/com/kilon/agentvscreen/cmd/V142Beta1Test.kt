@@ -23,14 +23,15 @@ import org.robolectric.annotation.Config
 class V142Beta1Test {
 
     @Test fun versionAndNewsName() {
-        assertEquals(57, com.kilon.agentvscreen.BuildConfig.VERSION_CODE)
-        assertEquals("1.4.2-beta6", com.kilon.agentvscreen.BuildConfig.VERSION_NAME)
+        assertEquals(58, com.kilon.agentvscreen.BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta1", com.kilon.agentvscreen.BuildConfig.VERSION_NAME)
         assertEquals("1.4.2-beta1", com.kilon.agentvscreen.api.AgentNews.nameOf(52))
         assertEquals("1.4.2-beta2", com.kilon.agentvscreen.api.AgentNews.nameOf(53))
         assertEquals("1.4.2-beta3", com.kilon.agentvscreen.api.AgentNews.nameOf(54))
         assertEquals("1.4.2-beta4", com.kilon.agentvscreen.api.AgentNews.nameOf(55))
         assertEquals("1.4.2-beta5", com.kilon.agentvscreen.api.AgentNews.nameOf(56))
         assertEquals("1.4.2-beta6", com.kilon.agentvscreen.api.AgentNews.nameOf(57))
+        assertEquals("2.0.0-beta1", com.kilon.agentvscreen.api.AgentNews.nameOf(58))
     }
 
     @Test fun backgroundThreadExceptionsAreNotFatalButMainAndVmErrorsAre() {
