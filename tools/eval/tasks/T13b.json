@@ -11,7 +11,7 @@
     [
       "act",
       "--fast",
-      "repeat 13 { drag 540 2000 540 500 250ms }; if \"text:目标 147\" { tap \"目标 147\" until text:已打开 } else { repeat 4 { drag 540 1800 540 800 250ms } until \"text:目标 147\"; tap \"目标 147\" until text:已打开 }"
+      "repeat 15 { drag 540 2000 540 500 350ms }; tap \"目标 147\" until text:已打开"
     ]
   ],
   "expect": [
