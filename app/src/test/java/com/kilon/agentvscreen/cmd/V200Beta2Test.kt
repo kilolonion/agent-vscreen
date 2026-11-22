@@ -710,4 +710,71 @@ class V200Beta2Test {
             aliveField.setBoolean(null, wasAlive)
         }
     }
+
+    @Test
+    fun upstreamEarlyDeathBeforeFirstByteWakesAndReplaysRequestUntouched() {
+        val now = AtomicLong(1_000L)
+        val dyingUpstream = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
+        val newUpstream = ServerSocket(0, 10, InetAddress.getByName("127.0.0.1"))
+        val replayed = StringBuilder()
+
+        // Dying upstream accepts TCP handshake (simulating SIGKILL exit_mm/exit_files window) and closes without writing any bytes.
+        val dyingThread = Thread {
+            runCatching {
+                val s = dyingUpstream.accept()
+                dyingUpstream.close()
+                Thread.sleep(30)
+                s.close()
+            }
+        }.apply { isDaemon = true; start() }
+
+        val newThread = Thread {
+            runCatching {
+                newUpstream.accept().use { s ->
+                    s.soTimeout = 3_000
+                    val buf = ByteArray(4096)
+                    val n = s.getInputStream().read(buf)
+                    if (n > 0) replayed.append(String(buf, 0, n, Charsets.UTF_8))
+                    val body = """{"ok":true,"replayed":true}"""
+                    val resp = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body"
+                    s.getOutputStream().write(resp.toByteArray(Charsets.UTF_8))
+                    s.getOutputStream().flush()
+                }
+            }
+        }.apply { isDaemon = true; start() }
+
+        lateinit var gate: Gate
+        val wantPort = freePort()
+        gate = Gate(
+            service = null,
+            clock = { now.get() },
+            shell = { cmd, _ ->
+                if (cmd.contains("start-foreground-service")) {
+                    Thread {
+                        Thread.sleep(30)
+                        gate.start(wantPort, newUpstream.localPort, "com.kilon.agentvscreen", "com.kilon.agentvscreen", 34)
+                    }.start()
+                }
+                0
+            },
+            startWatchThread = false,
+        )
+        try {
+            val gp = gate.start(wantPort, dyingUpstream.localPort, "com.kilon.agentvscreen", "com.kilon.agentvscreen", 34)
+            assertEquals(wantPort, gp)
+            // Heartbeat is still fresh when client connects during SIGKILL teardown!
+            val rawReq = "POST /v2/run HTTP/1.1\r\nHost: 127.0.0.1:$gp\r\nX-VScreen-Tailnet: sec\r\nContent-Length: 16\r\n\r\n{\"cmd\":\"status\"}"
+            val reply = readHttpRaw(gp, rawReq)
+            dyingThread.join(3_000)
+            newThread.join(3_000)
+            assertTrue("expected 200 OK after wake+replay, got: $reply", reply.contains("200 OK"))
+            assertTrue(reply.contains("\"replayed\":true"))
+            assertEquals("replayed bytes must match original request untouched", rawReq, replayed.toString())
+            assertEquals(1L, gate.statusJson().getLong("wake_ok"))
+        } finally {
+            gate.stop()
+            runCatching { dyingUpstream.close() }
+            runCatching { newUpstream.close() }
+        }
+    }
 }

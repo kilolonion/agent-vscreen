@@ -288,7 +288,7 @@ internal class Gate(
             if (!stale) {
                 val up = connectInternal()
                 if (up != null) {
-                    relay(client, up)
+                    relayWithEarlyDeathRecovery(client, up)
                     return
                 }
                 // Heartbeat was still fresh, but the internal port refused / timed out (e.g. just force-stopped):
@@ -304,6 +304,124 @@ internal class Gate(
             runCatching { client.close() }
             activeConns.decrementAndGet()
         }
+    }
+
+    /**
+     * Relay a fresh-heartbeat connection while retaining up to [REPLAY_MAX_BYTES] of initial client bytes until
+     * upstream sends its first response byte. If the upstream socket resets/closes with 0 response bytes and the
+     * internal port is now unresponsive (e.g. Linux `SIGKILL` teardown window right after `am force-stop` / OOM kill
+     * where `connect()` still succeeded into the dying listen queue), wake the app and replay the buffered bytes
+     * untouched (or return 503 `NOT_READY` if wake fails) instead of dropping the client with an empty close.
+     */
+    private fun relayWithEarlyDeathRecovery(client: Socket, firstUp: Socket) {
+        openSockets.add(firstUp)
+        val upstreamReplied = AtomicBoolean(false)
+        val clientEof = AtomicBoolean(false)
+        val stopC2s = AtomicBoolean(false)
+        val replayLock = Any()
+        val replayBuf = java.io.ByteArrayOutputStream()
+        var replayOverflow = false
+
+        runCatching { client.soTimeout = EARLY_READ_TIMEOUT_MS }
+        val c2s = Thread({
+            val buf = ByteArray(COPY_BUF_SIZE)
+            try {
+                val inp = client.getInputStream()
+                val out = firstUp.getOutputStream()
+                while (!stopC2s.get()) {
+                    val n = try {
+                        inp.read(buf)
+                    } catch (_: java.net.SocketTimeoutException) {
+                        if (upstreamReplied.get()) runCatching { client.soTimeout = 0 }
+                        continue
+                    }
+                    if (n < 0) {
+                        clientEof.set(true)
+                        break
+                    }
+                    if (!upstreamReplied.get()) {
+                        synchronized(replayLock) {
+                            if (!replayOverflow && replayBuf.size() + n <= REPLAY_MAX_BYTES) {
+                                replayBuf.write(buf, 0, n)
+                            } else {
+                                replayOverflow = true
+                                replayBuf.reset()
+                            }
+                        }
+                    }
+                    out.write(buf, 0, n)
+                    out.flush()
+                }
+            } catch (_: Exception) {
+            } finally {
+                if (upstreamReplied.get()) {
+                    runCatching { client.close() }
+                    runCatching { firstUp.close() }
+                }
+            }
+        }, "vscreen-gate-c2s").apply { isDaemon = true }
+        c2s.start()
+
+        try {
+            val buf = ByteArray(COPY_BUF_SIZE)
+            val upIn = firstUp.getInputStream()
+            val clientOut = client.getOutputStream()
+            while (true) {
+                val n = upIn.read(buf)
+                if (n < 0) break
+                if (n > 0) {
+                    if (upstreamReplied.compareAndSet(false, true)) {
+                        synchronized(replayLock) { replayBuf.reset() }
+                    }
+                    clientOut.write(buf, 0, n)
+                    clientOut.flush()
+                }
+            }
+        } catch (_: Exception) {
+        } finally {
+            stopC2s.set(true)
+            runCatching { firstUp.close() }
+            openSockets.remove(firstUp)
+            if (upstreamReplied.get()) {
+                runCatching { client.close() }
+                runCatching { c2s.join(2_000L) }
+            } else {
+                runCatching { c2s.join(500L) }
+            }
+        }
+
+        if (upstreamReplied.get() || c2s.isAlive) return
+
+        val replayBytes: ByteArray? = synchronized(replayLock) {
+            if (replayOverflow) null else replayBuf.toByteArray()
+        }
+        // Client hung up without sending anything, or upstream overflowed replay buffer.
+        if (replayBytes == null || (clientEof.get() && replayBytes.isEmpty())) return
+        // Only recover if the app is actually dead/unresponsive now (not an alive ApiServer rejecting bad input).
+        if (isAppResponsive()) return
+
+        runCatching { client.soTimeout = 0 }
+        val beatGapMs = if (hasBeat) (clock.nowMs() - lastBeatMs).coerceAtLeast(0L) else -1L
+        logWarn("upstream closed before first response byte (beat_gap_ms=$beatGapMs, buffered=${replayBytes.size}); waking")
+
+        if (ensureAwake(requireNewBeat = true)) {
+            val newUp = connectInternal()
+            if (newUp != null) {
+                if (replayBytes.isNotEmpty()) {
+                    try {
+                        newUp.getOutputStream().write(replayBytes)
+                        newUp.getOutputStream().flush()
+                    } catch (_: IOException) {
+                        runCatching { newUp.close() }
+                        sendNotReady(client, alreadyBuffered = replayBytes)
+                        return
+                    }
+                }
+                relay(client, newUp)
+                return
+            }
+        }
+        sendNotReady(client, alreadyBuffered = replayBytes)
     }
 
     private fun tryWakeAndForward(client: Socket, requireNewBeat: Boolean): Boolean {
@@ -468,21 +586,28 @@ internal class Gate(
         }
     }
 
-    private fun sendNotReady(client: Socket) {
+    private fun sendNotReady(client: Socket, alreadyBuffered: ByteArray = ByteArray(0)) {
         wakeLock.withLock { notReady++ }
         // Read the client's request headers (up to \r\n\r\n, max 16KB, max 1s) before writing 503.
         runCatching {
-            client.soTimeout = NOT_READY_READ_TIMEOUT_MS
-            val inp = client.getInputStream()
-            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(NOT_READY_READ_TIMEOUT_MS.toLong())
-            var read = 0
+            var read = alreadyBuffered.size
             var last4 = 0
-            while (read < NOT_READY_HEAD_MAX && System.nanoTime() < deadline) {
-                val b = inp.read()
-                if (b < 0) break
-                read++
-                last4 = (last4 shl 8) or (b and 0xFF)
-                if (last4 == 0x0D0A0D0A) break
+            var headerDone = false
+            for (b in alreadyBuffered) {
+                last4 = (last4 shl 8) or (b.toInt() and 0xFF)
+                if (last4 == 0x0D0A0D0A) { headerDone = true; break }
+            }
+            if (!headerDone) {
+                client.soTimeout = NOT_READY_READ_TIMEOUT_MS
+                val inp = client.getInputStream()
+                val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(NOT_READY_READ_TIMEOUT_MS.toLong())
+                while (read < NOT_READY_HEAD_MAX && System.nanoTime() < deadline) {
+                    val b = inp.read()
+                    if (b < 0) break
+                    read++
+                    last4 = (last4 shl 8) or (b and 0xFF)
+                    if (last4 == 0x0D0A0D0A) break
+                }
             }
         }
         runCatching {
@@ -498,6 +623,8 @@ internal class Gate(
         const val BEAT_STALE_MS = 2_500L
         const val CONNECT_TIMEOUT_MS = 500
         const val PROBE_READ_TIMEOUT_MS = 500
+        const val EARLY_READ_TIMEOUT_MS = 100
+        const val REPLAY_MAX_BYTES = 65_536
         const val COPY_BUF_SIZE = 16_384
         const val WAKE_POLL_MS = 100L
         const val WAKE_WAIT_MS = 3_000L
