@@ -1,6 +1,6 @@
 {
   "app_version": "2.0.0-beta1",
-  "generated_at": 1795316101,
+  "generated_at": 1795326622,
   "tasks": [
     {
       "id": "T01a",
@@ -8,13 +8,13 @@
       "seed": 7,
       "ok": true,
       "turns": 3,
-      "chars": 5790,
-      "est_tokens": 3384,
-      "image_tokens": 2219,
-      "phone_ms": 40460,
+      "chars": 5792,
+      "est_tokens": 3385,
+      "image_tokens": 2182,
+      "phone_ms": 37022,
       "reply_est_tokens": [
         2331,
-        502,
+        503,
         551
       ],
       "error": ""
@@ -25,13 +25,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 1483,
-      "est_tokens": 775,
+      "chars": 1567,
+      "est_tokens": 836,
       "image_tokens": 1428,
-      "phone_ms": 27759,
+      "phone_ms": 25220,
       "reply_est_tokens": [
-        249,
-        526
+        248,
+        588
       ],
       "error": ""
     },
@@ -41,13 +41,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 1136,
-      "est_tokens": 576,
+      "chars": 1262,
+      "est_tokens": 653,
       "image_tokens": 1428,
-      "phone_ms": 20942,
+      "phone_ms": 19219,
       "reply_est_tokens": [
         219,
-        357
+        434
       ],
       "error": ""
     },
@@ -57,13 +57,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 1202,
-      "est_tokens": 588,
+      "chars": 1171,
+      "est_tokens": 568,
       "image_tokens": 1428,
-      "phone_ms": 19691,
+      "phone_ms": 16907,
       "reply_est_tokens": [
-        221,
-        367
+        231,
+        337
       ],
       "error": ""
     },
@@ -73,13 +73,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 1176,
-      "est_tokens": 588,
+      "chars": 1175,
+      "est_tokens": 587,
       "image_tokens": 1428,
-      "phone_ms": 17419,
+      "phone_ms": 15576,
       "reply_est_tokens": [
         213,
-        375
+        374
       ],
       "error": ""
     },
@@ -89,14 +89,14 @@
       "seed": 7,
       "ok": true,
       "turns": 3,
-      "chars": 1491,
-      "est_tokens": 787,
+      "chars": 1181,
+      "est_tokens": 616,
       "image_tokens": 1530,
-      "phone_ms": 79204,
+      "phone_ms": 107553,
       "reply_est_tokens": [
         221,
         6,
-        560
+        389
       ],
       "error": ""
     },
@@ -106,12 +106,12 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 1092,
-      "est_tokens": 559,
+      "chars": 1090,
+      "est_tokens": 558,
       "image_tokens": 1428,
-      "phone_ms": 20201,
+      "phone_ms": 18963,
       "reply_est_tokens": [
-        211,
+        210,
         348
       ],
       "error": ""
@@ -122,13 +122,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 1655,
-      "est_tokens": 869,
+      "chars": 1538,
+      "est_tokens": 806,
       "image_tokens": 1428,
-      "phone_ms": 18841,
+      "phone_ms": 18481,
       "reply_est_tokens": [
-        261,
-        608
+        262,
+        544
       ],
       "error": ""
     },
@@ -138,13 +138,13 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 1256,
-      "est_tokens": 668,
+      "chars": 1116,
+      "est_tokens": 557,
       "image_tokens": 1428,
-      "phone_ms": 27559,
+      "phone_ms": 18535,
       "reply_est_tokens": [
-        164,
-        504
+        195,
+        362
       ],
       "error": ""
     },
@@ -154,29 +154,29 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 1319,
-      "est_tokens": 649,
+      "chars": 1238,
+      "est_tokens": 624,
       "image_tokens": 1428,
-      "phone_ms": 16497,
+      "phone_ms": 15722,
       "reply_est_tokens": [
-        232,
-        417
+        241,
+        383
       ],
       "error": ""
     },
     {
       "id": "T11a",
       "scene": "S11",
-      "seed": 7,
+      "seed": 5303,
       "ok": false,
       "turns": 2,
-      "chars": 1310,
-      "est_tokens": 671,
+      "chars": 1313,
+      "est_tokens": 662,
       "image_tokens": 1428,
-      "phone_ms": 31748,
+      "phone_ms": 19770,
       "reply_est_tokens": [
-        211,
-        460
+        216,
+        446
       ],
       "error": ""
     },
@@ -186,10 +186,10 @@
       "seed": 7,
       "ok": true,
       "turns": 2,
-      "chars": 1143,
+      "chars": 1154,
       "est_tokens": 578,
       "image_tokens": 1428,
-      "phone_ms": 56232,
+      "phone_ms": 57587,
       "reply_est_tokens": [
         212,
         366
@@ -286,11 +286,11 @@
     "failed": 1,
     "pass_rate": 0.9231,
     "turns": 28,
-    "chars": 22920,
-    "est_tokens": 11952,
-    "image_tokens": 19559,
-    "phone_ms": 445639,
-    "median_reply_est_tokens": 361.5
+    "chars": 22464,
+    "est_tokens": 11690,
+    "image_tokens": 19522,
+    "phone_ms": 439641,
+    "median_reply_est_tokens": 355.0
   },
   "diff_vs_baseline": null
 }

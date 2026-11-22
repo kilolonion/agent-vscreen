@@ -10,7 +10,7 @@
     [
       "act",
       "--fast",
-      "repeat 15 { drag 540 2000 540 500 350ms }; tap \"目标 147\""
+      "repeat 14 { drag 540 2000 540 500 350ms }; tap \"目标 147\""
     ]
   ],
   "expect": [
