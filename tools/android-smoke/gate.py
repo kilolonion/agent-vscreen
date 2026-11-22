@@ -156,13 +156,22 @@ def api_raw(cmd, timeout=15):
         return -1, {"error": repr(e)}, dt
 
 
+def gate_of(body):
+    if not isinstance(body, dict):
+        return None
+    res = body.get("result") if isinstance(body.get("result"), dict) else body
+    host = res.get("host") if isinstance(res.get("host"), dict) else None
+    gate = host.get("gate") if isinstance(host, dict) else None
+    return gate if isinstance(gate, dict) else None
+
+
 def wait_gate_active(secs=20):
     last = None
     for _ in range(secs):
         code, body, _ = api_raw("status", timeout=10)
-        last = (code, body)
-        gate = (body.get("host") or {}).get("gate") if isinstance(body, dict) else None
-        if code == 200 and body.get("ok") is True and isinstance(gate, dict) and gate.get("port", 0) > 0:
+        gate = gate_of(body)
+        last = (code, body.get("code") if isinstance(body, dict) else None, gate)
+        if code == 200 and body.get("ok") is True and gate and gate.get("port", 0) > 0:
             run("adb", "forward", f"tcp:{LOCAL_PORT}", f"tcp:{gate['port']}")
             return gate
         time.sleep(1)
@@ -188,14 +197,14 @@ def run_api30():
     )
 
     # Confirm via GATE STATUS last_wake_cmds that am unfreeze was never executed on SDK < 34.
-    gate_after = (body.get("host") or {}).get("gate") if code == 200 and isinstance(body, dict) else None
+    gate_after = gate_of(body) if code == 200 else None
     if gate_after is None:
         for _ in range(20):
             time.sleep(1)
             c2, b2, _ = api_raw("status", timeout=10)
             if c2 == 200 and b2.get("ok") is True:
-                gate_after = (b2.get("host") or {}).get("gate")
-                if isinstance(gate_after, dict) and gate_after.get("last_wake_cmds"):
+                gate_after = gate_of(b2)
+                if gate_after and gate_after.get("last_wake_cmds"):
                     break
     cmds = (gate_after or {}).get("last_wake_cmds") or []
     check(
@@ -216,8 +225,8 @@ def run_api34():
     print("am freeze:", freeze_out, flush=True)
     time.sleep(3.0)
     code, body, dt = api_raw("status", timeout=15)
-    gate1 = (body.get("host") or {}).get("gate") if isinstance(body, dict) else {}
-    cmds1 = (gate1 or {}).get("last_wake_cmds") or []
+    gate1 = gate_of(body) or {}
+    cmds1 = gate1.get("last_wake_cmds") or []
     check(
         "frozen app wakes and answers status within 3.5s",
         code == 200 and body.get("ok") is True and dt <= 3.5,
@@ -225,7 +234,7 @@ def run_api34():
     )
     check(
         "freeze wake recorded wake_ok and am unfreeze",
-        isinstance(gate1, dict) and gate1.get("wake_ok", 0) >= 1 and any("am unfreeze" in c for c in cmds1),
+        gate1.get("wake_ok", 0) >= 1 and any("am unfreeze" in c for c in cmds1),
         f"gate={gate1}",
     )
 
