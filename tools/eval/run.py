@@ -265,8 +265,7 @@ def run_task(token, task, return_events=False):
             phone_ms += int((reply.get("timing") or {}).get("phone_ms", 0))
 
             if idx == 0 and argv and argv[0] == "launch":
-                m_disp = re.search(r"(?:副屏|screen)\s+(\d+)", reply.get("text", ""))
-                disp_id = int(m_disp.group(1)) if m_disp else find_scene_display_id()
+                disp_id = find_scene_display_id()
                 if disp_id:
                     adb_shell("logcat", "-c")
                     adb_shell(
@@ -446,7 +445,7 @@ def main():
             _, evs2 = run_task(token, task, return_events=True)
             seq1 = normalize_avst_sequence(evs1)
             seq2 = normalize_avst_sequence(evs2)
-            matched = seq1 == seq2
+            matched = len(seq1) > 0 and seq1 == seq2
             print(
                 f"[REPEAT {'PASS' if matched else 'FAIL'}] {task['id']} ({task['scene']}) "
                 f"seed={task.get('seed', 7)} len1={len(seq1)} len2={len(seq2)}",
