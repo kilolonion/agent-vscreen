@@ -69,6 +69,7 @@ object Privileged {
         if (next == via) { if (next == Via.ROOT) RootBackend.start(ctx, "chosen again"); return }
         AppLogger.info("Privileged", "way in: ${via.key} -> ${next.key}")
         val old = via
+        if (old == Via.SHIZUKU) com.kilon.agentvscreen.core.VScreenRemoteDisplay.gateStopShizuku()
         com.kilon.agentvscreen.host.quiet("privilege-release") { com.kilon.agentvscreen.core.BackgroundOperation.privilegeChanged() }
         via = next
         prefs?.edit()?.putString(K_VIA, next.key)?.apply()
@@ -120,6 +121,7 @@ object Privileged {
         _snapshot.value = next
         // The first reading is logged too (it equals the placeholder when Shizuku is missing): support and CI read it.
         if (!announced || prev.via != next.via || prev.state != next.state) AppLogger.info("Privileged", "via=${next.via.key} state=${next.state} ${next.label}")
+        if (prev.via != next.via || prev.state != next.state) HostService.server?.onPrivilegeChanged()
         announced = true
     }
 

@@ -48,7 +48,12 @@ object AppCatalog {
     }
 
     /** Read the list in the background if it is not there. */
-    fun warm() { if (cache == null) Thread({ runCatching { all() } }, "vscreen-apps").apply { isDaemon = true }.start() }
+    fun warm() {
+        if (cache == null) Thread({
+            runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
+            runCatching { all() }
+        }, "vscreen-apps").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }.start()
+    }
 
     /** Every app, launchable ones first within the same label order. Blocks the first time (call off the main thread). */
     fun all(): List<App> {

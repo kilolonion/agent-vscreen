@@ -104,10 +104,16 @@ internal object VScreenOcr {
      * null when reading works. Never silent: an element list from accessibility alone looks complete but is not.
      */
     fun downLine(err: String?): String? {
+        BackgroundOperation.appContextOrNull()?.let { recoverIfNeeded(it) }
+        if (mlkitCrashed && paddleCrashed) {
+            return tr("文字识别不可用：PP-OCRv6 与 ML Kit 在自检时均崩溃，本版本已禁用。下面的元素只来自无障碍，画面上的字可能没列出来，以截图为准；vscreen diag 可重新自检，并告诉用户",
+                "Text recognition is unavailable: both PP-OCRv6 and ML Kit crashed during self-test and are disabled for this version. The elements below come from accessibility only and words on the picture may be missing; trust the screenshot, run vscreen diag to retry self-test, and tell the user")
+        }
         val e = err ?: fastError ?: return null
-        val acc = VScreenPaddleOcr.loadError()
-        return tr("文字识别不可用：" + (acc?.let { "PP-OCRv6 加载失败（${it.take(140)}）；" } ?: "") + "ML Kit 也失败（${e.take(140)}）。下面的元素只来自无障碍，画面上的字可能没列出来，以截图为准；vscreen diag 看详情，并告诉用户",
-            "Text recognition is unavailable: " + (acc?.let { "PP-OCRv6 failed to load (${it.take(140)}); " } ?: "") + "ML Kit failed too (${e.take(140)}). The elements below come from accessibility only and words on the picture may be missing; trust the screenshot, see vscreen diag, and tell the user")
+        val acc = if (paddleCrashed) tr("自检时进程崩溃，本版本已禁用", "crashed during self-test, disabled for this version") else VScreenPaddleOcr.loadError()
+        val mlNote = if (mlkitCrashed) tr("ML Kit 自检时进程崩溃，本版本已禁用", "ML Kit crashed during self-test, disabled for this version") else tr("ML Kit 也失败（${e.take(140)}）", "ML Kit failed too (${e.take(140)})")
+        return tr("文字识别不可用：" + (acc?.let { "PP-OCRv6 不可用（${it.take(140)}）；" } ?: "") + "$mlNote。下面的元素只来自无障碍，画面上的字可能没列出来，以截图为准；vscreen diag 看详情，并告诉用户",
+            "Text recognition is unavailable: " + (acc?.let { "PP-OCRv6 unavailable (${it.take(140)}); " } ?: "") + "$mlNote. The elements below come from accessibility only and words on the picture may be missing; trust the screenshot, see vscreen diag, and tell the user")
     }
     @Volatile private var accurateCache: Result? = null
 
@@ -124,69 +130,341 @@ internal object VScreenOcr {
     /** Average time of an accurate reading on this phone (0 = none yet). */
     @Volatile private var accurateMs = 0L
 
+    // ── 2.0.0-beta2: persistent per-versionCode self-test & crash guard ──
+
+    private const val PREFS_NAME = "agent_vscreen_ocr_selftest"
+    private const val KEY_VER = "ver"
+    private const val KEY_RUNNING = "running"
+    private const val KEY_MLKIT_STATUS = "mlkit_status"
+    private const val KEY_MLKIT_LINE = "mlkit_line"
+    private const val KEY_PADDLE_STATUS = "paddle_status"
+    private const val KEY_PADDLE_LINE = "paddle_line"
+    const val ENGINE_MLKIT = "mlkit"
+    const val ENGINE_PADDLE = "paddle"
+
+    private val selfTestLock = Any()
+    private val selfTestRunLock = Any()
+    @Volatile private var recoveredVer: Int = -1
+    @Volatile private var selfTestActive: Boolean = false
+    @Volatile private var mlkitCrashed: Boolean = false
+    @Volatile private var paddleCrashed: Boolean = false
+    @Volatile private var selfTestState: String = "pending"
+    @Volatile private var selfTestEngine: String? = null
+
+    internal var versionCodeProvider: () -> Int = { com.kilon.agentvscreen.BuildConfig.VERSION_CODE }
+    internal var mlkitSelfTestRunner: (android.content.Context) -> Pair<String, String> = { ctx -> runMlkitSelfTest(ctx) }
+    internal var paddleSelfTestRunner: (android.content.Context) -> Pair<String, String> = { ctx -> runPaddleSelfTest(ctx) }
+
+    private fun selfTestPrefs(ctx: android.content.Context) =
+        ctx.applicationContext.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+
+    internal fun isMlkitDisabled(ctx: android.content.Context? = BackgroundOperation.appContextOrNull()): Boolean {
+        if (ctx != null) recoverIfNeeded(ctx)
+        return mlkitCrashed
+    }
+
+    internal fun isPaddleDisabled(ctx: android.content.Context? = BackgroundOperation.appContextOrNull()): Boolean {
+        if (ctx != null) recoverIfNeeded(ctx)
+        return paddleCrashed
+    }
+
+    fun crashedEngines(ctx: android.content.Context? = BackgroundOperation.appContextOrNull()): Set<String> {
+        if (ctx != null) recoverIfNeeded(ctx)
+        return buildSet {
+            if (mlkitCrashed) add(ENGINE_MLKIT)
+            if (paddleCrashed) add(ENGINE_PADDLE)
+        }
+    }
+
+    fun selfTestStatusJson(ctx: android.content.Context? = BackgroundOperation.appContextOrNull()): org.json.JSONObject {
+        if (ctx != null) recoverIfNeeded(ctx)
+        return org.json.JSONObject()
+            .put("state", selfTestState)
+            .put("engine", selfTestEngine ?: org.json.JSONObject.NULL)
+    }
+
+    internal fun resetSelfTestForTests(ctx: android.content.Context? = null, clearPrefs: Boolean = true) {
+        synchronized(selfTestLock) {
+            if (clearPrefs && ctx != null) selfTestPrefs(ctx).edit().clear().commit()
+            recoveredVer = -1
+            selfTestActive = false
+            mlkitCrashed = false
+            paddleCrashed = false
+            selfTestReport = null
+            selfTestState = "pending"
+            selfTestEngine = null
+            fastError = null
+            versionCodeProvider = { com.kilon.agentvscreen.BuildConfig.VERSION_CODE }
+            mlkitSelfTestRunner = { c -> runMlkitSelfTest(c) }
+            paddleSelfTestRunner = { c -> runPaddleSelfTest(c) }
+        }
+    }
+
+    internal fun recoverIfNeeded(ctx: android.content.Context) {
+        val ver = versionCodeProvider()
+        if (recoveredVer == ver) return
+        synchronized(selfTestLock) {
+            if (recoveredVer == ver) return
+            val p = selfTestPrefs(ctx)
+            val storedVer = p.getInt(KEY_VER, 0)
+            if (storedVer != ver) {
+                p.edit().clear().putInt(KEY_VER, ver).commit()
+                mlkitCrashed = false
+                paddleCrashed = false
+                selfTestReport = null
+                selfTestState = "pending"
+                selfTestEngine = null
+                recoveredVer = ver
+                return
+            }
+            val running = p.getString(KEY_RUNNING, null)
+            if (running != null) {
+                val parts = running.split('@', limit = 2)
+                val eng = parts.getOrNull(0)
+                val runVer = parts.getOrNull(1)?.toIntOrNull()
+                val ed = p.edit().remove(KEY_RUNNING)
+                if (runVer == ver) {
+                    when (eng) {
+                        ENGINE_MLKIT -> {
+                            ed.putString(KEY_MLKIT_STATUS, "crashed")
+                                .putString(KEY_MLKIT_LINE, "ML Kit: CRASHED（自检时进程退出）")
+                            AppLogger.warning(TAG, "detected previous self-test crash in $eng (versionCode=$ver); disabled for this version")
+                        }
+                        ENGINE_PADDLE -> {
+                            ed.putString(KEY_PADDLE_STATUS, "crashed")
+                                .putString(KEY_PADDLE_LINE, "PP-OCRv6: CRASHED（自检时进程退出）")
+                            AppLogger.warning(TAG, "detected previous self-test crash in $eng (versionCode=$ver); disabled for this version")
+                        }
+                    }
+                }
+                ed.commit()
+            }
+            syncStateFromPrefsLocked(p)
+            recoveredVer = ver
+        }
+    }
+
+    private fun syncStateFromPrefsLocked(p: android.content.SharedPreferences) {
+        val ms = p.getString(KEY_MLKIT_STATUS, null)
+        val ml = p.getString(KEY_MLKIT_LINE, null)
+        val ps = p.getString(KEY_PADDLE_STATUS, null)
+        val pl = p.getString(KEY_PADDLE_LINE, null)
+        mlkitCrashed = (ms == "crashed")
+        paddleCrashed = (ps == "crashed")
+        val lines = listOfNotNull(pl, ml)
+        selfTestReport = if (lines.isEmpty()) null else lines.joinToString("\n")
+        if (!selfTestActive) {
+            if (ms != null && ps != null) {
+                val crashed = listOfNotNull(ENGINE_MLKIT.takeIf { mlkitCrashed }, ENGINE_PADDLE.takeIf { paddleCrashed })
+                if (crashed.isNotEmpty()) {
+                    selfTestState = "crashed"
+                    selfTestEngine = crashed.joinToString(",")
+                } else {
+                    selfTestState = "done"
+                    selfTestEngine = null
+                }
+            } else {
+                selfTestState = "pending"
+                selfTestEngine = null
+            }
+        }
+    }
+
     /** Whether [recognize] with accurate = true will try PP-OCRv6 now. */
     fun accurateEnabled(): Boolean {
         val ctx = BackgroundOperation.appContextOrNull() ?: return false
-        return BackgroundOperation.state.value.accurateOcr && VScreenPaddleOcr.available(ctx)
+        recoverIfNeeded(ctx)
+        return !paddleCrashed && BackgroundOperation.state.value.accurateOcr && VScreenPaddleOcr.available(ctx)
     }
 
     /**
-     * 1.4.0-beta2: both engines read the self-test picture once, with this phone's runtimes. Run when the service
-     * starts (so a broken engine is known before an agent's first look) and by `vscreen diag`. One line per engine.
+     * 1.4.0-beta2 / 2.0.0-beta2: both engines read the self-test picture once per versionCode, with a crash guard
+     * written synchronously via commit() before each engine runs. Startup runs [maybeStartSelfTest] on a background
+     * priority thread only when this versionCode has no completed result yet; `vscreen diag` calls [selfTest] to
+     * clear saved results/crash marks and re-run both engines.
      */
     @Volatile var selfTestReport: String? = null; private set
+
+    fun maybeStartSelfTest(ctx: android.content.Context): Boolean {
+        val app = ctx.applicationContext
+        recoverIfNeeded(app)
+        synchronized(selfTestLock) {
+            if (selfTestActive) return false
+            val p = selfTestPrefs(app)
+            if (p.getString(KEY_MLKIT_STATUS, null) != null && p.getString(KEY_PADDLE_STATUS, null) != null) {
+                return false
+            }
+            selfTestActive = true
+            selfTestState = "running"
+            selfTestEngine = if (p.getString(KEY_MLKIT_STATUS, null) == null) ENGINE_MLKIT else ENGINE_PADDLE
+        }
+        Thread({
+            runCatching { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND) }
+            try {
+                runSelfTest(app, manual = false)
+            } catch (_: Throwable) {
+            } finally {
+                synchronized(selfTestLock) {
+                    selfTestActive = false
+                    syncStateFromPrefsLocked(selfTestPrefs(app))
+                }
+            }
+        }, "ocr-selftest").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }.start()
+        return true
+    }
+
     fun selfTest(ctx: android.content.Context): String {
-        val lines = ArrayList<String>()
+        val app = ctx.applicationContext
+        synchronized(selfTestLock) { selfTestActive = true }
+        return try {
+            runSelfTest(app, manual = true)
+        } finally {
+            synchronized(selfTestLock) {
+                selfTestActive = false
+                syncStateFromPrefsLocked(selfTestPrefs(app))
+            }
+        }
+    }
+
+    private fun runSelfTest(ctx: android.content.Context, manual: Boolean): String = synchronized(selfTestRunLock) {
+        val ver = versionCodeProvider()
+        val p = selfTestPrefs(ctx)
+        if (manual) {
+            synchronized(selfTestLock) {
+                p.edit().clear().putInt(KEY_VER, ver).commit()
+                mlkitCrashed = false
+                paddleCrashed = false
+                selfTestReport = null
+                recoveredVer = ver
+            }
+        } else {
+            recoverIfNeeded(ctx)
+        }
+
         // ML Kit first: it warms up in seconds, so an agent whose accurate read waits behind the slow PP-OCRv6 build
         // falls back to a warm ML Kit instead of a cold one. The report keeps PP-OCRv6 on the first line.
-        lines += try {
-            val bmp = ctx.assets.open("vscreen-ocr/selftest.png").use { android.graphics.BitmapFactory.decodeStream(it) }
-            try {
-                val t0 = SystemClock.elapsedRealtime()
-                // Cold ML Kit takes ~9 s under emulator translation; the self-test may wait longer than an agent's read.
-                val text = mlkit(bmp, 30)
-                val words = text.textBlocks.flatMap { b -> b.lines.map { it.text } }
-                val hit = VScreenPaddleOcr.EXPECT.filter { w -> words.any { it.contains(w) } }
-                fastError = null
-                "ML Kit: ${if (hit.isNotEmpty()) "ok" else "WRONG"} ${hit.size}/${VScreenPaddleOcr.EXPECT.size} expected words, ${words.size} lines, ${SystemClock.elapsedRealtime() - t0}ms"
-            } finally { bmp.recycle() }
-        } catch (t: Throwable) { val c = t.cause ?: t; fastError = "${c.javaClass.simpleName}: ${c.message}"; "ML Kit: FAILED ${c.javaClass.simpleName}: ${c.message?.take(240)}" }
-        lines.add(0, try {
-            val (words, hit, ms) = VScreenPaddleOcr.selfTest(ctx)
-            "PP-OCRv6: ${if (hit.size == VScreenPaddleOcr.EXPECT.size) "ok" else "WRONG"} ${hit.size}/${VScreenPaddleOcr.EXPECT.size} expected words, ${words.size} lines, ${ms}ms" +
-                (VScreenPaddleOcr.optNote?.let { " [$it]" } ?: "")
-        } catch (t: Throwable) { "PP-OCRv6: FAILED ${t.javaClass.simpleName}: ${t.message?.take(240)}" })
-        return lines.joinToString("\n").also { selfTestReport = it; AppLogger.info(TAG, "self-test\n$it") }
+        if (manual || p.getString(KEY_MLKIT_STATUS, null) == null) {
+            synchronized(selfTestLock) { selfTestState = "running"; selfTestEngine = ENGINE_MLKIT }
+            p.edit().putInt(KEY_VER, ver).putString(KEY_RUNNING, "$ENGINE_MLKIT@$ver").commit()
+            val (status, line) = mlkitSelfTestRunner(ctx)
+            p.edit().remove(KEY_RUNNING).putString(KEY_MLKIT_STATUS, status).putString(KEY_MLKIT_LINE, line).commit()
+        }
+
+        if (manual || p.getString(KEY_PADDLE_STATUS, null) == null) {
+            synchronized(selfTestLock) { selfTestState = "running"; selfTestEngine = ENGINE_PADDLE }
+            p.edit().putInt(KEY_VER, ver).putString(KEY_RUNNING, "$ENGINE_PADDLE@$ver").commit()
+            val (status, line) = paddleSelfTestRunner(ctx)
+            p.edit().remove(KEY_RUNNING).putString(KEY_PADDLE_STATUS, status).putString(KEY_PADDLE_LINE, line).commit()
+        }
+
+        val report = synchronized(selfTestLock) {
+            selfTestActive = false
+            syncStateFromPrefsLocked(p)
+            selfTestReport.orEmpty()
+        }
+        AppLogger.info(TAG, "self-test\n$report")
+        report
+    }
+
+    private fun runMlkitSelfTest(ctx: android.content.Context): Pair<String, String> = try {
+        val bmp = ctx.assets.open("vscreen-ocr/selftest.png").use { android.graphics.BitmapFactory.decodeStream(it) }
+        try {
+            val t0 = SystemClock.elapsedRealtime()
+            // Cold ML Kit takes ~9 s under emulator translation; the self-test may wait longer than an agent's read.
+            val text = mlkit(bmp, 30)
+            val words = text.textBlocks.flatMap { b -> b.lines.map { it.text } }
+            val hit = VScreenPaddleOcr.EXPECT.filter { w -> words.any { it.contains(w) } }
+            fastError = null
+            val ok = hit.isNotEmpty()
+            (if (ok) "ok" else "wrong") to "ML Kit: ${if (ok) "ok" else "WRONG"} ${hit.size}/${VScreenPaddleOcr.EXPECT.size} expected words, ${words.size} lines, ${SystemClock.elapsedRealtime() - t0}ms"
+        } finally { bmp.recycle() }
+    } catch (t: Throwable) {
+        val c = t.cause ?: t
+        fastError = "${c.javaClass.simpleName}: ${c.message}"
+        "failed" to "ML Kit: FAILED ${c.javaClass.simpleName}: ${c.message?.take(240)}"
+    }
+
+    private fun runPaddleSelfTest(ctx: android.content.Context): Pair<String, String> = try {
+        val (words, hit, ms) = VScreenPaddleOcr.selfTest(ctx)
+        val ok = hit.size == VScreenPaddleOcr.EXPECT.size
+        (if (ok) "ok" else "wrong") to ("PP-OCRv6: ${if (ok) "ok" else "WRONG"} ${hit.size}/${VScreenPaddleOcr.EXPECT.size} expected words, ${words.size} lines, ${ms}ms" +
+            (VScreenPaddleOcr.optNote?.let { " [$it]" } ?: ""))
+    } catch (t: Throwable) {
+        "failed" to "PP-OCRv6: FAILED ${t.javaClass.simpleName}: ${t.message?.take(240)}"
     }
 
     /** Engines for status: what read / tap --text use, and what the fast paths use. */
-    fun engineInfo(): String = (if (accurateEnabled()) tr("${VScreenPaddleOcr.ENGINE}；滚动等快速路径用 $ENGINE；后台感知（state 的 now.words）也用精确引擎", "${VScreenPaddleOcr.ENGINE}; fast paths such as scrolling use $ENGINE; background perception (now.words in state) uses the accurate engine too") +
-            (if (accurateMs > 0L) tr("（约 ${accurateMs}ms/次，慢时降低频率）", " (about ${accurateMs}ms each, less often when slow)") else "")
-        else ENGINE + (VScreenPaddleOcr.loadError()?.let { tr("（PP-OCRv6 加载失败：$it）", " (PP-OCRv6 failed to load: $it)") } ?: "")) +
-        (selfTestReport?.takeIf { "FAILED" in it || "WRONG" in it }?.let { tr("；自检：", "; self-test: ") + it.replace("\n", "; ") } ?: "")
+    fun engineInfo(): String {
+        val ctx = BackgroundOperation.appContextOrNull()
+        if (ctx != null) recoverIfNeeded(ctx)
+        val base = when {
+            mlkitCrashed && paddleCrashed -> tr(
+                "OCR 不可用（PP-OCRv6 与 ML Kit 在自检时均崩溃，本版本已禁用；运行 diag 或升级应用后重试）",
+                "OCR unavailable (both PP-OCRv6 and ML Kit crashed in self-test and are disabled for this version; run diag or update the app to retry)"
+            )
+            mlkitCrashed -> {
+                val accOk = ctx != null && VScreenPaddleOcr.available(ctx)
+                if (accOk) tr(
+                    "${VScreenPaddleOcr.ENGINE}（ML Kit 自检崩溃，本版本已禁用，由 PP-OCRv6 接手全部识别）",
+                    "${VScreenPaddleOcr.ENGINE} (ML Kit crashed in self-test and is disabled for this version; PP-OCRv6 handles all recognition)"
+                ) else tr(
+                    "OCR 不可用（ML Kit 自检崩溃已在本版本禁用" + (VScreenPaddleOcr.loadError()?.let { "；PP-OCRv6 加载失败：$it" } ?: "；PP-OCRv6 不可用") + "）",
+                    "OCR unavailable (ML Kit crashed in self-test and is disabled for this version" + (VScreenPaddleOcr.loadError()?.let { "; PP-OCRv6 failed to load: $it" } ?: "; PP-OCRv6 unavailable") + ")"
+                )
+            }
+            paddleCrashed -> ENGINE + tr(
+                "（PP-OCRv6 自检崩溃，本版本已禁用，由 ML Kit 接手）",
+                " (PP-OCRv6 crashed in self-test and is disabled for this version; ML Kit took over)"
+            )
+            accurateEnabled() -> tr("${VScreenPaddleOcr.ENGINE}；滚动等快速路径用 $ENGINE；后台感知（state 的 now.words）也用精确引擎", "${VScreenPaddleOcr.ENGINE}; fast paths such as scrolling use $ENGINE; background perception (now.words in state) uses the accurate engine too") +
+                (if (accurateMs > 0L) tr("（约 ${accurateMs}ms/次，慢时降低频率）", " (about ${accurateMs}ms each, less often when slow)") else "")
+            else -> ENGINE + (VScreenPaddleOcr.loadError()?.let { tr("（PP-OCRv6 加载失败：$it）", " (PP-OCRv6 failed to load: $it)") } ?: "")
+        }
+        return base + (selfTestReport?.takeIf { "FAILED" in it || "WRONG" in it || "CRASHED" in it }?.let { tr("；自检：", "; self-test: ") + it.replace("\n", "; ") } ?: "")
+    }
 
     /**
      * OCR of [frame] (version [version]) on display [displayId]. Never throws. Not on the main thread.
      * [accurate]: read / tap --text / vision marks ask for PP-OCRv6 (slower, fewer misreads) when it
      * is enabled; scroll measurement, waits and other loops keep ML Kit (fast). PP-OCRv6 failures
-     * fall back to ML Kit and say so in [Result.fallback].
+     * fall back to ML Kit and say so in [Result.fallback]. When one engine crashed during self-test,
+     * it is not loaded in this versionCode and the other engine takes over.
      */
     fun recognize(displayId: Int, frame: Bitmap, version: Long, accurate: Boolean = false): Result {
+        val ctx = BackgroundOperation.appContextOrNull()
+        if (ctx != null) recoverIfNeeded(ctx)
+        if (mlkitCrashed && paddleCrashed) {
+            val msg = tr("OCR 不可用：PP-OCRv6 与 ML Kit 在自检时均崩溃，本版本已禁用", "OCR unavailable: both PP-OCRv6 and ML Kit crashed in self-test and are disabled for this version")
+            fastError = msg
+            return Result(emptyList(), displayId, version, 0L, msg)
+        }
         var fallback: String? = null
-        if (accurate && accurateEnabled()) {
+        val wantPaddle = !paddleCrashed && (accurateEnabled() && accurate || (mlkitCrashed && ctx != null && VScreenPaddleOcr.available(ctx)))
+        if (wantPaddle && ctx != null) {
             val ac = accurateCache
             if (reusable(ac, displayId, frame, version)) return ac!!
             val t0 = SystemClock.elapsedRealtime()
             try {
-                val items = VScreenPaddleOcr.recognize(BackgroundOperation.appContextOrNull()!!, frame)
+                val items = VScreenPaddleOcr.recognize(ctx, frame)
                 val took = SystemClock.elapsedRealtime() - t0
                 accurateMs = if (accurateMs == 0L) took else (accurateMs * 3 + took) / 4
+                fastError = null
                 return Result(items, displayId, version, took, null, ScreenSig.of(frame),
                     engine = VScreenPaddleOcr.ENGINE).also { accurateCache = it }
             } catch (t: Throwable) {
+                if (mlkitCrashed) {
+                    val msg = tr("PP-OCRv6 失败（${t.javaClass.simpleName}: ${t.message}），且 ML Kit 已因自检崩溃禁用", "PP-OCRv6 failed (${t.javaClass.simpleName}: ${t.message}), and ML Kit is disabled after self-test crash")
+                    AppLogger.warning(TAG, msg)
+                    fastError = msg
+                    return Result(emptyList(), displayId, version, SystemClock.elapsedRealtime() - t0, msg)
+                }
                 fallback = tr("PP-OCRv6 失败（${t.javaClass.simpleName}: ${t.message}），已改用 ML Kit", "PP-OCRv6 failed (${t.javaClass.simpleName}: ${t.message}), switched to ML Kit")
                 AppLogger.warning(TAG, fallback)
             }
+        } else if (mlkitCrashed) {
+            val msg = tr("OCR 不可用：ML Kit 已因自检崩溃禁用，且 PP-OCRv6 不可用", "OCR unavailable: ML Kit is disabled after self-test crash and PP-OCRv6 is unavailable")
+            fastError = msg
+            return Result(emptyList(), displayId, version, 0L, msg)
         }
         val r = recognizeFast(displayId, frame, version)
         return if (fallback != null) r.copy(fallback = fallback) else r
@@ -222,8 +500,14 @@ internal object VScreenOcr {
         if (big !== frame) big.recycle()
         try {
             val ctx = BackgroundOperation.appContextOrNull()
-            val items = if (ctx != null && accurateEnabled()) VScreenPaddleOcr.recognize(ctx, padded)
-                else recognizeFast(-4, padded, -System.nanoTime()).items
+            if (ctx != null) recoverIfNeeded(ctx)
+            val items = when {
+                mlkitCrashed && paddleCrashed -> emptyList()
+                ctx != null && !paddleCrashed && (accurateEnabled() || (mlkitCrashed && VScreenPaddleOcr.available(ctx))) ->
+                    VScreenPaddleOcr.recognize(ctx, padded)
+                !mlkitCrashed -> recognizeFast(-4, padded, -System.nanoTime()).items
+                else -> emptyList()
+            }
             fun back(b: Rect) = Rect(r.left + ((b.left - pad) / zoom).toInt(), r.top + ((b.top - pad) / zoom).toInt(),
                 r.left + ((b.right - pad) / zoom).toInt(), r.top + ((b.bottom - pad) / zoom).toInt())
             return items.map { Item(it.text, back(it.box), it.glyphs.map { g -> Glyph(g.ch, back(g.box)) }) }
@@ -242,6 +526,11 @@ internal object VScreenOcr {
     }
 
     private fun recognizeFast(displayId: Int, frame: Bitmap, version: Long): Result {
+        if (mlkitCrashed) {
+            val msg = tr("ML Kit 在自检时崩溃，本版本已禁用", "ML Kit crashed in self-test and is disabled for this version")
+            fastError = msg
+            return Result(emptyList(), displayId, version, 0L, msg)
+        }
         val c = cache
         if (reusable(c, displayId, frame, version)) return c!!
         val t0 = SystemClock.elapsedRealtime()

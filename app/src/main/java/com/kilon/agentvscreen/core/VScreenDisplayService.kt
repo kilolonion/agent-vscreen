@@ -129,6 +129,8 @@ class VScreenDisplayService : Binder {
      * the next service start for anything a killed service left behind ([Sound.FILE]).
      */
     private val sound = Sound()
+    /** 2.0.0-beta2: byte-level TCP forwarder holding the public loopback port (survives app freeze/kill). */
+    private val gate = Gate(this)
 
     private inner class Sound {
         private val muted = LinkedHashMap<String, String>()
@@ -245,6 +247,7 @@ class VScreenDisplayService : Binder {
 
     override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
         if (code == DESTROY_CODE) {
+            runCatching { gate.stop() }
             synchronized(displays) { displays.values.forEach { runCatching { it.release() } }; displays.clear() }
             sound.giveAll() // uninstall, update, Shizuku stopping the service: no app is left silent
             System.exit(0)
@@ -491,6 +494,32 @@ class VScreenDisplayService : Binder {
                             out.writeInt(0); out.writeFloat(rb); out.writeInt(if (hasNow()) 1 else 0); out.writeString(steps.joinToString("，"))
                         }
                         else -> throw IllegalArgumentException("unknown aps op $op")
+                    }
+                }
+                GATE -> {
+                    when (val op = data.readInt()) {
+                        0 -> {
+                            val wantPort = data.readInt()
+                            val internalPort = data.readInt()
+                            val pkg = data.readString().orEmpty()
+                            val processName = data.readString().orEmpty()
+                            val sdk = data.readInt()
+                            out.writeInt(0)
+                            out.writeInt(gate.start(wantPort, internalPort, pkg, processName, sdk))
+                        }
+                        1 -> {
+                            gate.beat()
+                            out.writeInt(0)
+                        }
+                        2 -> {
+                            gate.stop()
+                            out.writeInt(0)
+                        }
+                        3 -> {
+                            out.writeInt(0)
+                            out.writeString(gate.statusJson().toString())
+                        }
+                        else -> throw IllegalArgumentException("unknown gate op $op")
                     }
                 }
             }
@@ -859,6 +888,18 @@ class VScreenDisplayService : Binder {
         runCatching { inject(e, displayId, 1) }; e.recycle()
     }
 
+    /** 2.0.0-beta2: cancel held agent fingers on every display this service created (same path as pointer op 3). */
+    internal fun cancelAgentFingersOnAllDisplays(): Int {
+        val ids = synchronized(displays) { displays.keys.toList() }
+        var total = 0
+        for (id in ids) {
+            total += synchronized(fence.lock(id)) {
+                synchronized(fingers) { cancelFingers(id, 0L) }
+            }
+        }
+        return total
+    }
+
     /** A finger nobody moved for [FINGER_MAX_IDLE_MS] is cancelled, so a dead app never leaves a finger down. */
     private fun startFingerWatch() {
         if (fingerWatch) return
@@ -1035,6 +1076,14 @@ class VScreenDisplayService : Binder {
          * ([InputFence.USER] for the user's own input); see [InputFence].
          */
         const val FENCE = FIRST_CALL_TRANSACTION + 22
+        /**
+         * 2.0.0-beta2 (protocol 16): TCP forwarder (Gate) in the privileged service process.
+         * op 0 START (wantPort, internalPort, pkg, processName, sdk) -> boundPort (-1 = failed)
+         * op 1 BEAT -> ok
+         * op 2 STOP -> ok
+         * op 3 STATUS -> json string
+         */
+        const val GATE = FIRST_CALL_TRANSACTION + 23
         /** The rule of [mayInject]: never the main screen; a display this service created, or one the app owns. */
         internal fun injectableDisplay(displayId: Int, created: Boolean, owner: String?, appPkg: String): Boolean = when {
             displayId == android.view.Display.DEFAULT_DISPLAY -> false
@@ -1042,7 +1091,7 @@ class VScreenDisplayService : Binder {
             else -> owner == appPkg
         }
         /** The newest call code; onTransact serves CREATE..LAST_CALL. A new code moves this. */
-        const val LAST_CALL = FENCE
+        const val LAST_CALL = GATE
         /** Apps the service silenced, so a service that was killed gives them back on its next start. Shell-owned. */
         const val FILE = "/data/local/tmp/agent-vscreen-muted.json"
         /** "allow" / "ignore" / "default" … as `appops get` says it, or null when it cannot be read. */
@@ -1056,7 +1105,7 @@ class VScreenDisplayService : Binder {
         /** A display nobody touched for this long (app gone) is released. */
         const val ORPHAN_MS = 20 * 60_000L
         /** Bump when the protocol changes, so Shizuku restarts an old service process. */
-        const val PROTOCOL = 15
+        const val PROTOCOL = 16
         /** Shizuku's reserved "destroy user service" transaction. */
         const val DESTROY_CODE = 16777115
         private const val SHELL_PKG = "com.android.shell"

@@ -78,6 +78,7 @@ class ApiServer(private val ctx: Context) {
     @Volatile var lastCaller: String? = null; private set
 
     val running: Boolean get() = server?.isClosed == false
+    @Volatile var starting = false; private set
 
     /** 1.2: the extra socket on this phone's Tailscale address (null: off, or no tailnet address now). */
     @Volatile private var tailServer: ServerSocket? = null
@@ -98,34 +99,163 @@ class ApiServer(private val ctx: Context) {
      * Tailscale node keeps answering on the set port and forwards to wherever the service is. Nobody is killed.
      */
     fun start(port: Int) {
-        stop()
-        if (!bindAny(port)) retryBind(port)
-        if (ApiConfig.tailnet) startTailnet(port)
+        if (starting && wantedPort == port) return
+        wantedPort = port
+        if (!com.kilon.agentvscreen.host.Privileged.isReady()) {
+            rebindGen.incrementAndGet()
+            synchronized(bindLock) {
+                closeLocalLocked()
+                if (!bindAny(port)) retryBind(port)
+                if (ApiConfig.tailnet) startTailnet(port)
+            }
+            return
+        }
+        val gen = rebindGen.incrementAndGet()
+        starting = true
+        val task = {
+            try {
+                synchronized(bindLock) {
+                    if (gen == rebindGen.get() && wantedPort == port) {
+                        startWithGateOrFallbackLocked(port)
+                    }
+                }
+            } finally {
+                if (gen == rebindGen.get()) starting = false
+            }
+        }
+        val onMain = runCatching { android.os.Looper.myLooper() == android.os.Looper.getMainLooper() }.getOrDefault(false)
+        if (onMain) Thread(task, "vscreen-api-start").apply { isDaemon = true }.start() else task()
+    }
+
+    /** 2.0.0-beta2: re-run Gate setup when privileged service connects, reconnects (Shizuku restart) or switches (Root). */
+    fun onPrivilegeChanged() {
+        val port = wantedPort
+        if (port <= 0) return
+        val gen = rebindGen.incrementAndGet()
+        starting = false
+        Thread({
+            synchronized(bindLock) {
+                if (gen != rebindGen.get() || wantedPort != port) return@synchronized
+                if (com.kilon.agentvscreen.host.Privileged.isReady()) {
+                    if (usingGate && server?.isClosed == false && internalPort > 0) {
+                        val gp = com.kilon.agentvscreen.core.VScreenRemoteDisplay.gateStart(
+                            port, internalPort, ctx.packageName, processName(), android.os.Build.VERSION.SDK_INT
+                        ).getOrDefault(-1)
+                        if (gp > 0) {
+                            boundPort = gp
+                            lastError = null; portBusy = false; bindFailures = 0
+                            portNote = if (gp == port) null else tr("端口 $port 被占着，已改用 $gp；agent 会自己找到，不用重新接入",
+                                "Port $port is held, so $gp is used; agents find it by themselves, nothing to set up again")
+                            com.kilon.agentvscreen.host.Tailnet.retarget(ctx, gp)
+                            onChange?.invoke()
+                            AppLogger.info(TAG, "gate rebound on 127.0.0.1:$gp -> internal 127.0.0.1:$internalPort")
+                            return@synchronized
+                        }
+                    }
+                    startWithGateOrFallbackLocked(port)
+                } else if (usingGate) {
+                    closeLocalLocked()
+                    if (!bindAny(port)) retryBind(port)
+                    if (ApiConfig.tailnet) startTailnet(port)
+                }
+            }
+        }, "vscreen-gate-rebind").apply { isDaemon = true }.start()
     }
 
     /** The port the service listens on right now (0: none); [ApiConfig.port] is the one agents are told. */
     @Volatile var boundPort = 0; private set
+    /** 2.0.0-beta2: internal loopback port when Gate forwards traffic to this server (0: direct mode). */
+    @Volatile var internalPort = 0; private set
+    /** 2.0.0-beta2: true while public loopback traffic arrives through the privileged Gate. */
+    @Volatile var usingGate = false; private set
     /** Not an error: the set port was taken, another one is used (shown as a plain note). */
     @Volatile var portNote: String? = null; private set
+    @Volatile private var wantedPort = 0
+    private val bindLock = Any()
+    private val rebindGen = AtomicInteger(0)
+
+    private fun processName(): String =
+        if (android.os.Build.VERSION.SDK_INT >= 28) runCatching { android.app.Application.getProcessName() }.getOrNull()
+            ?.takeIf { it.isNotBlank() } ?: ctx.applicationInfo?.processName ?: ctx.packageName
+        else ctx.applicationInfo?.processName ?: ctx.packageName
+
+    private fun startWithGateOrFallbackLocked(port: Int) {
+        closeLocalLocked()
+        if (!bindWithGateLocked(port)) {
+            if (!bindAny(port)) retryBind(port)
+        }
+        if (ApiConfig.tailnet) startTailnet(port)
+    }
+
+    private fun bindWithGateLocked(port: Int): Boolean {
+        if (!com.kilon.agentvscreen.host.Privileged.isReady()) return false
+        var ss: ServerSocket? = null
+        var intPort = 0
+        for (p in ApiConfig.INTERNAL_BASE until ApiConfig.INTERNAL_BASE + ApiConfig.PORT_SPAN) {
+            if (p > 65535) break
+            val cand = ServerSocket()
+            try {
+                cand.reuseAddress = true
+                cand.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), p), 50)
+                ss = cand; intPort = p; break
+            } catch (e: Exception) {
+                com.kilon.agentvscreen.host.quiet("ApiServer:internal") { cand.close() }
+                AppLogger.info(TAG, "bind internal $p: ${e.message}")
+            }
+        }
+        if (ss == null || intPort <= 0) return false
+        server = ss; internalPort = intPort
+        Thread({ acceptLoop(ss, sendAcceptAck = true) }, "vscreen-http-accept").apply { isDaemon = true }.start()
+        val gp = com.kilon.agentvscreen.core.VScreenRemoteDisplay.gateStart(
+            port, intPort, ctx.packageName, processName(), android.os.Build.VERSION.SDK_INT
+        ).onFailure { AppLogger.warning(TAG, "gateStart failed: ${it.message}") }.getOrDefault(-1)
+        if (gp <= 0) {
+            com.kilon.agentvscreen.host.quiet("ApiServer:gate-fallback") { ss.close() }
+            server = null; internalPort = 0; boundPort = 0; usingGate = false
+            return false
+        }
+        boundPort = gp; usingGate = true; lastError = null; portBusy = false; bindFailures = 0
+        portNote = if (gp == port) null else tr("端口 $port 被占着，已改用 $gp；agent 会自己找到，不用重新接入",
+            "Port $port is held, so $gp is used; agents find it by themselves, nothing to set up again")
+        com.kilon.agentvscreen.host.Tailnet.retarget(ctx, gp)
+        onChange?.invoke()
+        AppLogger.info(TAG, "gate listening on 127.0.0.1:$gp -> internal 127.0.0.1:$intPort")
+        return true
+    }
+
+    private fun closeLocalLocked() {
+        retry?.interrupt(); retry = null
+        usingGate = false
+        runCatching { server?.close() }; server = null; boundPort = 0; internalPort = 0; portNote = null
+        tailWatch?.interrupt(); tailWatch = null
+        runCatching { tailServer?.close() }; tailServer = null; tailAddress = null
+    }
 
     private fun bindAny(port: Int): Boolean {
         val taken = ArrayList<String>()
+        var sawOwnGate = false
         for (p in port until port + ApiConfig.PORT_SPAN) {
             if (p > 65535) break
             if (bindLocal(p)) {
-                portNote = if (p == port) null else tr("端口 $port 被${taken.firstOrNull() ?: "别的程序"}占着，已改用 $p；agent 会自己找到，不用重新接入",
+                portNote = if (p == port || taken.isEmpty()) null else tr("端口 $port 被${taken.firstOrNull() ?: "别的程序"}占着，已改用 $p；agent 会自己找到，不用重新接入",
                     "Port $port is held by ${taken.firstOrNull() ?: "another program"}, so $p is used; agents find it by themselves, nothing to set up again")
-                if (p != port) AppLogger.warning(TAG, "port $port taken (${taken.joinToString()}), listening on $p")
+                if (p != port && taken.isNotEmpty()) AppLogger.warning(TAG, "port $port taken (${taken.joinToString()}), listening on $p")
                 com.kilon.agentvscreen.host.Tailnet.retarget(ctx, p)
                 onChange?.invoke()
                 return true
             }
-            taken += holderOf(p)
+            if (PortHolder.isOwnGate(p)) {
+                sawOwnGate = true
+            } else {
+                taken += holderOf(p)
+            }
         }
         bindFailures++
-        portBusy = true
-        lastError = tr("端口 $port 到 ${port + ApiConfig.PORT_SPAN - 1} 都被占着（${taken.distinct().joinToString("、")}）：在“接入”里换一组端口，或关掉占着它们的应用；每 30 秒会自己再试",
-            "Ports $port to ${port + ApiConfig.PORT_SPAN - 1} are all taken (${taken.distinct().joinToString(", ")}): pick other ports under Connect, or close the apps holding them; tried again every 30 s")
+        if (taken.isNotEmpty() || !sawOwnGate) {
+            portBusy = true
+            lastError = tr("端口 $port 到 ${port + ApiConfig.PORT_SPAN - 1} 都被占着（${taken.distinct().joinToString("、")}）：在“接入”里换一组端口，或关掉占着它们的应用；每 30 秒会自己再试",
+                "Ports $port to ${port + ApiConfig.PORT_SPAN - 1} are all taken (${taken.distinct().joinToString(", ")}): pick other ports under Connect, or close the apps holding them; tried again every 30 s")
+        }
         onChange?.invoke()
         return false
     }
@@ -144,7 +274,7 @@ class ApiServer(private val ctx: Context) {
             AppLogger.info(TAG, "bind $port: ${e.message}")
             return false
         }
-        server = ss; boundPort = port; lastError = null; portBusy = false; bindFailures = 0
+        server = ss; boundPort = port; internalPort = 0; usingGate = false; lastError = null; portBusy = false; bindFailures = 0
         Thread({ acceptLoop(ss) }, "vscreen-http-accept").apply { isDaemon = true }.start()
         AppLogger.info(TAG, "listening on 127.0.0.1:$port")
         return true
@@ -155,7 +285,10 @@ class ApiServer(private val ctx: Context) {
         retry = Thread({
             while (!Thread.currentThread().isInterrupted && server == null) {
                 try { Thread.sleep(30_000) } catch (_: InterruptedException) { break }
-                if (bindAny(port)) break
+                synchronized(bindLock) {
+                    if (server != null || wantedPort != port) return@Thread
+                    if (bindWithGateLocked(port) || bindAny(port)) return@Thread
+                }
             }
         }, "vscreen-http-rebind").apply { isDaemon = true }.also { it.start() }
     }
@@ -187,11 +320,19 @@ class ApiServer(private val ctx: Context) {
         tr("端口刚刚被放开", "The port was just released")
     }
 
-    fun stop() {
-        retry?.interrupt(); retry = null
-        runCatching { server?.close() }; server = null; boundPort = 0; portNote = null
-        tailWatch?.interrupt(); tailWatch = null
-        runCatching { tailServer?.close() }; tailServer = null; tailAddress = null
+    fun stop(stopGate: Boolean = true) {
+        rebindGen.incrementAndGet()
+        starting = false
+        val shouldStopGate = synchronized(bindLock) {
+            wantedPort = 0
+            val wasGate = usingGate
+            closeLocalLocked()
+            stopGate && wasGate
+        }
+        if (shouldStopGate) {
+            Thread({ runCatching { com.kilon.agentvscreen.core.VScreenRemoteDisplay.gateStop() } }, "vscreen-gate-stop")
+                .apply { isDaemon = true }.start()
+        }
     }
 
     /**
@@ -218,9 +359,38 @@ class ApiServer(private val ctx: Context) {
         }, "vscreen-tailnet-watch").apply { isDaemon = true }.also { it.start() }
     }
 
-    private fun acceptLoop(ss: ServerSocket) {
+    /** 2.0.0-beta2 test helper: bind a loopback port directly in internal-Gate mode (writes 0x06 accept-ack). */
+    internal fun startInternalForTests(port: Int): Boolean = synchronized(bindLock) {
+        closeLocalLocked()
+        val ss = ServerSocket()
+        try {
+            ss.reuseAddress = true
+            ss.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 50)
+        } catch (_: Exception) {
+            quiet("ApiServer:test-internal") { ss.close() }
+            return@synchronized false
+        }
+        server = ss; boundPort = port; internalPort = port; usingGate = true
+        Thread({ acceptLoop(ss, sendAcceptAck = true) }, "vscreen-http-accept").apply { isDaemon = true }.start()
+        true
+    }
+
+    private fun acceptLoop(ss: ServerSocket, sendAcceptAck: Boolean = false) {
         while (!ss.isClosed) {
             val s = try { ss.accept() } catch (e: SocketException) { break } catch (e: Exception) { continue }
+            if (sendAcceptAck) {
+                // 2.0.0-beta2: prove the app process itself ran accept() (not a dying/frozen kernel listen queue)
+                // before Gate forwards any client bytes. Only sent on the internal port behind Gate.
+                try {
+                    s.getOutputStream().apply {
+                        write(com.kilon.agentvscreen.core.Gate.ACCEPT_ACK_BYTE)
+                        flush()
+                    }
+                } catch (_: Exception) {
+                    quiet("http-ack-close") { s.close() }
+                    continue
+                }
+            }
             // 1.2: a bounded pool. When every worker is taken the connection is told so at once (503) instead of
             // one more thread being made for it: a flood of connections can no longer exhaust the app.
             // 1.2.0-beta2: a worker waiting for a request that has not come is not doing anything. When every worker

@@ -57,9 +57,10 @@ internal fun VScreenOffloadHandler.status(sid: String?, args: OffloadArgs): Nati
         com.kilon.agentvscreen.host.quiet("VScreenScreenCommands:55") { BackgroundOperation.acquire(sid, create = false) }
     }
     val t0 = SystemClock.elapsedRealtime()
-    // Right after the app starts the system may still be binding the accessibility service: wait for it once
-    // (not once per field: with accessibility off that cost seconds on every status).
-    val a11y = a11yLive(if (BackgroundOperation.state.value.accessibilityConnected) 0 else 1_500)
+    // 2.0.0-beta2: do not block `status` for 1.5 s waiting for accessibility to bind; Readiness.no_accessibility
+    // already notes that binding may still be in progress right after start, and waiting penalised every cold wake
+    // and every phone with accessibility off.
+    val a11y = a11yLive(0)
     if (a11y && !BackgroundOperation.state.value.accessibilityConnected) BackgroundOperation.refreshStatus()
     val s = BackgroundOperation.state.value
     val d = BackgroundOperation.previewDisplayFor(sid ?: "")

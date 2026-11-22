@@ -207,11 +207,69 @@ jobs:
           profile: pixel_6
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: mkdir -p eval-out && { python3 tools/eval/run.py --apk test-apks/torture-debug.apk --out eval-out --repeat-check > eval-out/eval.log 2>&1 || { rc=$?; cat eval-out/eval.log; adb logcat -d > eval-out/logcat.txt; exit "$rc"; }; cat eval-out/eval.log; }
+          script: mkdir -p eval-out && { python3 tools/eval/run.py --apk test-apks/torture-debug.apk --out eval-out --repeat-check > eval-out/eval.log 2>&1; rc=$?; adb logcat -d > eval-out/logcat.txt; cat eval-out/eval.log; exit "$rc"; }
       - if: always()
         uses: actions/upload-artifact@v5
         with:
           name: eval-results
           path: eval-out/*
           if-no-files-found: warn
+          retention-days: 7
+  gate:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 34
+            mode: shizuku
+            profile: pixel_6
+            flag: ""
+          - api: 34
+            mode: root
+            profile: pixel_6
+            flag: "--root"
+          - api: 30
+            mode: shizuku
+            profile: pixel_2
+            flag: "--api30"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: candidate
+          path: test-apks
+      - name: Prepare artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_MODE: ${{ matrix.mode }}
+        run: |
+          find test-apks -type f -exec mv {} test-apks/ \; 2>/dev/null || true
+          if [[ "$GATE_MODE" == shizuku ]]; then
+            gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --output test-apks/shizuku.apk
+          fi
+          ls -la test-apks
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          profile: ${{ matrix.profile }}
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          disable-animations: true
+          script: python3 tools/android-smoke/gate.py test-apks/app-debug.apk ${{ matrix.flag }} 2>&1 | tee gate.log; grep -q '^SUMMARY all passed' gate.log || { adb logcat -d > logcat.txt; exit 1; }
+      - if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: gate-${{ matrix.api }}-${{ matrix.mode }}-logs
+          path: |
+            gate.log
+            logcat.txt
           retention-days: 7
