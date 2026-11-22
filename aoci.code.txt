@@ -117,7 +117,7 @@ ThreadGuard.kt[RR7T]: F:默认未捕获异常处理：后台线程异常只结�
 Takeover.kt[DW7T]: F:用户接管相对agent一轮、空闲计时与其他会话的规则纯函数，及跨轮次欠下的“先看一眼”记录 | R:code:app/src/main/java/com/kilon/agentvscreen/core/BackgroundOperation.kt | A:TakeoverRules.survivesTurnEnd,mayIdle,needsAwake,mayAdoptIdle,refuseAfterWait,RereadDebts | S:RereadDebts非线程安全，调用方须持BackgroundOperation的lock
 Control.kt[CW8T]: F:副屏控制权纪元门禁：每次接管、停止、交还或关屏递增epoch，在每次输入发送前校验计划纪元并按序通知屏幕服务栅栏 | R:code:app/src/main/java/com/kilon/agentvscreen/core/BackgroundOperation.kt,code:app/src/main/java/com/kilon/agentvscreen/core/InputFence.kt,code:app/src/main/java/com/kilon/agentvscreen/core/UserTouch.kt,code:app/src/main/java/com/kilon/agentvscreen/cmd/CmdTypes.kt | A:Control.epoch,admitInput,asUser,withPlan,wireEpoch,refusal | S:epoch以墙钟毫秒起步保证App重启后仍单调递增；用户自身输入须包在asUser内携带USER纪元绕过agent栅栏；fence经UserTouch串行线程先于用户首指送达
 InputFence.kt[DS8T]: F:屏幕服务侧按显示屏维护的输入准入栅栏与单屏互斥锁，按控制纪元拦截过期agent输入并区分用户9号手指与agent手指取消 | R:code:app/src/main/java/com/kilon/agentvscreen/core/VScreenDisplayService.kt,code:app/src/main/java/com/kilon/agentvscreen/core/Control.kt | A:InputFence,admits,cancels,set,lock,USER | S:set先置agentAllowed=false再写epoch最后写允许态以避免并发读放行旧纪元；纯Kotlin无Android依赖供JVM单测
-Meter.kt[KO6T]: F:回复成本纯函数计量器：统计回复字符数、CJK与非CJK估算token及经ImagePolicy筛选后实发图片的尺寸与token | R:code:app/src/main/java/com/kilon/agentvscreen/api/ImagePolicy.kt,code:app/src/main/java/com/kilon/agentvscreen/cmd/CmdTypes.kt | A:Meter.of,sentDimensions,Cost | S:CJK字符每字1token、其余每4字符向上取整1token、图片按ceil(w*h/750)计且不引入分词器；读图只走inJustDecodeBounds不解码像素
+Meter.kt[KO6T]: F:回复成本纯函数计量器：统计回复字符数、CJK与非CJK估算token及纯只读表头查询实发图片的尺寸与token | R:code:app/src/main/java/com/kilon/agentvscreen/api/ImagePolicy.kt,code:app/src/main/java/com/kilon/agentvscreen/cmd/CmdTypes.kt | A:Meter.of,sentDimensions,Cost | S:sentDimensions严格只读(优先读已存在的vscreen_c压缩副本表头否则读原图)，绝不调compact写盘防与发送线程竞争；TaskLog按占位URL重建文字属近似值
 
 ===/<repository>/app/src/main/java/com/kilon/agentvscreen/host/===
 A11yHeal.kt[RR5T]: F:用户开过一次后自动把只读无障碍服务重新打开，带频率限制、用户关闭检测与系统拦截记忆 | R:code:app/src/main/java/com/kilon/agentvscreen/host/Heal.kt | A:A11yHeal.want,maybeHeal,onLost,wanted,blocked,userOff | S:只追加不动其他无障碍服务，至多每分钟一次；开回后短时间又被关视为用户拒绝
@@ -238,7 +238,7 @@ VScreenV050Test.kt[TB2T]: F:测试按压时长、垃圾标签、collect分条合
 VScreenV49Test.kt[TB4S]: F:验证动作步骤解析、目标与手势、等待条件和应用笔记；约束act与launch的选项来自唯一命令表 | R:code:app/src/main/java/com/kilon/agentvscreen/cmd/CommandSpec.kt,code:app/src/main/java/com/kilon/agentvscreen/cmd/VScreenSteps.kt | A:- | S:-
 V142Beta1Test.kt[TR4S]: F:校验当前构建版本号(2.0.0-beta1/58)与历史名称映射、后台线程异常、clampIn、旧画面提示、更新通道、Markdown解析及迟到变化等待 | R:code:app/src/main/java/com/kilon/agentvscreen/core/ThreadGuard.kt,code:app/src/main/java/com/kilon/agentvscreen/ui/Markdown.kt | A:- | S:-
 V142ParkTest.kt[TB4T]: F:验证KEEP、任务列表、停放、取回和APP_PARKED的选项类型、命令范围、双语帮助与能力披露 | R:code:app/src/main/java/com/kilon/agentvscreen/cmd/CommandSpec.kt,code:app/src/main/java/com/kilon/agentvscreen/cmd/Codes.kt | A:- | S:-
-V200Beta1Test.kt[TO5M]: F:测试2.0.0-beta1回复计量规则、HTTP回复JSON的meter与纯文本回复不变、TaskLog逐步计量字段及13个评测场景任务语法完整性 | R:code:app/src/main/java/com/kilon/agentvscreen/core/Meter.kt,code:app/src/main/java/com/kilon/agentvscreen/api/ApiServer.kt,code:app/src/main/java/com/kilon/agentvscreen/core/TaskLog.kt,code:tools/eval/run.py | A:- | S:-
+V200Beta1Test.kt[TO5M]: F:测试2.0.0-beta1回复计量规则、sentDimensions纯只读无写盘保证、HTTP回复meter与纯文本一致、TaskLog四字段及13个场景任务语法完整性 | R:code:app/src/main/java/com/kilon/agentvscreen/core/Meter.kt,code:app/src/main/java/com/kilon/agentvscreen/api/ApiServer.kt,code:app/src/main/java/com/kilon/agentvscreen/core/TaskLog.kt,code:tools/eval/run.py | A:- | S:-
 
 ===/<repository>/app/src/test/java/com/kilon/agentvscreen/core/===
 PicturesTest.kt[TP5T]: F:扫描源码，所有JPEG编码只能在Pictures.kt，参数在Pictures.Use | R:code:app/src/main/java/com/kilon/agentvscreen/core/Pictures.kt | A:- | S:发版门之一
@@ -290,7 +290,7 @@ go.mod[FN5T]: F:tsbridge Go模块与tailscale.com依赖版本 | R:code:tsbridge/
 main.go[IN8L]: F:内置Tailscale节点(tsnet)：加入tailnet，把对端HTTP转发到App本地端口并加密钥与对端身份头，经stdin/stdout与App通信 | R:code:tsbridge/dns.go,code:app/src/main/java/com/kilon/agentvscreen/host/Tailnet.kt | A:- | S:配置只走环境变量以免密钥出现在ps；stdin EOF即退出；X-VScreen-Tailnet密钥防本机伪造tailnet请求
 
 ===/<repository>/.github/workflows/===
-device.yml[OQ7M]: F:模拟器设备测试与评测场：构建App、avsu替身su与折磨APK，跑Shizuku/root端到端及API34全套eval任务基线门禁并上传eval-out产物 | R:code:tools/android-smoke/agent_e2e.py,code:tools/android-smoke/avsu.c,code:tools/eval/run.py | A:- | S:推送main、v1.4、v2.0、v2/**与beta/**时触发；eval脚本兼容POSIX sh并上传eval-out产物，成功率低于baseline即失败
+device.yml[OQ7M]: F:模拟器设备测试与评测场：构建App、avsu替身su与场景APK，跑Shizuku/root端到端及API34全套eval按任务门禁并上传eval-out产物 | R:code:tools/android-smoke/agent_e2e.py,code:tools/android-smoke/avsu.c,code:tools/eval/run.py | A:- | S:推送main、v1.4、v2.0、v2/**与beta/**时触发；eval校验baseline中已通过的任务ID不退化，token变化仅报告
 ci.yml[OQ7M]: F:主CI：生成文件回写检查、单测、debug/release APK、Operit ToolPkg打包、gitleaks全历史密钥扫描；推v*标签时用仓库secrets签名并发GitHub Release | R:code:build.sh,code:tools/ocr-bench/check_assets.py,code:.github/workflows/device.yml | A:- | S:只在push事件签名发布；release拒收debug签名并核对证书SHA-256；标签含-即预发布；未跟踪的生成文件让CI失败
 
 ===/<repository>/app/src/debug/===
@@ -308,9 +308,9 @@ avsu.c[XQ6S]: F:CI模拟器用的替身root管理器：su客户端把标准流�
 shizuku.py[TQ4S]: F:经安卓界面走真实Shizuku管理器授权并核对应用上报的状态，覆盖候选包全新安装、已发布测试版基线和1.3到1.4再到候选包的升级，并确认授权在应用重启后仍在 | R:code:tools/android-smoke/agent_e2e.py | A:- | S:升级模式用一次性密钥重签历史包与候选包以模拟原地升级
 
 ===/<repository>/tools/eval/===
-baseline.json[FQ4S]: F:2.0.0-beta1在API34模拟器上的实测评测基线：12/13(92.31%)通过(仅S11开环充能过载)、共28轮、11952估算token与19559图片token | R:code:tools/eval/run.py,code:.github/workflows/device.yml | A:- | S:CI的eval任务校验当前pass_rate不低于0.9231，token差异仅报告不阻断
+baseline.json[FQ4S]: F:2.0.0-beta1在API34模拟器上的实测评测基线：12/13通过(仅T11a在seed=5303下开环充能过载)及各任务轮数与token基线 | R:code:tools/eval/run.py,code:.github/workflows/device.yml | A:- | S:CI的eval任务逐项校验此处ok为true的任务ID不得退化，token差异仅报告
 model_bench.py[XQ5M]: F:真实模型基准脚本：经Anthropic Messages API(固定claude-sonnet-5-5)和单一vscreen工具在S02/S04/S10/S11/S13上运行自然语言任务 | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:BENCH_TASKS,MODEL_ID | S:仅用Python标准库并从环境变量ANTHROPIC_API_KEY读密钥，手工评测不进CI
-run.py[OQ7L]: F:评测场主运行器：安装授权App与折磨APK，带--include-stopped-packages预设场景后按版本筛选执行tasks脚本，校验AVST日志并产出result.json与result.md | R:code:tools/eval/baseline.json,code:tools/android-smoke/agent_e2e.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:run_task,version_allows,evaluate_events | S:仅用Python标准库；force-stop后发广播须带--include-stopped-packages使PresetReceiver生效；成功率低于baseline退出码为1
+run.py[OQ7L]: F:评测场主运行器：安装授权App与场景APK、按版本执行tasks脚本、按任务ID核验baseline无退化、支持--repeat-check双跑非空AVST序列一致性校验并产出result文件 | R:code:tools/eval/baseline.json,code:tools/android-smoke/agent_e2e.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:run_task,check_baseline_regressions,normalize_avst_sequence | S:门禁逐个检查baseline已通过任务ID而非总通过率；--repeat-check要求非空且忽略t与touch坐标校验同seed两次AVST序列一致
 
 ===/<repository>/tools/eval/tasks/===
 T01a.json[TB3T]: F:S01普通列表基础评测任务：启动折磨应用后点击“条目 5”进入详情再点“返回”，断言收到detail与goal事件 | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:-
@@ -329,16 +329,16 @@ T07a.json[TB3T]: F:S07短暂Toast基础评测任务：点击“保存”触发�
 T07b.json[TB3T]: F:S07短暂Toast捕捉评测任务：单步tap“保存”附带until text:已保存 3s，在2秒浮层消失前捕获文字确认 | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:声明since为beta3，验证动作后紧接条件轮询不会漏掉短寿命Toast
 T08a.json[TU3T]: F:S08软键盘遮挡基础评测任务：点输入框(540,1740)输入“测试内容”，发key back收起遮挡面板后再点“提交”，校验goal | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:-
 T08b.json[TU3T]: F:S08软键盘遮挡条件链评测任务：在点击聚焦、返回收键盘与点击提交三步上分别串联until条件直至出现“提交成功” | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:声明since为beta3，依赖阶段3为tap与key动作统一开放until后置条件
-T09a.json[TW3T]: F:S09限时闪现按钮基础评测任务：启用act --fast通过repeat循环等待“点我”并在800ms窗口内点击直至出现“命中*”，校验target_hit与goal | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:-
+T09a.json[TW3T]: F:S09限时闪现按钮基础评测任务：启动后用act --fast等待首轮“点我”出现并在800ms窗口内点击，校验target_hit与goal | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:-
 T09b.json[TW3T]: F:S09限时闪现盯守本能评测任务：用--on规则与--watch 10s在手机本地盯守“点我”并在每次闪现时即刻点击最多3次 | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:声明since为beta5，依赖阶段5无主流程纯--watch加--on本地反应模式
 T10a.json[TU3T]: F:S10滑条设值基础评测任务：按固定比例从轨道起点(100,800)拖到70%位置(716,800)，校验value与goal事件为真 | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:-
 T10b.json[TU3T]: F:S10滑条闭环微调评测任务：用drag ... seek扫过整条轨道并在读数框[400,600,700,700]读到70时精准抬手 | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:声明since为beta4，依赖阶段4的drag seek分段试探与折返微调手势
-T11a.json[TU3T]: F:S11按住充能基础评测任务：在seed=7固定4秒满格周期下按住(540,1600)3620ms计入分段睡眠漂移后稳定落入90%–100%区间松手 | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:预留16ms分段睡眠定时器余量防超过4040ms触发过载fail
-T11b.json[TU3T]: F:S11按住充能闭环评测任务：用press ... hold按住充能按钮，实时监测百分比区域[300,1400,800,1500]匹配9*即刻松手防过载 | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:声明since为beta4，可在任意seed随机充能速率下避免超时过载
+T11a.json[TU3T]: F:S11按住充能基础评测任务：以seed=5303经SceneRng生成4000ms满格周期，按住(540,1600)3620ms测试开环充能并校验goal且无fail | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:seed=5303经SceneRng算出满格4000ms，无默认seed特例
+T11b.json[TU3T]: F:S11按住充能闭环评测任务：在seed=5303下用press ... hold持续按住，监测区域[300,1400,800,1500]匹配9*即刻松手防过载 | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:声明since为beta4，可在任意seed随机充能速率下避免超时过载
 T12a.json[TA3T]: F:S12背景轮播干扰基础评测任务：等待3秒建立顶部轮播运动遮罩后点击下方“确定”，校验在持续画面噪声下仍稳定达成goal | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:设max_seconds为180秒兼容模拟器动态画面OCR
 T12b.json[TA3T]: F:S12背景轮播干扰条件评测任务：等待3秒后点击“确定”并附until text:已确定，验证动态轮播下文字条件不被误扰 | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:声明since为beta3，设max_seconds为180秒
-T13a.json[TB3T]: F:S13长列表寻项基础评测任务：用act --fast配合repeat无惯性drag每次上移约10行并300ms快检直至出现“目标 147”点击打开 | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:用drag替代swipe防止惯性滑过第147行
-T13b.json[TB3T]: F:S13长列表寻项条件评测任务：用act --fast与repeat无惯性drag找到“目标 147”后用tap附until text:已打开一步确认进入详情 | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:声明since为beta3，依赖阶段3为tap支持until后置条件
+T13a.json[TB3T]: F:S13长列表寻项基础评测任务：用act --fast执行14次定距无惯性drag将“目标 147”移至屏幕中部并点击打开详情 | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:固定14次无惯性drag零OCR开销且保证双跑触点序列严格一致
+T13b.json[TB3T]: F:S13长列表寻项条件评测任务：用act --fast执行14次定距无惯性drag到达“目标 147”后用tap附until text:已打开一步确认 | R:code:tools/eval/run.py,code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:- | S:声明since为beta3，依赖阶段3为tap支持until后置条件
 
 ===/<repository>/torture/===
 build.gradle.kts[FV5T]: F:折磨测试APK模块构建配置：声明com.kilon.avstorture包名、SDK37/min30、Java21及零第三方依赖的纯Android框架构建 | R:code:settings.gradle.kts,code:.github/workflows/device.yml | A:applicationId(com.kilon.avstorture) | S:禁止引入Compose或任何第三方依赖，且仅构建debug供评测场使用、不进入release发版产物
@@ -349,5 +349,5 @@ AndroidManifest.xml[FG4T]: F:折磨测试APK组件清单：注册竖屏singleTop
 ===/<repository>/torture/src/main/java/com/kilon/avstorture/===
 AvstLog.kt[TO5T]: F:折磨应用机器判定日志器：以AVST标签向logcat输出含时间戳、场景号、事件名、ok布尔值与data载荷的单行JSON及根视图触点事件 | R:code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt,code:tools/eval/run.py | A:AvstLog.TAG,AvstLog.emit,AvstLog.touch | S:评测脚本只解析tag=AVST的单行JSON判分，字段名t/scene/ev/ok/data不可改动
 PresetReceiver.kt[TW5T]: F:评测场景预设广播接收器：在launch前将目标scene与seed同步写入SharedPreferences，使应用首帧直达指定场景 | R:code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt,code:tools/eval/run.py,code:tools/eval/model_bench.py | A:PresetReceiver,PREFS_NAME,EXTRA_SCENE,EXTRA_SEED | S:用commit同步落盘防紧随其后的launch读到旧值；am start显式传入的Intent extra始终优先于此预设
-SceneActivity.kt[TU7L]: F:折磨测试APK唯一宿主Activity：按scene与确定性seed构建S01至S13全部13个纯View/Canvas评测场景，记录根视图rawX/rawY触点与各场景判定事件 | R:code:torture/src/main/java/com/kilon/avstorture/AvstLog.kt,code:torture/src/main/java/com/kilon/avstorture/SceneSpec.kt,code:torture/src/main/java/com/kilon/avstorture/PresetReceiver.kt,code:tools/eval/run.py | A:SceneActivity | S:全屏贴边且S08禁调系统键盘以免抢占Back键；S02关闭叉号与S06画布不设无障碍文本；切换场景时清理Handler与动画防串场
+SceneActivity.kt[TU7L]: F:测试APK唯一宿主Activity：无特例统一经SceneRng按scene与seed构建S01至S13全13个纯View/Canvas场景并记录AVST判定与触点事件 | R:code:torture/src/main/java/com/kilon/avstorture/AvstLog.kt,code:torture/src/main/java/com/kilon/avstorture/SceneSpec.kt,code:torture/src/main/java/com/kilon/avstorture/PresetReceiver.kt,code:tools/eval/run.py | A:SceneActivity | S:所有seed均走SceneRng无默认seed硬编码分支；S08禁调系统键盘防抢Back键；S09达成goal后停表保证同seed序列一致
 SceneSpec.kt[TQ4T]: F:折磨场景确定性伪随机数生成器：基于SplitMix64按整数seed跨平台复现一致的延迟毫秒与随机坐标偏移 | R:code:torture/src/main/java/com/kilon/avstorture/SceneActivity.kt | A:SceneRng,nextLong,nextInt,nextRange,nextFloat | S:禁止改用系统随机源或非确定性种子，确保同(scene,seed)在任意设备上延迟与坐标完全一致

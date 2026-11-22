@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-19T04:18:00Z",
-  "updated_at": "2026-11-22T02:58:12Z",
+  "updated_at": "2026-11-22T05:53:12Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -17,9 +17,9 @@
     },
     ".github/workflows/device.yml": {
       "role": "index",
-      "sha256": "d609404523ca50aaee14ba6f5686a6118537df35b6f51cb01665769cb5449436",
-      "size": 9053,
-      "normalized_sha256": "d609404523ca50aaee14ba6f5686a6118537df35b6f51cb01665769cb5449436"
+      "sha256": "9e339d3f848310b23950281d992b136826addab96c9a6f008a1d8cf0a0d0f396",
+      "size": 9068,
+      "normalized_sha256": "9e339d3f848310b23950281d992b136826addab96c9a6f008a1d8cf0a0d0f396"
     },
     ".gitignore": {
       "role": "index",
@@ -59,9 +59,9 @@
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "c55a455bc33300aea303fd143fe844f1a736f9f24b2e41c566e45dca91d3d927",
-      "size": 105755,
-      "normalized_sha256": "c55a455bc33300aea303fd143fe844f1a736f9f24b2e41c566e45dca91d3d927"
+      "sha256": "7b83eac7cbd424ee8cf728761244c11530d41557a32374e01abf3e31bd84cf18",
+      "size": 105762,
+      "normalized_sha256": "7b83eac7cbd424ee8cf728761244c11530d41557a32374e01abf3e31bd84cf18"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -416,9 +416,9 @@
     },
     "app/src/main/java/com/kilon/agentvscreen/core/Meter.kt": {
       "role": "index",
-      "sha256": "5e9652b68ebbbaaffbe00b26e0cbf9b04e995a912bf1c447a79b5eb629c6a028",
-      "size": 3252,
-      "normalized_sha256": "5e9652b68ebbbaaffbe00b26e0cbf9b04e995a912bf1c447a79b5eb629c6a028"
+      "sha256": "cdf2710b26a86f4eda4d96787d732f15bbe7a2f06f183d7b36e1f957289af8ee",
+      "size": 4309,
+      "normalized_sha256": "cdf2710b26a86f4eda4d96787d732f15bbe7a2f06f183d7b36e1f957289af8ee"
     },
     "app/src/main/java/com/kilon/agentvscreen/core/Pictures.kt": {
       "role": "index",
@@ -1226,9 +1226,9 @@
     },
     "app/src/test/java/com/kilon/agentvscreen/cmd/V200Beta1Test.kt": {
       "role": "index",
-      "sha256": "0504a1aa96d24db6b808af351fe75d5d6841bb118c50e935551f2556e98d3092",
-      "size": 8731,
-      "normalized_sha256": "0504a1aa96d24db6b808af351fe75d5d6841bb118c50e935551f2556e98d3092"
+      "sha256": "0635221dec2bc18dad77e16259fd901fec98bca942dd20135849bdfcf36df676",
+      "size": 10536,
+      "normalized_sha256": "0635221dec2bc18dad77e16259fd901fec98bca942dd20135849bdfcf36df676"
     },
     "app/src/test/java/com/kilon/agentvscreen/cmd/VScreenRegexLintTest.kt": {
       "role": "index",
@@ -1478,9 +1478,9 @@
     },
     "tools/eval/baseline.json": {
       "role": "index",
-      "sha256": "8735f04bf39b9b9745f7771f697cf45ccb796be04f5a41e521f47b6fb1be160a",
-      "size": 5154,
-      "normalized_sha256": "8735f04bf39b9b9745f7771f697cf45ccb796be04f5a41e521f47b6fb1be160a"
+      "sha256": "48e43742afd172707e46a436803c0065d692c91009eab449311f1ce88b323962",
+      "size": 5158,
+      "normalized_sha256": "48e43742afd172707e46a436803c0065d692c91009eab449311f1ce88b323962"
     },
     "tools/eval/model_bench.py": {
       "role": "index",
@@ -1490,9 +1490,9 @@
     },
     "tools/eval/run.py": {
       "role": "index",
-      "sha256": "6708e84afa9bfd9b8fc25eb54fd1c9d076c2625d5bdd7287af0bdaa65a893c64",
-      "size": 16765,
-      "normalized_sha256": "6708e84afa9bfd9b8fc25eb54fd1c9d076c2625d5bdd7287af0bdaa65a893c64"
+      "sha256": "49637537c267caeb82a3e83163072c5e3ae91ad8568dbed837546c88e460d7e1",
+      "size": 20479,
+      "normalized_sha256": "49637537c267caeb82a3e83163072c5e3ae91ad8568dbed837546c88e460d7e1"
     },
     "tools/eval/tasks/T01a.json": {
       "role": "index",
@@ -1592,9 +1592,9 @@
     },
     "tools/eval/tasks/T09a.json": {
       "role": "index",
-      "sha256": "7d03414184d77460d0bcbfac8a125546ffa0028e2ddce84827a37d871b233542",
-      "size": 445,
-      "normalized_sha256": "7d03414184d77460d0bcbfac8a125546ffa0028e2ddce84827a37d871b233542"
+      "sha256": "b3f12a6248e774267f9a0881be1872d3b3301a6c41448aba90ba458fa2371381",
+      "size": 405,
+      "normalized_sha256": "b3f12a6248e774267f9a0881be1872d3b3301a6c41448aba90ba458fa2371381"
     },
     "tools/eval/tasks/T09b.json": {
       "role": "index",
@@ -1616,15 +1616,15 @@
     },
     "tools/eval/tasks/T11a.json": {
       "role": "index",
-      "sha256": "09760b96c4f26d30157037ebaae889199e00d44922c5dc612ac4a0fa4a7b1403",
-      "size": 323,
-      "normalized_sha256": "09760b96c4f26d30157037ebaae889199e00d44922c5dc612ac4a0fa4a7b1403"
+      "sha256": "a7b5edf816cecdee31676abbf5a0284647c34e5078c607e0b32d0f9bca32fd48",
+      "size": 326,
+      "normalized_sha256": "a7b5edf816cecdee31676abbf5a0284647c34e5078c607e0b32d0f9bca32fd48"
     },
     "tools/eval/tasks/T11b.json": {
       "role": "index",
-      "sha256": "347d443c3db9b8ba3f2dc27da6977e18fc0461d44172a4160a08a22733fbabc4",
-      "size": 379,
-      "normalized_sha256": "347d443c3db9b8ba3f2dc27da6977e18fc0461d44172a4160a08a22733fbabc4"
+      "sha256": "00f04308a6f1f8f4e4a04e34663bbeb891c1793ae3079ab3f636133b168e2971",
+      "size": 382,
+      "normalized_sha256": "00f04308a6f1f8f4e4a04e34663bbeb891c1793ae3079ab3f636133b168e2971"
     },
     "tools/eval/tasks/T12a.json": {
       "role": "index",
@@ -1640,15 +1640,15 @@
     },
     "tools/eval/tasks/T13a.json": {
       "role": "index",
-      "sha256": "5edc993a10fe11d7cff6eee990b3bd6f9d55fcffcae4d35a0c1a9b3283da7ad1",
-      "size": 412,
-      "normalized_sha256": "5edc993a10fe11d7cff6eee990b3bd6f9d55fcffcae4d35a0c1a9b3283da7ad1"
+      "sha256": "5e23968a817073da38852bc6362fa0a55d91a52f3b7c795ac3336c2b9a4573a0",
+      "size": 380,
+      "normalized_sha256": "5e23968a817073da38852bc6362fa0a55d91a52f3b7c795ac3336c2b9a4573a0"
     },
     "tools/eval/tasks/T13b.json": {
       "role": "index",
-      "sha256": "8813f0aab1b9d1d1b5dfe4559772ee0aad2eea1250f8f5895536337e59d7eab7",
-      "size": 453,
-      "normalized_sha256": "8813f0aab1b9d1d1b5dfe4559772ee0aad2eea1250f8f5895536337e59d7eab7"
+      "sha256": "36fd51c9803c12e573e7cd10372c0a80de5c3bfcbb5c3901c6c19b1f1552ea1f",
+      "size": 421,
+      "normalized_sha256": "36fd51c9803c12e573e7cd10372c0a80de5c3bfcbb5c3901c6c19b1f1552ea1f"
     },
     "tools/ocr-bench/bench.py": {
       "role": "index",
@@ -1700,9 +1700,9 @@
     },
     "torture/src/main/java/com/kilon/avstorture/SceneActivity.kt": {
       "role": "index",
-      "sha256": "5658a35d308f3d9c510b05b299f962ea73d2810240c7bbdedcdcb8ad7cfd6363",
-      "size": 58844,
-      "normalized_sha256": "5658a35d308f3d9c510b05b299f962ea73d2810240c7bbdedcdcb8ad7cfd6363"
+      "sha256": "c2063bd1a6da83c81dc56f648fd378fc1a3e120a926e4f2acd2ccb86456ad06f",
+      "size": 58623,
+      "normalized_sha256": "c2063bd1a6da83c81dc56f648fd378fc1a3e120a926e4f2acd2ccb86456ad06f"
     },
     "torture/src/main/java/com/kilon/avstorture/SceneSpec.kt": {
       "role": "index",
