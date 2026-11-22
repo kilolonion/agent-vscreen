@@ -124,6 +124,7 @@ class HostService : Service() {
         pendingAt = 0L
         BackgroundOperation.setEnabled(true)
         ensureServer(applicationContext).onChange = { renotify() }
+        startGateBeat()
         Overlay.attach(applicationContext)
         Presence.start(applicationContext)
         A11yHeal.maybeHeal(applicationContext, "service start")
@@ -156,6 +157,20 @@ class HostService : Service() {
     private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
     private var watch: kotlinx.coroutines.Job? = null
     private var sleeper: kotlinx.coroutines.Job? = null
+    @Volatile private var beatThread: Thread? = null
+
+    /** 2.0.0-beta2: periodic heartbeat to Gate off the main thread; stops when HostService is destroyed. */
+    private fun startGateBeat() {
+        if (beatThread?.isAlive == true) return
+        beatThread = Thread({
+            while (!Thread.currentThread().isInterrupted && isAlive) {
+                if (Privileged.isReady() && server?.usingGate == true) {
+                    runCatching { com.kilon.agentvscreen.core.VScreenRemoteDisplay.gateBeat() }
+                }
+                try { Thread.sleep(1_000L) } catch (_: InterruptedException) { break }
+            }
+        }, "vscreen-gate-beat").apply { isDaemon = true }.also { it.start() }
+    }
 
     /**
      * A separate, visible notification while the user's Stop holds: the user may have pressed it (or closed the screen
@@ -200,6 +215,7 @@ class HostService : Service() {
         // Started again (the user opened the app, boot, update): whatever failed before gets another go now.
         if (!Liveness.foreground) goForeground()
         if (server?.running != true) server?.start(ApiConfig.port)
+        startGateBeat()
         Presence.start(applicationContext) // the overlay permission may have arrived since
         Tailnet.sync(applicationContext)
         com.kilon.agentvscreen.core.VScreenPower.heal(applicationContext, "service restart")
@@ -219,16 +235,17 @@ class HostService : Service() {
     }
 
     override fun onDestroy() {
+        isAlive = false
+        beatThread?.interrupt(); beatThread = null
         watch?.cancel(); sleeper?.cancel()
         Tailnet.stop("service destroyed")
         com.kilon.agentvscreen.host.quiet("HostService:167") { getSystemService(NotificationManager::class.java)?.cancel(STOP_NOTE_ID) }
         Overlay.detach()
         Presence.stop()
-        // On demand the server stays (the next request wakes the service); off, it goes with the service.
+        // On demand the server (and Gate) stay so the next request wakes the service; off (BLOCKED), dropServer stops Gate too.
         if (ServiceControl.now(this) == ServiceControl.State.BLOCKED) dropServer() else server?.onChange = null
         Liveness.serviceGone()
         if (!Prefs.serviceOn(this)) BackgroundOperation.setEnabled(false)
-        isAlive = false
         super.onDestroy()
     }
 

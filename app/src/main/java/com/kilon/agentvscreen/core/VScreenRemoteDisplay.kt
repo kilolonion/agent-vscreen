@@ -102,7 +102,10 @@ internal object VScreenRemoteDisplay {
             shizukuBinder = service?.takeIf { it.pingBinder() }
             latch?.countDown()
         }
-        override fun onServiceDisconnected(name: ComponentName?) { shizukuBinder = null }
+        override fun onServiceDisconnected(name: ComponentName?) {
+            shizukuBinder = null
+            com.kilon.agentvscreen.host.HostService.server?.onPrivilegeChanged()
+        }
     }
     @Volatile private var latch: CountDownLatch? = null
 
@@ -333,5 +336,40 @@ internal object VScreenRemoteDisplay {
     fun touch(displayId: Int) {
         if (binder?.isBinderAlive != true) return
         call(VScreenDisplayService.TOUCH, { it.writeInt(displayId) }) { }
+    }
+
+    /** 2.0.0-beta2 [Gate]: TCP forwarder in the privileged service process. */
+    fun gateStart(wantPort: Int, internalPort: Int, pkg: String, processName: String, sdk: Int): Result<Int> =
+        call(VScreenDisplayService.GATE, {
+            it.writeInt(0); it.writeInt(wantPort); it.writeInt(internalPort)
+            it.writeString(pkg); it.writeString(processName); it.writeInt(sdk)
+        }) { it.readInt() }
+
+    fun gateBeat(): Result<Unit> = call(VScreenDisplayService.GATE, { it.writeInt(1) }) { }
+
+    fun gateStop(): Result<Unit> = call(VScreenDisplayService.GATE, { it.writeInt(2) }) { }
+
+    fun gateStatus(): Result<String> = call(VScreenDisplayService.GATE, { it.writeInt(3) }) { it.readString().orEmpty() }
+
+    /** [gateStatus] only when the service is already connected (never binds or waits); null otherwise. */
+    fun gateStatusIfConnected(): String? {
+        if (binder?.isBinderAlive != true) return null
+        return gateStatus().getOrNull()
+    }
+
+    /** Stop Gate on the Shizuku binder specifically (used when switching from Shizuku to Root). */
+    fun gateStopShizuku() {
+        val b = shizukuBinder?.takeIf { it.isBinderAlive } ?: return
+        Thread({
+            val data = Parcel.obtain(); val reply = Parcel.obtain()
+            try {
+                data.writeInterfaceToken(VScreenDisplayService.DESCRIPTOR)
+                data.writeInt(2)
+                b.transact(VScreenDisplayService.GATE, data, reply, 0)
+            } catch (_: Throwable) {
+            } finally {
+                data.recycle(); reply.recycle()
+            }
+        }, "vscreen-gate-stop").apply { isDaemon = true }.start()
     }
 }

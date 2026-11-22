@@ -12,6 +12,8 @@ object ApiConfig {
     const val DEFAULT_PORT = 18765
     /** 1.4.0-beta15: the service may listen on any of [port] .. [port] + PORT_SPAN - 1 (the first free one). */
     const val PORT_SPAN = 10
+    /** 2.0.0-beta2: internal port range for ApiServer when Gate holds the public port (range INTERNAL_BASE .. + PORT_SPAN - 1). */
+    const val INTERNAL_BASE = 18775
     private lateinit var prefs: SharedPreferences
 
     fun init(ctx: Context) {

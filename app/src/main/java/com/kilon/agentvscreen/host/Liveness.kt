@@ -141,6 +141,13 @@ object Liveness {
         else -> null
     }
 
+    /** 2.0.0-beta2: Gate status JSON when Gate is active and the privileged service is connected, else null. */
+    fun gateJson(): JSONObject? {
+        if (HostService.server?.usingGate != true) return null
+        val raw = com.kilon.agentvscreen.core.VScreenRemoteDisplay.gateStatusIfConnected() ?: return null
+        return runCatching { JSONObject(raw).takeIf { it.optInt("port", 0) > 0 } }.getOrNull()
+    }
+
     fun json(): JSONObject = JSONObject()
         .put("foreground_service", foreground)
         .put("foreground_error", foregroundError ?: JSONObject.NULL)
@@ -159,6 +166,7 @@ object Liveness {
         .put("previous_exit", ExitInfo.last ?: JSONObject.NULL)
         .put("background_thread_deaths", com.kilon.agentvscreen.core.ThreadGuard.deaths)
         .put("last_background_thread_death", com.kilon.agentvscreen.core.ThreadGuard.last ?: JSONObject.NULL)
+        .put("gate", gateJson() ?: JSONObject.NULL)
 
     /**
      * Open the vendor page where an app is allowed to keep running in the background (launch manager / autostart);

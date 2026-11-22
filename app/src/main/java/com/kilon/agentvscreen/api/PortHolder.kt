@@ -17,9 +17,28 @@ object PortHolder {
             .firstOrNull { f -> f.size > 7 && f[1].uppercase().endsWith(hex) && f[3] == "0A" }?.get(7)?.toIntOrNull()
     }
 
+    /** Pure check: [uid] is shell (2000) or root (0) and [gatePort] matches [port]. */
+    fun isOwnGate(uid: Int, port: Int, gatePort: Int): Boolean =
+        (uid == 2000 || uid == 0) && gatePort > 0 && gatePort == port
+
+    private fun currentGatePort(): Int = runCatching {
+        val raw = com.kilon.agentvscreen.core.VScreenRemoteDisplay.gateStatusIfConnected() ?: return@runCatching 0
+        org.json.JSONObject(raw).optInt("port", 0)
+    }.getOrDefault(0)
+
+    /** True when [port] is held by uid 2000 or 0 and matches our own Gate's bound port. */
+    fun isOwnGate(port: Int): Boolean {
+        val gatePort = currentGatePort()
+        if (gatePort <= 0 || gatePort != port) return false
+        val table = VScreenShell.run(arrayOf("sh", "-c", "cat /proc/net/tcp /proc/net/tcp6 2>/dev/null"), 3_000L).combined
+        val uid = uidIn(table, port) ?: return false
+        return isOwnGate(uid, port, gatePort)
+    }
+
     fun name(ctx: Context, port: Int): String? {
         val table = VScreenShell.run(arrayOf("sh", "-c", "cat /proc/net/tcp /proc/net/tcp6 2>/dev/null"), 3_000L).combined
         val uid = uidIn(table, port) ?: return null
+        if (isOwnGate(uid, port, currentGatePort())) return null
         val user = uid / 100_000
         if (uid % 100_000 < 10_000) return tr("系统服务（uid $uid）", "a system service (uid $uid)")
         val pkg = VScreenShell.run(arrayOf("sh", "-c", "cmd package list packages --uid $uid 2>/dev/null || pm list packages --uid $uid"), 3_000L)
