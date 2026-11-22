@@ -133,7 +133,13 @@ class HostService : Service() {
         // 1.4.0-beta2: read a known picture once with both OCR engines, so a broken one is logged (and said in every
         // reply) before an agent's first look, not discovered from missing words.
         com.kilon.agentvscreen.core.VScreenOwnership.start(applicationContext)
-        if (com.kilon.agentvscreen.core.VScreenOcr.selfTestReport == null) Thread({ runCatching { com.kilon.agentvscreen.core.VScreenOcr.selfTest(applicationContext) } }, "ocr-selftest").start()
+        val skipOcrSelfTest = com.kilon.agentvscreen.BuildConfig.DEBUG && runCatching {
+            Class.forName("android.os.SystemProperties").getMethod("get", String::class.java)
+                .invoke(null, "debug.avs.skip_ocr_selftest") as? String == "1"
+        }.getOrDefault(false)
+        if (!skipOcrSelfTest && com.kilon.agentvscreen.core.VScreenOcr.selfTestReport == null) {
+            Thread({ runCatching { com.kilon.agentvscreen.core.VScreenOcr.selfTest(applicationContext) } }, "ocr-selftest").start()
+        }
         // 1.3 beta4: woken while hidden: go back once nothing needs the service (ServiceControl.shouldSleep).
         sleeper = scope.launch {
             while (true) {

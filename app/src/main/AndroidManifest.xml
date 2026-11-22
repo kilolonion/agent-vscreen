@@ -78,9 +78,12 @@
             android:noHistory="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
+        <!-- 2.0.0-beta2: exported with DUMP (signature|privileged|development) so Gate in Shizuku (uid 2000) / Root (uid 0)
+             can wake HostService via `am start-foreground-service`; ordinary third-party apps cannot hold DUMP. -->
         <service
             android:name=".host.HostService"
-            android:exported="false"
+            android:exported="true"
+            android:permission="android.permission.DUMP"
             android:foregroundServiceType="specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Local automation server that keeps a virtual display for agent apps" />

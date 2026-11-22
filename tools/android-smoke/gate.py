@@ -91,6 +91,8 @@ def press_text(package, labels, tries=20):
 def setup():
     sdk = int(shell("getprop", "ro.build.version.sdk"))
     print("SDK", sdk, "ABIs", shell("getprop", "ro.product.cpu.abilist"), flush=True)
+    if FORCE_API30 or sdk < 34:
+        shell("setprop", "debug.avs.skip_ocr_selftest", "1")
     run("adb", "install", "-r", str(SHIZUKU))
     shell("monkey", "-p", MANAGER, "1")
     pkgdir = Path(shell("pm", "path", MANAGER).removeprefix("package:")).parent
@@ -112,6 +114,22 @@ def setup():
     check("shizuku granted", wait_state("READY", 45), str(shizuku_state()))
     shell("input", "keyevent", "KEYCODE_HOME")
     return sdk
+
+
+def pid():
+    try:
+        return shell("pidof", APP)
+    except subprocess.CalledProcessError:
+        return ""
+
+
+def wait_app_dead(secs=3.0):
+    deadline = time.monotonic() + secs
+    while time.monotonic() < deadline:
+        if not pid():
+            return True
+        time.sleep(0.1)
+    return not pid()
 
 
 def seed():
@@ -186,6 +204,8 @@ def run_api30():
         return
 
     shell("am", "force-stop", APP)
+    dead = wait_app_dead(3.0)
+    print("API 30 force-stop dead:", dead, flush=True)
     code, body, dt = api_raw("status", timeout=15)
     ok_resp = (code == 200 and body.get("ok") is True) or (
         code == 503 and body.get("code") == "NOT_READY" and body.get("next") == "ask_user"
@@ -193,7 +213,7 @@ def run_api30():
     check(
         "API 30 force-stop status returns 200 or 503 NOT_READY within 3.5s",
         ok_resp and dt <= 3.5,
-        f"http={code} dt={dt:.2f}s code={body.get('code')}",
+        f"http={code} dt={dt:.2f}s code={body.get('code')} body_err={body.get('error')}",
     )
 
     # Confirm via GATE STATUS last_wake_cmds that am unfreeze was never executed on SDK < 34.
@@ -219,6 +239,7 @@ def run_api34():
     check("gate active on API 34+", gate is not None, str(gate))
     if gate is None:
         return
+    gate_port = gate["port"]
 
     # 1) am freeze --sticky <proc>, wait > BEAT_STALE_MS (3s), status succeeds within 3.5s.
     freeze_out = shell("am", "freeze", "--sticky", APP)
@@ -238,8 +259,10 @@ def run_api34():
         f"gate={gate1}",
     )
 
-    # 2) am force-stop -> status returns 200 or 503 NOT_READY within 3.5s, never times out.
+    # 2) am force-stop -> wait for process exit -> status returns 200 or 503 NOT_READY within 3.5s, never times out.
     shell("am", "force-stop", APP)
+    dead2 = wait_app_dead(3.0)
+    print("force-stop dead:", dead2, flush=True)
     code2, body2, dt2 = api_raw("status", timeout=15)
     ok2 = (code2 == 200 and body2.get("ok") is True) or (
         code2 == 503 and body2.get("code") == "NOT_READY" and body2.get("next") == "ask_user"
@@ -247,17 +270,19 @@ def run_api34():
     check(
         "force-stop status returns 200 or 503 NOT_READY within 3.5s",
         ok2 and dt2 <= 3.5,
-        f"http={code2} dt={dt2:.2f}s code={body2.get('code')}",
+        f"http={code2} dt={dt2:.2f}s code={body2.get('code')} body_err={body2.get('error')}",
     )
 
-    # 3) Disable HostService + force-stop -> wake must fail and return 503 NOT_READY.
+    # 3) Disable HostService (via adb root) + force-stop -> wake must fail and return 503 NOT_READY.
+    run("adb", "root")
+    run("adb", "wait-for-device")
+    time.sleep(1)
+    run("adb", "forward", f"tcp:{LOCAL_PORT}", f"tcp:{gate_port}")
     try:
-        try:
-            dis = shell("pm", "disable-user", "--user", "0", f"{APP}/.host.HostService")
-        except subprocess.CalledProcessError:
-            dis = shell("pm", "disable", f"{APP}/.host.HostService")
+        dis = shell("pm", "disable", f"{APP}/.host.HostService")
         print("disable HostService:", dis, flush=True)
         shell("am", "force-stop", APP)
+        wait_app_dead(3.0)
         code3, body3, dt3 = api_raw("status", timeout=15)
         check(
             "disabled HostService returns 503 NOT_READY without timing out",
@@ -271,7 +296,11 @@ def run_api34():
             f"http={code3} dt={dt3:.2f}s body={body3}",
         )
     finally:
-        run("adb", "shell", "pm", "enable", f"{APP}/.host.HostService")
+        try:
+            en = shell("pm", "enable", f"{APP}/.host.HostService")
+            print("re-enabled HostService:", en, flush=True)
+        except Exception as e:
+            print("WARN re-enable HostService failed:", e, flush=True)
 
 
 def main():
