@@ -26,7 +26,13 @@ object VScreenPerception {
     const val BLANK_MS = 1_500L
 
     /** The words on the screen at one moment (epoch ms), as written there (trimmed), de-duplicated. */
-    class Reading(val atMs: Long, val words: List<String>)
+    class Reading(
+        val atMs: Long,
+        val words: List<String>,
+        val boxes: Map<String, android.graphics.Rect> = emptyMap(),
+        var hits: Int = 1,
+        var lastAtMs: Long = atMs,
+    )
 
     private class Watcher(val d: VScreenDisplay) {
         @Volatile var running = true
@@ -37,6 +43,7 @@ object VScreenPerception {
         @Volatile var readingVersion = -1L      // frame version behind [reading]
         @Volatile var readingSmall: Bitmap? = null  // small copy of that frame (is the picture still the same?)
         @Volatile var forceOcr = false
+        @Volatile var ocrRunning = false
         @Volatile var ocrMs = 0L
         @Volatile var ocrEngine: String = VScreenOcr.ENGINE
         @Volatile var blankSince = 0L
@@ -48,6 +55,9 @@ object VScreenPerception {
     }
 
     private val watchers = HashMap<Int, Watcher>()
+    private val ocrPool = java.util.concurrent.Executors.newCachedThreadPool { r ->
+        Thread(r, "vscreen-percept-ocr").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }
+    }
 
     /** Start (or keep alive) the watcher for [d]. Cheap to call on every command. */
     fun ensure(d: VScreenDisplay) {
@@ -121,22 +131,72 @@ object VScreenPerception {
         } finally { cur.recycle() }
     }
 
+    /** Confirm the latest reading is still on screen (e.g. when snapshot reuses it), counting as a consecutive look. */
+    internal fun confirmLatest(displayId: Int) {
+        val w = watcher(displayId) ?: return
+        synchronized(w.lock) {
+            w.readings.lastOrNull()?.let {
+                it.hits++
+                it.lastAtMs = System.currentTimeMillis()
+            }
+        }
+    }
+
+    private fun recordReadingLocked(
+        w: Watcher,
+        frameEpochMs: Long,
+        words: List<String>,
+        boxes: Map<String, android.graphics.Rect>,
+    ) {
+        val last = w.readings.lastOrNull()
+        if (last == null || frameEpochMs >= last.atMs) {
+            if (last != null && last.words == words) {
+                last.hits++
+                last.lastAtMs = maxOf(last.lastAtMs, frameEpochMs)
+            } else {
+                w.readings.addLast(Reading(frameEpochMs, words, boxes))
+            }
+        } else {
+            val idx = w.readings.indexOfFirst { it.atMs > frameEpochMs }
+            if (idx > 0 && w.readings[idx - 1].words == words) {
+                w.readings[idx - 1].hits++
+                w.readings[idx - 1].lastAtMs = maxOf(w.readings[idx - 1].lastAtMs, frameEpochMs)
+            } else if (idx >= 0) {
+                w.readings.add(idx, Reading(frameEpochMs, words, boxes))
+            } else {
+                w.readings.addLast(Reading(frameEpochMs, words, boxes))
+            }
+        }
+        while (w.readings.size > MAX_READINGS) w.readings.removeFirst()
+    }
+
     /** v0.5: a reading someone else made of [frame] becomes the watcher's latest (no second OCR of the same picture). */
-    internal fun offerReading(displayId: Int, frame: Bitmap, version: Long, r: VScreenOcr.Result, a11y: List<String>) {
+    internal fun offerReading(
+        displayId: Int,
+        frame: Bitmap,
+        version: Long,
+        r: VScreenOcr.Result,
+        a11y: List<String>,
+        a11yBoxes: Map<String, android.graphics.Rect> = emptyMap(),
+        frameEpochMs: Long = System.currentTimeMillis(),
+    ) {
         val w = watcher(displayId) ?: return
         if (r.error != null) return
-        val words = if (VScreenActivity.uniform(frame)) emptyList() else wordsOf(still(r.items, mask(displayId)), a11y)
+        val (words, boxes) = if (VScreenActivity.uniform(frame)) emptyList<String>() to emptyMap()
+        else wordsAndBoxesOf(still(r.items, mask(displayId)), a11y.map { it to a11yBoxes[VScreenOcr.norm(it)] })
         val sm = small(frame)
         synchronized(w.lock) {
-            if (w.readingVersion > version) { sm.recycle(); return }
+            if (!w.running || w.d.released) { sm.recycle(); return }
+            if (w.readingVersion > version) {
+                sm.recycle()
+                recordReadingLocked(w, frameEpochMs, words, boxes)
+                w.lock.notifyAll()
+                return
+            }
             w.reading = r; w.readingAt = SystemClock.elapsedRealtime(); w.readingVersion = version
             w.readingSmall?.recycle(); w.readingSmall = sm
             w.forceOcr = false
-            val last = w.readings.lastOrNull()
-            if (last == null || last.words != words) {
-                w.readings.addLast(Reading(System.currentTimeMillis(), words))
-                while (w.readings.size > MAX_READINGS) w.readings.removeFirst()
-            }
+            recordReadingLocked(w, frameEpochMs, words, boxes)
             w.lock.notifyAll()
         }
     }
@@ -180,23 +240,38 @@ object VScreenPerception {
     fun engine(displayId: Int): String? = watcher(displayId)?.let { it.ocrEngine + if (it.ocrMs > 0) tr("（约 ${it.ocrMs}ms/次）", " (about ${it.ocrMs}ms each)") else "" }
 
     /** The words of one reading: OCR lines (no junk) + accessibility texts, trimmed, one each by normalised form. */
-    internal fun wordsOf(items: List<VScreenOcr.Item>, a11y: List<String>): List<String> {
+    internal fun wordsOf(items: List<VScreenOcr.Item>, a11y: List<String>): List<String> =
+        wordsAndBoxesOf(items, a11y.map { it to null }).first
+
+    /** Same as [wordsOf], also keeping the upright frame bounding box per normalised word key (for 3.6 toast checks). */
+    internal fun wordsAndBoxesOf(
+        items: List<VScreenOcr.Item>,
+        a11y: List<Pair<String, android.graphics.Rect?>>,
+    ): Pair<List<String>, Map<String, android.graphics.Rect>> {
         val seen = HashSet<String>()
         val out = ArrayList<String>()
-        for (t in joinSplit(items.filter { !VScreenOcr.isJunk(it) }).map { it.replace('\n', ' ').trim() } + a11y.map { it.replace('\n', ' ').trim() }) {
+        val boxes = HashMap<String, android.graphics.Rect>()
+        val ocrPairs = joinSplitWithBoxes(items.filter { !VScreenOcr.isJunk(it) })
+            .map { (txt, box) -> txt.replace('\n', ' ').trim() to box }
+        val a11yPairs = a11y.map { (txt, box) -> txt.replace('\n', ' ').trim() to box }
+        for ((t, b) in ocrPairs + a11yPairs) {
             if (t.isEmpty() || t.length > 80) continue
-            if (seen.add(VScreenOcr.norm(t))) out += t
+            val k = VScreenOcr.norm(t)
+            if (b != null && !b.isEmpty && k !in boxes) boxes[k] = android.graphics.Rect(b)
+            if (seen.add(k)) out += t
         }
-        return out
+        return out to boxes
     }
 
     /**
      * 1.3.0: OCR sometimes cuts one line into pieces ("Auracast 音频广" + "播"). Pieces on one line with almost no gap
      * between them are one text again, so a word that went away is listed once, not as fragments.
      */
-    internal fun joinSplit(items: List<VScreenOcr.Item>): List<String> {
+    internal fun joinSplit(items: List<VScreenOcr.Item>): List<String> = joinSplitWithBoxes(items).map { it.first }
+
+    internal fun joinSplitWithBoxes(items: List<VScreenOcr.Item>): List<Pair<String, android.graphics.Rect>> {
         val left = items.sortedWith(compareBy({ it.box.top }, { it.box.left })).toMutableList()
-        val out = ArrayList<String>()
+        val out = ArrayList<Pair<String, android.graphics.Rect>>()
         while (left.isNotEmpty()) {
             var cur = left.removeAt(0)
             var text = cur.text.trim()
@@ -210,7 +285,7 @@ object VScreenPerception {
                 text += if (text.lastOrNull()?.let { it.code < 128 && it.isLetterOrDigit() } == true && nt.firstOrNull()?.let { it.code < 128 && it.isLetterOrDigit() } == true) " $nt" else nt
                 box.union(next.box); cur = next
             }
-            out += text
+            out += text to box
         }
         return out
     }
@@ -251,24 +326,49 @@ object VScreenPerception {
             if (uniform) { if (w.blankSince == 0L) w.blankSince = now } else w.blankSince = 0L
             val forced = w.forceOcr
             val gap = maxOf(1_000L, w.ocrMs * 2)
-            if (forced || (now - lastOcr >= gap && (changedSinceOcr || now - lastOcr >= 5_000L))) {
-                lastOcr = now; w.forceOcr = false; changedSinceOcr = false
-                val frameAt = now
-                val r = runCatching { VScreenOcr.recognize(d.displayId, fv.first, fv.second, accurate = VScreenOcr.accurateEnabled()) }.getOrNull()
-                if (r != null) { w.ocrMs = r.ms; w.ocrEngine = r.engine }
-                if (r != null && r.error == null) {
-                    val a11y = runCatching { A11yTree.snapshot(d.displayId).texts(200) }.getOrNull().orEmpty()
-                    val words = if (uniform) emptyList() else wordsOf(still(r.items, mask(d.displayId)), a11y)
-                    val sm = small(fv.first)
-                    synchronized(w.lock) {
-                        w.reading = r; w.readingAt = frameAt; w.readingVersion = fv.second
-                        w.readingSmall?.recycle(); w.readingSmall = sm
-                        val last = w.readings.lastOrNull()
-                        if (last == null || last.words != words) {
-                            w.readings.addLast(Reading(System.currentTimeMillis(), words))
-                            while (w.readings.size > MAX_READINGS) w.readings.removeFirst()
+            if (!w.ocrRunning && (forced || (now - lastOcr >= gap && (changedSinceOcr || now - lastOcr >= 5_000L)))) {
+                val frameCopy = runCatching { fv.first.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull()
+                if (frameCopy != null) {
+                    lastOcr = now; w.forceOcr = false; changedSinceOcr = false; w.ocrRunning = true
+                    val frameAt = now
+                    val frameEpoch = System.currentTimeMillis()
+                    val frameVer = fv.second
+                    ocrPool.execute {
+                        try {
+                            val a11yPairs = runCatching {
+                                A11yTree.snapshot(d.displayId).nodes.asSequence()
+                                    .filter { it.visible }
+                                    .mapNotNull { n -> n.words?.take(120)?.let { it to d.toFrame(n.box) } }
+                                    .take(200).toList()
+                            }.getOrNull().orEmpty()
+                            val r = runCatching { VScreenOcr.recognize(d.displayId, frameCopy, frameVer, accurate = VScreenOcr.accurateEnabled()) }.getOrNull()
+                            if (r != null) { w.ocrMs = r.ms; w.ocrEngine = r.engine }
+                            if (r != null && r.error == null && w.running && !d.released) {
+                                val (words, boxes) = if (uniform) emptyList<String>() to emptyMap()
+                                else wordsAndBoxesOf(still(r.items, mask(d.displayId)), a11yPairs)
+                                val sm = small(frameCopy)
+                                synchronized(w.lock) {
+                                    if (!w.running || d.released) {
+                                        sm.recycle()
+                                    } else {
+                                        if (frameVer >= w.readingVersion) {
+                                            w.reading = r; w.readingAt = frameAt; w.readingVersion = frameVer
+                                            w.readingSmall?.recycle(); w.readingSmall = sm
+                                        } else {
+                                            sm.recycle()
+                                        }
+                                        recordReadingLocked(w, frameEpoch, words, boxes)
+                                    }
+                                    w.lock.notifyAll()
+                                }
+                            }
+                        } catch (t: Throwable) {
+                            AppLogger.warning(TAG, "ocr: ${t.message}")
+                        } finally {
+                            frameCopy.recycle()
+                            w.ocrRunning = false
+                            synchronized(w.lock) { w.lock.notifyAll() }
                         }
-                        w.lock.notifyAll()
                     }
                 }
             }

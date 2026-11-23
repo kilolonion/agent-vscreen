@@ -130,6 +130,7 @@ internal object Mcp {
         structured.put("ok", res.exitCode == 0).put("code", res.codeOrDefault).put("exit", res.exitCode)
             .put("next", if (res.exitCode == 0) "none" else com.kilon.agentvscreen.cmd.Codes.next(res.codeOrDefault))
             .put("meter", meter.json())
+            .put("returned_at", res.data?.optLong("returned_at")?.takeIf { it > 0L } ?: System.currentTimeMillis())
         if (replayed) structured.put("replayed", true)
         return JSONObject().put("content", content).put("structuredContent", structured).put("isError", res.exitCode != 0)
     }

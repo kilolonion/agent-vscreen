@@ -486,7 +486,9 @@ internal object Steps {
         var t = toks
         var max: Long? = null
         val last = t.last()
-        if (t.size >= 2 && !last.contains(':') && last.any { it.isDigit() } && duration(last) != null) { max = duration(last); t = t.dropLast(1) }
+        val hasUnit = last.any { it.isLetter() }
+        val hasMaxKw = t.size >= 3 && t[t.size - 2].lowercase() in setOf("max", "最长", "within")
+        if (t.size >= 2 && !last.contains(':') && last.any { it.isDigit() } && (hasUnit || hasMaxKw) && duration(last) != null) { max = duration(last); t = t.dropLast(1) }
         if (max != null && t.size >= 2 && t.last().lowercase() in setOf("max", "最长", "within")) t = t.dropLast(1)
         val conds = t.joinToString(" ").split(Regex("\\s+or\\s+|\\s*\\|\\s*|\\s+或\\s+")).map { it.trim() }.filter { it.isNotEmpty() }.map { cond(it) }
         if (conds.isEmpty()) throw ActionError("INVALID_STEP", tr("until / wait 后面要写条件：", "until / wait needs a condition: ") + CONDS_HELP)

@@ -120,10 +120,10 @@ def anthropic_call(api_key, system_prompt, messages):
         return json.loads(resp.read().decode("utf-8"))
 
 
-def run_one(api_key, token, system_prompt, spec, run_idx):
+def run_one(api_key, token, system_prompt, spec, run_idx, reply_mode="quiet"):
     scene = spec["scene"]
     seed_val = spec["seed"] + run_idx
-    session = f"mbench_{spec['id']}_{run_idx}"
+    session = f"mbench_{reply_mode}_{spec['id']}_{run_idx}"
 
     eval_run.adb_shell("am", "force-stop", eval_run.TORTURE_PKG)
     eval_run.adb_shell(
@@ -133,11 +133,18 @@ def run_one(api_key, token, system_prompt, spec, run_idx):
         "--ei", "seed", str(seed_val),
     )
     eval_run.adb_shell("logcat", "-c")
+    eval_run.call_api(token, ["note", "reply", reply_mode], session=session, timeout=30)
 
     messages = [{"role": "user", "content": spec["goal_prompt"]}]
     turns = 0
     in_tokens = 0
     out_tokens = 0
+    quiet_replies = 0
+    refetch_after_quiet = 0
+    cmd_records = []
+    cmd_idx = 0
+    prev_returned_at = 0
+    prev_was_quiet = False
     t0 = time.monotonic()
 
     try:
@@ -159,7 +166,25 @@ def run_one(api_key, token, system_prompt, spec, run_idx):
             finished = False
             for tu in tool_uses:
                 argv = (tu.get("input") or {}).get("argv") or []
+                if prev_was_quiet and eval_run.is_refetch_command(argv):
+                    refetch_after_quiet += 1
                 reply = eval_run.call_api(token, argv, session=session, timeout=90)
+                cur_returned_at = int(reply.get("returned_at") or 0)
+                is_q = eval_run.is_quiet_reply(argv, reply)
+                if is_q:
+                    quiet_replies += 1
+                cmd_records.append({
+                    "index": cmd_idx,
+                    "argv": list(argv),
+                    "prev_returned_at": prev_returned_at,
+                    "returned_at": cur_returned_at,
+                    "is_quiet": is_q,
+                })
+                cmd_idx += 1
+                if cur_returned_at > 0:
+                    prev_returned_at = cur_returned_at
+                prev_was_quiet = is_q
+
                 blocks = [{"type": "text", "text": reply.get("text", "")}]
                 for img in reply.get("images") or []:
                     img_url = img.get("url")
@@ -191,8 +216,10 @@ def run_one(api_key, token, system_prompt, spec, run_idx):
             pass
         eval_run.adb_shell("am", "force-stop", eval_run.TORTURE_PKG)
 
+    false_quiet, false_quiet_details = eval_run.count_false_quiet(cmd_records, events)
     ok = eval_run.evaluate_events(events, spec["expect"], spec["forbid"])
     return {
+        "mode": reply_mode,
         "task": spec["id"],
         "scene": scene,
         "run": run_idx + 1,
@@ -201,14 +228,82 @@ def run_one(api_key, token, system_prompt, spec, run_idx):
         "input_tokens": in_tokens,
         "output_tokens": out_tokens,
         "wall_seconds": wall_s,
+        "quiet_replies": quiet_replies,
+        "false_quiet": false_quiet,
+        "false_quiet_details": false_quiet_details,
+        "refetch_after_quiet": refetch_after_quiet,
     }
+
+
+def summarize_mode(records):
+    total = len(records)
+    passed = sum(1 for r in records if r["ok"])
+    return {
+        "passed": passed,
+        "total": total,
+        "pass_rate": round(passed / total, 4) if total else 0.0,
+        "avg_turns": round(sum(r["turns"] for r in records) / max(1, total), 2),
+        "input_tokens": sum(r["input_tokens"] for r in records),
+        "output_tokens": sum(r["output_tokens"] for r in records),
+        "wall_seconds": round(sum(r["wall_seconds"] for r in records), 2),
+        "quiet_replies": sum(int(r.get("quiet_replies", 0)) for r in records),
+        "false_quiet": sum(int(r.get("false_quiet", 0)) for r in records),
+        "refetch_after_quiet": sum(int(r.get("refetch_after_quiet", 0)) for r in records),
+    }
+
+
+def compare_quiet_vs_full(quiet_tot, full_tot):
+    """3.10 & 3.11 gate: quiet pass_rate >= full, avg_turns <= full * 1.10, false_quiet == 0."""
+    turns_change = round((quiet_tot["avg_turns"] - full_tot["avg_turns"]) / full_tot["avg_turns"], 4) if full_tot["avg_turns"] > 0 else 0.0
+    in_drop = round((full_tot["input_tokens"] - quiet_tot["input_tokens"]) / full_tot["input_tokens"], 4) if full_tot["input_tokens"] > 0 else 0.0
+    gate_ok = (
+        quiet_tot["pass_rate"] >= full_tot["pass_rate"]
+        and (full_tot["avg_turns"] == 0 or quiet_tot["avg_turns"] <= full_tot["avg_turns"] * 1.10)
+        and quiet_tot["false_quiet"] == 0
+    )
+    return {
+        "pass_rate_delta": round(quiet_tot["pass_rate"] - full_tot["pass_rate"], 4),
+        "avg_turns_change_pct": turns_change,
+        "input_tokens_drop_pct": in_drop,
+        "false_quiet": quiet_tot["false_quiet"],
+        "refetch_after_quiet": quiet_tot["refetch_after_quiet"],
+        "gate_pass": gate_ok,
+    }
+
+
+def render_markdown(summary):
+    lines = [
+        f"# Agent-VScreen 模型对照评测（{summary['model']}，每任务 {summary['runs_per_task']} 次）",
+        "",
+        "| 模式 | 通过率 | 平均轮数 | Input Tokens | Output Tokens | 误静默 | 短回复数 | refetch_after_quiet | 耗时 (s) |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for mode, tot in summary["by_mode"].items():
+        lines.append(
+            f"| `{mode}` | {tot['passed']}/{tot['total']} ({tot['pass_rate']:.1%}) | {tot['avg_turns']} | "
+            f"{tot['input_tokens']} | {tot['output_tokens']} | {tot['false_quiet']} | "
+            f"{tot['quiet_replies']} | {tot['refetch_after_quiet']} | {tot['wall_seconds']} |"
+        )
+    cmp = summary.get("comparison")
+    if cmp:
+        lines.extend([
+            "",
+            "## quiet vs full 对照结论（3.10 / 3.11）",
+            f"- 成功率差值：`{cmp['pass_rate_delta']:+.1%}`（要求 ≥ 0%）",
+            f"- 平均轮数变化：`{cmp['avg_turns_change_pct']:+.1%}`（要求 ≤ +10%）",
+            f"- Input token 降幅：`{cmp['input_tokens_drop_pct']:.1%}`（3.10 目标 ≥ 40%）",
+            f"- 误静默：`{cmp['false_quiet']}`（要求 = 0）；`refetch_after_quiet`：`{cmp['refetch_after_quiet']}`",
+            f"- 3.11 门槛：**{'通过' if cmp['gate_pass'] else '未通过'}**",
+        ])
+    return "\n".join(lines) + "\n"
 
 
 def main():
     parser = argparse.ArgumentParser(description="Run Anthropic model benchmark against AVSTorture.")
     parser.add_argument("--apk", required=True, help="Path to torture debug APK")
     parser.add_argument("--out", default="eval-model-out", help="Output directory")
-    parser.add_argument("--runs", type=int, default=3, help="Runs per task (default: 3)")
+    parser.add_argument("--runs", type=int, default=3, help="Runs per task per mode (default: 3)")
+    parser.add_argument("--mode", choices=["both", "quiet", "full"], default="both", help="Reply mode(s) to benchmark (default: both)")
     parser.add_argument("--task", default=None, help="Optional single task id filter (e.g. M01_S02)")
     args = parser.parse_args()
 
@@ -226,33 +321,49 @@ def main():
     if not selected:
         raise SystemExit(f"No matching benchmark task for {args.task}")
 
+    modes = ["quiet", "full"] if args.mode == "both" else [args.mode]
     records = []
-    for spec in selected:
-        for r in range(args.runs):
-            rec = run_one(api_key, token, guide, spec, r)
-            print(
-                f"[{'PASS' if rec['ok'] else 'FAIL'}] {rec['task']} #{rec['run']} "
-                f"turns={rec['turns']} in={rec['input_tokens']} out={rec['output_tokens']} wall={rec['wall_seconds']}s",
-                flush=True,
-            )
-            records.append(rec)
+    by_mode_records = {}
+    try:
+        for mode in modes:
+            mode_recs = []
+            for spec in selected:
+                for r in range(args.runs):
+                    rec = run_one(api_key, token, guide, spec, r, reply_mode=mode)
+                    print(
+                        f"[{mode}] [{'PASS' if rec['ok'] else 'FAIL'}] {rec['task']} #{rec['run']} "
+                        f"turns={rec['turns']} in={rec['input_tokens']} out={rec['output_tokens']} "
+                        f"quiet={rec['quiet_replies']} false_quiet={rec['false_quiet']} "
+                        f"refetch={rec['refetch_after_quiet']} wall={rec['wall_seconds']}s",
+                        flush=True,
+                    )
+                    mode_recs.append(rec)
+                    records.append(rec)
+            by_mode_records[mode] = mode_recs
+    finally:
+        try:
+            eval_run.call_api(token, ["note", "reply", "quiet"], session="mbench_cleanup", timeout=30)
+        except Exception:
+            pass
+
+    by_mode = {m: summarize_mode(recs) for m, recs in by_mode_records.items()}
+    comparison = compare_quiet_vs_full(by_mode["quiet"], by_mode["full"]) if "quiet" in by_mode and "full" in by_mode else None
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     summary = {
         "model": MODEL_ID,
+        "mode": args.mode,
         "runs_per_task": args.runs,
         "records": records,
-        "totals": {
-            "passed": sum(1 for r in records if r["ok"]),
-            "total": len(records),
-            "avg_turns": round(sum(r["turns"] for r in records) / max(1, len(records)), 2),
-            "input_tokens": sum(r["input_tokens"] for r in records),
-            "output_tokens": sum(r["output_tokens"] for r in records),
-            "wall_seconds": round(sum(r["wall_seconds"] for r in records), 2),
-        },
+        "by_mode": by_mode,
+        "comparison": comparison,
+        "totals": summarize_mode(records),
     }
     (out_dir / "model_bench.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    md = render_markdown(summary)
+    (out_dir / "model_bench.md").write_text(md, encoding="utf-8")
+    print("\n" + md, flush=True)
 
 
 if __name__ == "__main__":

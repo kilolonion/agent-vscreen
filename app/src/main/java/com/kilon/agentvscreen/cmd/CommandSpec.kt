@@ -128,24 +128,27 @@ internal object CommandSpec {
                 Opt("keep", Kind.VALUE, "notify|wake", "notify|wake", "本轮结束后继续盯 --stop 的条件，看到就通知用户（notify）或发一条事件给调用方（wake，用 events 取），然后结束；重启后还在", "after this turn keep watching the --stop condition; when seen, notify the user (notify) or send the caller an event (wake, fetched with events), then end; survives a restart"),
                 Opt("for", Kind.DURATION, "时长", "duration", "--keep 盯多久（默认 1 小时，最长 12 小时）", "how long --keep watches (default 1 hour, at most 12 hours)"),
                 Opt("save", Kind.VALUE, "名字", "name", "把这段步骤存成这个应用的段，以后 use 名字", "save these steps as a segment of this app, later: use <name>"),
+                Opt("full", Kind.SWITCH, null, null, "这次一定出完整回复；不带步骤时按上次 act 的时间窗重算【这段时间】并返回全屏图和全部元素", "always return a full reply this time; with no steps, replays the last act window with a full picture and all elements"),
                 Opt("paused", Kind.SWITCH, null, null, "= --bare", "= --bare", deprecated = true),
                 Opt("confirmed", Kind.SWITCH, null, null, "已不起作用：付费/不可撤销由用户在手机上确认", "no longer has any effect: payment / irreversible steps are confirmed by the user on the phone", deprecated = true)),
             long = true, sumZh = "在副屏上做一段步骤（点、滑、输入、等待），返回现在的画面；不带步骤 = 看一眼",
             sumEn = "run a stretch of steps on the screen (tap, swipe, type, wait) and return the screen now; no steps = look",
             scopeOf = { a -> if (looksOnly(a)) Scope.LOOK else Scope.OPERATE },
             scopeNoteZh = "不带步骤、或只有 wait 的 act 只需要 look", scopeNoteEn = "an act with no steps, or only wait steps, needs just look"),
-        Cmd("note", "[文字] | before \"<步骤>\" | after \"<步骤>\" | save <段名> \"<步骤>\" | show <段名> | human on|off | delete <编号|before|after|段名>", "[text] | before \"<steps>\" | after \"<steps>\" | save <segment> \"<steps>\" | show <segment> | human on|off | delete <number|before|after|segment>",
+        Cmd("note", "[文字] | before \"<步骤>\" | after \"<步骤>\" | save <段名> \"<步骤>\" | show <段名> | human on|off | reply quiet|full | delete <编号|before|after|段名>", "[text] | before \"<steps>\" | after \"<steps>\" | save <segment> \"<steps>\" | show <segment> | human on|off | reply quiet|full | delete <number|before|after|segment>",
             listOf("给当前应用记笔记（不带参数 = 列出笔记、段和前置/收尾步骤）。下次 launch 会列出来，并标明是谁、在应用哪个版本时记的。",
                 "before / after：每段 act 开始前先做 before 的步骤，做完、观察完再做 after 的步骤（--bare 跳过）。",
                 "例：会自己走的画面（游戏、播放器）记 before = 继续的步骤、after = 暂停的步骤，你思考时画面就停着；每次进页面都弹的窗记 before = 关掉它的步骤。",
                 "save：不执行，直接存下或改写一个段（示教存的段也一样），步骤写法和 act 相同，可以用 try / if / repeat、* 和 @N；note 列出的就是段的完整步骤。",
-                "human on：这个应用以后每段 act 都用仿人节奏（同 act --human）；off 关掉。"),
+                "human on：这个应用以后每段 act 都用仿人节奏（同 act --human）；off 关掉。",
+                "reply quiet|full：按当前 agent 保存默认回复模式（默认 quiet：符合预期时给短回复，full：每次都给完整回复），不需要先打开应用。"),
             listOf("keep notes for the current app (no arguments = list notes, segments and before/after steps). The next launch lists them, with who wrote each and for which app version.",
                 "before / after: every act first does the before steps, and after acting and looking does the after steps (--bare skips them).",
                 "e.g. for a picture that moves by itself (a game, a player) keep before = the steps that resume and after = the steps that pause, so it stands still while you think; for a popup shown on every visit keep before = the steps that close it.",
                 "save: store or rewrite a segment without running it (taught lessons too); the steps are written as for act, with try / if / repeat, * and @N; note lists each segment's full steps.",
-                "human on: every act on this app uses human pacing from now on (as act --human); off turns it off."),
-            sumZh = "给当前应用记笔记、前置/收尾步骤", sumEn = "keep notes and before/after steps for the current app"),
+                "human on: every act on this app uses human pacing from now on (as act --human); off turns it off.",
+                "reply quiet|full: save this agent's default reply mode (default quiet: short reply when expected; full: always return full four blocks); works without an open app."),
+            sumZh = "给当前应用记笔记、前置/收尾步骤，或设回复模式", sumEn = "keep notes and before/after steps for the current app, or set reply mode"),
         Cmd("events", "", "",
             listOf("取盯守（act --keep wake）看到条件时发来的事件。事件有序号，取走后在你下一次 events 时才删除（中途断了不会丢）。",
                 "这个会话没有正在运行的 --keep wake 盯守时不等，直接说明。"),
@@ -154,9 +157,9 @@ internal object CommandSpec {
             listOf(Opt("wait", Kind.DURATION, "时长", "duration", "没有事件时最多等这么久（默认不等，最长 120s）", "wait up to this long when there is none (default no wait, at most 120s)"),
                 Opt("again", Kind.SWITCH, null, null, "把上一次取走的那批再给一遍", "return the previously fetched batch again")),
             scope = Scope.LOOK, screen = false),
-        Cmd("task", "[任务号] | cancel <任务号>", "[task id] | cancel <task id>",
-            listOf("查看用 --async 开始的任务：不带参数列出本会话的任务；带任务号返回它的状态，做完了就是它的完整结果；cancel 让它在下一步之前停下。"),
-            listOf("look at tasks started with --async: no argument lists this session's tasks; with a task id it returns the state, and the full result once finished; cancel stops it before its next step."),
+        Cmd("task", "[任务号] | cancel <任务号> | recap", "[task id] | cancel <task id> | recap",
+            listOf("查看用 --async 开始的任务：不带参数列出本会话的任务；带任务号返回它的状态，做完了就是它的完整结果；cancel 让它在下一步之前停下；recap 返回本会话走过的页面和步骤摘要（不重新读屏，最多 600 字）。"),
+            listOf("look at tasks started with --async: no argument lists this session's tasks; with a task id it returns the state, and the full result once finished; cancel stops it before its next step; recap summarizes this session's pages and steps without re-reading the screen (at most 600 chars)."),
             listOf(Opt("wait", Kind.DURATION, "时长", "duration", "任务没做完时最多等这么久（最长 120s）", "wait up to this long while the task is unfinished (at most 120s)")),
             scope = Scope.LOOK, screen = false),
         Cmd("tasks", "", "",
@@ -329,7 +332,7 @@ internal object CommandSpec {
         append(head).append('\n')
         commands.forEach { c -> c.help().forEach { append(it).append('\n') } }
         append("  guide\n        ").append(tr("用法速查（一页）。", "the one-page quick usage.")).append('\n')
-        append("  help [all|codes|<").append(tr("命令", "command")).append(">]\n        ").append(tr("完整说明 / 代码表 / 单条命令。", "the full reference / the code table / one command.")).append('\n')
+        append("  help [all|codes|<").append(tr("主题", "topic")).append(">|<").append(tr("命令", "command")).append(">]\n        ").append(tr("完整说明 / 代码表 / 主题 / 单条命令。", "the full reference / the code table / a topic / one command.")).append('\n')
         append('\n').append(rules)
     }
 

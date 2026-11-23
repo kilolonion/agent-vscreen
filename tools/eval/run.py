@@ -223,6 +223,89 @@ def check_baseline_regressions(rows, baseline):
     return regressed
 
 
+FALSE_QUIET_EVENTS = frozenset({"popup_shown", "snap_back", "fail", "target_missed"})
+REFETCH_CMDS = frozenset({"look", "zoom", "frames"})
+ACT_VALUE_OPTS = frozenset({
+    "--stop", "--watch", "--timeout", "--wait", "--after", "--detail",
+    "--every", "--for", "--for-ms", "--session", "--id", "--retry",
+})
+ACT_FLAG_OPTS = frozenset({
+    "--full", "--fast", "--bare", "--human", "--async", "--keep", "--no-wait",
+})
+
+
+def is_quiet_reply(argv, reply):
+    """True when an `act` command returned a short (quiet) reply (`loud == []`)."""
+    if not argv or argv[0] != "act" or not isinstance(reply, dict):
+        return False
+    loud = reply.get("loud")
+    return isinstance(loud, list) and len(loud) == 0
+
+
+def is_refetch_command(argv):
+    """3.11: `act --full`, `look`/`zoom`/`frames`, or `act` without positional steps."""
+    if not argv:
+        return False
+    sub = argv[0]
+    if sub in REFETCH_CMDS:
+        return True
+    if sub != "act":
+        return False
+    args = list(argv[1:])
+    if "--full" in args:
+        return True
+    i = 0
+    positional = []
+    while i < len(args):
+        tok = args[i]
+        if tok == "--":
+            positional.extend(args[i + 1 :])
+            break
+        if tok.startswith("--"):
+            key = tok.split("=", 1)[0]
+            if "=" not in tok and key in ACT_VALUE_OPTS and i + 1 < len(args):
+                i += 2
+                continue
+            i += 1
+            continue
+        positional.append(tok)
+        i += 1
+    return len(positional) == 0
+
+
+def count_false_quiet(cmd_records, events):
+    """3.11 & 3.12: count quiet replies whose wall-clock window `(prev_returned_at, returned_at]`
+    contained any AVST event in FALSE_QUIET_EVENTS (`popup_shown`, `snap_back`, `fail`, `target_missed`).
+    """
+    count = 0
+    details = []
+    for rec in cmd_records:
+        if not rec.get("is_quiet"):
+            continue
+        cur_ret = int(rec.get("returned_at") or 0)
+        if cur_ret <= 0:
+            continue
+        prev_ret = int(rec.get("prev_returned_at") or 0)
+        hits = []
+        for ev in events:
+            name = ev.get("ev")
+            if name not in FALSE_QUIET_EVENTS:
+                continue
+            t = int(ev.get("t") or 0)
+            if prev_ret < t <= cur_ret:
+                hits.append({"ev": name, "t": t})
+        if hits:
+            count += 1
+            details.append({
+                "cmd_index": rec["index"],
+                "argv": rec["argv"],
+                "from_ms": prev_ret,
+                "to_ms": cur_ret,
+                "events": hits,
+            })
+    return count, details
+
+
 def run_task(token, task, return_events=False):
     task_id = task["id"]
     scene = task["scene"]
@@ -247,6 +330,14 @@ def run_task(token, task, return_events=False):
     image_tokens = 0
     phone_ms = 0
     reply_est_tokens = []
+    reply_image_tokens = []
+    quiet_replies = 0
+    refetch_after_quiet = 0
+    loud_reasons = []
+    reply_texts = []
+    cmd_records = []
+    prev_returned_at = 0
+    prev_was_quiet = False
     timed_out = False
     error_detail = ""
     t0 = time.monotonic()
@@ -258,6 +349,8 @@ def run_task(token, task, return_events=False):
                 timed_out = True
                 error_detail = "max_seconds exceeded"
                 break
+            if prev_was_quiet and is_refetch_command(argv):
+                refetch_after_quiet += 1
             reply = call_api(token, argv, session=session, timeout=max(10, int(rem) + 15))
             turns += 1
             meter = reply.get("meter") or {}
@@ -265,8 +358,28 @@ def run_task(token, task, return_events=False):
             et = int(meter.get("est_tokens", 0))
             est_tokens += et
             reply_est_tokens.append(et)
-            image_tokens += int(meter.get("image_tokens", 0))
+            itok = int(meter.get("image_tokens", 0))
+            image_tokens += itok
+            reply_image_tokens.append(itok)
             phone_ms += int((reply.get("timing") or {}).get("phone_ms", 0))
+
+            cur_returned_at = int(reply.get("returned_at") or 0)
+            is_q = is_quiet_reply(argv, reply)
+            if is_q:
+                quiet_replies += 1
+            if argv and argv[0] == "act" and isinstance(reply.get("loud"), list):
+                loud_reasons.append(list(reply["loud"]))
+            reply_texts.append(str(reply.get("text") or ""))
+            cmd_records.append({
+                "index": idx,
+                "argv": list(argv),
+                "prev_returned_at": prev_returned_at,
+                "returned_at": cur_returned_at,
+                "is_quiet": is_q,
+            })
+            if cur_returned_at > 0:
+                prev_returned_at = cur_returned_at
+            prev_was_quiet = is_q
 
             if idx == 0 and argv and argv[0] == "launch":
                 disp_id = find_scene_display_id()
@@ -296,11 +409,14 @@ def run_task(token, task, return_events=False):
             pass
         adb_shell("am", "force-stop", TORTURE_PKG)
 
+    false_quiet, false_quiet_details = count_false_quiet(cmd_records, events)
+    all_text = "\n".join(reply_texts)
     ok = (not timed_out) and (not error_detail) and evaluate_events(events, expect_list, forbid_list)
     row = {
         "id": task_id,
         "scene": scene,
         "seed": seed_val,
+        "since": task.get("since"),
         "ok": ok,
         "turns": turns,
         "chars": chars,
@@ -308,6 +424,15 @@ def run_task(token, task, return_events=False):
         "image_tokens": image_tokens,
         "phone_ms": phone_ms,
         "reply_est_tokens": reply_est_tokens,
+        "reply_image_tokens": reply_image_tokens,
+        "quiet_replies": quiet_replies,
+        "false_quiet": false_quiet,
+        "false_quiet_details": false_quiet_details,
+        "refetch_after_quiet": refetch_after_quiet,
+        "loud_reasons": loud_reasons,
+        "reply_has_popup": ("弹出" in all_text) or (" popup [" in all_text),
+        "reply_has_toast": ("toast：" in all_text) or ("toast:" in all_text),
+        "act_reply_previews": [t[:400] for i, t in enumerate(reply_texts) if i < len(task["commands"]) and task["commands"][i] and task["commands"][i][0] == "act"],
         "error": error_detail,
     }
     if return_events:
@@ -330,6 +455,120 @@ def compute_totals(rows):
         "image_tokens": sum(r["image_tokens"] for r in rows),
         "phone_ms": sum(r["phone_ms"] for r in rows),
         "median_reply_est_tokens": round(statistics.median(all_replies), 1) if all_replies else 0.0,
+        "quiet_replies": sum(int(r.get("quiet_replies", 0)) for r in rows),
+        "false_quiet": sum(int(r.get("false_quiet", 0)) for r in rows),
+        "refetch_after_quiet": sum(int(r.get("refetch_after_quiet", 0)) for r in rows),
+    }
+
+
+def compute_beta3_comparison(rows, baseline):
+    """3.10, 3.12 & 3.13: compare `since == beta3` (b) tasks against same-scene (a) tasks.
+    Reports both:
+      - All replies (including `launch`) vs `baseline.json`;
+      - `act`-only replies (`[1:]`): text median vs `baseline.json` `[1:]`,
+        image token sum vs same-run same-scene `a` tasks `[1:]` (baseline has no per-reply image breakdown).
+    """
+    b_rows = [r for r in rows if r.get("since") == "beta3"]
+    if not b_rows or not baseline or "tasks" not in baseline:
+        return None
+    base_by_scene = {t["scene"]: t for t in (baseline.get("tasks") or []) if "scene" in t}
+    cur_a_by_scene = {r["scene"]: r for r in rows if not r.get("since") and "scene" in r}
+    pairs = []
+    base_replies = []
+    new_replies = []
+    base_act_replies = []
+    new_act_replies = []
+    base_img = 0
+    new_img = 0
+    same_run_a_act_img = 0
+    new_act_img = 0
+    for br in b_rows:
+        ar = base_by_scene.get(br["scene"])
+        if not ar:
+            continue
+        cur_ar = cur_a_by_scene.get(br["scene"])
+        ar_rep = ar.get("reply_est_tokens") or []
+        br_rep = br.get("reply_est_tokens") or []
+        ar_act_rep = ar_rep[1:]
+        br_act_rep = br_rep[1:]
+        base_replies.extend(ar_rep)
+        new_replies.extend(br_rep)
+        base_act_replies.extend(ar_act_rep)
+        new_act_replies.extend(br_act_rep)
+        base_img += int(ar.get("image_tokens", 0))
+        new_img += int(br.get("image_tokens", 0))
+        cur_ar_act_img_val = sum((cur_ar.get("reply_image_tokens") or [])[1:]) if cur_ar else 0
+        br_act_img_val = sum((br.get("reply_image_tokens") or [])[1:])
+        same_run_a_act_img += cur_ar_act_img_val
+        new_act_img += br_act_img_val
+        pairs.append({
+            "scene": br["scene"],
+            "base_id": ar["id"],
+            "new_id": br["id"],
+            "ok": bool(br["ok"]),
+            "base_median": round(statistics.median(ar_rep), 1) if ar_rep else 0.0,
+            "new_median": round(statistics.median(br_rep), 1) if br_rep else 0.0,
+            "base_act_median": round(statistics.median(ar_act_rep), 1) if ar_act_rep else 0.0,
+            "new_act_median": round(statistics.median(br_act_rep), 1) if br_act_rep else 0.0,
+            "base_est_tokens": int(ar.get("est_tokens", 0)),
+            "new_est_tokens": int(br.get("est_tokens", 0)),
+            "base_image_tokens": int(ar.get("image_tokens", 0)),
+            "new_image_tokens": int(br.get("image_tokens", 0)),
+            "same_run_a_act_image_tokens": cur_ar_act_img_val,
+            "new_act_image_tokens": br_act_img_val,
+            "quiet_replies": int(br.get("quiet_replies", 0)),
+            "false_quiet": int(br.get("false_quiet", 0)),
+            "loud_reasons": br.get("loud_reasons") or [],
+        })
+    if not pairs:
+        return None
+    base_med = round(statistics.median(base_replies), 1) if base_replies else 0.0
+    new_med = round(statistics.median(new_replies), 1) if new_replies else 0.0
+    med_drop = round((base_med - new_med) / base_med, 4) if base_med > 0 else 0.0
+    img_drop = round((base_img - new_img) / base_img, 4) if base_img > 0 else 0.0
+
+    base_act_med = round(statistics.median(base_act_replies), 1) if base_act_replies else 0.0
+    new_act_med = round(statistics.median(new_act_replies), 1) if new_act_replies else 0.0
+    act_med_drop = round((base_act_med - new_act_med) / base_act_med, 4) if base_act_med > 0 else 0.0
+    act_img_drop = round((same_run_a_act_img - new_act_img) / same_run_a_act_img, 4) if same_run_a_act_img > 0 else 0.0
+
+    # 3.10 scene checks (S02 popup BEFORE+弹出, S12 carousel no BEFORE/AFTER, S07 toast event)
+    by_id = {r["id"]: r for r in rows}
+    s02 = by_id.get("T02a")
+    s12a = by_id.get("T12a")
+    s12b = by_id.get("T12b")
+    s07a = by_id.get("T07a")
+    s07b = by_id.get("T07b")
+
+    def flat_reasons(row):
+        return [c for sub in (row.get("loud_reasons") or []) for c in sub] if row else []
+
+    scene_checks = {
+        "S02_before_and_popup": bool(s02 and ("BEFORE" in flat_reasons(s02)) and s02.get("reply_has_popup")),
+        "S02_loud": flat_reasons(s02),
+        "S02_has_popup": bool(s02 and s02.get("reply_has_popup")),
+        "S12a_no_before_after": bool(s12a and "BEFORE" not in flat_reasons(s12a) and "AFTER" not in flat_reasons(s12a)),
+        "S12b_no_before_after": bool(s12b and "BEFORE" not in flat_reasons(s12b) and "AFTER" not in flat_reasons(s12b)),
+        "S12a_loud": flat_reasons(s12a),
+        "S12b_loud": flat_reasons(s12b),
+        "S07a_has_toast": bool(s07a and s07a.get("reply_has_toast")),
+        "S07b_has_toast": bool(s07b and s07b.get("reply_has_toast")),
+    }
+    return {
+        "pairs": pairs,
+        "base_median_reply_est_tokens": base_med,
+        "new_median_reply_est_tokens": new_med,
+        "median_reply_drop_pct": med_drop,
+        "base_image_tokens": base_img,
+        "new_image_tokens": new_img,
+        "image_tokens_drop_pct": img_drop,
+        "base_act_median_reply_est_tokens": base_act_med,
+        "new_act_median_reply_est_tokens": new_act_med,
+        "act_median_reply_drop_pct": act_med_drop,
+        "same_run_a_act_image_tokens": same_run_a_act_img,
+        "new_act_image_tokens": new_act_img,
+        "act_image_tokens_drop_pct": act_img_drop,
+        "scene_checks": scene_checks,
     }
 
 
@@ -339,34 +578,74 @@ def fmt_diff(val, is_float=False):
     return f"{val:+d}"
 
 
-def render_markdown(app_version, rows, skipped, totals, diff, regressed, repeat_rows=None, gate=None):
+def render_markdown(app_version, rows, skipped, totals, diff, regressed, repeat_rows=None, gate=None, beta3_cmp=None):
     lines = [
         f"# Agent-VScreen 评测结果（{app_version}）",
         "",
-        "| 任务 | 场景 | 结果 | 轮数 | 总字数 | 总估算 token | 图片 token | 手机端耗时 (ms) |",
-        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |",
+        "| 任务 | 场景 | 结果 | 误静默 | 轮数 | 总字数 | 总估算 token | 图片 token | 手机端耗时 (ms) |",
+        "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for r in rows:
         status = "成功" if r["ok"] else "失败"
         lines.append(
-            f"| {r['id']} | {r['scene']} | {status} | {r['turns']} | {r['chars']} | "
+            f"| {r['id']} | {r['scene']} | {status} | {r.get('false_quiet', 0)} | {r['turns']} | {r['chars']} | "
             f"{r['est_tokens']} | {r['image_tokens']} | {r['phone_ms']} |"
         )
     lines.append(
         f"| **合计** | **{totals['passed']}/{totals['total']} ({totals['pass_rate']:.1%})** | "
-        f"**{'通过' if totals['failed'] == 0 else '有失败'}** | **{totals['turns']}** | **{totals['chars']}** | "
+        f"**{'通过' if totals['failed'] == 0 and totals.get('false_quiet', 0) == 0 else '有失败'}** | "
+        f"**{totals.get('false_quiet', 0)}** | **{totals['turns']}** | **{totals['chars']}** | "
         f"**{totals['est_tokens']}** | **{totals['image_tokens']}** | **{totals['phone_ms']}** |"
     )
     if diff is not None:
         gate_txt = "无退化" if not regressed else f"退化: {', '.join(regressed)}"
         lines.append(
             f"| **与 baseline 差值** | **{fmt_diff(diff['pass_rate'], is_float=True)}** | **{gate_txt}** | "
-            f"**{fmt_diff(diff['turns'])}** | **{fmt_diff(diff['chars'])}** | "
+            f"— | **{fmt_diff(diff['turns'])}** | **{fmt_diff(diff['chars'])}** | "
             f"**{fmt_diff(diff['est_tokens'])}** | **{fmt_diff(diff['image_tokens'])}** | "
             f"**{fmt_diff(diff['phone_ms'])}** |"
         )
+    lines.extend([
+        "",
+        f"短回复计量：`quiet_replies={totals.get('quiet_replies', 0)}` · "
+        f"`false_quiet={totals.get('false_quiet', 0)}` · "
+        f"`refetch_after_quiet={totals.get('refetch_after_quiet', 0)}` · "
+        f"`median_reply_est_tokens={totals.get('median_reply_est_tokens', 0.0)}`",
+    ])
     if skipped:
         lines.extend(["", f"跳过未到阶段的任务（{len(skipped)} 个）：" + ", ".join(f"{s['id']}({s['since']})" for s in skipped)])
+
+    if beta3_cmp is not None:
+        lines.extend([
+            "",
+            "## 新写法对比（beta3 `b` 任务 vs 同场景 `a` 任务）",
+            "",
+            "| 场景 | baseline | beta3 | 结果 | act 中位 token (base → b) | act 图 token (本次 a → b) | 全回复中位 (base → b) | 全回复图 (base → b) | 短回复 | loud 原因 |",
+            "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
+        ])
+        for p in beta3_cmp["pairs"]:
+            loud_str = "; ".join(",".join(x) if x else "quiet" for x in p["loud_reasons"]) or "-"
+            lines.append(
+                f"| {p['scene']} | {p['base_id']} | {p['new_id']} | {'成功' if p['ok'] else '失败'} | "
+                f"{p['base_act_median']} → {p['new_act_median']} | "
+                f"{p['same_run_a_act_image_tokens']} → {p['new_act_image_tokens']} | "
+                f"{p['base_median']} → {p['new_median']} | "
+                f"{p['base_image_tokens']} → {p['new_image_tokens']} | "
+                f"{p['quiet_replies']} | `{loud_str}` |"
+            )
+        lines.extend([
+            "",
+            f"- **仅 `act` 口径（3.13）文字中位数（vs baseline `[1:]`）**：`{beta3_cmp['base_act_median_reply_est_tokens']}` → `{beta3_cmp['new_act_median_reply_est_tokens']}`（降幅 **{beta3_cmp['act_median_reply_drop_pct']:.1%}**，目标 ≥ 50%）",
+            f"- **仅 `act` 口径（3.13）图片 token 合计（vs 本次同场景 `a` `[1:]`）**：`{beta3_cmp['same_run_a_act_image_tokens']}` → `{beta3_cmp['new_act_image_tokens']}`（降幅 **{beta3_cmp['act_image_tokens_drop_pct']:.1%}**，目标 ≥ 60%）",
+            f"- 全回复口径（含 `launch`）文字中位数（vs baseline）：`{beta3_cmp['base_median_reply_est_tokens']}` → `{beta3_cmp['new_median_reply_est_tokens']}`（降幅 **{beta3_cmp['median_reply_drop_pct']:.1%}**）",
+            f"- 全回复口径（含 `launch`）图片 token 合计（vs baseline）：`{beta3_cmp['base_image_tokens']}` → `{beta3_cmp['new_image_tokens']}`（降幅 **{beta3_cmp['image_tokens_drop_pct']:.1%}**）",
+        ])
+        sc = beta3_cmp["scene_checks"]
+        lines.extend([
+            f"- S02（弹窗 `BEFORE` + `弹出`）：`{'通过' if sc['S02_before_and_popup'] else '未命中'}`（loud=`{sc['S02_loud']}`, popup=`{sc['S02_has_popup']}`）",
+            f"- S12（轮播不触发 `BEFORE`/`AFTER`）：T12a=`{'通过' if sc['S12a_no_before_after'] else '未命中'}` `{sc['S12a_loud']}`，T12b=`{'通过' if sc['S12b_no_before_after'] else '未命中'}` `{sc['S12b_loud']}`",
+            f"- S07（toast 事件）：T07a=`{sc['S07a_has_toast']}`，T07b=`{sc['S07b_has_toast']}`",
+        ])
 
     if repeat_rows is not None:
         matched_cnt = sum(1 for item in repeat_rows if item["matched"])
@@ -432,6 +711,11 @@ def main():
     token = seed_token()
     info = ping()
     app_version = info.get("version", "2.0.0-beta1")
+    # 3.13: acknowledge current version once before eval so AgentNews banner (~2000 tokens) does not skew tasks.
+    try:
+        call_api(token, ["remembered", "eval"], session="eval-setup", timeout=30)
+    except Exception as e:
+        print(f"WARN: remembered eval failed: {e}", flush=True)
 
     task_files = sorted(Path(args.tasks_dir).glob("*.json"))
     if not task_files:
@@ -450,10 +734,14 @@ def main():
         res, evs1 = run_task(token, task, return_events=True)
         print(
             f"[{'PASS' if res['ok'] else 'FAIL'}] {res['id']} ({res['scene']}) "
-            f"turns={res['turns']} est_tokens={res['est_tokens']} img_tokens={res['image_tokens']} phone_ms={res['phone_ms']}"
+            f"turns={res['turns']} est_tokens={res['est_tokens']} img_tokens={res['image_tokens']} "
+            f"quiet={res['quiet_replies']} false_quiet={res['false_quiet']} loud={res['loud_reasons']} "
+            f"phone_ms={res['phone_ms']}"
             + (f" err={res['error']}" if res["error"] else ""),
             flush=True,
         )
+        if res["false_quiet_details"]:
+            print(f"  FALSE_QUIET details: {json.dumps(res['false_quiet_details'], ensure_ascii=False)}", flush=True)
         rows.append(res)
 
         if args.repeat_check and not since:
@@ -503,6 +791,7 @@ def main():
             "image_tokens": totals["image_tokens"] - int(bt.get("image_tokens", 0)),
             "phone_ms": totals["phone_ms"] - int(bt.get("phone_ms", 0)),
         }
+    beta3_cmp = compute_beta3_comparison(rows, baseline)
 
     result_obj = {
         "app_version": app_version,
@@ -512,6 +801,7 @@ def main():
         "totals": totals,
         "diff_vs_baseline": diff,
         "regressed_tasks": regressed,
+        "beta3_comparison": beta3_cmp,
         "gate": gate_status,
     }
     if repeat_rows is not None:
@@ -524,7 +814,10 @@ def main():
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "result.json").write_text(json.dumps(result_obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    md = render_markdown(app_version, rows, skipped, totals, diff, regressed, repeat_rows=repeat_rows, gate=gate_status)
+    md = render_markdown(
+        app_version, rows, skipped, totals, diff, regressed,
+        repeat_rows=repeat_rows, gate=gate_status, beta3_cmp=beta3_cmp,
+    )
     (out_dir / "result.md").write_text(md, encoding="utf-8")
     print("\n" + md, flush=True)
 
@@ -534,9 +827,13 @@ def main():
         base_copy["regressed_tasks"] = []
         base_copy.pop("repeat_check", None)
         base_copy.pop("gate", None)
+        base_copy.pop("beta3_comparison", None)
         baseline_path.write_text(json.dumps(base_copy, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     failed_gate = False
+    if totals["false_quiet"] > 0:
+        print(f"FAIL: false_quiet (误静默) = {totals['false_quiet']} (must be 0)", file=sys.stderr)
+        failed_gate = True
     if regressed:
         print(f"FAIL: baseline-passing task(s) failed or missing: {', '.join(regressed)}", file=sys.stderr)
         failed_gate = True

@@ -74,6 +74,7 @@ internal object Tasks {
             return NativeOffloadResult(0, list.joinToString("\n") { "${it.id}  ${it.state}  ${(((if (it.result == null) now else it.endedAt) - it.startedAt) / 1000)}s  [${it.session}] ${it.line}" } + "\n", "OK",
                 JSONObject().put("tasks", JSONArray(list.map { JSONObject().put("task", it.id).put("state", it.state).put("session", it.session).put("command", it.line) })))
         }
+        if (p[0].equals("recap", ignoreCase = true)) return recap(sid)
         val cancel = p[0] == "cancel"
         val id = (if (cancel) p.getOrNull(1) else p[0]) ?: throw ActionError("INVALID_ARGS", tr("task cancel <任务号>", "task cancel <task id>"))
         val t = synchronized(tasks) { tasks[id] }?.takeIf { mine(it, sid) } ?: throw ActionError("NOT_FOUND", tr("没有任务 $id（结果只保留 30 分钟）：task 看列表", "No task $id (results are kept for 30 minutes): task lists them"))
@@ -93,9 +94,112 @@ internal object Tasks {
         return r.copy(data = (r.data ?: JSONObject()).put("task", id).put("state", t.state))
     }
 
-    /** For status / diag: running tasks, without their arguments. */
+    /** 2.0.0-beta3 (3.8): summarize this session's path from TaskLog + PageBook only (no screen read, <= 600 chars). */
+    fun recap(sid: String): NativeOffloadResult {
+        val turns = com.kilon.agentvscreen.api.Turns.turnOf(sid)
+        val cards = PageBook.cards(sid)
+        val current = PageBook.current(sid)
+        val entries = com.kilon.agentvscreen.core.TaskLog.recapSteps(sid)
+        val text = formatRecap(turns, cards, current, entries)
+        val pageCount = maxOf(cards.size, entries.mapNotNull { it.pageId }.distinct().size)
+        val data = JSONObject()
+            .put("turns", turns)
+            .put("pages", pageCount)
+            .put("current_page", current?.pageJson() ?: JSONObject.NULL)
+        return NativeOffloadResult(0, text + "\n", "OK", data)
+    }
+
+    internal fun formatRecap(
+        turns: Int,
+        cards: List<PageBook.Card>,
+        current: PageBook.Card?,
+        entries: List<com.kilon.agentvscreen.core.TaskLog.RecapStep>,
+    ): String {
+        val pageCount = maxOf(cards.size, entries.mapNotNull { it.pageId }.distinct().size)
+        val header = tr("本会话 $turns 轮，经过 $pageCount 个页面", "Session: $turns turns, $pageCount pages visited")
+
+        // Build path tokens: alternating page nodes and step tokens.
+        data class Tok(val text: String, val isStep: Boolean)
+        val toks = ArrayList<Tok>()
+        var lastPageId: String? = null
+        for (e in entries) {
+            for ((step, fail) in e.steps) {
+                val label = step.take(28) + (if (fail != null) " ✗ $fail" else "")
+                toks += Tok(label, isStep = true)
+            }
+            if (e.pageId != null && e.pageId != lastPageId) {
+                val p = listOfNotNull(e.pageId, e.pageTitle?.take(16)?.takeIf { it.isNotBlank() }).joinToString(" ")
+                toks += Tok(p, isStep = false)
+                lastPageId = e.pageId
+            }
+        }
+        if (toks.isEmpty() && current != null) {
+            toks += Tok("P${current.id} ${current.title}".trim(), isStep = false)
+        }
+
+        val nowLine = if (current != null) {
+            val clickables = current.els
+                .filter { (it.clickable || it.editable) && !it.placeholder && it.text.isNotBlank() }
+                .map { it.text.take(16) }
+                .distinct()
+                .ifEmpty { current.els.filter { !it.placeholder && it.text.isNotBlank() }.map { it.text.take(16) }.distinct() }
+                .take(RECAP_MAX_CLICKABLES)
+            if (clickables.isEmpty()) tr("现在 P${current.id}。", "Now P${current.id}.")
+            else tr(
+                "现在 P${current.id}。P${current.id} 上可点：${clickables.joinToString("、")}",
+                "Now P${current.id}. Tappable on P${current.id}: ${clickables.joinToString(", ")}",
+            )
+        } else {
+            tr("还没有页面记录。", "No pages visited yet.")
+        }
+
+        val totalSteps = toks.count { it.isStep }
+        fun buildPath(keepSteps: Int): String {
+            if (toks.isEmpty()) return ""
+            if (totalSteps <= keepSteps) return toks.joinToString(" → ") { it.text }
+            // Keep the tail containing the last `keepSteps` step tokens (and any page nodes after the first kept step).
+            var seen = 0
+            var cutIdx = toks.size
+            for (i in toks.indices.reversed()) {
+                if (toks[i].isStep) {
+                    seen++
+                    if (seen == keepSteps) {
+                        cutIdx = i
+                        break
+                    }
+                }
+            }
+            val dropped = totalSteps - keepSteps
+            val tail = toks.subList(cutIdx, toks.size).joinToString(" → ") { it.text }
+            val prefix = tr("…前 $dropped 步", "...$dropped earlier steps")
+            return if (tail.isEmpty()) prefix else "$prefix → $tail"
+        }
+
+        fun assemble(pathLine: String, footer: String): String =
+            listOf(header, pathLine, footer).filter { it.isNotEmpty() }.joinToString("\n")
+
+        var keep = minOf(totalSteps, RECAP_MAX_STEPS)
+        var pathLine = buildPath(keep)
+        var out = assemble(pathLine, nowLine)
+        while (out.length > RECAP_MAX_CHARS && keep > 1) {
+            keep--
+            pathLine = buildPath(keep)
+            out = assemble(pathLine, nowLine)
+        }
+        if (out.length > RECAP_MAX_CHARS) {
+            val availPath = (RECAP_MAX_CHARS - header.length - nowLine.length - 4).coerceAtLeast(0)
+            val shortPath = if (availPath > 4 && pathLine.length > availPath) "…" + pathLine.takeLast(availPath - 1) else pathLine.take(availPath)
+            out = assemble(shortPath, nowLine)
+        }
+        return if (out.length <= RECAP_MAX_CHARS) out else out.take(RECAP_MAX_CHARS - 1) + "…"
+    }
+
     /** One `task <id> --wait` holds the connection at most this long (a client's HTTP timeout must not cut it). */
     const val WAIT_MAX_MS = 120_000L
+    const val RECAP_MAX_CHARS = 600
+    const val RECAP_MAX_STEPS = 12
+    private const val RECAP_MAX_CLICKABLES = 8
 
+    /** For status / diag: running tasks, without their arguments. */
     fun running(): Int = synchronized(tasks) { tasks.values.count { it.result == null } }
 }

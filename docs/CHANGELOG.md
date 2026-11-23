@@ -2,6 +2,10 @@
 
 For [1.4.2-beta3 (versionCode 54)](../README.md#whats-new-in-142-beta3), see the current beta notes. Changes on `main` since then come first.
 
+## 2.0.0-beta3 (`v2.0` branch)
+
+- Added reply protocol v3 (`Loud`, short quiet replies when all actions meet expectations with escape hatches `act --full` / `note reply quiet|full` / auto-escalation, `PageBook` page cards, cropped change images at 960/360/640 px, event-based `[Meanwhile]` with toast and popup detection, 1200-token reply budget) and externalized session memory (turn counter, `task recap`, layered core + 8-topic `guide`).
+
 ## 2.0.0-beta2 (`v2.0` branch)
 
 - Added Gate in the privileged service process: holds the public loopback port and forwards raw TCP bytes to the app's internal port; wakes a frozen or force-stopped app within 3 s or returns `503 NOT_READY`, and cancels held agent fingers when heartbeats go stale.
