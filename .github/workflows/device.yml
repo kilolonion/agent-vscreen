@@ -37,6 +37,12 @@ jobs:
           cache-dependency-path: tsbridge/go.sum
       - uses: gradle/actions/setup-gradle@v5
       - run: ./tsbridge/build.sh
+      - name: Robolectric jars
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ hashFiles('app/build.gradle.kts') }}
+          restore-keys: robolectric-
       - name: Unit tests
         run: ./gradlew --no-daemon :app:testDebugUnitTest
       - name: Stand-in root manager for the emulator (x86_64)
@@ -45,6 +51,7 @@ jobs:
             -o "$AVS_BUILD_DIR/avsu" tools/android-smoke/avsu.c
       # Debug: carries the CI hook (src/debug) that hands the test its token; release APKs never do.
       - run: ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease :torture:assembleDebug
+      - run: tools/android-smoke/check_abis.sh "$AVS_BUILD_DIR/app/outputs/apk/debug/app-debug.apk" "$AVS_BUILD_DIR/app/outputs/apk/release/app-release.apk"
       - uses: actions/upload-artifact@v5
         with:
           name: candidate

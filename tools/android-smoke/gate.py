@@ -137,6 +137,23 @@ def press_text(package, labels, tries=20):
     return False
 
 
+
+def su_ready(secs=15):
+    """The stand-in su daemon was started in the background just before; its socket may not be up yet (seen in CI:
+    `su -c id` exit 1 right after `--daemon`). Ask again until it answers, then show who it runs as."""
+    last = ""
+    for _ in range(secs * 2):
+        try:
+            out = shell(SU, "-c", "id")
+            if "uid=" in out:
+                return out
+            last = out
+        except subprocess.CalledProcessError as e:
+            last = (e.output or "").strip() or ("exit %d" % e.returncode)
+        time.sleep(0.5)
+    raise SystemExit("FAIL stand-in su never answered in %ds: %s" % (secs, last))
+
+
 def setup_root():
     """Reuse agent_e2e.py's root setup: adb root once at start, avsu daemon runs RootMain via `su 2000` (uid 2000)."""
     sdk = int(shell("getprop", "ro.build.version.sdk"))
@@ -150,7 +167,7 @@ def setup_root():
     shell("chmod", "755", "/data/local/tmp/avsu-bin", SU)
     shell("sh", "-c", f"'{SU} --daemon </dev/null >/dev/null 2>&1'")
     shell("setprop", "debug.avs.su", SU)
-    print("stand-in su:", shell(SU, "-c", "id"), flush=True)
+    print("stand-in su:", su_ready(), flush=True)
     shell("logcat", "-c")
     run("adb", "install", "-r", "-g", str(APK), timeout=240)
     shell("settings", "put", "secure", "enabled_accessibility_services", APP + "/.host.VScreenAccessibilityService")
