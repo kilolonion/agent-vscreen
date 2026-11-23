@@ -428,6 +428,7 @@ def run_task(token, task, return_events=False):
         "loud_reasons": loud_reasons,
         "reply_has_popup": ("弹出" in all_text) or (" popup [" in all_text),
         "reply_has_toast": ("toast：" in all_text) or ("toast:" in all_text),
+        "act_reply_previews": [t[:400] for i, t in enumerate(reply_texts) if i < len(task["commands"]) and task["commands"][i] and task["commands"][i][0] == "act"],
         "error": error_detail,
     }
     if return_events:

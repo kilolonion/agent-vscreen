@@ -381,6 +381,39 @@ class V200Beta3Test {
             VScreenPerception.Reading(2_000L, listOf("保存", "稳定新字"), hits = 2, lastAtMs = 2_500L),
         )
         assertTrue(wordFactsFromReadings(stableEnd, screenH, 2_500L).staticLines.any { it.contains("出现了") && it.contains("稳定新字") })
+
+        // Slow-OCR gap (next reading 5s later) still reports <=4s toast, while word observed >4s is not toast
+        val slowGap = listOf(
+            VScreenPerception.Reading(1_000L, listOf("保存"), hits = 2, lastAtMs = 1_200L),
+            VScreenPerception.Reading(2_000L, listOf("保存", "已保存"), mapOf("已保存" to bottomBox), hits = 1, lastAtMs = 2_000L),
+            VScreenPerception.Reading(7_000L, listOf("保存"), hits = 2, lastAtMs = 7_500L),
+        )
+        assertTrue(wordFactsFromReadings(slowGap, screenH, 7_500L).staticLines.any { it.startsWith("toast：已保存") })
+
+        val longBottom = listOf(
+            VScreenPerception.Reading(1_000L, listOf("保存"), hits = 2, lastAtMs = 1_200L),
+            VScreenPerception.Reading(2_000L, listOf("保存", "久留字"), mapOf("久留字" to bottomBox), hits = 2, lastAtMs = 6_500L),
+            VScreenPerception.Reading(7_000L, listOf("保存"), hits = 2, lastAtMs = 7_500L),
+        )
+        assertFalse(wordFactsFromReadings(longBottom, screenH, 7_500L).staticLines.any { it.startsWith("toast：久留字") })
+
+        // Bulk scroll (many new rows appearing together in one reading) must not spam fake toast lines
+        val scrolledWords = (1..8).map { "列表项$it" }
+        val scrolledBoxes = scrolledWords.associateWith { bottomBox }
+        val bulkScroll = listOf(
+            VScreenPerception.Reading(1_000L, listOf("顶部"), hits = 2, lastAtMs = 1_200L),
+            VScreenPerception.Reading(2_000L, listOf("顶部") + scrolledWords, scrolledBoxes, hits = 1, lastAtMs = 2_000L),
+            VScreenPerception.Reading(3_000L, listOf("顶部"), hits = 2, lastAtMs = 3_200L),
+        )
+        assertFalse(wordFactsFromReadings(bulkScroll, screenH, 3_200L).staticLines.any { it.startsWith("toast：") })
+
+        // Trailing bare digit in `until text:条目 5` stays part of text (not parsed as 5ms timeout)
+        val sDigit = Steps.parse("tap 返回 until text:条目 5")
+        assertEquals("条目 5", sDigit.until?.single()?.text)
+        assertNull(sDigit.untilMs)
+        val sUnit = Steps.parse("tap 保存 until text:已保存 3s")
+        assertEquals("已保存", sUnit.until?.single()?.text)
+        assertEquals(3_000L, sUnit.untilMs)
     }
 
     @Test

@@ -158,6 +158,8 @@ internal object Report {
     const val MIN_SPAN_SHARE = 0.01
     const val TOAST_BOTTOM_SHARE = 0.35
     const val TOAST_MAX_MS = 4_000L
+    const val MAX_TOASTS = 5
+    const val TOAST_MAX_NEW_WORDS = 3
     const val POPUP_MIN_AREA = 0.15
     const val POPUP_MAX_AREA = 0.90
     const val POPUP_DIM_DROP = 0.15
@@ -371,6 +373,7 @@ internal fun VScreenOffloadHandler.snapshot(d: VScreenDisplay, freshMs: Long = 1
         d.requestFreshFrame()
         d.awaitFrameAfter(t0, freshMs)
         val fv = d.latestWithVersion()
+        val frameEpochMs = System.currentTimeMillis()
         val a11yF = snapPool.submit<List<El>> { runCatching { a11yRaw(d) }.getOrDefault(emptyList()) }
         val actF = snapPool.submit<String?> { runCatching { VScreenShell.topActivity(d.displayId) }.getOrNull() }
         var reused = false
@@ -385,7 +388,7 @@ internal fun VScreenOffloadHandler.snapshot(d: VScreenDisplay, freshMs: Long = 1
                         val a11yList = runCatching { a11yF.get(3, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault(emptyList())
                         val a11yBoxes = HashMap<String, Rect>()
                         for (el in a11yList) if (!el.placeholder) a11yBoxes.putIfAbsent(VScreenOcr.norm(el.text), el.box)
-                        VScreenPerception.offerReading(d.displayId, fv.first, fv.second, r, a11yList.map { it.label }, a11yBoxes)
+                        VScreenPerception.offerReading(d.displayId, fv.first, fv.second, r, a11yList.map { it.label }, a11yBoxes, frameEpochMs)
                         r.items
                     }
         }
@@ -505,7 +508,14 @@ internal fun wordFactsFromReadings(rs: List<VScreenPerception.Reading>, screenH:
     }.distinctBy { VScreenOcr.norm(it) }
 
     // Transient words (appeared after start and disappeared before end): classify as toast or >=2-reading between.
-    class MidInfo(val raw: String, val firstAt: Long, var lastAt: Long, var maxRun: Int, var curRun: Int, var box: Rect?, var goneAt: Long)
+    class MidInfo(
+        val raw: String,
+        val firstAt: Long,
+        var lastAt: Long,
+        var maxRun: Int,
+        var box: Rect?,
+        val firstSlotNewCount: Int,
+    )
     val mids = LinkedHashMap<String, MidInfo>()
     val midCandidates = LinkedHashMap<String, String>()
     for (s in slots.drop(1).dropLast(1)) {
@@ -516,26 +526,31 @@ internal fun wordFactsFromReadings(rs: List<VScreenPerception.Reading>, screenH:
             }
         }
     }
+    val slotNewCounts = IntArray(slots.size) { i ->
+        if (i == 0) 0 else slots[i].normSet.count { it.isNotEmpty() && it !in slots[i - 1].normSet }
+    }
     for ((k, raw) in midCandidates) {
         var firstAt = -1L
         var lastAt = -1L
-        var goneAt = toMs
+        var firstSlotNew = Int.MAX_VALUE
         var curRun = 0
         var maxRun = 0
         var box: Rect? = null
-        for (s in slots) {
+        for ((idx, s) in slots.withIndex()) {
             if (k in s.normSet) {
-                if (firstAt < 0L) firstAt = s.atMs
+                if (firstAt < 0L) {
+                    firstAt = s.atMs
+                    firstSlotNew = slotNewCounts[idx]
+                }
                 lastAt = maxOf(lastAt, s.lastAtMs)
                 curRun++
                 if (curRun > maxRun) maxRun = curRun
                 if (box == null) box = s.boxes[k]
             } else {
-                if (firstAt >= 0L && curRun > 0) goneAt = s.atMs
                 curRun = 0
             }
         }
-        if (firstAt >= 0L) mids[k] = MidInfo(raw, firstAt, lastAt, maxRun, curRun, box, goneAt)
+        if (firstAt >= 0L) mids[k] = MidInfo(raw, firstAt, lastAt, maxRun, box, firstSlotNew)
     }
 
     val toastThresholdY = if (screenH > 0) (screenH * (1.0 - Report.TOAST_BOTTOM_SHARE)).toInt() else Int.MAX_VALUE
@@ -543,8 +558,8 @@ internal fun wordFactsFromReadings(rs: List<VScreenPerception.Reading>, screenH:
     val between = ArrayList<String>()
     for (m in mids.values) {
         val inBottom = screenH > 0 && m.box != null && m.box!!.centerY() >= toastThresholdY
-        val visibleMs = (m.goneAt - m.firstAt).coerceAtLeast(0L)
-        if (inBottom && visibleMs <= Report.TOAST_MAX_MS && (m.lastAt - m.firstAt) <= Report.TOAST_MAX_MS) {
+        val observedMs = (m.lastAt - m.firstAt).coerceAtLeast(0L)
+        if (inBottom && observedMs <= Report.TOAST_MAX_MS && m.firstSlotNewCount <= Report.TOAST_MAX_NEW_WORDS && toasts.size < Report.MAX_TOASTS) {
             toasts += tr("toast：${m.raw.take(30)}（${Report.ago(m.firstAt, toMs)}）", "toast: ${m.raw.take(30)} (${Report.ago(m.firstAt, toMs)})")
         } else if (m.maxRun >= Report.MIN_CONSECUTIVE_READINGS) {
             between += m.raw
