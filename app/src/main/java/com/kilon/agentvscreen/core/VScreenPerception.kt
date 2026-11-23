@@ -373,11 +373,22 @@ object VScreenPerception {
         while (w.running && !d.released && SystemClock.elapsedRealtime() - w.lastUse < IDLE_STOP_MS) {
             val t0 = SystemClock.elapsedRealtime()
             if (d.parked) { Thread.sleep(500); continue }
+            if (d.colorFastMode) {
+                d.takeColorFastRecordFrame()?.let { (small, recVer) ->
+                    try { VScreenRecorder.offer(d, small, recVer, pkg) } finally { small.recycle() }
+                }
+                Thread.sleep(100)
+                continue
+            }
+            d.takeColorFastRecordFrame()?.let { (small, recVer) ->
+                try { VScreenRecorder.offer(d, small, recVer, pkg) } finally { small.recycle() }
+            }
             // 1.2: frame-driven. The loop sleeps until the picture changes (or someone asks for a reading, or the
             // heartbeat is due) instead of waking 5 times a second whatever the screen does.
             var slept = 0L
-            while (w.running && !w.forceOcr && slept < HEARTBEAT_MS && !d.awaitNewFrame(seen, MIN_GAP_MS)) slept += MIN_GAP_MS
+            while (w.running && !w.forceOcr && !d.colorFastMode && slept < HEARTBEAT_MS && !d.awaitNewFrame(seen, MIN_GAP_MS)) slept += MIN_GAP_MS
             seen = d.version
+            if (d.colorFastMode) continue
             val fv = d.latestWithVersion()
             if (fv == null) { Thread.sleep(MIN_GAP_MS); continue }
             val now = SystemClock.elapsedRealtime()

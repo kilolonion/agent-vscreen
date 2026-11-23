@@ -601,6 +601,15 @@ class V200Beta5Test {
         assertEquals("已恢复（暂停了 14.2s）", resumed.line())
         assertFalse(ActHold.isHeld())
 
+        // Under su 2000 without readproc group, `ps -A -o NAME` omits app UIDs -> falls back to [pkg].
+        heldCalls.clear()
+        ActHold.psNamesFn = { "NAME\nsh\nps\nagent-vscreen:root\n" }
+        val armedSu = ActHold.prepare("s1", 2, "com.example.app", "Demo", skip, null) as ActHold.PrepareOutcome.Armed
+        armedSu.afterSend()
+        assertEquals(listOf(listOf("com.example.app")), heldCalls)
+        assertNotNull(ActHold.unholdBeforeCommand())
+        ActHold.psNamesFn = { "NAME\ncom.example.app\ncom.example.app:sub\n" }
+
         // Race guard: if next command arrives BEFORE afterSend runs, afterSend must NOT freeze.
         heldCalls.clear()
         val armedRace = ActHold.prepare("s1", 2, "com.example.app", "Demo", skip, null) as ActHold.PrepareOutcome.Armed

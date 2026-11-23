@@ -222,15 +222,15 @@ internal object ActHold {
             // Re-check dynamic busy state right before freezing in case user took over during flush.
             if (isDisplayBusyFn(p.sid) != null) return
             val psOut = runCatching { psNamesFn() }.getOrNull()
-            val procs = if (psOut != null) {
+            val parsed = if (psOut != null) {
                 parseProcessNames(psOut, p.pkg, Gate.HOLD_MAX_PROCS)
             } else {
-                listOf(p.pkg)
+                emptyList()
             }
-            if (procs.isEmpty()) {
-                AppLogger.info(TAG, "post-send hold skipped: no running process for ${p.pkg}")
-                return
-            }
+            // Under Magisk/KernelSU `su 2000`, setgroups(0, NULL) drops gid 3009 (readproc) so `/proc` hidepid=2
+            // hides app UIDs from `ps -A`. Fall back to the known foreground package name, which `am freeze` resolves
+            // via ActivityManagerService without reading `/proc`.
+            val procs = parsed.ifEmpty { listOf(p.pkg) }
             val frozen = runCatching { gateHoldFn(procs, p.maxMs) }.getOrDefault(-1)
             if (frozen > 0) {
                 activeHold = ActiveHold(p.sid, p.displayId, p.pkg, p.appName, procs, clockMsFn())
