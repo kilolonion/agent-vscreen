@@ -48,7 +48,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * skipped; the full list stays below so nothing is hidden. Finished steps drop out by themselves (polled every 2 s).
  */
 
-private val OPTIONAL = setOf("accessibility", "vendor_bg")
+private val OPTIONAL = setOf("accessibility", "vendor_bg", "detector")
 
 @Composable
 fun SetupFlowPage() {
@@ -102,6 +102,9 @@ fun SetupFlowPage() {
                     val ready = pv.state == ShizukuManager.State.READY
                     val starting = root && com.kilon.agentvscreen.host.RootBackend.phase == com.kilon.agentvscreen.host.RootBackend.Phase.STARTING
                     val (label, act) = when {
+                        step.key == "detector" -> tr("已了解，开启", "I understand, turn on") to {
+                            com.kilon.agentvscreen.core.VScreenDetector.acceptLicense(ctx); refresh(); Unit
+                        }
                         step.key == "privilege" && root -> (if (starting) tr("启动中…", "Starting…") else tr("用 Root 启动", "Start with root")) to {
                             choose(com.kilon.agentvscreen.host.Privileged.Via.ROOT); Unit
                         }
@@ -138,7 +141,10 @@ fun SetupFlowPage() {
                         }
                         Help(tr("Shizuku 和 Root", "Shizuku and root"), H.privilege)
                     }
-                    if (step.key in OPTIONAL) LinkButton(onClick = { skipped += step.key }) { Text(tr("跳过这一步", "Skip this step")) }
+                    if (step.key in OPTIONAL) LinkButton(onClick = {
+                        skipped += step.key
+                        if (step.key == "detector") { com.kilon.agentvscreen.core.VScreenDetector.decline(ctx); refresh() }
+                    }) { Text(tr("跳过这一步", "Skip this step")) }
                     if (step.key == "accessibility" && ready) Text(tr("无障碍只能由你在系统设置里打开。", "Only you can turn accessibility on, in system settings."),
                         fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                 }
