@@ -65,12 +65,45 @@ def install(filename):
     run("adb", "install", "-r", str(APKS / filename))
 
 
+def state_now():
+    states = re.findall(r"state=(\w+)", shell("logcat", "-d", "-s", "ShizukuManager:I"))
+    return states[-1] if states else None
+
+
+def wait_ready(secs):
+    for _ in range(secs):
+        if state_now() == "READY":
+            return True
+        time.sleep(1)
+    return False
+
+
+def window_packages():
+    dump = shell("uiautomator", "dump", "/data/local/tmp/vscreen-window.xml")
+    if "dumped" not in dump.lower():
+        return set()
+    root = ET.fromstring(shell("cat", "/data/local/tmp/vscreen-window.xml"))
+    return {n.attrib.get("package") for n in root.iter("node")}
+
+
 def grant():
     launch()
     check_state("NEED_PERMISSION")
     press_text(APP, ["Grant Shizuku", "授权 Shizuku"])
     press_text(MANAGER, ["Allow all the time", "始终允许"])
-    check_state("READY")
+    # A slow API 30 emulator can swallow the tap on Shizuku's dialog (CI: the tap "passed", the app stayed
+    # NEED_PERMISSION for 45 s). Tell that apart from the app missing a granted permission, which must still fail.
+    for attempt in range(3):
+        if wait_ready(15):
+            print("PASS app reports READY", flush=True)
+            return
+        if MANAGER in window_packages():
+            print("Shizuku dialog still showing after the tap (swallowed tap); tapping again", flush=True)
+            press_text(MANAGER, ["Allow all the time", "始终允许"])
+            continue
+        raise RuntimeError("Shizuku dialog is gone but the app still reports %s: the grant was not noticed"
+                           % state_now())
+    raise RuntimeError("Expected READY after 3 taps on Shizuku's dialog, saw " + str(state_now()))
 
 
 print("SDK", shell("getprop", "ro.build.version.sdk"), "ABIs", shell("getprop", "ro.product.cpu.abilist"), flush=True)
