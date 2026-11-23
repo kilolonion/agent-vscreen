@@ -1,11 +1,16 @@
 package com.kilon.agentvscreen.cmd
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Rect
 import android.os.SystemClock
 import com.kilon.agentvscreen.core.BackgroundOperation
 import com.kilon.agentvscreen.core.BackgroundOperation.ActionError
 import com.kilon.agentvscreen.core.Change
+import com.kilon.agentvscreen.core.Mask
+import com.kilon.agentvscreen.core.ScreenSig
 import com.kilon.agentvscreen.core.VScreenDisplay
 import com.kilon.agentvscreen.core.VScreenGame
 import com.kilon.agentvscreen.core.VScreenPerception
@@ -16,9 +21,10 @@ import org.json.JSONObject
 import kotlin.math.ceil
 import kotlin.math.hypot
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
- * 2.0.0-beta4 (Stage 4: Closed-loop gestures & drag tracking, spec 4.3–4.7).
+ * 2.0.0-beta4 (Stage 4: Closed-loop gestures & drag tracking, spec 4.3–4.8).
  *
  * All threshold constants live here with exact spec names so tuning or auditing has a single source.
  */
@@ -37,21 +43,20 @@ internal object Gesture {
     const val BOOST_EXTRA_MS = 3_000L
     const val HUMAN_START_DRIFT_PX = 3
     private const val INTERRUPT_SLICE_MS = 50L
-    private const val MAX_PICKUP_FRAMES = 3
-    private const val SETTLE_FRAME_WAIT_MS = 100L
+    private const val MAX_PICKUP_FRAMES = 8
+    private const val SETTLE_FRAME_WAIT_MS = 250L
     private const val SETTLE_FRAME_SLACK_MS = 30L
     const val HOLD_ARRIVE_FRAME_WAIT_MS = 100L
     const val SEEK_FRAME_POLL_SLICE_MS = 20L
     private const val DRAG_MARK_MARGIN_MS = 500L
 
-    // 4.4 drag GestureRecord constants (recording-frame coordinates, long side 640)
+    // 4.4 & 4.8 drag GestureRecord constants (recording-frame coordinates, long side 640)
     const val PATCH = 64
+    const val TEXTURE_MIN = 12.0
     const val TRACK_RADIUS = 160
     const val TRACK_SCORE_MIN = 0.8
     const val MATCH_DIST_PX = 60.0
-    const val PICKUP_SHIFT_PX = 4.0
     const val PICKUP_FROM_MS = 150L
-    const val PICKUP_TO_MS = 450L
     const val SETTLE_MS = 350L
     private const val PATCH_TRACK_SCALE = 0.5f
     private const val REFINE_RADIUS = 4
@@ -61,21 +66,87 @@ internal object Gesture {
     const val AFTER_ELSEWHERE = "elsewhere"
     const val AFTER_UNKNOWN = "unknown"
 
+    /** R(p): [size]x[size] square centered on ([cx], [cy]), clamped to [frameW]x[frameH]. */
+    fun patchRect(cx: Int, cy: Int, frameW: Int, frameH: Int, size: Int = PATCH): Rect {
+        val bw = minOf(size, frameW).coerceAtLeast(1)
+        val bh = minOf(size, frameH).coerceAtLeast(1)
+        val left = (cx - bw / 2).coerceIn(0, maxOf(0, frameW - bw))
+        val top = (cy - bh / 2).coerceIn(0, maxOf(0, frameH - bh))
+        return Rect(left, top, left + bw, top + bh)
+    }
+
+    /** Luminance standard deviation inside [rect] of [frame] (0 = flat solid color). */
+    fun regionLumStdDev(frame: Bitmap, rect: Rect): Double {
+        if (frame.isRecycled) return 0.0
+        val r = Rect(rect)
+        if (!r.intersect(0, 0, frame.width, frame.height) || r.width() <= 0 || r.height() <= 0) return 0.0
+        val w = r.width()
+        val h = r.height()
+        val n = w * h
+        val px = IntArray(n)
+        frame.getPixels(px, 0, w, r.left, r.top, w, h)
+        var sum = 0.0
+        var sumSq = 0.0
+        for (i in 0 until n) {
+            val p = px[i]
+            val lum = (((p shr 16) and 0xff) * 3 + ((p shr 8) and 0xff) * 6 + (p and 0xff)) / 10.0
+            sum += lum
+            sumSq += lum * lum
+        }
+        val mean = sum / n
+        return sqrt((sumSq / n - mean * mean).coerceAtLeast(0.0))
+    }
+
+    /**
+     * 4.8: Paint motion-mask rectangles to a flat color on both frames, then compare via [ScreenSig.compare]
+     * together with the pixel-level `fine` measure ([Change.ratio] vs [ScreenSig.FINE_MIN]).
+     */
+    fun wholeScreenUnchanged(pre: Bitmap, after: Bitmap, mask: Mask? = null): Boolean {
+        if (pre.isRecycled || after.isRecycled || pre.width != after.width || pre.height != after.height) return false
+        val rects = mask?.rectsIn(pre.width, pre.height).orEmpty()
+        var preWork = pre
+        var afterWork = after
+        var copied = false
+        try {
+            if (rects.isNotEmpty()) {
+                val pCopy = pre.copy(Bitmap.Config.ARGB_8888, true)
+                val aCopy = after.copy(Bitmap.Config.ARGB_8888, true)
+                val paint = Paint().apply { color = Color.GRAY; style = Paint.Style.FILL }
+                val cPre = Canvas(pCopy)
+                val cAfter = Canvas(aCopy)
+                for (r in rects) {
+                    cPre.drawRect(r, paint)
+                    cAfter.drawRect(r, paint)
+                }
+                preWork = pCopy
+                afterWork = aCopy
+                copied = true
+            }
+            val sigPre = ScreenSig.of(preWork) ?: return false
+            val sigAfter = ScreenSig.of(afterWork) ?: return false
+            val fine = Change.ratio(preWork, afterWork).coerceAtLeast(0.0)
+            return sigPre.compare(sigAfter).copy(fine = fine).kind == ScreenSig.Kind.NONE
+        } finally {
+            if (copied) {
+                preWork.recycle()
+                afterWork.recycle()
+            }
+        }
+    }
+
     /** Build a grayscale [VScreenGame.Patch] of [size]x[size] centered on ([cx], [cy]) in [frame] at [scale]. */
     fun makePatch(frame: Bitmap, cx: Int, cy: Int, size: Int = PATCH, scale: Float = 1f): VScreenGame.Patch? {
         if (frame.isRecycled || frame.width < 4 || frame.height < 4) return null
-        val bw = minOf(size, frame.width)
-        val bh = minOf(size, frame.height)
-        val left = (cx - bw / 2).coerceIn(0, maxOf(0, frame.width - bw))
-        val top = (cy - bh / 2).coerceIn(0, maxOf(0, frame.height - bh))
-        val box = Rect(left, top, left + bw, top + bh)
+        val box = patchRect(cx, cy, frame.width, frame.height, size)
+        val bw = box.width()
+        val bh = box.height()
         val w = (bw * scale).roundToInt().coerceAtLeast(2)
         val h = (bh * scale).roundToInt().coerceAtLeast(2)
         val px = IntArray(w * h)
         if (w == bw && h == bh) {
-            frame.getPixels(px, 0, w, left, top, w, h)
+            frame.getPixels(px, 0, w, box.left, box.top, w, h)
         } else {
-            val sub = Bitmap.createBitmap(frame, left, top, bw, bh)
+            val sub = Bitmap.createBitmap(frame, box.left, box.top, bw, bh)
             val sc = Bitmap.createScaledBitmap(sub, w, h, true)
             if (sub !== frame && sub !== sc) sub.recycle()
             sc.getPixels(px, 0, w, 0, 0, w, h)
@@ -121,32 +192,6 @@ internal object Gesture {
         return refineHit(patch1x, frame, hit)
     }
 
-    /** Full-frame search via unmodified [VScreenGame.track] at 0.5x in step-1 bands (2 calls on 288x640, ~200ms). */
-    private fun trackFullFrame(patchHalf: VScreenGame.Patch, patch1x: VScreenGame.Patch, frame: Bitmap): Pair<Rect, Double>? {
-        val r = TRACK_RADIUS
-        val stride = r * 2 - PATCH
-        val halfW = patchHalf.box.width() / 2
-        val halfH = patchHalf.box.height() / 2
-        var best: Pair<Rect, Double>? = null
-        var cy = halfH + r
-        while (true) {
-            val y = cy.coerceAtMost(maxOf(halfH, frame.height - halfH))
-            var cx = halfW + r
-            while (true) {
-                val x = cx.coerceAtMost(maxOf(halfW, frame.width - halfW))
-                val hit = VScreenGame.track(shiftPatch(patchHalf, x, y, frame.width, frame.height), frame, radius = r)
-                if (hit != null && (best == null || hit.second > best.second)) {
-                    best = hit
-                }
-                if (x >= frame.width - halfW - r) break
-                cx += stride
-            }
-            if (y >= frame.height - halfH - r) break
-            cy += stride
-        }
-        return best?.let { refineHit(patch1x, frame, it) }?.takeIf { it.second >= TRACK_SCORE_MIN }
-    }
-
     /** Convert display pixel coordinate [pt] into recording frame coordinate space ([frameW]x[frameH]). */
     fun toFrameCoord(pt: Pair<Int, Int>, dispW: Int, dispH: Int, frameW: Int, frameH: Int): Pair<Int, Int> {
         val sx = frameW.toDouble() / maxOf(1, dispW)
@@ -182,14 +227,15 @@ internal object Gesture {
     }
 
     /**
-     * Pure 4.4 analysis on recording-sized bitmaps (long side 640):
-     * - Template: [PATCH]x[PATCH] square centered on [startF] in [preFrame].
-     * - Picked up: any frame in [pickupFrames] has `Change.ratio >= Change.REGION_CHANGED` on the start patch,
-     *   or `VScreenGame.track` finds the patch shifted >= [PICKUP_SHIFT_PX] px. Empty list -> null.
-     * - Followed: [midFrame] matches patch with score >= [TRACK_SCORE_MIN] and distance to [midF] <= [MATCH_DIST_PX].
-     * - After release: [settleFrame] checked near [endF] (<= [MATCH_DIST_PX], stayed) and [startF]
-     *   (<= [MATCH_DIST_PX], snapped_back), higher score wins when both match; else full-frame search -> elsewhere;
-     *   else unknown.
+     * Pure 4.4 & 4.8 analysis on recording-sized bitmaps (long side 640):
+     * - Low-texture guard: luminance stddev of R([startF]) in [preFrame] < [TEXTURE_MIN] -> picked_up=null, unknown.
+     * - Picked up: any frame in [pickupFrames] (150ms..release) has `Change.ratio(pre, f, R(start)) >= REGION_CHANGED`.
+     * - After release (frame-diff, independent of template score):
+     *   - `snapped_back`: `picked_up == true` and motion-masked `ScreenSig.compare` + `fine` == `Kind.NONE`.
+     *   - `stayed`: both `R(start)` and `R(end)` changed (`>= REGION_CHANGED`).
+     *   - `elsewhere`: `R(start)` changed, `R(end)` unchanged, and whole screen changed.
+     *   - otherwise `unknown`.
+     * - `followed` and `score` retain template tracking (informational only; never trigger loud/SNAP_BACK).
      */
     fun analyzeGestureFrames(
         preFrame: Bitmap?,
@@ -199,85 +245,95 @@ internal object Gesture {
         startF: Pair<Int, Int>,
         midF: Pair<Int, Int>,
         endF: Pair<Int, Int>,
+        mask: Mask? = null,
         pollMsP50: Long? = null,
         pollMsMax: Long? = null,
         keyTimesMs: LongArray? = null,
     ): GestureRecord {
-        if (preFrame == null || preFrame.isRecycled) {
+        if (preFrame == null || preFrame.isRecycled || preFrame.width < 4 || preFrame.height < 4) {
             return GestureRecord(null, null, AFTER_UNKNOWN, 0.0, pollMsP50, pollMsMax, keyTimesMs)
         }
-        val patch1x = makePatch(preFrame, startF.first, startF.second, PATCH, 1f)
-            ?: return GestureRecord(null, null, AFTER_UNKNOWN, 0.0, pollMsP50, pollMsMax, keyTimesMs)
-        val patchHalf = makePatch(preFrame, startF.first, startF.second, PATCH, PATCH_TRACK_SCALE) ?: patch1x
+        val startRect = patchRect(startF.first, startF.second, preFrame.width, preFrame.height, PATCH)
+        // 4.8: Low-texture guard — blank/untextured start cannot be judged reliably.
+        if (regionLumStdDev(preFrame, startRect) < TEXTURE_MIN) {
+            return GestureRecord(null, null, AFTER_UNKNOWN, 0.0, pollMsP50, pollMsMax, keyTimesMs)
+        }
 
-        val offX = patch1x.box.centerX() - startF.first
-        val offY = patch1x.box.centerY() - startF.second
-        val nearR = MATCH_DIST_PX.toInt()
-
-        // 1. Picked up (150–450ms after down)
+        // 1. Picked up (150ms after down until release): Change.ratio on R(start) >= REGION_CHANGED
         val pickedUp: Boolean? = if (pickupFrames.isEmpty()) {
             null
         } else {
             pickupFrames.any { f ->
-                if (f.isRecycled) return@any false
-                val ratioChanged = f.width == preFrame.width && f.height == preFrame.height &&
-                    Change.ratio(preFrame, f, patch1x.box) >= Change.REGION_CHANGED
-                if (ratioChanged) return@any true
-                val tracked = trackNear(patchHalf, patch1x, f, patch1x.box.centerX(), patch1x.box.centerY(), nearR)
-                tracked != null && tracked.second >= TRACK_SCORE_MIN &&
-                    hypot(
-                        (tracked.first.centerX() - patch1x.box.centerX()).toDouble(),
-                        (tracked.first.centerY() - patch1x.box.centerY()).toDouble(),
-                    ) >= PICKUP_SHIFT_PX
+                !f.isRecycled && f.width == preFrame.width && f.height == preFrame.height &&
+                    Change.ratio(preFrame, f, startRect) >= Change.REGION_CHANGED
             }
         }
 
-        // 2. Followed (at drag midpoint)
-        val followed: Boolean? = if (midFrame == null || midFrame.isRecycled) {
+        val patch1x = makePatch(preFrame, startF.first, startF.second, PATCH, 1f)
+        val patchHalf = patch1x?.let { makePatch(preFrame, startF.first, startF.second, PATCH, PATCH_TRACK_SCALE) ?: it }
+        val offX = (patch1x?.box?.centerX() ?: startRect.centerX()) - startF.first
+        val offY = (patch1x?.box?.centerY() ?: startRect.centerY()) - startF.second
+        val nearR = MATCH_DIST_PX.toInt()
+
+        // 2. Followed (informational template tracking at drag midpoint)
+        var midScore = 0.0
+        val followed: Boolean? = if (midFrame == null || midFrame.isRecycled || patch1x == null || patchHalf == null) {
             null
         } else {
             val midCx = (midF.first + offX).coerceIn(0, maxOf(0, midFrame.width - 1))
             val midCy = (midF.second + offY).coerceIn(0, maxOf(0, midFrame.height - 1))
             val hit = trackNear(patchHalf, patch1x, midFrame, midCx, midCy, nearR)
-            hit != null && hit.second >= TRACK_SCORE_MIN &&
+            if (hit != null && hit.second >= TRACK_SCORE_MIN &&
                 hypot(
                     (hit.first.centerX() - midCx).toDouble(),
                     (hit.first.centerY() - midCy).toDouble(),
                 ) <= MATCH_DIST_PX
+            ) {
+                midScore = hit.second
+                true
+            } else {
+                false
+            }
         }
 
-        // 3. After release (350ms after lift)
-        val (afterRelease, score) = if (settleFrame == null || settleFrame.isRecycled) {
-            AFTER_UNKNOWN to 0.0
+        // 3. After release (4.8 frame-diff classification)
+        val afterRelease: String = if (settleFrame == null || settleFrame.isRecycled ||
+            settleFrame.width != preFrame.width || settleFrame.height != preFrame.height
+        ) {
+            AFTER_UNKNOWN
         } else {
-            val endCx = (endF.first + offX).coerceIn(0, maxOf(0, settleFrame.width - 1))
-            val endCy = (endF.second + offY).coerceIn(0, maxOf(0, settleFrame.height - 1))
-            val endHit = trackNear(patchHalf, patch1x, settleFrame, endCx, endCy, nearR)?.takeIf { (box, sc) ->
-                sc >= TRACK_SCORE_MIN && hypot(
-                    (box.centerX() - endCx).toDouble(),
-                    (box.centerY() - endCy).toDouble(),
-                ) <= MATCH_DIST_PX
-            }
-            val startCx = (startF.first + offX).coerceIn(0, maxOf(0, settleFrame.width - 1))
-            val startCy = (startF.second + offY).coerceIn(0, maxOf(0, settleFrame.height - 1))
-            val startHit = trackNear(patchHalf, patch1x, settleFrame, startCx, startCy, nearR)?.takeIf { (box, sc) ->
-                sc >= TRACK_SCORE_MIN && hypot(
-                    (box.centerX() - startCx).toDouble(),
-                    (box.centerY() - startCy).toDouble(),
-                ) <= MATCH_DIST_PX
-            }
+            val wholeUnchanged = wholeScreenUnchanged(preFrame, settleFrame, mask)
+            val endRect = patchRect(endF.first, endF.second, settleFrame.width, settleFrame.height, PATCH)
+            val startChanged = Change.ratio(preFrame, settleFrame, startRect) >= Change.REGION_CHANGED
+            val endChanged = Change.ratio(preFrame, settleFrame, endRect) >= Change.REGION_CHANGED
             when {
-                endHit != null && startHit != null ->
-                    if (endHit.second >= startHit.second) AFTER_STAYED to endHit.second
-                    else AFTER_SNAPPED_BACK to startHit.second
-                endHit != null -> AFTER_STAYED to endHit.second
-                startHit != null -> AFTER_SNAPPED_BACK to startHit.second
-                else -> {
-                    val fullHit = trackFullFrame(patchHalf, patch1x, settleFrame)
-                    if (fullHit != null) AFTER_ELSEWHERE to fullHit.second
-                    else AFTER_UNKNOWN to 0.0
+                pickedUp == true && wholeUnchanged -> AFTER_SNAPPED_BACK
+                startChanged && endChanged -> AFTER_STAYED
+                startChanged && !endChanged && !wholeUnchanged -> AFTER_ELSEWHERE
+                else -> AFTER_UNKNOWN
+            }
+        }
+
+        // Informational template score (does not affect afterRelease or SNAP_BACK)
+        val score: Double = if (settleFrame == null || settleFrame.isRecycled || patch1x == null || patchHalf == null) {
+            midScore
+        } else {
+            val probePt = when (afterRelease) {
+                AFTER_STAYED -> endF
+                AFTER_SNAPPED_BACK -> startF
+                else -> null
+            }
+            val settleHit = probePt?.let { pt ->
+                val cx = (pt.first + offX).coerceIn(0, maxOf(0, settleFrame.width - 1))
+                val cy = (pt.second + offY).coerceIn(0, maxOf(0, settleFrame.height - 1))
+                trackNear(patchHalf, patch1x, settleFrame, cx, cy, nearR)?.takeIf { (box, sc) ->
+                    sc >= TRACK_SCORE_MIN && hypot(
+                        (box.centerX() - cx).toDouble(),
+                        (box.centerY() - cy).toDouble(),
+                    ) <= MATCH_DIST_PX
                 }
             }
+            settleHit?.second ?: midScore
         }
 
         return GestureRecord(
@@ -293,7 +349,7 @@ internal object Gesture {
 
     /**
      * Wait [SETTLE_MS] after release, record the settled frame, decode recording frames, and compute [GestureRecord].
-     * Used by both normal `drag` (4.4, 4.7) and closed-loop `drag` (`hold` / `seek`).
+     * Used by both normal `drag` (4.4, 4.7, 4.8) and closed-loop `drag` (`hold` / `seek`).
      */
     fun evaluateDragRecord(
         d: VScreenDisplay,
@@ -304,6 +360,7 @@ internal object Gesture {
         downAt: Long,
         midAt: Long,
         preUpAt: Long,
+        upAt: Long,
         upElapsed: Long,
         pkg: String?,
         pollMsP50: Long? = null,
@@ -323,10 +380,13 @@ internal object Gesture {
         val keyTimes = longArrayOf(preDownAt, midAt, preUpAt, settleAt)
 
         val preRec = VScreenRecorder.frameAt(d.displayId, preDownAt)
-        val pickupRecs = VScreenRecorder.frames(d.displayId, downAt + PICKUP_FROM_MS, downAt + PICKUP_TO_MS).let { list ->
-            if (list.size <= MAX_PICKUP_FRAMES) list
-            else (0 until MAX_PICKUP_FRAMES).map { k -> list[(k * (list.size - 1)) / maxOf(1, MAX_PICKUP_FRAMES - 1)] }
-        }
+        val pickupFrom = downAt + PICKUP_FROM_MS
+        val pickupRecs = if (upAt >= pickupFrom) {
+            VScreenRecorder.frames(d.displayId, pickupFrom, upAt).let { list ->
+                if (list.size <= MAX_PICKUP_FRAMES) list
+                else (0 until MAX_PICKUP_FRAMES).map { k -> list[(k * (list.size - 1)) / maxOf(1, MAX_PICKUP_FRAMES - 1)] }
+            }
+        } else emptyList()
         val duringRecs = VScreenRecorder.frames(d.displayId, downAt, maxOf(downAt, preUpAt))
         val midRec = duringRecs.minByOrNull { kotlin.math.abs(it.atMs - midAt) }
             ?: VScreenRecorder.frameAt(d.displayId, midAt)?.takeIf { it.atMs >= downAt }
@@ -352,6 +412,7 @@ internal object Gesture {
                 startF = startF,
                 midF = midF,
                 endF = endF,
+                mask = VScreenPerception.mask(d.displayId),
                 pollMsP50 = pollMsP50,
                 pollMsMax = pollMsMax,
                 keyTimesMs = keyTimes,
@@ -528,6 +589,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
     var downAt = System.currentTimeMillis()
     var midAt = downAt
     var preUpAt = downAt
+    var upAt = downAt
     var upElapsed = tStart
 
     try {
@@ -599,6 +661,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
             }
             preUpAt = System.currentTimeMillis()
             VScreenShell.finger(d.displayId, "up", 0, curPt.first, curPt.second)
+            upAt = System.currentTimeMillis()
             upElapsed = SystemClock.elapsedRealtime()
         } else {
             // Loop.SEEK (2-point straight line, 12px steps)
@@ -659,6 +722,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
             d.latestWithVersion()?.let { (bmp, ver) -> VScreenRecorder.offerFresh(d, bmp, ver, pkg) }
             preUpAt = System.currentTimeMillis()
             VScreenShell.finger(d.displayId, "up", 0, curPt.first, curPt.second)
+            upAt = System.currentTimeMillis()
             upElapsed = SystemClock.elapsedRealtime()
         }
     } finally {
@@ -679,6 +743,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
             downAt = downAt,
             midAt = midAt,
             preUpAt = preUpAt,
+            upAt = upAt,
             upElapsed = upElapsed,
             pkg = pkg,
             pollMsP50 = stats?.first,

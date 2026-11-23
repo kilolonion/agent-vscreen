@@ -8,6 +8,7 @@ import android.graphics.Rect
 import com.kilon.agentvscreen.I18n
 import com.kilon.agentvscreen.api.AgentGuide
 import com.kilon.agentvscreen.core.BackgroundOperation.ActionError
+import com.kilon.agentvscreen.core.Mask
 import com.kilon.agentvscreen.core.Meter
 import com.kilon.agentvscreen.core.VScreenPerception
 import org.junit.After
@@ -147,84 +148,180 @@ class V200Beta4Test {
         }
     }
 
-    // ── 4.4 & 4.6: GestureRecord on synthetic recording frames (all 4 outcomes) ──
+    // ── 4.4, 4.6 & 4.8: GestureRecord on synthetic recording frames ──────────
 
-    /** Draw a distinct 64x64 textured card centered at (cx, cy) on a 288x640 synthetic recording frame. */
-    private fun frameWithCard(cardAt: Pair<Int, Int>?): Bitmap {
+    /** Draw an S04-like 42x42 card centered at [cardAt] (and optional slot at [slotAt], active green when [slotGreen]). */
+    private fun frameWithCard(
+        cardAt: Pair<Int, Int>?,
+        slotAt: Pair<Int, Int>? = null,
+        slotGreen: Boolean = false,
+        bannerColor: Int? = null,
+    ): Bitmap {
         val bmp = Bitmap.createBitmap(288, 640, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         c.drawColor(Color.rgb(245, 246, 250))
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        if (bannerColor != null) {
+            p.color = bannerColor
+            c.drawRect(0f, 0f, 288f, 64f, p)
+        }
+        if (slotAt != null) {
+            val (sx, sy) = slotAt
+            val sh = 25f
+            p.style = Paint.Style.FILL
+            p.color = if (slotGreen) Color.parseColor("#4CAF50") else Color.rgb(224, 228, 236)
+            c.drawRect(sx - sh, sy - sh, sx + sh, sy + sh, p)
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = 3f
+            p.color = if (slotGreen) Color.rgb(27, 94, 32) else Color.rgb(148, 163, 184)
+            c.drawRect(sx - sh, sy - sh, sx + sh, sy + sh, p)
+            p.style = Paint.Style.FILL
+        }
         if (cardAt != null) {
             val (cx, cy) = cardAt
-            val half = Gesture.PATCH / 2
-            val p = Paint()
-            p.color = Color.rgb(30, 58, 138)
-            c.drawRect((cx - half).toFloat(), (cy - half).toFloat(), (cx + half).toFloat(), (cy + half).toFloat(), p)
+            val half = 21f
             p.color = Color.WHITE
-            c.drawRect((cx - half + 8).toFloat(), (cy - half + 8).toFloat(), (cx + half - 8).toFloat(), (cy + half - 8).toFloat(), p)
-            p.color = Color.rgb(220, 38, 38)
-            c.drawRect((cx - half + 12).toFloat(), (cy - half + 12).toFloat(), (cx - 4).toFloat(), (cy - 4).toFloat(), p)
-            p.color = Color.rgb(22, 163, 74)
-            c.drawCircle((cx + 8).toFloat(), (cy + 8).toFloat(), 12f, p)
+            c.drawRect(cx - half, cy - half, cx + half, cy + half, p)
+            p.style = Paint.Style.STROKE
+            p.strokeWidth = 4f
+            p.color = Color.rgb(30, 64, 175)
+            c.drawRect(cx - half, cy - half, cx + half, cy + half, p)
+            p.style = Paint.Style.FILL
+            p.color = Color.rgb(30, 64, 175)
+            c.drawRect(cx - half + 4f, cy - half + 4f, cx - half + 11f, cy - half + 11f, p)
+            p.color = Color.parseColor("#4CAF50")
+            c.drawCircle(cx.toFloat(), cy.toFloat(), 9f, p)
+        }
+        return bmp
+    }
+
+    /** Draw a uniform white list of 12 identical-style rows differing only by row index numbers. */
+    private fun frameWithNumberedList(firstNum: Int): Bitmap {
+        val bmp = Bitmap.createBitmap(288, 640, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.drawColor(Color.WHITE)
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(17, 24, 39)
+            textSize = 20f
+        }
+        val linePaint = Paint().apply {
+            color = Color.rgb(229, 231, 235)
+            strokeWidth = 2f
+        }
+        for (row in 0 until 12) {
+            val yTop = 20 + row * 50
+            c.drawText("Item ${firstNum + row}", 24f, (yTop + 30).toFloat(), textPaint)
+            c.drawLine(0f, (yTop + 48).toFloat(), 288f, (yTop + 48).toFloat(), linePaint)
         }
         return bmp
     }
 
     @Test
-    fun gestureRecordAllFourSyntheticOutcomes() {
+    fun gestureRecordCardIntoGreenSlotIsStayed() {
+        val start = 70 to 460
+        val pickupMoved = 84 to 420
+        val mid = 135 to 310
+        val slot = 144 to 160
+
+        val pre = frameWithCard(cardAt = start, slotAt = slot, slotGreen = false)
+        val pick = frameWithCard(cardAt = pickupMoved, slotAt = slot, slotGreen = false)
+        val midF = frameWithCard(cardAt = mid, slotAt = slot, slotGreen = false)
+        val afterInGreenSlot = frameWithCard(cardAt = slot, slotAt = slot, slotGreen = true)
+        try {
+            val rec = Gesture.analyzeGestureFrames(pre, listOf(pick), midF, afterInGreenSlot, start, mid, slot)
+            assertEquals("rec=$rec", true, rec.pickedUp)
+            assertEquals("rec=$rec", true, rec.followed)
+            assertEquals("rec=$rec", Gesture.AFTER_STAYED, rec.afterRelease)
+        } finally {
+            listOf(pre, pick, midF, afterInGreenSlot).forEach { it.recycle() }
+        }
+    }
+
+    @Test
+    fun gestureRecordSnapBackAndMotionMaskAndElsewhere() {
         val start = 70 to 460
         val pickupMoved = 84 to 420
         val mid = 135 to 310
         val end = 200 to 160
         val elsewherePos = 210 to 540
 
-        val pre = frameWithCard(start)
-        val pick = frameWithCard(pickupMoved)
-        val midF = frameWithCard(mid)
-        val settledAtEnd = frameWithCard(end)
-        val settledAtStart = frameWithCard(start)
-        val settledElsewhere = frameWithCard(elsewherePos)
-        val settledGone = frameWithCard(null)
+        val pre = frameWithCard(cardAt = start, bannerColor = Color.rgb(30, 64, 175))
+        val pick = frameWithCard(cardAt = pickupMoved, bannerColor = Color.rgb(30, 64, 175))
+        val midF = frameWithCard(cardAt = mid, bannerColor = Color.rgb(30, 64, 175))
+        val settledAtStartSame = frameWithCard(cardAt = start, bannerColor = Color.rgb(30, 64, 175))
+        // Top banner changed color (e.g. looping carousel) while card snapped back; masked out by motion mask
+        val settledAtStartWithCarousel = frameWithCard(cardAt = start, bannerColor = Color.rgb(220, 38, 38))
+        val settledElsewhere = frameWithCard(cardAt = elsewherePos, bannerColor = Color.rgb(30, 64, 175))
+        val maskCells = BooleanArray(8 * 10) { idx -> idx < 8 } // top 1/10 (0..64px) marked moving
+        val mask = Mask(maskCells, cols = 8, rows = 10, screenW = 1080, screenH = 2400)
         try {
-            // 1. stayed
-            val rStayed = Gesture.analyzeGestureFrames(pre, listOf(pick), midF, settledAtEnd, start, mid, end)
-            assertEquals("rStayed=$rStayed", true, rStayed.pickedUp)
-            assertEquals("rStayed=$rStayed", true, rStayed.followed)
-            assertEquals("rStayed=$rStayed", Gesture.AFTER_STAYED, rStayed.afterRelease)
-            assertTrue("stayed score=${rStayed.score}", rStayed.score >= Gesture.TRACK_SCORE_MIN)
-
-            // 2. snapped_back
-            val rSnap = Gesture.analyzeGestureFrames(pre, listOf(pick), midF, settledAtStart, start, mid, end)
-            assertEquals(true, rSnap.pickedUp)
-            assertEquals(true, rSnap.followed)
-            assertEquals(Gesture.AFTER_SNAPPED_BACK, rSnap.afterRelease)
+            val rSnap = Gesture.analyzeGestureFrames(pre, listOf(pick), midF, settledAtStartSame, start, mid, end)
+            assertEquals("rSnap=$rSnap", true, rSnap.pickedUp)
+            assertEquals("rSnap=$rSnap", Gesture.AFTER_SNAPPED_BACK, rSnap.afterRelease)
             assertTrue("snap score=${rSnap.score}", rSnap.score >= Gesture.TRACK_SCORE_MIN)
 
-            // 3. elsewhere
+            val rSnapMasked = Gesture.analyzeGestureFrames(pre, listOf(pick), midF, settledAtStartWithCarousel, start, mid, end, mask = mask)
+            assertEquals("rSnapMasked=$rSnapMasked", true, rSnapMasked.pickedUp)
+            assertEquals("rSnapMasked=$rSnapMasked", Gesture.AFTER_SNAPPED_BACK, rSnapMasked.afterRelease)
+
             val rElse = Gesture.analyzeGestureFrames(pre, listOf(pick), midF, settledElsewhere, start, mid, end)
-            assertEquals(true, rElse.pickedUp)
-            assertEquals(true, rElse.followed)
-            assertEquals(Gesture.AFTER_ELSEWHERE, rElse.afterRelease)
-            assertTrue("elsewhere score=${rElse.score}", rElse.score >= Gesture.TRACK_SCORE_MIN)
-
-            // 4. unknown
-            val rUnk = Gesture.analyzeGestureFrames(pre, listOf(pick), midF, settledGone, start, mid, end)
-            assertEquals(true, rUnk.pickedUp)
-            assertEquals(true, rUnk.followed)
-            assertEquals(Gesture.AFTER_UNKNOWN, rUnk.afterRelease)
-            assertEquals(0.0, rUnk.score, 0.001)
-
-            // Extra: not picked up / no pickup frames / did not follow
-            val rNotPicked = Gesture.analyzeGestureFrames(pre, listOf(pre), pre, settledAtStart, start, mid, end)
-            assertEquals(false, rNotPicked.pickedUp)
-            assertEquals(false, rNotPicked.followed)
-
-            val rNoPickup = Gesture.analyzeGestureFrames(pre, emptyList(), null, settledAtEnd, start, mid, end)
-            assertNull(rNoPickup.pickedUp)
-            assertNull(rNoPickup.followed)
-            assertEquals(Gesture.AFTER_STAYED, rNoPickup.afterRelease)
+            assertEquals("rElse=$rElse", true, rElse.pickedUp)
+            assertEquals("rElse=$rElse", Gesture.AFTER_ELSEWHERE, rElse.afterRelease)
         } finally {
-            listOf(pre, pick, midF, settledAtEnd, settledAtStart, settledElsewhere, settledGone).forEach { it.recycle() }
+            listOf(pre, pick, midF, settledAtStartSame, settledAtStartWithCarousel, settledElsewhere).forEach { it.recycle() }
+        }
+    }
+
+    @Test
+    fun gestureRecordBlankStartIsUnknown() {
+        val start = 70 to 460
+        val mid = 135 to 310
+        val end = 200 to 160
+        val blank = frameWithCard(cardAt = null)
+        val after = frameWithCard(cardAt = end)
+        try {
+            val rec = Gesture.analyzeGestureFrames(blank, listOf(after), after, after, start, mid, end)
+            assertNull("blank start must set pickedUp=null: $rec", rec.pickedUp)
+            assertNull("blank start must skip followed: $rec", rec.followed)
+            assertEquals("blank start must be unknown: $rec", Gesture.AFTER_UNKNOWN, rec.afterRelease)
+        } finally {
+            blank.recycle()
+            after.recycle()
+        }
+    }
+
+    @Test
+    fun gestureRecordSameStyleListScrollNotSnappedBack() {
+        // 4.8: scrolling a uniform list where only row numbers differ must NOT be classified as snapped_back.
+        val start = 60 to 450
+        val mid = 60 to 300
+        val end = 60 to 150
+        val pre = frameWithNumberedList(1)
+        val during = frameWithNumberedList(4)
+        val after = frameWithNumberedList(6)
+        try {
+            val rec = Gesture.analyzeGestureFrames(pre, listOf(during), during, after, start, mid, end)
+            assertFalse("same-style list scroll must not be snapped_back: $rec", rec.afterRelease == Gesture.AFTER_SNAPPED_BACK)
+            assertFalse("wholeScreenUnchanged must catch digit changes", Gesture.wholeScreenUnchanged(pre, after))
+        } finally {
+            pre.recycle()
+            during.recycle()
+            after.recycle()
+        }
+    }
+
+    @Test
+    fun gestureRecordNotPickedUpIsNotSnappedBack() {
+        val start = 70 to 460
+        val mid = 135 to 310
+        val end = 200 to 160
+        val pre = frameWithCard(cardAt = start)
+        try {
+            val rec = Gesture.analyzeGestureFrames(pre, listOf(pre), pre, pre, start, mid, end)
+            assertEquals("rec=$rec", false, rec.pickedUp)
+            assertEquals("not picked up must not be snapped_back: $rec", Gesture.AFTER_UNKNOWN, rec.afterRelease)
+        } finally {
+            pre.recycle()
         }
     }
 

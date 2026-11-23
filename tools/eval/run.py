@@ -879,7 +879,7 @@ def run_gesture_stats(token, out_dir, app_version, s04_runs=40, s10_runs=20, s11
                 pass
             adb_shell("am", "force-stop", TORTURE_PKG)
 
-    # ── S11: 20 press-hold charge runs (`press 540 1600 hold until text:9* in 300,1400,800,1500 8s`) ──
+    # ── S11: 20 press-hold charge runs (4.8: color on inner left of charge bar turning #16A34A at >=90%) ──
     if s11_runs > 0:
         session = "gstats_s11"
         try:
@@ -887,9 +887,22 @@ def run_gesture_stats(token, out_dir, app_version, s04_runs=40, s10_runs=20, s11
             for i in range(s11_runs):
                 seed_val = 5300 + i
                 _start_scene_on_display(disp_id, "S11", seed_val)
+                enter = _wait_enter_event("S11")
+                data = (enter or {}).get("data") or {}
+                probe = data.get("bar_probe")
+                if isinstance(probe, list) and len(probe) >= 2:
+                    bx, by = int(probe[0]), int(probe[1])
+                else:
+                    bar = data.get("bar")
+                    if isinstance(bar, list) and len(bar) >= 4:
+                        bl, bt, br, bb = int(bar[0]), int(bar[1]), int(bar[2]), int(bar[3])
+                        bx = bl + max(bb - bt, int((br - bl) * 0.12))
+                        by = (bt + bb) // 2
+                    else:
+                        bx, by = 220, 1340
                 reply = call_api(
                     token,
-                    ["act", "press 540 1600 hold until text:9* in 300,1400,800,1500 8s"],
+                    ["act", f"press 540 1600 hold until color:{bx},{by}=#16A34A~40 8s"],
                     session=session,
                     timeout=90,
                 )

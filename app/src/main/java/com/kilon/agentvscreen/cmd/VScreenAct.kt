@@ -1214,6 +1214,7 @@ private fun VScreenOffloadHandler.doAction(sid: String, d: VScreenDisplay, step:
                     downAt = downAt,
                     midAt = midAt,
                     preUpAt = preUpAt,
+                    upAt = upAt,
                     upElapsed = upElapsed,
                     pkg = pkg,
                 )
