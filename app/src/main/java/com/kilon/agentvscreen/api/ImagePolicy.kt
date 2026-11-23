@@ -46,7 +46,12 @@ object ImagePolicy {
         if (shots.isEmpty()) return emptyList()
         val d = res.data
         if (d == null || asked(res)) return shots.take(MAX_ASKED)
-        val must = res.exitCode != 0 || (d.optJSONArray("steps")?.length() ?: 0) == 0
+        val loud = d.optJSONArray("loud")
+        val loudNeedsPic = loud != null && (0 until loud.length()).any {
+            val r = loud.optString(it)
+            r == "FAILED" || r == "NO_TEXT"
+        }
+        val must = res.exitCode != 0 || (d.optJSONArray("steps")?.length() ?: 0) == 0 || loudNeedsPic
         val new = d.optBoolean("picture_changed", true) || d.optJSONObject("screen")?.optBoolean("image_has_strip") == true
         return if (must || new) shots.take(MAX) else emptyList()
     }

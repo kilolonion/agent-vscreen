@@ -354,6 +354,9 @@ internal fun VScreenOffloadHandler.releaseCmd(sid: String?): NativeOffloadResult
     val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
     val main0 = mainWatch(s)
     BackgroundOperation.releaseNow(s)
+    PageBook.clear(s)
+    Loud.clear(s)
+    com.kilon.agentvscreen.api.Turns.resetTurn(s)
     return text(tr("副屏已释放（连接保留，下次 launch 会新建副屏）", "Screen released (connection kept; the next launch creates a new screen)") + (mainCheckLines(main0)?.let { "\n${Blocks.notes}$it" } ?: ""))
 }
 

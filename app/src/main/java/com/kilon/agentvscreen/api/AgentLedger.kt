@@ -55,6 +55,10 @@ object AgentLedger {
 
     private val FIELDS = listOf("install_at", "remembered_at", "remembered_where", "last_call_at", "comebacks", "last_comeback_at", "last_local_at", "last_remote_at")
 
+    const val REPLY_QUIET = "quiet"
+    const val REPLY_FULL = "full"
+    private val replyModes = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     fun init(ctx: Context) {
         prefs = ctx.getSharedPreferences("agent_vscreen_ledger", Context.MODE_PRIVATE)
         // Before beta7 the one record had no agent: it belongs to the first token, the only one onboarding gave out.
@@ -64,6 +68,8 @@ object AgentLedger {
             e.apply()
         }
         val ids = prefs.all.keys.filter { it.contains('.') && !it.startsWith("ack") }.map { it.substringBefore('.') }.toSet()
+        replyModes.clear()
+        ids.forEach { id -> prefs.getString("$id.reply_mode", null)?.let { replyModes[id] = it } }
         _agents.value = ids.associateWith { id ->
             Snapshot(prefs.getLong("$id.install_at", 0L), prefs.getLong("$id.remembered_at", 0L), prefs.getString("$id.remembered_where", null),
                 prefs.getLong("$id.last_call_at", 0L), prefs.getInt("$id.comebacks", 0), prefs.getLong("$id.last_comeback_at", 0L),
@@ -71,6 +77,20 @@ object AgentLedger {
         }
         _snap.value = combined(_agents.value.values)
     }
+
+    /** 2.0.0-beta3 (3.1): per-agent default reply mode ("quiet" or "full"), default "quiet". */
+    fun replyMode(agentId: String): String {
+        val raw = replyModes[agentId] ?: if (::prefs.isInitialized) prefs.getString("$agentId.reply_mode", null) else null
+        return if (raw.equals(REPLY_FULL, ignoreCase = true)) REPLY_FULL else REPLY_QUIET
+    }
+
+    fun setReplyMode(agentId: String, mode: String) {
+        val norm = if (mode.equals(REPLY_FULL, ignoreCase = true)) REPLY_FULL else REPLY_QUIET
+        replyModes[agentId] = norm
+        if (::prefs.isInitialized) prefs.edit().putString("$agentId.reply_mode", norm).apply()
+    }
+
+    internal fun resetReplyModesForTest() { replyModes.clear() }
 
     private fun combined(all: Collection<Snapshot>): Snapshot {
         fun mx(f: (Snapshot) -> Long) = all.maxOfOrNull(f) ?: 0L
@@ -101,6 +121,7 @@ object AgentLedger {
     /** Forget agent [id]'s record (its token was revoked). */
     fun forget(id: String) {
         _agents.value = _agents.value - id
+        replyModes.remove(id)
         _snap.value = combined(_agents.value.values)
         if (::prefs.isInitialized) prefs.edit().apply { prefs.all.keys.filter { it.startsWith("$id.") || it == "ack_$id" || it == "ack_at_$id" }.forEach { remove(it) } }.apply()
     }

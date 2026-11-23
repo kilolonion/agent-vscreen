@@ -736,12 +736,14 @@ class ApiServer(private val ctx: Context) {
                 val ack = AgentLedger.ackVersion(tid)
                 val head = "Agent-VScreen ${com.kilon.agentvscreen.BuildConfig.VERSION_NAME}" +
                     (if (ack < com.kilon.agentvscreen.BuildConfig.VERSION_CODE) tr("（你的说明还没按这一版确认：更新后执行 remembered \"<存在哪里>\"）", " (your note is not confirmed for this version yet: refresh it, then run remembered \"<where>\")") else "") + "\n\n"
+                Turns.bumpTurn(session)
                 return NativeOffloadResult(0, head + AgentGuide.guide())
             }
             "remembered" -> {
                 val where = argv.drop(1).joinToString(" ").trim()
                 if (where.isEmpty()) return NativeOffloadResult(2, tr("用法：vscreen remembered \"<你把说明存在了哪里>\"（例如：长期记忆 / skills/agent-vscreen）\n", "Usage: vscreen remembered \"<where you saved the note>\" (e.g. long-term memory / skills/agent-vscreen)\n"))
                 AgentLedger.remembered(where)
+                Turns.bumpTurn(session)
                 return NativeOffloadResult(0, tr("已记录（版本 ${com.kilon.agentvscreen.BuildConfig.VERSION_NAME}）：你说把 Agent-VScreen 的说明存在了「${where.take(80)}」。App 首页会显示给用户。以后的新对话里，要操作手机应用时用 vscreen（不知道怎么用就先 vscreen guide）。\n", "Recorded: you saved the Agent-VScreen note in \"${where.take(80)}\". The app shows this to the user. In future conversations, use vscreen to operate apps on the phone (run vscreen guide first if unsure how).\n"))
             }
         }
@@ -890,6 +892,7 @@ class ApiServer(private val ctx: Context) {
             .put("images", JSONArray(shots.map { n -> JSONObject().put("name", n).put("full_url", shotUrl(n, r, v2))
                 .put("url", if (cli || !v2) shotUrl(n, r, v2) else shotUrl(ImagePolicy.sendName(ctx, res, n), r, v2)) }))
             .put("meter", meter.json())
+            .put("returned_at", res.data?.optLong("returned_at")?.takeIf { it > 0L } ?: System.currentTimeMillis())
         if (v2) {
             o.put("next", com.kilon.agentvscreen.cmd.Codes.next(code).takeIf { exit != 0 } ?: "none")
             requestId?.let { o.put("request_id", it) }

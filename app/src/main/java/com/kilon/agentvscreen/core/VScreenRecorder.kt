@@ -28,9 +28,10 @@ object VScreenRecorder {
     const val MAX_SIDE = 640
     private const val MIN_GAP_MS = 150L
     private const val FULL_MS = 3 * 60_000L
-    private const val KEEP_MS = 10 * 60_000L
+    const val KEEP_MS = 10 * 60_000L
     private const val OFF_KEEP_MS = 15_000L
     private const val MAX_BYTES = 60L * 1024 * 1024
+    private const val STRICT_START_GRACE_MS = 1_500L
 
     class Frame(val atMs: Long, val file: File, val bytes: Long)
 
@@ -74,19 +75,32 @@ object VScreenRecorder {
 
     /** A frame the perception service just looked at; stored only when it is new. Never throws. */
     fun offer(d: VScreenDisplay, frame: Bitmap, version: Long, pkg: String?) {
+        offerInternal(d, frame, version, pkg, respectGap = true)
+    }
+
+    /** 2.0.0-beta3: ensure the current frame is recorded on the track immediately (bypasses MIN_GAP_MS) and return it. */
+    fun offerFresh(d: VScreenDisplay, frame: Bitmap, version: Long, pkg: String?): Frame? {
+        offerInternal(d, frame, version, pkg, respectGap = false)
+        return existing(d.displayId)?.let { t -> synchronized(t) { t.frames.lastOrNull() } }
+    }
+
+    private fun offerInternal(d: VScreenDisplay, frame: Bitmap, version: Long, pkg: String?, respectGap: Boolean) {
         runCatching {
             val t = track(d) ?: return
             val now = System.currentTimeMillis()
-            if (version == t.lastVersion || now - t.lastAt < MIN_GAP_MS) return
-            t.lastVersion = version; t.lastAt = now
+            val skip = synchronized(t) {
+                t.closed || (version == t.lastVersion && t.frames.isNotEmpty()) || (respectGap && now - t.lastAt < MIN_GAP_MS)
+            }
+            if (skip) return
             t.on = enabledFor(pkg)
             val k = MAX_SIDE.toDouble() / maxOf(frame.width, frame.height)
             val small = if (k >= 1.0) frame else Bitmap.createScaledBitmap(frame, maxOf(1, (frame.width * k).roundToInt()), maxOf(1, (frame.height * k).roundToInt()), true)
-            val f = File(t.dir, "$now.jpg")
+            val f = File(t.dir, "${now}_${version}.jpg")
             try { Pictures.write(small, f, Pictures.Use.RECORDING, fit = false) }
             finally { if (small !== frame) small.recycle() }
             synchronized(t) {
                 if (t.closed) { f.delete(); return }
+                t.lastVersion = version; t.lastAt = now
                 t.frames.addLast(Frame(now, f, f.length())); t.bytes += f.length()
                 prune(t, now)
             }
@@ -135,6 +149,23 @@ object VScreenRecorder {
     /** The frame showing at [atMs]: the last one taken at or before it (the picture does not change between frames). */
     fun frameAt(displayId: Int, atMs: Long): Frame? = existing(displayId)?.let { t ->
         synchronized(t) { t.frames.lastOrNull { it.atMs <= atMs } ?: t.frames.firstOrNull() }
+    }
+
+    /**
+     * 2.0.0-beta3 (3.2): strict frame lookup for BEFORE / AFTER comparisons.
+     * Returns null when [atMs] is missing or older than [KEEP_MS] (or already pruned from the track),
+     * so callers treat uncertain/missing history as changed.
+     */
+    fun frameAtStrict(displayId: Int, atMs: Long): Frame? = existing(displayId)?.let { t ->
+        if (atMs <= 0L) return null
+        val now = System.currentTimeMillis()
+        val keep = if (t.on) KEEP_MS else OFF_KEEP_MS
+        if (now - atMs > keep) return null
+        synchronized(t) {
+            if (t.frames.isEmpty()) return null
+            t.frames.lastOrNull { it.atMs <= atMs }
+                ?: t.frames.first().takeIf { it.atMs - atMs <= STRICT_START_GRACE_MS }
+        }
     }
 
     fun marks(displayId: Int, fromMs: Long, toMs: Long): List<Mark> = existing(displayId)?.let { t ->

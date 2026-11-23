@@ -360,9 +360,16 @@ internal fun lookLate(windowMs: Long, sinceDone: () -> Long, nextSame: () -> Boo
 
 /**
  * Options of one stretch. [fast]: no settling wait between actions (the last step still waits). [bare]: the app's
- * before / after steps are skipped.
+ * before / after steps are skipped. [skipLookSettle]: skip the 3s look settle when replaying `act --full`.
  */
-internal class SegmentOpts(val stop: List<Cond>, val watchMs: Long?, val bare: Boolean, val fast: Boolean, val human: Boolean = false)
+internal class SegmentOpts(
+    val stop: List<Cond>,
+    val watchMs: Long?,
+    val bare: Boolean,
+    val fast: Boolean,
+    val human: Boolean = false,
+    val skipLookSettle: Boolean = false,
+)
 
 /** A step that was not done, and why (it ends the stretch; the reason goes to the notes). */
 internal class StepRefused(val code: String, message: String) : Exception(message)
@@ -371,8 +378,19 @@ internal class StepRefused(val code: String, message: String) : Exception(messag
  * What a stretch did. [outcome]: done | stopped (a stop condition fired) | missed (a step was done but what it expected
  * never came) | refused (a step was not done) | interrupted (takeover, stop, lost connection, cancelled).
  */
-internal class SegmentOut(val lines: List<String>, val steps: List<StepOut>, val notes: Notes, val actionMs: Long, val start: Long,
-                          val outcome: String, val stoppedAt: String?)
+internal class SegmentOut(
+    val lines: List<String>,
+    val steps: List<StepOut>,
+    val notes: Notes,
+    val actionMs: Long,
+    val start: Long,
+    val outcome: String,
+    val stoppedAt: String?,
+    val startPkg: String? = null,
+    val firstActionMask: Mask? = null,
+    val beforeChanged: Boolean = false,
+    val afterBaseFrame: VScreenRecorder.Frame? = null,
+)
 
 private fun s1(ms: Long) = "${(ms / 100) / 10.0}s"
 
@@ -386,7 +404,13 @@ private const val MAX_RUN = 300
 private val INTERRUPTS = setOf("APP_WITH_USER", "USER_TAKEOVER", "USER_STOPPED", "CONTROL_CHANGED", "DISABLED", "CONNECTION_LOST", "CANCELLED", "NOT_CONNECTED", "BUSY", "NO_SCREEN")
 
 /** Run a stretch of [steps] on the session's screen. Never throws for a step: a failed step ends the stretch and is said. */
-internal fun VScreenOffloadHandler.runSegment(sid: String, d: VScreenDisplay, steps: List<Step>, o: SegmentOpts): SegmentOut {
+internal fun VScreenOffloadHandler.runSegment(
+    sid: String,
+    d: VScreenDisplay,
+    steps: List<Step>,
+    o: SegmentOpts,
+    prevReturnAt: Long? = null,
+): SegmentOut {
     val start = System.currentTimeMillis()
     val t0 = SystemClock.elapsedRealtime()
     val lines = ArrayList<String>()
@@ -397,6 +421,27 @@ internal fun VScreenOffloadHandler.runSegment(sid: String, d: VScreenDisplay, st
     BackgroundOperation.takeWakeNote(d.displayId)?.let { notes.add("SCREEN_RESUMED", it) }
     VScreenAwake.kick("act")
     VScreenPerception.ensure(d)
+    val startPkg = runCatching { VScreenShell.topPackage(d.displayId) }.getOrNull()
+    var beforeCaptured = false
+    var firstActionMask: Mask? = null
+    var beforeChanged = false
+    fun captureBeforeIfNeeded() {
+        if (beforeCaptured) return
+        beforeCaptured = true
+        firstActionMask = VScreenPerception.mask(d.displayId)
+        val baseFrame = prevReturnAt?.let { VScreenRecorder.frameAtStrict(d.displayId, it) }
+        val preFrame = d.latestWithVersion()?.let { (bmp, ver) ->
+            VScreenRecorder.offerFresh(d, bmp, ver, startPkg)
+        } ?: VScreenRecorder.frameAt(d.displayId, System.currentTimeMillis())
+        val baseBmp = baseFrame?.let { VScreenRecorder.decode(it) }
+        val preBmp = preFrame?.let { VScreenRecorder.decode(it) }
+        beforeChanged = try {
+            Loud.compareWithMask(baseBmp, preBmp, firstActionMask)
+        } finally {
+            baseBmp?.recycle()
+            preBmp?.recycle()
+        }
+    }
     val app = workApp(sid, d)
     val prof = if (o.bare) emptyMap() else app?.let { VScreenMap.profile(it) }.orEmpty()
     muteNote(d)?.let { notes += it }
@@ -545,10 +590,17 @@ internal fun VScreenOffloadHandler.runSegment(sid: String, d: VScreenDisplay, st
                 if (stoppedBy != null || missed != null || outcome != "done") return
                 val conds = step.until ?: continue
                 val w = check(conds, step.untilMs ?: Steps.CHECK_DEFAULT_MS, label, step.raw) ?: return
-                if (w.met != null) { put(StepOut(label, step.raw, "done", tr("$label 第 $k 次后等到 ${w.met}", "$label got ${w.met} after round $k"))); return }
+                if (w.met != null) {
+                    put(StepOut(label, step.raw, "done", tr("$label 第 $k 次后等到 ${w.met}", "$label got ${w.met} after round $k")).also {
+                        it.waitedFor = want; it.waitMs = w.ms; it.waitMet = true
+                    })
+                    return
+                }
             }
             if (want != null) {
-                val so = put(StepOut(label, step.raw, "missed", tr("$label repeat 做了 ${step.times} 次，没等到 $want", "$label repeat ran ${step.times} times, $want never came")).also { it.code = "STEP_MISSED" })
+                val so = put(StepOut(label, step.raw, "missed", tr("$label repeat 做了 ${step.times} 次，没等到 $want", "$label repeat ran ${step.times} times, $want never came")).also {
+                    it.code = "STEP_MISSED"; it.waitedFor = want; it.waitMet = false
+                })
                 missed = tr("第 $label 步 repeat 做了 ${step.times} 次，没等到 $want。", "Step $label repeat ran ${step.times} times and $want never came. ") + screenNow()
                 so.waitedFor = want
             }
@@ -582,6 +634,7 @@ internal fun VScreenOffloadHandler.runSegment(sid: String, d: VScreenDisplay, st
             return
         }
         // An action.
+        captureBeforeIfNeeded()
         stop?.poll()?.let { stoppedBy = it; stoppedAt = label; put(StepOut(label, step.raw, "stopped", tr("$label 没做（${step.raw}）：停止条件 $it 已经满足", "$label not done (${step.raw}): stop condition $it already met"))); return }
         val conds = step.until ?: if (quick) null else listOf(Cond("stable", CondKind.STABLE))
         val probe = conds?.let { Probe(this, d, it, afterAction = true) }
@@ -599,7 +652,11 @@ internal fun VScreenOffloadHandler.runSegment(sid: String, d: VScreenDisplay, st
             // 1.4.0-beta14 (test K6: tap a web box; key ctrl+a; type → the box was not found and the words were lost):
             // an editing key keeps focus where the tap put it, so the tapped point still names the box typed into.
             lastTap = if (step.kind == StepKind.TAP || step.kind == StepKind.PRESS) ctxAct.point else if (step.kind == StepKind.TYPE || editKey) lastTap else null
-            val so = StepOut(label, step.raw, "done", "").also { it.fact = fact; it.point = ctxAct.point.takeIf { step.kind == StepKind.TAP || step.kind == StepKind.PRESS } }
+            val so = StepOut(label, step.raw, "done", "").also {
+                it.fact = fact
+                it.point = ctxAct.point.takeIf { step.kind == StepKind.TAP || step.kind == StepKind.PRESS }
+                it.typeVerified = done1.typeVerified
+            }
             val maxMs = step.untilMs ?: if (step.until != null) Steps.UNTIL_DEFAULT_MS else 3_000L
             if (done1.miss != null) {
                 so.status = "missed"; so.code = done1.code ?: "STEP_MISSED"; so.text = "$label ${step.raw} → $fact"
@@ -689,7 +746,7 @@ internal fun VScreenOffloadHandler.runSegment(sid: String, d: VScreenDisplay, st
         } catch (e: StepRefused) {
             fail(e.code, e.message ?: e.code, (outs.count { it.status != "skipped" && !it.n.contains(' ') } + 1).toString())
         }
-        if (steps.isEmpty() && !o.fast && stoppedBy == null && outcome == "done") {
+        if (steps.isEmpty() && !o.skipLookSettle && !o.fast && stoppedBy == null && outcome == "done") {
             val p = Probe(this, d, listOf(Cond("stable", CondKind.STABLE)), look = true)
             try {
                 val w = waitOn(d, p, 3_000L, stop)
@@ -741,7 +798,23 @@ internal fun VScreenOffloadHandler.runSegment(sid: String, d: VScreenDisplay, st
     muteNote(d)?.let { notes += it }
     val top = runCatching { VScreenShell.topPackage(d.displayId) }.getOrNull()
     if (app != null && top != null && top != app && top != context.packageName) notes += tr("副屏前台现在是 $top，不是你打开的 $app", "The front app on the screen is now $top, not $app that you opened")
-    return SegmentOut(lines, outs.filter { it.status != "refused" || it.code != null }, notes, SystemClock.elapsedRealtime() - t0, start, outcome, stoppedAt)
+    if (!beforeCaptured) captureBeforeIfNeeded()
+    val afterBaseFrame = d.latestWithVersion()?.let { (bmp, ver) ->
+        VScreenRecorder.offerFresh(d, bmp, ver, top ?: startPkg)
+    } ?: VScreenRecorder.frameAt(d.displayId, System.currentTimeMillis())
+    return SegmentOut(
+        lines = lines,
+        steps = outs.filter { it.status != "refused" || it.code != null },
+        notes = notes,
+        actionMs = SystemClock.elapsedRealtime() - t0,
+        start = start,
+        outcome = outcome,
+        stoppedAt = stoppedAt,
+        startPkg = startPkg,
+        firstActionMask = firstActionMask,
+        beforeChanged = beforeChanged,
+        afterBaseFrame = afterBaseFrame,
+    )
 }
 
 /** Per stretch: where the last tap went, the focus before it, and when the session last acted (for the #N freshness check). */
@@ -961,7 +1034,7 @@ internal fun connectionLost(d: VScreenDisplay): String? {
 }
 
 /** What one action did ([text]), and [miss] when its own effect could not be confirmed (it ends the stretch; [code] says which kind). */
-internal class Done(val text: String, val miss: String? = null, val code: String? = null)
+internal class Done(val text: String, val miss: String? = null, val code: String? = null, val typeVerified: Boolean = false)
 
 /** Do one action and say what was done (facts: where, with which method). */
 private fun VScreenOffloadHandler.doAction(sid: String, d: VScreenDisplay, step: Step, ctx: ActCtx, tappedAt: Pair<Int, Int>? = null): Done {
@@ -969,6 +1042,7 @@ private fun VScreenOffloadHandler.doAction(sid: String, d: VScreenDisplay, step:
     ctx.point = null
     var miss: String? = null
     var missCode: String? = null
+    var typeVerified = false
     val pts = ArrayList<IntArray>()
     val hu = ctx.human
     // 1.3.0-beta19: a person does not act the instant they decide: a short, uneven pause first.
@@ -1090,7 +1164,10 @@ private fun VScreenOffloadHandler.doAction(sid: String, d: VScreenDisplay, step:
                         miss = tr("输入框$where 现在是“${f.field.take(60)}”，不含你输入的字（这个框可能不收这种输入，或焦点在别处）", "The input box$where now reads \"${f.field.take(60)}\" without your text (this box may not accept this kind of input, or focus is elsewhere)")
                         tr("按 ${f.method} 发了 ${step.text.length} 个字；输入框$where 现在是“${f.field.take(60)}”，不含你输入的字", "sent ${step.text.length} characters by ${f.method}; the input box$where now reads \"${f.field.take(60)}\" without your text")
                     }
-                    else -> tr("输入 ${step.text.length} 个字（${f.method}）；输入框$where 现在是“${f.field.take(60)}”", "typed ${step.text.length} characters (${f.method}); the input box$where now reads \"${f.field.take(60)}\"")
+                    else -> {
+                        typeVerified = true
+                        tr("输入 ${step.text.length} 个字（${f.method}）；输入框$where 现在是“${f.field.take(60)}”", "typed ${step.text.length} characters (${f.method}); the input box$where now reads \"${f.field.take(60)}\"")
+                    }
                 }
             }
             StepKind.KEY -> {
@@ -1102,7 +1179,7 @@ private fun VScreenOffloadHandler.doAction(sid: String, d: VScreenDisplay, step:
     }
     ctx.acted = true
     if (pts.isNotEmpty()) BackgroundOperation.actionLog(sid, 1).lastOrNull()?.trackN?.let { VScreenRecorder.setPoints(d.displayId, it, pts) }
-    return Done(fact, miss, missCode)
+    return Done(fact, miss, missCode, typeVerified)
 }
 
 private fun bounds(d: VScreenDisplay, pts: List<Pair<Int, Int>>) {
@@ -1171,11 +1248,12 @@ internal fun VScreenOffloadHandler.mainCheckLines(w: MainWatch, sid: String? = n
 
 // ── the command ──────────────────────────────────────────────────────
 
-/** `act ["<steps>"] [--stop C] [--watch T] [--fast] [--bare] [--keep notify|wake] [--for T] [--save NAME]` */
+/** `act ["<steps>"] [--stop C] [--watch T] [--fast] [--bare] [--full] [--keep notify|wake] [--for T] [--save NAME]` */
 internal fun VScreenOffloadHandler.act(sid: String?, args: OffloadArgs): NativeOffloadResult {
     val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
     val body = args.positional.joinToString(" ").trim()
     val steps = if (body.isEmpty()) emptyList() else Steps.parseAll(body)
+    val fullFlag = args.hasFlag("full")
     val stop = args.get("stop")?.let { Steps.conds(it) }.orEmpty()
     val keep = args.get("keep")?.lowercase()?.also {
         if (it !in setOf("notify", "wake")) throw ActionError("INVALID_ARGS", tr("--keep notify（通知用户）或 --keep wake（发事件给调用方，用 events 取）", "--keep notify (notifies the user) or --keep wake (sends an event to the caller, collect with events)"))
@@ -1193,8 +1271,26 @@ internal fun VScreenOffloadHandler.act(sid: String?, args: OffloadArgs): NativeO
         val nm = Steps.tokens(st.raw).getOrNull(1)
         if (nm != null && workApp(s, d)?.let { VScreenMap.segment(it, nm) }?.start != null) BackgroundOperation.acknowledgeReread(s)
     }
-    val out = runSegment(s, d, steps, SegmentOpts(stop, watch, bare = args.hasFlag("bare", "paused"), fast = args.hasFlag("fast"), human = args.hasFlag("human")))
+    // 3.12: read lastReturn[sid] BEFORE fourBlocks overwrites it.
+    val prevReturnAt = synchronized(VScreenOffloadHandler.lastReturn) { VScreenOffloadHandler.lastReturn[s] }
+    // 3.11: `act --full` with no steps replays the last act window without re-running steps.
+    val replayWindow = if (fullFlag && steps.isEmpty() && watch == null) Loud.lastActWindow(s) else null
+    val out = runSegment(
+        s, d, steps,
+        SegmentOpts(
+            stop = stop,
+            watchMs = watch,
+            bare = args.hasFlag("bare", "paused"),
+            fast = args.hasFlag("fast"),
+            human = args.hasFlag("human"),
+            skipLookSettle = replayWindow != null,
+        ),
+        prevReturnAt = prevReturnAt,
+    )
     val lines = ArrayList(out.lines)
+    if (replayWindow != null) {
+        lines += tr("按 --full 补看上一段完整回复（未重新执行步骤）", "Full replay of the last stretch (--full; no steps re-run)")
+    }
     if (args.hasFlag("confirmed")) out.notes += tr("--confirmed 已不起作用：付费和不可撤销的步骤由用户在手机上确认", "--confirmed no longer has any effect: payment and irreversible steps are confirmed by the user on the phone")
     if (steps.isNotEmpty() && body.isNotEmpty() && out.outcome == "done") args.get("save")?.let { name ->
         val app = workApp(s, d) ?: throw ActionError("NO_APP", tr("副屏上没有应用，段存不到哪里", "No app on the screen, so there's nowhere to save the segment"))
@@ -1206,7 +1302,50 @@ internal fun VScreenOffloadHandler.act(sid: String?, args: OffloadArgs): NativeO
     // The user's "blocked" apps are never read or shown, whichever way the stretch got there.
     val pkgNow = runCatching { VScreenShell.topPackage(d.displayId) }.getOrNull()
     if (pkgNow != null && com.kilon.agentvscreen.core.Guard.check(com.kilon.agentvscreen.core.Guard.Act.READ, pkgNow) is com.kilon.agentvscreen.core.Guard.Verdict.Deny) return blockedBlocks(lines, out.notes, pkgNow)
-    return fourBlocks(s, d, lines, out.notes, out.start, out.actionMs, "act", fullList = steps.isEmpty(), steps = out.steps, outcome = out.outcome, stoppedAt = out.stoppedAt)
+
+    val workAppNow = workApp(s, d)
+    val resolveUse: (Step) -> List<Step>? = { st ->
+        val nm0 = st.text
+        var seg = if (nm0 != null) workAppNow?.let { VScreenMap.segment(it, nm0) } else null
+        if (seg == null) {
+            val nm = Steps.tokens(st.raw).getOrNull(1)
+            if (nm != null) seg = workAppNow?.let { VScreenMap.segment(it, nm) }
+        }
+        seg?.let { runCatching { Steps.parseAll(it.steps) }.getOrNull() }
+    }
+    val verifiedTypes = out.steps.filter { it.typeVerified }.map { it.n }.toSet()
+    val firstNoExpect = Loud.firstUnexpectedStep(steps, verifiedTypes, resolveUse)
+    val hasAppUntil = Loud.hasAppUntil(steps, resolveUse)
+    val agentId = Call.current()?.tokenId ?: com.kilon.agentvscreen.api.Agents.ofSession(s)
+    val replyModeFull = com.kilon.agentvscreen.api.AgentLedger.replyMode(agentId) == com.kilon.agentvscreen.api.AgentLedger.REPLY_FULL
+    val explicitForced = fullFlag || steps.isEmpty() || replyModeFull
+    val (escalated, explainEsc) = if (!explicitForced) Loud.consumeEscalation(s) else (false to false)
+    if (explainEsc) {
+        out.notes += tr(
+            "最近 ${Loud.ESCALATE_WINDOW} 条短回复里补看了 ${Loud.ESCALATE_THRESHOLD} 次以上，本会话接下来 ${Loud.ESCALATE_TURNS} 轮自动出完整回复",
+            "Refetched ${Loud.ESCALATE_THRESHOLD}+ times in the last ${Loud.ESCALATE_WINDOW} quiet replies; the next ${Loud.ESCALATE_TURNS} turns automatically return full replies",
+        )
+    }
+    val loudCtx = ActLoudCtx(
+        stepsWritten = steps,
+        firstNoExpectStep = firstNoExpect,
+        hasAppUntil = hasAppUntil,
+        startPkg = out.startPkg,
+        firstActionMask = out.firstActionMask,
+        beforeChanged = out.beforeChanged,
+        afterBaseFrame = out.afterBaseFrame,
+        forced = explicitForced || escalated,
+        replayWindow = replayWindow,
+        prevReturnAt = prevReturnAt,
+    )
+    return fourBlocks(
+        s, d, lines, out.notes, out.start, out.actionMs, "act",
+        fullList = steps.isEmpty(),
+        steps = out.steps,
+        outcome = out.outcome,
+        stoppedAt = out.stoppedAt,
+        actLoud = loudCtx,
+    )
 }
 
 /** The now block of an app the user blocked: nothing of it is read or shown. */

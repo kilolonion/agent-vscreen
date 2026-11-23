@@ -54,9 +54,15 @@ internal object VScreenOptions {
             val key = if (t.startsWith("--") && t.length > 2) t.substring(2).substringBefore('=') else null
             if (key == null || !isDurationOption(sub, key)) { out += t; i++; continue }
             if ('=' in t) { out += "--$key=" + ms(key, t.substringAfter('=')); i++; continue }
-            out += t
             val next = rest.getOrNull(i + 1)
-            if (next == null || next.startsWith("--")) i++ else { out += ms(key, next).toString(); i += 2 }
+            if (next == null || next.startsWith("--")) {
+                if (sub == "look" && key == "last") out += "--last=window" else out += t
+                i++
+            } else {
+                out += t
+                out += ms(key, next).toString()
+                i += 2
+            }
         }
         return out
     }

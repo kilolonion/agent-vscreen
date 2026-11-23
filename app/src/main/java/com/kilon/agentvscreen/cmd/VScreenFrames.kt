@@ -162,8 +162,9 @@ internal fun VScreenOffloadHandler.framesCmd(sid: String?, args: OffloadArgs): N
     val count = bounded("count", args.getInt("count") ?: 12, 1, 96)
     val every = args.get("every")?.let { parseDuration(it, 0L).coerceAtLeast(100L) }
     val win = synchronized(lastWindows) { lastWindows[s] }
+    val lastArg = args.get("last")
     val (from, to, said) = when {
-        args.get("last") != null -> parseDuration(args.get("last"), 30_000L).let { ms -> Triple(now - ms, now, tr("最近 ${spoken(ms)}", "the last ${spokenEn(ms)}")) }
+        lastArg != null && lastArg != "window" -> parseDuration(lastArg, 30_000L).let { ms -> Triple(now - ms, now, tr("最近 ${spoken(ms)}", "the last ${spokenEn(ms)}")) }
         args.get("from") != null -> Triple(at(args.get("from")!!, "from"), args.get("to")?.let { at(it, "to") } ?: now, tr("指定的时间段", "the stretch asked for"))
         win != null -> Triple(win[0], win[1], tr("上一次返回的【这段时间】", "the [Meanwhile] of the last reply"))
         else -> Triple(now - 30_000L, now, tr("最近 30 秒（还没有上一次返回）", "the last 30 s (no earlier reply yet)"))

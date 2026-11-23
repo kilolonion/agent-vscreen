@@ -67,6 +67,22 @@ internal fun noteLines(pkg: String, verNow: String? = null): List<String> {
  */
 internal fun VScreenOffloadHandler.noteCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {
     val p = args.positional
+    if (p.firstOrNull()?.lowercase() == "reply") {
+        val me = Call.current()?.tokenId ?: com.kilon.agentvscreen.api.Agents.ofSession(sid ?: VScreenOffloadHandler.DEFAULT_SESSION)
+        val mode = when (p.getOrNull(1)?.lowercase()) {
+            "quiet", "短" -> com.kilon.agentvscreen.api.AgentLedger.REPLY_QUIET
+            "full", "完整" -> com.kilon.agentvscreen.api.AgentLedger.REPLY_FULL
+            else -> throw ActionError("INVALID_ARGS", tr("note reply quiet|full", "note reply quiet|full"))
+        }
+        com.kilon.agentvscreen.api.AgentLedger.setReplyMode(me, mode)
+        val replyMsg = if (mode == com.kilon.agentvscreen.api.AgentLedger.REPLY_FULL)
+            tr("已设为默认完整回复（full）：之后每条 act 都返回完整四段（note reply quiet 改回短回复）",
+                "Default reply mode set to full: every act now returns the full four blocks (note reply quiet switches back to short replies)")
+        else
+            tr("已设为默认短回复（quiet）：符合预期的 act 只回一小段，有意外仍回完整四段（单次要完整加 act --full）",
+                "Default reply mode set to quiet: expected act calls return a short reply, unexpected ones still return full four blocks (for one full reply use act --full)")
+        return NativeOffloadResult(0, replyMsg + "\n", "OK", org.json.JSONObject().put("reply_mode", mode))
+    }
     val pkg = noteApp(sid)
     val ver = appVersion(pkg)
     val first = p.firstOrNull()?.lowercase()?.let { VScreenMap.LEGACY_KEYS[it] ?: it }

@@ -92,6 +92,8 @@ class StepOut(val n: String, val step: String, var status: String, var text: Str
     var point: Pair<Int, Int>? = null
     /** false = the picture did not visibly change after this action. */
     var changed: Boolean? = null
+    /** 2.0.0-beta3 (3.2): true when a `type` step confirmed its text landed in the input box. */
+    var typeVerified: Boolean = false
     fun json(): org.json.JSONObject = org.json.JSONObject().put("n", n).put("step", step).put("status", status)
         .also { o ->
             fact?.let { o.put("fact", it) }; code?.let { o.put("code", it) }

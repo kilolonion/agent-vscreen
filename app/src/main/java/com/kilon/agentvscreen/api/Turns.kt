@@ -22,11 +22,26 @@ object Turns {
     private val enders = HashMap<String, Runnable>()
     private val quietSince = HashMap<String, Long>()
     private val doneAsked = HashSet<String>()
+    private val turns = HashMap<String, Int>()
 
     init {
         BackgroundOperation.describeOwner = { sid -> describe(sid) }
         BackgroundOperation.ownerFreesInMs = { sid -> leftMs(sid) }
     }
+
+    /** 2.0.0-beta3 (3.8): completed command turns in [sid] so far. */
+    fun turnOf(sid: String): Int = synchronized(this) { turns[sid] ?: 0 }
+
+    /** Increment and return the turn count for [sid] when a command returns. */
+    fun bumpTurn(sid: String): Int = synchronized(this) {
+        val next = (turns[sid] ?: 0) + 1
+        turns[sid] = next
+        next
+    }
+
+    fun resetTurn(sid: String) { synchronized(this) { turns.remove(sid) } }
+
+    internal fun resetTurnsForTest() { synchronized(this) { turns.clear() } }
 
     fun begin(sid: String) {
         val start = synchronized(this) {
@@ -65,7 +80,10 @@ object Turns {
             if ((inFlight[sid] ?: 0) > 0) return
             active.remove(sid)
             quietSince.remove(sid)
+            turns.remove(sid)
         }
+        com.kilon.agentvscreen.cmd.PageBook.clear(sid)
+        com.kilon.agentvscreen.cmd.Loud.clear(sid)
         BackgroundOperation.onTaskFinished(sid)
     }
 

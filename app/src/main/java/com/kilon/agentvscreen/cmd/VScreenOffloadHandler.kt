@@ -77,12 +77,14 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         init { BackgroundOperation.onScreenReleased { forgetDisplay(it) } }
     }
 
-    /** `help [command|all|codes]`. */
+    /** `help [command|topic|all|codes]`. */
     internal fun helpFor(cmd: String?): String = when (cmd) {
         null -> CommandSpec.quickHelp()
         "all" -> CommandSpec.fullHelp()
         "codes" -> Codes.help()
-        else -> CommandSpec.helpFor(cmd) ?: (tr("没有叫 $cmd 的命令。", "There is no command called $cmd.") + "\n\n" + CommandSpec.quickHelp())
+        else -> com.kilon.agentvscreen.api.AgentGuide.topic(cmd)
+            ?: CommandSpec.helpFor(cmd)
+            ?: (tr("没有叫 $cmd 的命令。", "There is no command called $cmd.") + "\n\n" + CommandSpec.quickHelp())
     }
 
     /** Nothing a command does may take the app down: any throwable becomes an error result. Every call is audited. */
@@ -96,10 +98,12 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
             err("INTERNAL_ERROR", run { val why = "${t.javaClass.simpleName}: ${(t.cause?.message ?: t.message ?: "").take(300)}"; tr("工具内部错误（$why），命令没有执行完。vscreen diag 能导出诊断，交给开发者", "Internal tool error ($why); the command did not finish. vscreen diag exports a diagnostic bundle for the developer") })
         }
         val argv = request.argv.drop(1)
+        val sid = request.sessionId?.takeIf { it.isNotBlank() } ?: DEFAULT_SESSION
+        if (argv.firstOrNull() != "release") com.kilon.agentvscreen.api.Turns.bumpTurn(sid)
         if (argv.firstOrNull() !in setOf(null, "help", "--help", "-h"))
-            com.kilon.agentvscreen.host.quiet("audit") { Audit.command(call?.tokenName ?: "main", call?.peer, request.sessionId ?: DEFAULT_SESSION, argv, r.codeOrDefault, r.exitCode, android.os.SystemClock.elapsedRealtime() - t0, call?.requestId) }
+            com.kilon.agentvscreen.host.quiet("audit") { Audit.command(call?.tokenName ?: "main", call?.peer, sid, argv, r.codeOrDefault, r.exitCode, android.os.SystemClock.elapsedRealtime() - t0, call?.requestId) }
         if (argv.firstOrNull() !in setOf(null, "help", "--help", "-h"))
-            com.kilon.agentvscreen.host.quiet("tasklog") { com.kilon.agentvscreen.core.TaskLog.onCommand(request.sessionId ?: DEFAULT_SESSION, call?.tokenName ?: "main", argv, r.codeOrDefault, r.exitCode, android.os.SystemClock.elapsedRealtime() - t0, r.output, r) }
+            com.kilon.agentvscreen.host.quiet("tasklog") { com.kilon.agentvscreen.core.TaskLog.onCommand(sid, call?.tokenName ?: "main", argv, r.codeOrDefault, r.exitCode, android.os.SystemClock.elapsedRealtime() - t0, r.output, r) }
         return r
     }
 
@@ -219,33 +223,42 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         com.kilon.agentvscreen.core.Guard.require(com.kilon.agentvscreen.core.Guard.Act.READ, com.kilon.agentvscreen.core.VScreenShell.topPackage(id))
     }
 
-    internal fun dispatch(sub: String, args: OffloadArgs, sid: String?): NativeOffloadResult = when (sub) {
-        "launch" -> launchCmd(sid, args)
-        "act" -> act(sid, args)
-        "note" -> noteCmd(sid, args)
-        "keep" -> keepCmd(sid, args)
-        "schedule" -> scheduleCmd(sid, args)
-        "ask" -> askCmd(sid, args)
-        "teach" -> teachCmd(sid, args)
-        "stop" -> stopCmd(sid, args)
-        "release" -> releaseCmd(sid)
-        "handoff" -> handoffCmd(sid, args)
-        "tasks" -> tasksCmd(sid)
-        "status" -> status(sid, args)
-        "apps" -> apps(args)
-        "sound" -> soundCmd(args)
-        "events" -> eventsCmd(sid, args)
-        "task" -> Tasks.command(sid ?: DEFAULT_SESSION, args)
-        "done" -> doneCmd(sid)
-        "title" -> titleCmd(sid, args)
-        "spots" -> spotsCmd(sid, args)
-        "look" -> lookCmd(sid, args)
-        "zoom" -> lookCmd(sid, args, "zoom")
-        "frames" -> lookCmd(sid, args, "frames")
-        "collect" -> collectCmd(sid, args)
-        "fix" -> fix(sid, args)
-        "diag" -> diagCmd(sid)
-        else -> unknown(sub)
+    internal fun dispatch(sub: String, args: OffloadArgs, sid: String?): NativeOffloadResult {
+        val s = sid ?: DEFAULT_SESSION
+        val isRefetch = when (sub) {
+            "act" -> args.hasFlag("full") || args.positional.joinToString(" ").trim().isEmpty()
+            "look", "zoom", "frames" -> true
+            else -> false
+        }
+        Loud.onCommand(s, sub, isRefetch)
+        return when (sub) {
+            "launch" -> launchCmd(sid, args)
+            "act" -> act(sid, args)
+            "note" -> noteCmd(sid, args)
+            "keep" -> keepCmd(sid, args)
+            "schedule" -> scheduleCmd(sid, args)
+            "ask" -> askCmd(sid, args)
+            "teach" -> teachCmd(sid, args)
+            "stop" -> stopCmd(sid, args)
+            "release" -> releaseCmd(sid)
+            "handoff" -> handoffCmd(sid, args)
+            "tasks" -> tasksCmd(sid)
+            "status" -> status(sid, args)
+            "apps" -> apps(args)
+            "sound" -> soundCmd(args)
+            "events" -> eventsCmd(sid, args)
+            "task" -> Tasks.command(s, args)
+            "done" -> doneCmd(sid)
+            "title" -> titleCmd(sid, args)
+            "spots" -> spotsCmd(sid, args)
+            "look" -> lookCmd(sid, args)
+            "zoom" -> lookCmd(sid, args, "zoom")
+            "frames" -> lookCmd(sid, args, "frames")
+            "collect" -> collectCmd(sid, args)
+            "fix" -> fix(sid, args)
+            "diag" -> diagCmd(sid)
+            else -> unknown(sub)
+        }
     }
 
     private fun unknown(sub: String): NativeOffloadResult = if (sub in setOf("resume", "continue", "screenshot", "tap", "type", "swipe", "key", "wait", "scroll"))
