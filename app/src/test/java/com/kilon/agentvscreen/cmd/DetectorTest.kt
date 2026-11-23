@@ -3,7 +3,11 @@ package com.kilon.agentvscreen.cmd
 import android.graphics.Rect
 import com.kilon.agentvscreen.core.DetectorMath
 import com.kilon.agentvscreen.core.DetectorModels
+import org.robolectric.RuntimeEnvironment
+import com.kilon.agentvscreen.core.VScreenDetector
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -80,5 +84,19 @@ class DetectorTest {
         assertTrue(runCatching { DetectorModels.parseManifest(badName, "GitHub", "https://x/") }.isFailure)
         val badSha = ok.replace("a".repeat(64), "xyz")
         assertTrue(runCatching { DetectorModels.parseManifest(badSha, "GitHub", "https://x/") }.isFailure)
+    }
+
+    @Test fun builtInModelIsDescribedAndStaysOffUntilTheLicenseNoticeIsAccepted() {
+        val ctx = RuntimeEnvironment.getApplication()
+        val m = DetectorModels.builtIn(ctx)
+        assertNotNull(m)
+        assertTrue(m!!.builtIn); assertEquals(320, m.inW); assertEquals(704, m.inH)
+        assertEquals(m.sha256, DetectorModels.installed(ctx)!!.sha256)
+        assertFalse(VScreenDetector.licenseAccepted(ctx)); assertFalse(VScreenDetector.active(ctx))
+        VScreenDetector.acceptLicense(ctx)
+        assertTrue(VScreenDetector.active(ctx))
+        val f = DetectorModels.ensureFile(ctx, m)
+        val sha = java.security.MessageDigest.getInstance("SHA-256").digest(f.readBytes()).joinToString("") { "%02x".format(it) }
+        assertEquals(m.sha256, sha)
     }
 }

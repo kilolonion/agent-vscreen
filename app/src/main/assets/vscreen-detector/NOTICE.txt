@@ -1,0 +1,10 @@
+Agent-VScreen textless-element detector (model.onnx)
+
+This one file is NOT under the app's MIT license. model.onnx is a YOLO11n detector fine-tuned from Ultralytics YOLO11
+and Microsoft OmniParser icon_detect weights, and is licensed under the GNU Affero General Public License v3.0
+(LICENSE-AGPL-3.0.txt). It is a separate work shipped alongside the app: the app only reads it at runtime as data
+through ONNX Runtime and is not compiled or linked with it.
+
+Corresponding source (training data rule, notebook, export): tools/detector in
+https://github.com/kilolonion/agent-vscreen ; released model files and manifest:
+https://github.com/kilolonion/agent-vscreen-models

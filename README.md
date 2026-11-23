@@ -163,7 +163,7 @@ Release signing is optional: copy `keystore.properties.example` to `keystore.pro
 
 ## License
 
-MIT. The bundled OCR models (`app/src/main/assets/vscreen-ocr/`) come from PaddleOCR under their own Apache-2.0 license.
+MIT. The bundled OCR models (`app/src/main/assets/vscreen-ocr/`) come from PaddleOCR under their own Apache-2.0 license. The textless-icon detector model (`app/src/main/assets/vscreen-detector/model.onnx`, and the larger optional download from [agent-vscreen-models](https://github.com/kilolonion/agent-vscreen-models)) is a separate file under AGPL-3.0 (see the NOTICE.txt beside it; training code in `tools/detector`); the app reads it only as data and asks before turning it on.
 
 ## Thanks
 
