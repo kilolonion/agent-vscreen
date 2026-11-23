@@ -78,6 +78,32 @@ object VScreenPerception {
     /** Whether new background full-screen OCR jobs are paused for [displayId]. */
     fun isOcrPaused(displayId: Int): Boolean = (ocrPaused[displayId]?.get() ?: 0) > 0
 
+    /** Whether a background full-screen OCR job is currently executing for [displayId]. */
+    fun isOcrRunning(displayId: Int): Boolean = watcher(displayId)?.ocrRunning == true
+
+    /**
+     * Wait up to [timeoutMs] for any in-flight background full-screen OCR (or PP-OCRv6 job) to finish before a
+     * latency-sensitive closed-loop gesture touches down. Returns immediately (0ms) when idle.
+     */
+    fun awaitOcrIdle(displayId: Int, timeoutMs: Long, onTick: () -> Unit = {}) {
+        if (!isOcrRunning(displayId) && !VScreenPaddleOcr.busy()) return
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (isOcrRunning(displayId) || VScreenPaddleOcr.busy()) {
+            onTick()
+            val left = deadline - SystemClock.elapsedRealtime()
+            if (left <= 0L) break
+            val w = watcher(displayId)
+            val slice = minOf(50L, left)
+            if (w != null) {
+                synchronized(w.lock) {
+                    if (w.ocrRunning || VScreenPaddleOcr.busy()) w.lock.wait(slice)
+                }
+            } else {
+                Thread.sleep(slice)
+            }
+        }
+    }
+
     /** Start (or keep alive) the watcher for [d]. Cheap to call on every command. */
     fun ensure(d: VScreenDisplay) {
         synchronized(watchers) {
@@ -354,12 +380,14 @@ object VScreenPerception {
                     val frameVer = fv.second
                     ocrPool.execute {
                         try {
+                            if (!w.running || d.released || isOcrPaused(d.displayId)) return@execute
                             val a11yPairs = runCatching {
                                 A11yTree.snapshot(d.displayId).nodes.asSequence()
                                     .filter { it.visible }
                                     .mapNotNull { n -> n.words?.take(120)?.let { it to d.toFrame(n.box) } }
                                     .take(200).toList()
                             }.getOrNull().orEmpty()
+                            if (!w.running || d.released || isOcrPaused(d.displayId)) return@execute
                             val r = runCatching { VScreenOcr.recognize(d.displayId, frameCopy, frameVer, accurate = VScreenOcr.accurateEnabled()) }.getOrNull()
                             if (r != null) { w.ocrMs = r.ms; w.ocrEngine = r.engine }
                             if (r != null && r.error == null && w.running && !d.released) {

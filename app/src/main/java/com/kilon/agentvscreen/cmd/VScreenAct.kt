@@ -77,7 +77,13 @@ internal class Probe(
         }
         return maskNow
     }
-    private var base: Bitmap? = d.latestFrame()?.let { VScreenPerception.small(it) }
+    private val needsSmall = afterAction || conds.any {
+        it.kind == CondKind.CHANGE || it.kind == CondKind.STILL || it.kind == CondKind.STABLE
+    }
+    private val colorWatches: Map<Int, VScreenDisplay.ColorWatch> = conds.withIndex()
+        .filter { it.value.kind == CondKind.COLOR }
+        .associate { (i, c) -> i to d.watchColor(c.x, c.y) }
+    private var base: Bitmap? = if (needsSmall) d.latestFrame()?.let { VScreenPerception.small(it) } else null
     private var prev: Bitmap? = null
     private val stillMs = HashMap<Int, Long>()
     /** stable: (time, share of sampled pixels that differ from the previous look) of the last looks, per condition. */
@@ -117,6 +123,7 @@ internal class Probe(
         prev?.recycle(); prev = null
         cropCache.values.forEach { it.first.recycle() }
         cropCache.clear()
+        colorWatches.values.forEach { d.unwatchColor(it) }
     }
 
     /**
@@ -236,8 +243,15 @@ internal class Probe(
         return out.distinct()
     }
 
+    /** Read live color at condition [i] from [VScreenDisplay.ColorWatch] when fresh, falling back to [full]. */
+    private fun liveColor(i: Int, c: Cond, full: Bitmap?): Int? {
+        val w = colorWatches[i]
+        if (w != null && w.sampledAtMs >= 0L && w.sampledAtMs >= d.latestCaptureAtMs) return w.color
+        return full?.takeIf { c.x in 0 until it.width && c.y in 0 until it.height }?.let { VPixels.at(it, c.x, c.y) }
+    }
+
     /** For a wait that timed out: what each condition sees now (a fact the caller can compare with what it asked). */
-    fun now(): String = (if (waitingForChange) tr("动作之后画面没有变化，应用没有反应；", "nothing on the screen changed after the action, the app did not react; ") else "") + conds.joinToString(tr("；", "; ")) { c ->
+    fun now(): String = (if (waitingForChange) tr("动作之后画面没有变化，应用没有反应；", "nothing on the screen changed after the action, the app did not react; ") else "") + conds.withIndex().joinToString(tr("；", "; ")) { (i, c) ->
         when (c.kind) {
             // 1.4.0-beta5: with an area, say whether the words are elsewhere on the screen (beta4 said "not on the
             // screen" for words that were there, only outside the area).
@@ -253,8 +267,9 @@ internal class Probe(
             CondKind.CHANGE -> tr("${where(c)}没有明显变化", "no clear change in ${where(c)}")
             CondKind.STILL -> tr("${where(c)}一直在变", "${where(c)} keeps changing")
             CondKind.STABLE -> tr("${where(c)}还在变（不是匀速的小动画）", "${where(c)} is still changing (not a steady small animation)")
-            CondKind.COLOR -> d.latestFrame()?.takeIf { c.x in 0 until it.width && c.y in 0 until it.height }
-                ?.let { tr("(${c.x},${c.y}) 现在是 ${VPixels.hex(VPixels.at(it, c.x, c.y))}", "(${c.x},${c.y}) is now ${VPixels.hex(VPixels.at(it, c.x, c.y))}") } ?: tr("读不到 (${c.x},${c.y}) 的颜色", "cannot read the color at (${c.x},${c.y})")
+            CondKind.COLOR -> liveColor(i, c, d.latestFrame())
+                ?.let { tr("(${c.x},${c.y}) 现在是 ${VPixels.hex(it)}", "(${c.x},${c.y}) is now ${VPixels.hex(it)}") }
+                ?: tr("读不到 (${c.x},${c.y}) 的颜色", "cannot read the color at (${c.x},${c.y})")
             CondKind.APP -> tr("前台是 ", "front app is ") + (appFacts().takeIf { it.isNotEmpty() }?.joinToString(" / ") ?: tr("（读不到）", "(unreadable)"))
             else -> c.raw
         }
@@ -266,8 +281,11 @@ internal class Probe(
         val dt = if (lastPoll == 0L) 0L else now - lastPoll
         lastPoll = now
         if (wantsText && !cropOnly) VScreenPerception.hurry(d.displayId)
-        val full = d.latestFrame()
-        val cur = full?.let { VScreenPerception.small(it) }
+        val needFull = needsSmall || wantsText || conds.withIndex().any { (i, c) ->
+            c.kind == CondKind.COLOR && colorWatches[i]?.let { it.sampledAtMs < 0L || it.sampledAtMs < d.latestCaptureAtMs } != false
+        }
+        val full = if (needFull) d.latestFrame() else null
+        val cur = if (needsSmall) full?.let { VScreenPerception.small(it) } else null
         try {
             if (afterAction && actionAt > 0) {
                 // Did the app react, has the change calmed down, is it a new page?
@@ -315,8 +333,7 @@ internal class Probe(
                             else -> null
                         }
                     }
-                    CondKind.COLOR -> full?.takeIf { c.x in 0 until it.width && c.y in 0 until it.height }?.let { f ->
-                        val px = VPixels.at(f, c.x, c.y)
+                    CondKind.COLOR -> liveColor(i, c, full)?.let { px ->
                         if (VPixels.dist(px, c.color) <= c.tol) tr("(${c.x},${c.y}) 是 ${VPixels.hex(px)}", "(${c.x},${c.y}) is ${VPixels.hex(px)}") else null
                     }
                     CondKind.APP -> {

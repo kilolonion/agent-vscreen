@@ -910,6 +910,23 @@ def run_gesture_stats(token, out_dir, app_version, s04_runs=40, s10_runs=20, s11
                 evs = read_avst_events("S11")
                 goal = any(e.get("ev") == "goal" and e.get("ok") is True for e in evs)
                 overloaded = any(e.get("ev") == "fail" for e in evs)
+                down_evs = [
+                    e for e in evs
+                    if e.get("ev") == "touch" and isinstance(e.get("data"), dict) and e["data"].get("a") == "down"
+                ]
+                up_evs = [
+                    e for e in evs
+                    if e.get("ev") == "touch" and isinstance(e.get("data"), dict) and e["data"].get("a") == "up"
+                ]
+                end_evs = [e for e in evs if e.get("ev") in ("goal", "fail")]
+                held_ms = None
+                end_ms = None
+                if down_evs:
+                    dt0 = int(down_evs[0].get("t") or 0)
+                    if up_evs:
+                        held_ms = int(up_evs[-1].get("t") or 0) - dt0
+                    if end_evs:
+                        end_ms = int(end_evs[0].get("t") or 0) - dt0
                 g = _extract_gesture(reply)
                 reason = "ok" if (goal and not overloaded) else ("overload" if overloaded else "early_or_missed")
                 rec = {
@@ -920,13 +937,15 @@ def run_gesture_stats(token, out_dir, app_version, s04_runs=40, s10_runs=20, s11
                     "ok": goal and not overloaded,
                     "reason": reason,
                     "code": reply.get("code"),
+                    "held_ms": held_ms,
+                    "end_ms": end_ms,
                     "poll_ms_p50": g.get("poll_ms_p50"),
                     "poll_ms_max": g.get("poll_ms_max"),
                 }
                 stats["s11"]["runs"].append(rec)
                 print(
                     f"[S11 {i + 1}/{s11_runs}] seed={seed_val} goal={goal} overload={overloaded} "
-                    f"poll={rec['poll_ms_p50']}/{rec['poll_ms_max']} code={rec['code']}",
+                    f"held_ms={held_ms} end_ms={end_ms} poll={rec['poll_ms_p50']}/{rec['poll_ms_max']} code={rec['code']}",
                     flush=True,
                 )
         finally:

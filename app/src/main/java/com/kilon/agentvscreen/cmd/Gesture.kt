@@ -49,6 +49,7 @@ internal object Gesture {
     const val HOLD_ARRIVE_FRAME_WAIT_MS = 100L
     const val SEEK_FRAME_POLL_SLICE_MS = 20L
     private const val DRAG_MARK_MARGIN_MS = 500L
+    const val OCR_IDLE_WAIT_MS = 8_000L
 
     // 4.4 & 4.8 drag GestureRecord constants (recording-frame coordinates, long side 640)
     const val PATCH = 64
@@ -100,10 +101,16 @@ internal object Gesture {
     /**
      * 4.8: Paint motion-mask rectangles to a flat color on both frames, then compare via [ScreenSig.compare]
      * together with the pixel-level `fine` measure ([Change.ratio] vs [ScreenSig.FINE_MIN]).
+     * Pixels inside [excludeRects] (the dragged object's start/end regions) are never erased by the motion mask.
      */
-    fun wholeScreenUnchanged(pre: Bitmap, after: Bitmap, mask: Mask? = null): Boolean {
+    fun wholeScreenUnchanged(
+        pre: Bitmap,
+        after: Bitmap,
+        mask: Mask? = null,
+        excludeRects: List<Rect> = emptyList(),
+    ): Boolean {
         if (pre.isRecycled || after.isRecycled || pre.width != after.width || pre.height != after.height) return false
-        val rects = mask?.rectsIn(pre.width, pre.height).orEmpty()
+        val rects = if (mask == null || mask.mostly) emptyList() else mask.rectsIn(pre.width, pre.height)
         var preWork = pre
         var afterWork = after
         var copied = false
@@ -117,6 +124,13 @@ internal object Gesture {
                 for (r in rects) {
                     cPre.drawRect(r, paint)
                     cAfter.drawRect(r, paint)
+                }
+                for (ex in excludeRects) {
+                    val clipped = Rect(ex)
+                    if (clipped.intersect(0, 0, pre.width, pre.height) && clipped.width() > 0 && clipped.height() > 0) {
+                        cPre.drawBitmap(pre, clipped, clipped, null)
+                        cAfter.drawBitmap(after, clipped, clipped, null)
+                    }
                 }
                 preWork = pCopy
                 afterWork = aCopy
@@ -302,12 +316,12 @@ internal object Gesture {
         ) {
             AFTER_UNKNOWN
         } else {
-            val wholeUnchanged = wholeScreenUnchanged(preFrame, settleFrame, mask)
             val endRect = patchRect(endF.first, endF.second, settleFrame.width, settleFrame.height, PATCH)
+            val wholeUnchanged = wholeScreenUnchanged(preFrame, settleFrame, mask, excludeRects = listOf(startRect, endRect))
             val startChanged = Change.ratio(preFrame, settleFrame, startRect) >= Change.REGION_CHANGED
             val endChanged = Change.ratio(preFrame, settleFrame, endRect) >= Change.REGION_CHANGED
             when {
-                pickedUp == true && wholeUnchanged -> AFTER_SNAPPED_BACK
+                pickedUp == true && !startChanged && wholeUnchanged -> AFTER_SNAPPED_BACK
                 startChanged && endChanged -> AFTER_STAYED
                 startChanged && !endChanged && !wholeUnchanged -> AFTER_ELSEWHERE
                 else -> AFTER_UNKNOWN
@@ -565,12 +579,10 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
     val startPt = path[0]
     val isDrag = step.kind == StepKind.DRAG
     val dragMs = (step.ms ?: Gesture.DEFAULT_DRAG_MS).toInt()
-    if (isDrag) {
-        d.latestWithVersion()?.let { (bmp, ver) -> VScreenRecorder.offerFresh(d, bmp, ver, pkg) }
+    val colorOnlyPress = !isDrag && conds.all { it.kind == CondKind.COLOR }
+    if (!colorOnlyPress) {
+        d.boost(maxMs + (if (isDrag && step.loop == Loop.HOLD) dragMs.toLong() else 0L) + Gesture.BOOST_EXTRA_MS)
     }
-    val preDownAt = System.currentTimeMillis()
-
-    d.boost(maxMs + (if (isDrag && step.loop == Loop.HOLD) dragMs.toLong() else 0L) + Gesture.BOOST_EXTRA_MS)
     VScreenPerception.setOcrPaused(d.displayId, true)
     val probe = Probe(this, d, conds, afterAction = false, cropOnly = true)
     val pollDurations = ArrayList<Long>()
@@ -585,14 +597,24 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
     var midPt = if (path.size >= 2) Gesture.pointAtHalfPath(path) else startPt
     var metFact: String? = null
     var metKind: CondKind? = null
-    val tStart = SystemClock.elapsedRealtime()
-    var downAt = System.currentTimeMillis()
+    var preDownAt = System.currentTimeMillis()
+    var tStart = SystemClock.elapsedRealtime()
+    var downAt = preDownAt
     var midAt = downAt
     var preUpAt = downAt
     var upAt = downAt
     var upElapsed = tStart
 
     try {
+        Gesture.checkLoopInterrupts(d, call)
+        VScreenPerception.awaitOcrIdle(d.displayId, Gesture.OCR_IDLE_WAIT_MS) {
+            Gesture.checkLoopInterrupts(d, call)
+        }
+        if (isDrag) {
+            d.latestWithVersion()?.let { (bmp, ver) -> VScreenRecorder.offerFresh(d, bmp, ver, pkg) }
+        }
+        preDownAt = System.currentTimeMillis()
+        tStart = SystemClock.elapsedRealtime()
         Gesture.checkLoopInterrupts(d, call)
         val down = VScreenShell.finger(d.displayId, "down", 0, startPt.first, startPt.second).first
         if (!down.ok) throw ActionError(down.code, down.message)

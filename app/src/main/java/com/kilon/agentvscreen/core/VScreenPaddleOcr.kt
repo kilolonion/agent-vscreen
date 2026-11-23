@@ -184,7 +184,8 @@ internal object VScreenPaddleOcr {
                     slot.release()
                 }
             }
-            Thread(task, "vscreen-ocr").apply { isDaemon = true }.start()
+            val callerPrio = Thread.currentThread().priority
+            Thread(task, "vscreen-ocr").apply { isDaemon = true; priority = callerPrio }.start()
         } catch (t: Throwable) {
             slot.release()
             throw t

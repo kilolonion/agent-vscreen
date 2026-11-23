@@ -497,4 +497,119 @@ class V200Beta4Test {
             assertTrue("Core guide ($lang) exceeded budget: $coreTokens", coreTokens <= AgentGuide.CORE_GUIDE_MAX_TOKENS)
         }
     }
+
+    @Test
+    fun motionMaskOverStartAndEndDoesNotMisclassifyStayedAsSnappedBack() {
+        val w = 288
+        val h = 640
+        val start = 80 to 440
+        val mid = 144 to 300
+        val end = 144 to 170
+
+        val pre = frameWithCard(cardAt = start, slotAt = end, slotGreen = false)
+        val during = frameWithCard(cardAt = mid, slotAt = end, slotGreen = false)
+        val settled = frameWithCard(cardAt = end, slotAt = end, slotGreen = true)
+
+        // Build a motion mask that covers BOTH start and end cells (as repeated S04 runs on the same display can produce).
+        val cols = 6
+        val rows = 10
+        val cells = BooleanArray(cols * rows)
+        for (cy in 1..7) for (cx in 1..4) cells[cy * cols + cx] = true
+        val mask = com.kilon.agentvscreen.core.Mask(cells, cols, rows, w, h)
+
+        try {
+            val rec = Gesture.analyzeGestureFrames(pre, listOf(during), during, settled, start, mid, end, mask = mask)
+            assertEquals(true, rec.pickedUp)
+            assertEquals(Gesture.AFTER_STAYED, rec.afterRelease)
+        } finally {
+            pre.recycle()
+            during.recycle()
+            settled.recycle()
+        }
+    }
+
+    @Test
+    fun sampleRgbaColorMatchesVPixelsAcrossAllRotationsAndRowPadding() {
+        val rawW = 24
+        val rawH = 36
+        val pixelStride = 4
+        val rowStride = (rawW + 8) * pixelStride // non-zero row padding (32 bytes/row)
+
+        val rawBmp = Bitmap.createBitmap(rawW, rawH, Bitmap.Config.ARGB_8888)
+        for (y in 0 until rawH) {
+            for (x in 0 until rawW) {
+                val r = (x * 10 + 15) and 0xFF
+                val g = (y * 6 + 20) and 0xFF
+                val b = ((x + y) * 4 + 30) and 0xFF
+                rawBmp.setPixel(x, y, Color.rgb(r, g, b))
+            }
+        }
+        val buf = java.nio.ByteBuffer.allocateDirect(rowStride * rawH)
+        for (y in 0 until rawH) {
+            for (x in 0 until rawW) {
+                val c = rawBmp.getPixel(x, y)
+                val off = y * rowStride + x * pixelStride
+                buf.put(off, Color.red(c).toByte())
+                buf.put(off + 1, Color.green(c).toByte())
+                buf.put(off + 2, Color.blue(c).toByte())
+                buf.put(off + 3, 0xFF.toByte())
+            }
+        }
+
+        try {
+            for (turn in listOf(0, 90, 180, 270)) {
+                val upright = if (turn == 0) {
+                    rawBmp.copy(Bitmap.Config.ARGB_8888, false)
+                } else {
+                    val m = android.graphics.Matrix().apply { postRotate(turn.toFloat()) }
+                    Bitmap.createBitmap(rawBmp, 0, 0, rawW, rawH, m, false)
+                }
+                try {
+                    val pts = listOf(
+                        0 to 0,
+                        upright.width - 1 to 0,
+                        0 to upright.height - 1,
+                        upright.width - 1 to upright.height - 1,
+                        upright.width / 2 to upright.height / 2,
+                        5 to 7,
+                    )
+                    for ((px, py) in pts) {
+                        val expected = com.kilon.agentvscreen.core.VPixels.at(upright, px, py, r = 2)
+                        val actual = com.kilon.agentvscreen.core.VScreenDisplay.sampleRgbaColor(
+                            buf = buf,
+                            rawW = rawW,
+                            rawH = rawH,
+                            rowStride = rowStride,
+                            pixelStride = pixelStride,
+                            turn = turn,
+                            x = px,
+                            y = py,
+                            radius = 2,
+                        )
+                        assertEquals("Mismatch at turn=$turn ($px,$py)", expected, actual)
+                    }
+                    // Out-of-bounds returns null
+                    assertNull(
+                        com.kilon.agentvscreen.core.VScreenDisplay.sampleRgbaColor(
+                            buf, rawW, rawH, rowStride, pixelStride, turn, upright.width, 0,
+                        ),
+                    )
+                } finally {
+                    upright.recycle()
+                }
+            }
+            // Buffer position must not have been mutated
+            assertEquals(0, buf.position())
+        } finally {
+            rawBmp.recycle()
+        }
+    }
+
+    @Test
+    fun awaitOcrIdleReturnsImmediatelyWhenIdle() {
+        var ticks = 0
+        VScreenPerception.awaitOcrIdle(9199, 500L) { ticks++ }
+        assertEquals(0, ticks)
+        assertFalse(VScreenPerception.isOcrRunning(9199))
+    }
 }
