@@ -161,7 +161,7 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 
 ## 许可
 
-MIT。内置的 OCR 模型（`app/src/main/assets/vscreen-ocr/`）来自 PaddleOCR，沿用它的 Apache-2.0 许可。
+MIT。内置的 OCR 模型（`app/src/main/assets/vscreen-ocr/`）来自 PaddleOCR，沿用它的 Apache-2.0 许可。无字图标识别模型（`app/src/main/assets/vscreen-detector/model.onnx`，以及可选下载的大模型，见 [agent-vscreen-models](https://github.com/kilolonion/agent-vscreen-models)）是单独的文件，采用 AGPL-3.0（见同目录 NOTICE.txt，训练代码在 `tools/detector`）；App 只把它当数据读取，开启前会先说明许可。
 
 ## 致谢
 

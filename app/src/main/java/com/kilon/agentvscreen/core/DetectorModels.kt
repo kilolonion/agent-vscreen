@@ -9,16 +9,19 @@ import java.net.URL
 import java.security.MessageDigest
 
 /**
- * [vscreen] 2.0: the separate download of the textless-element detector ([VScreenDetector]).
+ * [vscreen] 2.0: where the textless-element detector's model comes from ([VScreenDetector]).
  *
- * The weights are AGPL-3.0 and do not ship in the (MIT) APK. A release is a folder with `manifest.json` (written by
+ * The small model (student 704x320, ~5 MB) is built in as a separate file, assets/vscreen-detector/ (model.onnx,
+ * model.json, NOTICE.txt, LICENSE-AGPL-3.0.txt): those weights are AGPL-3.0, the app is MIT, and the app only reads
+ * the file as data through ONNX Runtime. Nothing runs until the user has seen the license notice
+ * ([VScreenDetector.licenseAccepted]). A larger model can be downloaded and then takes the built-in one's place;
+ * removing it falls back to the built-in model. A release is a folder with `manifest.json` (written by
  * tools/detector/train_colab.ipynb: each model's file, sha256, size, input size, threshold, license) and the model
  * files, mirrored on several hosts; the first host that answers is used, so a phone in mainland China that cannot
  * reach GitHub gets ModelScope. Every file is checked against the manifest's sha256 before it is used; a bad or
  * partial download is deleted, never loaded.
  *
- * Installed state is one small JSON next to the model (filesDir/detector/installed.json). Removing it (or the
- * model) turns the feature off; the app works the same without it.
+ * Downloaded state is one small JSON next to the model (noBackupFilesDir/detector/installed.json).
  */
 object DetectorModels {
     private const val TAG = "DetectorModels"
@@ -40,14 +43,47 @@ object DetectorModels {
     class Offer(val id: String, val file: String, val sha256: String, val bytes: Long, val inW: Int, val inH: Int,
                 val threshold: Float, val default: Boolean, val hitRate: Double?, val source: String, val base: String)
 
-    class Installed(val id: String, val file: File, val sha256: String, val inW: Int, val inH: Int, val threshold: Float, val source: String)
+    class Installed(val id: String, val file: File, val sha256: String, val inW: Int, val inH: Int, val threshold: Float, val source: String,
+                    val builtIn: Boolean = false)
+
+    const val ASSET_DIR = "vscreen-detector"
+    const val BUILT_IN = "built-in"
+    @Volatile private var builtInCache: Installed? = null
 
     @Volatile private var cache: Pair<Long, Installed?>? = null
 
     private fun dir(ctx: Context) = File(ctx.noBackupFilesDir ?: ctx.filesDir, DIR).apply { mkdirs() }
 
-    /** The installed model, or null. Cheap (cached on the state file's time). */
-    fun installed(ctx: Context): Installed? {
+    /** The model in use: a downloaded one, else the built-in one (null only if the APK has none). Cheap. */
+    fun installed(ctx: Context): Installed? = downloaded(ctx) ?: builtIn(ctx)
+
+    /**
+     * The built-in model (assets/vscreen-detector/model.json). Its file is copied out of the APK on first use
+     * ([ensureFile]); the descriptor is read without touching the 5 MB file, so this is safe on the main thread.
+     */
+    fun builtIn(ctx: Context): Installed? {
+        builtInCache?.let { return it }
+        return runCatching {
+            val o = JSONObject(ctx.assets.open("$ASSET_DIR/model.json").use { it.readBytes() }.toString(Charsets.UTF_8))
+            Installed(o.getString("id"), File(File(dir(ctx), BUILT_IN), o.getString("sha256").take(16) + ".onnx"), o.getString("sha256"),
+                o.getInt("w"), o.getInt("h"), o.getDouble("threshold").toFloat(), BUILT_IN, builtIn = true)
+        }.getOrNull()?.also { builtInCache = it }
+    }
+
+    /** Make sure [m]'s file is on disk (the built-in model is copied out of the APK once). Call off the main thread. */
+    @Synchronized
+    fun ensureFile(ctx: Context, m: Installed): File {
+        if (!m.builtIn || m.file.isFile) return m.file
+        val d = m.file.parentFile!!.apply { mkdirs() }
+        d.listFiles()?.forEach { it.delete() }   // an older app version's copy
+        val tmp = File(d, m.file.name + ".part")
+        ctx.assets.open("$ASSET_DIR/model.onnx").use { input -> tmp.outputStream().use { input.copyTo(it, 64 * 1024) } }
+        if (!tmp.renameTo(m.file)) { tmp.copyTo(m.file, overwrite = true); tmp.delete() }
+        return m.file
+    }
+
+    /** The downloaded model, or null. Cheap (cached on the state file's time). */
+    fun downloaded(ctx: Context): Installed? {
         val f = File(dir(ctx), "installed.json")
         val stamp = if (f.isFile) f.lastModified() else 0L
         cache?.let { if (it.first == stamp) return it.second }
@@ -100,16 +136,27 @@ object DetectorModels {
     }
 
     /**
-     * Download [offer], check its size and sha256, and install it (replacing any other model). [progress] gets
+     * Download [offer], check its size and sha256, and install it (replacing any other downloaded model). The host
+     * the manifest came from is tried first, then the others (a CDN may refuse a large file). [progress] gets
      * (bytes so far, total). Throws with a readable reason; nothing is installed on failure.
      */
     fun install(ctx: Context, offer: Offer, progress: (Long, Long) -> Unit = { _, _ -> }) {
+        val hosts = listOf(offer.source to offer.base) + SOURCES.filter { it.second != offer.base }
+        val errors = ArrayList<String>()
+        for ((name, base) in hosts) {
+            try { installFrom(ctx, offer, name, base, progress); return }
+            catch (t: Throwable) { errors += "$name: ${t.message ?: t.javaClass.simpleName}" }
+        }
+        error(errors.joinToString("; "))
+    }
+
+    private fun installFrom(ctx: Context, offer: Offer, source: String, base: String, progress: (Long, Long) -> Unit) {
         val d = dir(ctx)
         val tmp = File(d, offer.file + ".part")
         val md = MessageDigest.getInstance("SHA-256")
-        val c = open(offer.base + offer.file, 10_000)
+        val c = open(base + offer.file, 10_000)
         try {
-            if (c.responseCode != 200) error("HTTP ${c.responseCode} from ${offer.source}")
+            if (c.responseCode != 200) error("HTTP ${c.responseCode}")
             var got = 0L
             c.inputStream.use { input ->
                 tmp.outputStream().use { out ->
@@ -127,22 +174,23 @@ object DetectorModels {
             if (sha != offer.sha256) error("sha256 mismatch: got $sha")
             val dst = File(d, offer.file)
             if (!tmp.renameTo(dst)) { tmp.copyTo(dst, overwrite = true); tmp.delete() }
-            d.listFiles()?.forEach { if (it.name != dst.name && it.name.endsWith(".onnx")) it.delete() }
+            d.listFiles()?.forEach { if (it.isFile && it.name != dst.name && it.name.endsWith(".onnx")) it.delete() }
             val state = JSONObject().put("id", offer.id).put("file", offer.file).put("sha256", offer.sha256).put("bytes", offer.bytes)
-                .put("w", offer.inW).put("h", offer.inH).put("threshold", offer.threshold.toDouble()).put("source", offer.source)
+                .put("w", offer.inW).put("h", offer.inH).put("threshold", offer.threshold.toDouble()).put("source", source)
                 .put("license", LICENSE).put("at", System.currentTimeMillis())
             File(d, "installed.json.tmp").apply { writeText(state.toString()) }.renameTo(File(d, "installed.json"))
             cache = null
             VScreenDetector.reset(ctx)
-            AppLogger.info(TAG, "installed ${offer.id} from ${offer.source}")
+            AppLogger.info(TAG, "installed ${offer.id} from $source")
         } catch (t: Throwable) {
             tmp.delete(); throw t
         } finally { c.disconnect() }
     }
 
+    /** Remove the downloaded model; the built-in one is used again. */
     fun remove(ctx: Context) {
         VScreenDetector.close()
-        dir(ctx).listFiles()?.forEach { it.delete() }
+        dir(ctx).listFiles()?.forEach { if (it.isFile) it.delete() }
         cache = null
         VScreenDetector.reset(ctx)
     }

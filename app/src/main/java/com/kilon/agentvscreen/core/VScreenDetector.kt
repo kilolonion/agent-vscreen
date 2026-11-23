@@ -18,17 +18,18 @@ import kotlin.math.roundToInt
  * [vscreen] 2.0: the optional textless-element detector. It finds things a finger can tap that OCR cannot name
  * (icons, ×, switches, drawn buttons), so an agent gets a point for them instead of guessing coordinates.
  *
- * The model is NOT in the APK: its weights are AGPL-3.0 (trained from Ultralytics YOLO / OmniParser icon_detect,
- * tools/detector), the app is MIT. [DetectorModels] downloads it on request and checks its sha256; this object only
- * reads what is installed. Nothing installed, switched off, or failed to load = [detect] returns null and every
- * caller behaves exactly as without the feature.
+ * The weights are AGPL-3.0 (trained from Ultralytics YOLO / OmniParser icon_detect, tools/detector), the app is
+ * MIT: the small model ships as a separate file in assets/vscreen-detector/ and a larger one can be downloaded
+ * ([DetectorModels]). Nothing runs until the user has seen the model's license notice in Settings
+ * ([licenseAccepted]). Notice not accepted, switched off, or failed to load = [detect] returns null and every caller
+ * behaves exactly as without the feature.
  *
  * Model contract (tools/detector/README.md): input [1,3,H,W] float 0..1 RGB, the frame scaled to fit and anchored
  * top-left, the rest filled with 114/255; output [1,5,N] = cx, cy, w, h (input pixels), score. NMS happens here.
  *
  * A native crash inside the runtime would take the screen service down with it, so (like the OCR engines) a run is
  * marked in prefs before it starts and cleared after; a mark found on the next start means the last run died, and
- * the detector stays off until the model is installed again.
+ * the detector stays off until the user switches it on again.
  */
 object VScreenDetector {
     private const val TAG = "VScreenDetector"
@@ -36,6 +37,7 @@ object VScreenDetector {
     private const val K_ON = "on"
     private const val K_RUNNING = "running"
     private const val K_CRASHED = "crashed"
+    private const val K_LICENSE = "license_ok"
     /** At most this many hits are kept per frame (the list is for tapping, not for counting). */
     const val MAX_HITS = 60
 
@@ -60,23 +62,28 @@ object VScreenDetector {
 
     private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    /** The user's switch (on by default once a model is installed). */
+    /** The user has seen the model's license notice (AGPL-3.0, separate from the app) and turned the feature on. */
+    fun licenseAccepted(ctx: Context): Boolean = prefs(ctx).getBoolean(K_LICENSE, false)
+    fun acceptLicense(ctx: Context) { prefs(ctx).edit().putBoolean(K_LICENSE, true).putBoolean(K_ON, true).apply(); reset(ctx) }
+
+    /** The user's switch (on once the license notice is accepted). */
     fun switchedOn(ctx: Context): Boolean = prefs(ctx).getBoolean(K_ON, true)
-    fun setSwitchedOn(ctx: Context, on: Boolean) { prefs(ctx).edit().putBoolean(K_ON, on).apply(); if (!on) close() }
+    /** Switching on also clears a crash mark or load error: the user asked to try again. */
+    fun setSwitchedOn(ctx: Context, on: Boolean) { prefs(ctx).edit().putBoolean(K_ON, on).apply(); if (on) reset(ctx) else close() }
 
     /** Why the detector is not running even though a model is installed (a crash, a load error), or null. */
     fun problem(ctx: Context): String? = prefs(ctx).getString(K_CRASHED, null) ?: loadError
 
-    /** Installed, switched on, and not disabled by a crash. */
+    /** License notice accepted, switched on, a model present, and not disabled by a crash. */
     fun active(ctx: Context? = BackgroundOperation.appContextOrNull()): Boolean =
-        ctx != null && switchedOn(ctx) && prefs(ctx).getString(K_CRASHED, null) == null && loadError == null && DetectorModels.installed(ctx) != null
+        ctx != null && licenseAccepted(ctx) && switchedOn(ctx) && prefs(ctx).getString(K_CRASHED, null) == null && loadError == null && DetectorModels.installed(ctx) != null
 
     /** Called once when the service process starts: a run mark left behind means that run killed the process. */
     fun checkLastRun(ctx: Context) {
         val p = prefs(ctx)
         if (p.getBoolean(K_RUNNING, false)) {
             AppLogger.warning(TAG, "the last detector run did not finish (native crash?): detector disabled until reinstalled")
-            p.edit().putBoolean(K_RUNNING, false).putString(K_CRASHED, "last run crashed the service; reinstall the model to try again").apply()
+            p.edit().putBoolean(K_RUNNING, false).putString(K_CRASHED, "last run crashed the service; switch it on again in Settings to retry").apply()
         }
     }
 
@@ -105,7 +112,7 @@ object VScreenDetector {
             val s = OrtSession.SessionOptions().apply {
                 setIntraOpNumThreads(max(1, min(4, Runtime.getRuntime().availableProcessors() / 2)))
                 setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-            }.use { env.createSession(m.file.absolutePath, it) }
+            }.use { env.createSession(DetectorModels.ensureFile(ctx, m).absolutePath, it) }
             Engine(env, s, m).also { engine = it }
         } catch (t: Throwable) {
             loadError = "${t.javaClass.simpleName}: ${t.message?.take(160)}"
@@ -160,9 +167,10 @@ object VScreenDetector {
 
     /** One line for `diag` and the settings page. */
     fun status(ctx: Context): String {
-        val m = DetectorModels.installed(ctx) ?: return "not installed (optional download, Settings)"
+        val m = DetectorModels.installed(ctx) ?: return "no model in this build"
         val prob = problem(ctx)
-        return "${m.id} ${m.inW}x${m.inH} thr ${m.threshold} " + when {
+        return "${m.id} ${m.inW}x${m.inH} thr ${m.threshold} (${m.source}) " + when {
+            !licenseAccepted(ctx) -> "off: license notice not accepted yet (Settings)"
             prob != null -> "OFF: $prob"
             !switchedOn(ctx) -> "switched off"
             else -> "on" + if (lastMs > 0) ", last run ${lastMs} ms" else ""
