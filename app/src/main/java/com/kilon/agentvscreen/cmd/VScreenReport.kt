@@ -45,7 +45,9 @@ internal data class El(val n: Int, val text: String, val box: Rect, val fromA11y
                        /** EMPTY_INPUT / NO_TEXT: the view id or class; LINK: the length of the hidden text. */
                        val hint: String? = null,
                        /** 1.4.0-beta13: a search box the app draws itself (its view id or class says search): a control, not content. */
-                       val search: Boolean = false) {
+                       val search: Boolean = false,
+                       /** 2.0: found by the optional detector model (a textless tappable thing neither the tree nor OCR names). */
+                       val detected: Boolean = false) {
     val placeholder: Boolean get() = kind != ElKind.TEXT
     /** Nothing can be done with it: plain words. */
     val plain: Boolean get() = !clickable && !editable && !scrollable && checked == null && !password
@@ -55,7 +57,7 @@ internal data class El(val n: Int, val text: String, val box: Rect, val fromA11y
     val label: String get() = when (kind) {
         ElKind.TEXT -> text
         ElKind.EMPTY_INPUT -> tr("（空输入框", "(empty input box") + (hint?.let { " $it" } ?: "") + tr("）", ")")
-        ElKind.NO_TEXT -> tr("（无文字", "(no text") + (hint?.let { " $it" } ?: "") + tr("）", ")")
+        ElKind.NO_TEXT -> if (detected) tr("（无文字 图标）", "(no text icon)") else tr("（无文字", "(no text") + (hint?.let { " $it" } ?: "") + tr("）", ")")
         ElKind.LINK -> tr("（链接/标识 ${hint ?: "?"} 字）", "(link / id, ${hint ?: "?"} chars)")
     }
     val flags: String get() = buildList {
@@ -68,7 +70,7 @@ internal data class El(val n: Int, val text: String, val box: Rect, val fromA11y
     fun json(): org.json.JSONObject = org.json.JSONObject().put("n", n).put("text", if (placeholder) "" else text)
         .put("x", box.centerX()).put("y", box.centerY())
         .put("box", org.json.JSONArray(listOf(box.left, box.top, box.right, box.bottom)))
-        .put("source", if (fromA11y) "accessibility" else "ocr")
+        .put("source", if (fromA11y) "accessibility" else if (detected) "detector" else "ocr")
         .also { o ->
             if (placeholder) o.put("kind", kind.name.lowercase()).put("hint", hint ?: org.json.JSONObject.NULL)
             if (clickable) o.put("tappable", true); if (editable) o.put("input", true); if (scrollable) o.put("scrollable", true)
@@ -200,7 +202,7 @@ internal fun saysWord(l: String, w: String): Boolean {
  * that lags behind the picture: a timer, a counter), the picture's text wins — the list says what is drawn.
  * Nothing is cut here; the printer decides how many lines to show.
  */
-internal fun mergeElements(d: VScreenDisplay, a11y: List<El>, ocr: List<VScreenOcr.Item>?): List<El> {
+internal fun mergeElements(d: VScreenDisplay, a11y: List<El>, ocr: List<VScreenOcr.Item>?, icons: List<Rect>? = null): List<El> {
     val items = ocr.orEmpty().filter { !VScreenOcr.isJunk(it) && !isJunkLabel(it.text.trim()) && it.text.isNotBlank() }
     val out = ArrayList<El>()
     val usedOcr = HashSet<VScreenOcr.Item>()
@@ -281,8 +283,38 @@ internal fun mergeElements(d: VScreenDisplay, a11y: List<El>, ocr: List<VScreenO
         }
         if (!said) { val w = tidy(t); out += El(0, if (w.first == ElKind.TEXT) w.second else "", Rect(it.box), false, kind = w.first, hint = if (w.first == ElKind.LINK) w.second else null) }
     }
+    out += detectedOnly(out, icons.orEmpty())
     val row = maxOf(16, d.height / 120)
     return out.sortedWith(compareBy({ it.box.centerY() / row }, { it.box.centerX() })).mapIndexed { i, r -> r.copy(n = i + 1) }
+}
+
+/** 2.0: at most this many detector-only places join one list (the list is for tapping; the rest are in the picture). */
+internal const val MAX_DETECTED = 20
+
+/**
+ * 2.0, pure: the detector's boxes ([icons], best first) that name a place no listed element already names: one source
+ * per place, as for OCR words. A box is the same place as an element when they overlap most (IoU >= 0.3), when the
+ * element's middle is inside the box (words drawn on a button: OCR already lists it), or when the box's middle is
+ * inside a tappable element not much bigger than it (an app's own icon button). What is left is what the tree and
+ * OCR both miss: icons in web pages, games and canvases, and buttons apps never labelled.
+ */
+internal fun detectedOnly(els: List<El>, icons: List<Rect>): List<El> {
+    if (icons.isEmpty()) return emptyList()
+    fun area(r: Rect) = r.width().toLong() * r.height()
+    fun iou(a: Rect, b: Rect): Double {
+        val i = Rect(a); if (!i.intersect(b)) return 0.0
+        val inter = area(i).toDouble(); return inter / (area(a) + area(b) - inter)
+    }
+    val out = ArrayList<El>()
+    for (b in icons) {
+        if (out.size >= MAX_DETECTED) break
+        val taken = (els + out).any { e ->
+            iou(e.box, b) >= 0.3 || b.contains(e.box.centerX(), e.box.centerY()) ||
+                (e.clickable || e.editable || e.checked != null) && e.box.contains(b.centerX(), b.centerY()) && area(e.box) <= 6 * area(b)
+        }
+        if (!taken) out += El(0, "", Rect(b), false, clickable = true, kind = ElKind.NO_TEXT, hint = "icon", detected = true)
+    }
+    return out
 }
 /** One look at the screen: a frame, the OCR words of exactly that frame, the elements, the foreground activity. */
 internal class Snap(val frame: Bitmap?, val version: Long, val items: List<VScreenOcr.Item>?, val els: List<El>,
@@ -327,6 +359,9 @@ internal fun VScreenOffloadHandler.snapshot(d: VScreenDisplay, freshMs: Long = 1
         val fv = d.latestWithVersion()
         val a11yF = snapPool.submit<List<El>> { runCatching { a11yRaw(d) }.getOrDefault(emptyList()) }
         val actF = snapPool.submit<String?> { runCatching { VScreenShell.topActivity(d.displayId) }.getOrNull() }
+        // 2.0: the optional detector looks at the same frame while OCR reads it (null when no model is installed).
+        val iconsF = if (fv != null && com.kilon.agentvscreen.core.VScreenDetector.active())
+            snapPool.submit<List<Rect>?> { runCatching { com.kilon.agentvscreen.core.VScreenDetector.detectFrame(d.displayId, fv.first, fv.second)?.map { it.box } }.getOrNull() } else null
         var reused = false
         var problem: String? = null
         var fellBack: String? = null
@@ -348,7 +383,8 @@ internal fun VScreenOffloadHandler.snapshot(d: VScreenDisplay, freshMs: Long = 1
         if (attempt == 0 && fv != null && after != null && after.second != fv.second && !samePicture(fv.first, after.first, mask)) { attempt++; continue }
         val stale = staleFrameNote(d.lastFrameAtMs, t0, SystemClock.elapsedRealtime(),
             com.kilon.agentvscreen.core.VScreenAwake.stateOf(d)?.let { it == android.view.Display.STATE_ON }, d.parked)
-        return Snap(fv?.first, fv?.second ?: -1L, items, mergeElements(d, raw, items?.let { VScreenPerception.still(it, mask) }), act, reused, mask,
+        val icons = iconsF?.let { f -> runCatching { f.get(3, java.util.concurrent.TimeUnit.SECONDS) }.getOrNull() }
+        return Snap(fv?.first, fv?.second ?: -1L, items, mergeElements(d, raw, items?.let { VScreenPerception.still(it, mask) }, icons), act, reused, mask,
             problem ?: VScreenOcr.downLine(null), fellBack, stale)
     }
 }

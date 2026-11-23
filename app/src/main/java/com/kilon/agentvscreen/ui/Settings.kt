@@ -160,6 +160,7 @@ fun SettingsTab(bottom: Dp) {
                     if (v != pv.via) scope.launch(Dispatchers.IO) { com.kilon.agentvscreen.host.Privileged.choose(ctx, v) } })
             SwitchPreference(checked = s.accurateOcr, onCheckedChange = { BackgroundOperation.setAccurateOcr(it) },
                 title = tr("精确文字识别", "Accurate text recognition"), summary = tr("PP-OCRv6，在本机运行", "PP-OCRv6, on this phone"))
+            DetectorPreference()
             SwitchPreference(checked = s.recording, onCheckedChange = { BackgroundOperation.setRecording(it) },
                 title = tr("后台录制", "Background recording"), summary = tr("回看刚才发生了什么时用", "Used to replay what just happened"))
             val names = listOf(tr("跟随系统", "System"), "中文", "English")
