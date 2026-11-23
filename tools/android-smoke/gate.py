@@ -440,6 +440,213 @@ def run_api30():
         f"pid={pid_after}->{pid()} http={c_alive}",
     )
 
+    # 5.5: API 30 `act --hold` returns HOLD_UNSUPPORTED (non-blocking) and completes normally.
+    run_api30_hold_unsupported()
+
+
+TORTURE_PKG = "com.kilon.avstorture"
+HOLD_FILE = "/data/local/tmp/avs-holds.txt"
+
+
+def _torture_apk():
+    cand = APK.parent / "torture-debug.apk"
+    return cand if cand.is_file() else None
+
+
+def _wchan_of(pkg):
+    try:
+        out = shell("ps", "-A", "-o", "NAME,WCHAN")
+    except subprocess.CalledProcessError:
+        return ""
+    for line in out.splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 2 and parts[0] == pkg:
+            return parts[1]
+    return ""
+
+
+def _count_avst_target_shown():
+    try:
+        raw = shell("logcat", "-d", "-s", "AVST:I", "-v", "raw")
+    except subprocess.CalledProcessError:
+        return 0
+    cnt = 0
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except Exception:
+            continue
+        if ev.get("scene") == "S09" and ev.get("ev") == "target_shown":
+            cnt += 1
+    return cnt
+
+
+def _api_args(argv, session="gate-hold", timeout=60):
+    body = json.dumps({"args": list(argv), "session": session}).encode("utf-8")
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{LOCAL_PORT}/v2/run",
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": "Bearer " + TOKEN,
+            "Content-Type": "application/json",
+            "X-VScreen-Lang": "zh",
+        },
+    )
+    t0 = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read().decode("utf-8")), time.monotonic() - t0
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = {"raw": raw}
+        return e.code, parsed, time.monotonic() - t0
+    except Exception as e:
+        return -1, {"error": repr(e)}, time.monotonic() - t0
+
+
+def run_api30_hold_unsupported():
+    tapk = _torture_apk()
+    if tapk is None:
+        check("API 30 --hold returns HOLD_UNSUPPORTED (torture APK present)", False, f"missing {APK.parent / 'torture-debug.apk'}")
+        return
+    try:
+        run("adb", "install", "-r", "-g", str(tapk), timeout=240)
+        shell("am", "force-stop", TORTURE_PKG)
+        shell(
+            "am", "broadcast", "-W", "--include-stopped-packages",
+            "-n", f"{TORTURE_PKG}/.PresetReceiver",
+            "--es", "scene", "S01", "--ei", "seed", "7",
+        )
+        c_l, b_l, _ = _api_args(["launch", TORTURE_PKG], session="gate-hold30", timeout=90)
+        print(f"API 30 launch torture: http={c_l} ok={b_l.get('ok')} code={b_l.get('code')}", flush=True)
+        c_h, b_h, _ = _api_args(["act", "--hold"], session="gate-hold30", timeout=60)
+        notes = b_h.get("notes") or []
+        note_codes = [n.get("code") for n in notes if isinstance(n, dict)]
+        check(
+            "API 30 act --hold returns HOLD_UNSUPPORTED and completes ok",
+            c_h == 200 and b_h.get("ok") is True and b_h.get("code") == "OK" and "HOLD_UNSUPPORTED" in note_codes,
+            f"http={c_h} ok={b_h.get('ok')} code={b_h.get('code')} notes={note_codes}",
+        )
+    finally:
+        try:
+            _api_args(["release"], session="gate-hold30", timeout=20)
+        except Exception:
+            pass
+        try:
+            shell("am", "force-stop", TORTURE_PKG)
+        except Exception:
+            pass
+
+
+def run_hold_force_stop_unhold(label):
+    """5.5: App force-stopped while target app is held -> Gate auto-unholds target app within ~10s."""
+    tapk = _torture_apk()
+    if tapk is None:
+        check(f"[{label}] --hold force-stop auto-unhold (torture APK present)", False, f"missing {APK.parent / 'torture-debug.apk'}")
+        return
+    try:
+        run("adb", "install", "-r", "-g", str(tapk), timeout=240)
+        shell("am", "force-stop", TORTURE_PKG)
+        shell(
+            "am", "broadcast", "-W", "--include-stopped-packages",
+            "-n", f"{TORTURE_PKG}/.PresetReceiver",
+            "--es", "scene", "S09", "--ei", "seed", "7", "--ez", "keep_cycling", "true",
+        )
+        shell("logcat", "-c")
+        c_l, b_l, _ = _api_args(["launch", TORTURE_PKG], session="gate-hold34", timeout=90)
+        print(f"[{label}] launch S09: http={c_l} ok={b_l.get('ok')} code={b_l.get('code')}", flush=True)
+        c_h, b_h, _ = _api_args(["act", "--hold"], session="gate-hold34", timeout=60)
+        print(f"[{label}] act --hold: http={c_h} ok={b_h.get('ok')} hold={b_h.get('hold')}", flush=True)
+
+        # Wait briefly for post-send freeze to complete: avs-holds.txt must list target app;
+        # when WCHAN is readable (root mode; uid 2000 shell sees '0' due to kptr_restrict), also require do_freezer_trap.
+        def _wchan_readable(w):
+            return w not in ("", "0", "-")
+
+        frozen = False
+        wchan_held = ""
+        hold_file_txt = ""
+        for _ in range(25):
+            wchan_held = _wchan_of(TORTURE_PKG)
+            hold_file_txt = shell("cat", HOLD_FILE, "2>/dev/null", "||", "true")
+            if TORTURE_PKG in hold_file_txt and (not _wchan_readable(wchan_held) or wchan_held == "do_freezer_trap"):
+                frozen = True
+                break
+            time.sleep(0.2)
+
+        # Behaviorally verify target is actually paused (S09 keep_cycling period is 3.0s -> expect 0 target_shown over 3.5s).
+        shown_while_held = -1
+        if frozen:
+            shell("logcat", "-c")
+            time.sleep(3.5)
+            shown_while_held = _count_avst_target_shown()
+        check(
+            f"[{label}] act --hold froze target app and recorded avs-holds.txt",
+            c_h == 200 and b_h.get("ok") is True and frozen and shown_while_held == 0,
+            f"http={c_h} wchan={wchan_held!r} hold_file={hold_file_txt!r} shown_while_held={shown_while_held}",
+        )
+        if not frozen:
+            return
+
+        # Clear logcat, force-stop Agent-VScreen while target is frozen, and confirm Gate auto-unholds within ~12s.
+        shell("logcat", "-c")
+        t_kill = time.monotonic()
+        shell("am", "force-stop", APP)
+        dead = wait_app_dead(3.0)
+        print(f"[{label}] force-stopped Agent-VScreen during hold: dead={dead}", flush=True)
+
+        thawed_at = None
+        wchan_after = wchan_held
+        hold_file_after = hold_file_txt
+        while time.monotonic() - t_kill <= 13.5:
+            wchan_after = _wchan_of(TORTURE_PKG)
+            hold_file_after = shell("cat", HOLD_FILE, "2>/dev/null", "||", "true")
+            if TORTURE_PKG not in hold_file_after and wchan_after != "do_freezer_trap":
+                thawed_at = time.monotonic() - t_kill
+                break
+            time.sleep(0.3)
+
+        # Wait up to 4.5s after thaw for S09 keep_cycling to emit target_shown (period 3s).
+        shown_after = 0
+        if thawed_at is not None:
+            t_wait = time.monotonic()
+            while time.monotonic() - t_wait <= 4.5:
+                shown_after = _count_avst_target_shown()
+                if shown_after >= 1:
+                    break
+                time.sleep(0.25)
+
+        check(
+            f"[{label}] Gate auto-unholds target app after App force-stop (<= 12s) and target_shown resumes",
+            dead and thawed_at is not None and thawed_at <= 12.5 and shown_after >= 1,
+            f"dead={dead} thawed_at={thawed_at} wchan={wchan_after!r} hold_file={hold_file_after!r} target_shown={shown_after}",
+        )
+
+        # Wake Agent-VScreen back via Gate so subsequent checks run cleanly.
+        ping_raw(timeout=15)
+        for _ in range(15):
+            cs, bs, _ = api_raw("status", timeout=10)
+            if cs == 200 and bs.get("ok") is True:
+                break
+            time.sleep(1)
+    finally:
+        try:
+            shell("am", "unfreeze", "--sticky", TORTURE_PKG)
+            shell("am", "unfreeze", TORTURE_PKG)
+        except Exception:
+            pass
+        try:
+            shell("am", "force-stop", TORTURE_PKG)
+        except Exception:
+            pass
+
 
 def run_api34_shizuku():
     gate, st = wait_gate_and_selftest(120)
@@ -469,6 +676,9 @@ def run_api34_shizuku():
         f"http={code4} dt={dt4:.2f}s fg={host4.get('foreground_service')} blocking={blocking4}",
     )
 
+    # 5) 5.5: App force-stopped while holding target app -> Gate auto-unholds within ~10s.
+    run_hold_force_stop_unhold("shizuku")
+
 
 def run_api34_root():
     gate, st = wait_gate_and_selftest(120)
@@ -477,6 +687,9 @@ def run_api34_root():
         return
 
     run_freeze_and_force_stop("root")
+
+    # 5.5: App force-stopped while holding target app -> Gate auto-unholds within ~10s.
+    run_hold_force_stop_unhold("root")
 
     # 3) Disable HostService (adb is already root since setup_root, no adbd restart) + force-stop -> 503 NOT_READY <= 3.5s.
     try:

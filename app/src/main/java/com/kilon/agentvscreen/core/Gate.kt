@@ -37,8 +37,11 @@ internal class Gate(
     private val sleepFn: ((Long) -> Unit)? = null,
     private val startWatchThread: Boolean = true,
     private val appResponsive: (() -> Boolean)? = null,
+    private val holdFile: java.io.File = java.io.File(HOLD_FILE),
+    private val readWchan: ((Collection<String>) -> List<Pair<String, String>>?)? = null,
+    private val cleanupOnInit: Boolean = false,
 ) {
-    constructor(service: VScreenDisplayService) : this(service, SystemClockImpl, ProcessShell)
+    constructor(service: VScreenDisplayService) : this(service, SystemClockImpl, ProcessShell, cleanupOnInit = true)
 
     fun interface Clock {
         fun nowMs(): Long
@@ -66,6 +69,7 @@ internal class Gate(
     }
 
     private val lifecycleLock = Any()
+    private val holdLock = Any()
     private val wakeLock = ReentrantLock()
     private val wakeCond = wakeLock.newCondition()
 
@@ -82,6 +86,12 @@ internal class Gate(
     @Volatile private var hasBeat: Boolean = false
     private val beatSeq = AtomicLong(0L)
     private val cancelledForCurrentStale = AtomicBoolean(false)
+
+    // 2.0.0-beta5 (5.1 & 5.8 #1): held app processes frozen between turns (owned by Gate so crash/force-stop still unholds).
+    private val heldProcs = ArrayList<String>()
+    @Volatile private var hasHeldProcs: Boolean = false
+    @Volatile private var holdSinceMs: Long = 0L
+    @Volatile private var holdDeadlineMs: Long = 0L
 
     private val activeConns = AtomicInteger(0)
     private val openSockets = Collections.synchronizedSet(HashSet<Socket>())
@@ -100,6 +110,12 @@ internal class Gate(
     private var lastWakeSucceeded: Boolean = false
     private var consecutiveWakeFails: Int = 0
     private var cooldownUntilMs: Long = 0L
+
+    init {
+        if (cleanupOnInit) {
+            runCatching { cleanupLeftoverHolds() }
+        }
+    }
 
     fun start(wantPort: Int, internalPort: Int, pkg: String, processName: String, sdk: Int): Int {
         if (wantPort !in 1..65535 || internalPort !in 1..65535) return -1
@@ -155,6 +171,7 @@ internal class Gate(
     }
 
     fun stop() {
+        runCatching { unhold() }
         synchronized(lifecycleLock) {
             stopped = true
             watchThread?.interrupt()
@@ -176,6 +193,160 @@ internal class Gate(
         snap.forEach { s -> runCatching { s.close() } }
     }
 
+    /** 2.0.0-beta5 (5.1): freeze [processes] via `am freeze --sticky`, record to [holdFile], auto-unhold after [maxMs]. */
+    fun hold(processes: List<String>, maxMs: Long = HOLD_MAX_MS): Int {
+        val clean = processes.asSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && it.none { c -> c.isWhitespace() || c.code < 32 } }
+            .distinct()
+            .take(HOLD_MAX_PROCS)
+            .toList()
+        if (clean.isEmpty()) return 0
+        val effMaxMs = maxMs.coerceIn(1_000L, HOLD_MAX_MS)
+        val frozenCount: Int
+        synchronized(holdLock) {
+            if (heldProcs.isNotEmpty()) unholdLocked()
+            val frozen = ArrayList<String>(clean.size)
+            for (proc in clean) {
+                val rc = runCatching { shell.run(listOf("am", "freeze", "--sticky", proc), SHELL_TIMEOUT_MS) }.getOrDefault(-1)
+                if (rc == 0) {
+                    frozen += proc
+                } else {
+                    logWarn("hold: am freeze --sticky $proc failed (rc=$rc)")
+                }
+            }
+            if (frozen.isNotEmpty()) {
+                val now = clock.nowMs()
+                heldProcs.addAll(frozen)
+                hasHeldProcs = true
+                holdSinceMs = now
+                holdDeadlineMs = now + effMaxMs
+                writeHoldFile(frozen)
+                logInfo("hold: froze ${frozen.size} proc(s): ${frozen.joinToString(",")} (max_ms=$effMaxMs)")
+            }
+            frozenCount = frozen.size
+        }
+        if (frozenCount > 0) {
+            synchronized(lifecycleLock) {
+                if (!stopped) ensureWatchThreadLocked()
+            }
+        }
+        return frozenCount
+    }
+
+    /**
+     * 2.0.0-beta5 (5.1 & 5.8 #1): unfreeze all held processes and remove [holdFile].
+     * Per 5.8 #1: runs `am unfreeze --sticky` (clears sticky flag) then `am unfreeze` (actual thaw on API 34/35);
+     * when WCHAN is readable and a process remains in `do_freezer_trap`, retries `am unfreeze` once and logs a warning.
+     */
+    fun unhold(): Int = synchronized(holdLock) { unholdLocked() }
+
+    /** 2.0.0-beta5 (5.1): startup recovery — unhold any processes left in [holdFile] from a prior crash and delete it. */
+    internal fun cleanupLeftoverHolds(): Int = synchronized(holdLock) {
+        val leftover = readHoldFile()
+        if (leftover.isEmpty()) {
+            deleteHoldFile()
+            return 0
+        }
+        logWarn("startup cleanup: unholding ${leftover.size} leftover proc(s): ${leftover.joinToString(",")}")
+        deleteHoldFile()
+        unfreezeProcesses(leftover)
+        leftover.size
+    }
+
+    private fun unholdLocked(): Int {
+        val snap = if (heldProcs.isNotEmpty()) {
+            heldProcs.toList().also { heldProcs.clear() }
+        } else {
+            readHoldFile()
+        }
+        hasHeldProcs = false
+        holdSinceMs = 0L
+        holdDeadlineMs = 0L
+        deleteHoldFile()
+        if (snap.isEmpty()) return 0
+        unfreezeProcesses(snap)
+        logInfo("unhold: thawed ${snap.size} proc(s): ${snap.joinToString(",")}")
+        return snap.size
+    }
+
+    private fun unfreezeProcesses(procs: List<String>) {
+        for (proc in procs) {
+            runCatching { shell.run(listOf("am", "unfreeze", "--sticky", proc), SHELL_TIMEOUT_MS) }
+            runCatching { shell.run(listOf("am", "unfreeze", proc), SHELL_TIMEOUT_MS) }
+        }
+        val wchans = runCatching { (readWchan ?: ::defaultReadWchan)(procs) }.getOrNull() ?: return
+        for (proc in procs) {
+            val stuck = wchans.any { (wchan, name) -> name == proc && wchan == FREEZER_WCHAN }
+            if (stuck) {
+                logWarn("unhold: $proc still in $FREEZER_WCHAN after unfreeze; retrying am unfreeze")
+                runCatching { shell.run(listOf("am", "unfreeze", proc), SHELL_TIMEOUT_MS) }
+            }
+        }
+    }
+
+    private fun defaultReadWchan(procs: Collection<String>): List<Pair<String, String>>? {
+        if (procs.isEmpty()) return emptyList()
+        val p = ProcessBuilder("ps", "-A", "-o", "WCHAN:32,NAME").redirectErrorStream(true).start()
+        val buf = StringBuilder()
+        val reader = Thread {
+            runCatching {
+                p.inputStream.bufferedReader().useLines { lines ->
+                    lines.forEach { buf.append(it).append('\n') }
+                }
+            }
+        }.apply { isDaemon = true; name = "vscreen-gate-ps"; start() }
+        val done = runCatching { p.waitFor(SHELL_TIMEOUT_MS, TimeUnit.MILLISECONDS) }.getOrDefault(false)
+        if (!done) runCatching { p.destroyForcibly() }
+        reader.join(500)
+        if (!done || p.exitValue() != 0) return null
+        return parseWchanOutput(buf.toString())
+    }
+
+    private fun writeHoldFile(procs: List<String>) {
+        runCatching {
+            holdFile.parentFile?.mkdirs()
+            holdFile.writeText(procs.joinToString("\n") + "\n")
+        }.onFailure { logWarn("hold: failed writing ${holdFile.path}: ${it.message}") }
+    }
+
+    private fun readHoldFile(): List<String> = runCatching {
+        if (!holdFile.isFile) emptyList()
+        else holdFile.readLines().map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+    }.getOrDefault(emptyList())
+
+    private fun deleteHoldFile() {
+        runCatching { if (holdFile.exists()) holdFile.delete() }
+    }
+
+    internal fun heldProcsSnapshot(): List<String> = synchronized(holdLock) { heldProcs.toList() }
+
+    /**
+     * 2.0.0-beta5 (5.1): auto-unhold held processes if [HOLD_MAX_MS] elapsed or if app heartbeat is stale past
+     * [HOLD_STALE_MS] (10s). Returns true iff an auto-unhold was triggered.
+     */
+    internal fun checkHoldExpiry(): Boolean {
+        if (!hasHeldProcs) return false
+        val reason: String? = synchronized(holdLock) {
+            if (heldProcs.isEmpty()) {
+                hasHeldProcs = false
+                return false
+            }
+            val now = clock.nowMs()
+            val maxHit = holdDeadlineMs > 0L && now >= holdDeadlineMs
+            val staleHit = hasBeat && (now - lastBeatMs >= HOLD_STALE_MS)
+            when {
+                maxHit -> "maxMs reached"
+                staleHit -> "app heartbeat stale (${(now - lastBeatMs).coerceAtLeast(0L)}ms)"
+                else -> null
+            }?.also { r ->
+                logWarn("hold auto-unhold: $r")
+                unholdLocked()
+            }
+        }
+        return reason != null
+    }
+
     fun statusJson(): JSONObject = JSONObject()
         .put("port", boundPort)
         .put("stale_count", staleCount)
@@ -184,6 +355,7 @@ internal class Gate(
         .put("not_ready", notReady)
         .put("last_wake_ms", lastWakeMs)
         .put("last_wake_cmds", JSONArray(lastWakeCmds))
+        .put("held", JSONArray(heldProcsSnapshot()))
 
     internal fun isBeatStale(nowMs: Long = clock.nowMs()): Boolean =
         !hasBeat || (nowMs - lastBeatMs > BEAT_STALE_MS)
@@ -237,11 +409,12 @@ internal class Gate(
         watchThread = Thread({
             while (!Thread.currentThread().isInterrupted && !stopped) {
                 try {
-                    Thread.sleep(FINGER_WATCH_MS)
+                    Thread.sleep(if (hasHeldProcs) HOLD_WATCH_MS else FINGER_WATCH_MS)
                 } catch (_: InterruptedException) {
                     return@Thread
                 }
                 if (stopped) return@Thread
+                runCatching { checkHoldExpiry() }
                 runCatching { checkStaleFingers() }
             }
         }, "vscreen-gate-watch").apply { isDaemon = true; start() }
@@ -572,7 +745,29 @@ internal class Gate(
         const val COOLDOWN_MS = 60_000L
         const val SHELL_TIMEOUT_MS = 2_000L
         const val FINGER_WATCH_MS = 500L
+        const val HOLD_WATCH_MS = 250L
         const val MIN_UNFREEZE_SDK = 34
+        /** 2.0.0-beta5 (5.1): max duration a foreground app may remain frozen between turns (120s). */
+        const val HOLD_MAX_MS = 120_000L
+        /** 2.0.0-beta5 (5.1): auto-unhold held processes if the app heartbeat is stale past 10s. */
+        const val HOLD_STALE_MS = 10_000L
+        const val HOLD_FILE = "/data/local/tmp/avs-holds.txt"
+        const val HOLD_MAX_PROCS = 8
+        const val FREEZER_WCHAN = "do_freezer_trap"
+
+        /** Parse `ps -A -o WCHAN:32,NAME` output into `(wchan, processName)` pairs (pure). */
+        internal fun parseWchanOutput(output: String): List<Pair<String, String>> {
+            val out = ArrayList<Pair<String, String>>()
+            for (raw in output.lineSequence()) {
+                val line = raw.trim()
+                if (line.isEmpty() || line.startsWith("WCHAN", ignoreCase = true)) continue
+                val parts = line.split(Regex("\\s+"))
+                if (parts.size >= 2) {
+                    out += parts[0] to parts.last()
+                }
+            }
+            return out
+        }
 
         /** Fixed bilingual text: Gate runs in the privileged service without the app's language preference. */
         const val NOT_READY_TEXT =

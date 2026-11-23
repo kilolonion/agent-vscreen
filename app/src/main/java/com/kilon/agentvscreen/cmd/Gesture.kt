@@ -484,7 +484,7 @@ internal object Gesture {
     }
 }
 
-/** 2.0.0-beta4 (4.4): tracking record generated for every drag (normal, multi-point, hold, seek). */
+/** 2.0.0-beta4 (4.4) & 2.0.0-beta5 (5.7): tracking record generated for every drag (normal, multi-point, hold, seek). */
 internal data class GestureRecord(
     val pickedUp: Boolean?,
     val followed: Boolean?,
@@ -493,8 +493,9 @@ internal data class GestureRecord(
     val pollMsP50: Long? = null,
     val pollMsMax: Long? = null,
     val keyTimesMs: LongArray? = null,
+    val imgAgeMs: Long? = null,
 ) {
-    fun describe(): String {
+    fun describe(omitUnknownWhenNotPicked: Boolean = false): String {
         val parts = ArrayList<String>(3)
         when (pickedUp) {
             true -> parts += tr("拿起了", "picked up")
@@ -506,16 +507,20 @@ internal data class GestureRecord(
             false -> parts += tr("未跟手", "did not follow")
             null -> {}
         }
-        parts += when (afterRelease) {
+        val afterText = when (afterRelease) {
             Gesture.AFTER_STAYED -> tr("松手后留在落点", "stayed at release")
             Gesture.AFTER_SNAPPED_BACK -> tr("松手后弹回起点", "snapped back to start")
             Gesture.AFTER_ELSEWHERE -> tr("松手后移到了别处", "moved elsewhere after release")
-            else -> tr("松手后位置不明", "position unknown after release")
+            else -> if (omitUnknownWhenNotPicked && pickedUp == null) null else tr("松手后位置不明", "position unknown after release")
         }
+        if (afterText != null) parts += afterText
         return parts.joinToString(" · ")
     }
 
-    fun describeSuffix(): String = tr("：", ": ") + describe()
+    fun describeSuffix(omitUnknownWhenNotPicked: Boolean = false): String {
+        val d = describe(omitUnknownWhenNotPicked)
+        return if (d.isEmpty()) "" else tr("：", ": ") + d
+    }
 
     fun json(): JSONObject = JSONObject()
         .put("picked_up", pickedUp ?: JSONObject.NULL)
@@ -525,10 +530,11 @@ internal data class GestureRecord(
         .also { o ->
             pollMsP50?.let { o.put("poll_ms_p50", it) }
             pollMsMax?.let { o.put("poll_ms_max", it) }
+            imgAgeMs?.let { o.put("img_age_ms", it) }
         }
 }
 
-/** 2.0.0-beta4 (4.3): result of one closed-loop `hold` / `seek` gesture. */
+/** 2.0.0-beta4 (4.3) & 2.0.0-beta5 (5.7): result of one closed-loop `hold` / `seek` gesture. */
 internal class GestureOut(
     val met: Boolean,
     val releasedAt: Pair<Int, Int>,
@@ -538,6 +544,7 @@ internal class GestureOut(
     val metKind: CondKind? = null,
     val pollMsP50: Long? = null,
     val pollMsMax: Long? = null,
+    val imgAgeMs: Long? = null,
     val actionFact: String = "",
     val points: List<IntArray> = emptyList(),
 )
@@ -599,6 +606,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
     var midPt = if (path.size >= 2) Gesture.pointAtHalfPath(path) else startPt
     var metFact: String? = null
     var metKind: CondKind? = null
+    var hitImgAgeMs: Long? = null
     var preDownAt = System.currentTimeMillis()
     var tStart = SystemClock.elapsedRealtime()
     var downAt = preDownAt
@@ -670,6 +678,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
                     hitElapsed = SystemClock.elapsedRealtime()
                     metFact = hit
                     metKind = probe.lastMetKind
+                    hitImgAgeMs = probe.lastHitImgAgeMs
                     break
                 }
                 val afterPoll = SystemClock.elapsedRealtime()
@@ -739,6 +748,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
                     hitElapsed = SystemClock.elapsedRealtime()
                     metFact = hit
                     metKind = probe.lastMetKind
+                    hitImgAgeMs = probe.lastHitImgAgeMs
                     break
                 }
             }
@@ -785,7 +795,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
             pkg = pkg,
             pollMsP50 = stats?.first,
             pollMsMax = stats?.second,
-        )
+        ).let { r -> if (hitImgAgeMs != null) r.copy(imgAgeMs = hitImgAgeMs) else r }
     } else null
 
     val recPts = if (isDrag) {
@@ -815,6 +825,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
         metKind = metKind,
         pollMsP50 = stats?.first,
         pollMsMax = stats?.second,
+        imgAgeMs = hitImgAgeMs,
         actionFact = actionFact,
         points = recPts,
     )

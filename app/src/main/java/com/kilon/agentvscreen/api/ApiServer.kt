@@ -458,8 +458,11 @@ class ApiServer(private val ctx: Context) {
 
     class Resp(val status: Int, val type: String, val body: ByteArray, val headers: Map<String, String> = emptyMap(),
                /** When set, the response is a stream (text/event-stream): the body is written by this. */
-               val stream: ((Emitter) -> Unit)? = null) {
-        fun plus(h: Map<String, String>) = Resp(status, type, body, headers + h, stream)
+               val stream: ((Emitter) -> Unit)? = null,
+               /** 2.0.0-beta5 (5.6): callback invoked after the HTTP response is flushed & closed (e.g. --hold freeze). */
+               val afterSend: (() -> Unit)? = null) {
+        fun plus(h: Map<String, String>) = Resp(status, type, body, headers + h, stream, afterSend)
+        fun withAfterSend(fn: (() -> Unit)?) = if (fn == null) this else Resp(status, type, body, headers, stream, fn)
         companion object {
             fun json(o: Any, status: Int = 200, headers: Map<String, String> = emptyMap()) =
                 Resp(status, "application/json; charset=utf-8", o.toString().toByteArray(), headers)
@@ -474,6 +477,7 @@ class ApiServer(private val ctx: Context) {
     private class HttpError(val status: Int, val code: String, message: String) : Exception(message)
 
     private fun serve(s: Socket) {
+        var afterSend: (() -> Unit)? = null
         s.use { sock ->
             runCatching {
                 // 1.2: the request must arrive promptly and be of sane size: a client that opens a connection and
@@ -492,9 +496,11 @@ class ApiServer(private val ctx: Context) {
                     AppLogger.error(TAG, "route ${req.path}", t)
                     Resp.err(500, "INTERNAL_ERROR", "${t.javaClass.simpleName}: ${t.message}")
                 }
+                afterSend = resp.afterSend
                 write(out, resp)
             }.onFailure { if (it !is SocketException && it !is java.io.IOException) AppLogger.warning(TAG, "serve: ${it.message}") }
         }
+        afterSend?.let { quiet("http-after-send") { it() } }
     }
 
     private fun read(inp: InputStream): Req? {
@@ -856,13 +862,14 @@ class ApiServer(private val ctx: Context) {
         if (v2 && r.accepts("text/event-stream")) return Resp.sse { em ->
             val (res, replayed) = runFor(r, argv, session, requestId) { line -> quiet("sse-step") { em.send("step", line) } }
             quiet("sse-result") { em.send("result", envelope(res, session, requestId, replayed, r, true).toString()) }
+            res.afterSend?.let { quiet("sse-after-send") { it() } }
         }
         val (res, replayed) = runFor(r, argv, session, requestId)
         val env = envelope(res, session, requestId, replayed, r, v2)
         val headers = mapOf("X-VScreen-Exit" to env.optInt("exit").toString(), "X-VScreen-Code" to env.optString("code"), "X-VScreen-Images" to env.optJSONArray("images").let { a -> (0 until (a?.length() ?: 0)).joinToString(",") { a!!.getJSONObject(it).optString("name") } }, "X-VScreen-Session" to session) +
             (if (v2) emptyMap() else mapOf("Deprecation" to "true", "Link" to "</v2/run>; rel=\"successor-version\""))
-        return if (r.q("format") == "text" || r.headers["accept"]?.startsWith("text/plain") == true) Resp.text(env.optString("text"), 200, headers)
-        else Resp.json(env, 200, headers)
+        return (if (r.q("format") == "text" || r.headers["accept"]?.startsWith("text/plain") == true) Resp.text(env.optString("text"), 200, headers)
+        else Resp.json(env, 200, headers)).withAfterSend(res.afterSend)
     }
 
     /**

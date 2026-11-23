@@ -26,6 +26,7 @@ internal class OffloadArgs(
     val positional: List<String>
     private val flags: Set<String>
     private val values: Map<String, String>
+    private val multiValues: Map<String, List<String>>
 
     init {
         // T54: every android-* command supports --compact / -q / --quiet for
@@ -39,13 +40,18 @@ internal class OffloadArgs(
         val pos = mutableListOf<String>()
         val fs = mutableSetOf<String>()
         val vs = mutableMapOf<String, String>()
+        val mvs = mutableMapOf<String, MutableList<String>>()
+        fun putVal(k: String, v: String) {
+            vs[k] = v
+            mvs.getOrPut(k) { mutableListOf() }.add(v)
+        }
         var i = 0
         while (i < argv.size) {
             val a = argv[i]
             when {
                 a.startsWith("--") && a.contains('=') -> {
                     val eq = a.indexOf('=')
-                    vs[a.substring(2, eq)] = a.substring(eq + 1)
+                    putVal(a.substring(2, eq), a.substring(eq + 1))
                 }
                 a.startsWith("--") -> {
                     val key = a.substring(2)
@@ -59,11 +65,11 @@ internal class OffloadArgs(
                     val negNumber = strict && next != null && Regex("^-[0-9.]+(ms|s|m|min|h|秒|分)?$").matches(next)
                     val opt = optional[key]
                     if (opt != null) {
-                        if (next != null && !next.startsWith("--") && opt(next)) { vs[key] = next; i++ } else fs.add(key)
+                        if (next != null && !next.startsWith("--") && opt(next)) { putVal(key, next); i++ } else fs.add(key)
                     } else if (key in effectiveBooleanFlags || next == null || (next.startsWith("-") && !negNumber)) {
                         fs.add(key)
                     } else {
-                        vs[key] = next
+                        putVal(key, next)
                         i++
                     }
                 }
@@ -75,10 +81,13 @@ internal class OffloadArgs(
         positional = pos
         flags = fs
         values = vs
+        multiValues = mvs
     }
 
     fun hasFlag(vararg names: String): Boolean = names.any { it in flags }
     fun get(vararg names: String): String? = names.firstNotNullOfOrNull { values[it] }
+    /** 2.0.0-beta5 (5.2): all values given for repeatable options like `--on`, in order. */
+    fun getAll(vararg names: String): List<String> = names.flatMap { multiValues[it].orEmpty() }
     fun getInt(vararg names: String): Int? = num(names) { it.toIntOrNull() }
     fun getLong(vararg names: String): Long? = num(names) { it.toLongOrNull() }
     fun getDouble(vararg names: String): Double? = num(names) { it.toDoubleOrNull() }

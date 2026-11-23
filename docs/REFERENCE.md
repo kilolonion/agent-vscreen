@@ -20,7 +20,7 @@
 
 权限范围: `operate` · 在副屏队列里执行
 
-### `act ["步骤; 步骤; …"] [--stop <条件>] [--watch <时长>] [--fast] [--bare] [--human] [--keep <notify|wake>] [--for <时长>] [--save <名字>] [--full] [--async]`
+### `act ["步骤; 步骤; …"] [--stop <条件>] [--on <条件 => 一步>] [--hold] [--watch <时长>] [--fast] [--bare] [--human] [--keep <notify|wake>] [--for <时长>] [--save <名字>] [--full] [--async]`
 
 做一段操作（最多 40 步，用 ; 或换行分开），返回四段。不带步骤 = 看一眼（等画面稳定，最多 3 秒）。
 步骤：
@@ -43,9 +43,14 @@
         act "drag 200 1500 540 600 hold until color:540,600=#4CAF50 2s"
         act "drag 100 800 980 800 seek until text:70 in 400,600,700,700"
         act "press 540 1600 hold until text:9* in 300,1400,800,1500 8s"
+        act --on "text:限时优惠 => tap 980,420" "tap 确定 until text:已确定"
+        act --on "text:点我 => tap 点我 x3" --watch 10s
+        act "tap 开始 until text:进行中" --hold
         act --stop "text:到货" --keep notify --for 2h
 
 - `--stop <条件>` 整段一直盯着，满足就停下，后面的步骤不做
+- `--on <条件 => 一步>` 短程规则（仅本次 act 生效，可写 1–3 条，不跨轮）：条件成立时执行一步（只允许 tap / key back / scroll / wait 时长，可选 x1–x3，默认 x1；条件不能是 stable / still；text: / gone: 连续 2 次独立读屏才触发，间隔 500ms；规则不能触发付款或“每次询问”应用）
+- `--hold` 回复发出后暂停副屏前台应用，下一条命令前自动恢复（最长 120 秒，仅 Android 14+；一直要就 note hold on）。限制：暂停只对按帧计时的应用有效；按真实时钟计时的应用恢复后会直接跳过这段时间；暂停期间应用的网络连接可能超时
 - `--watch <时长>` 步骤做完再看这么久（会动的画面）
 - `--fast` 动作之间不等画面稳定（游戏、连续点击）；最后一步仍会等
 - `--bare` 这一段不做这个应用记下的前置/收尾步骤
@@ -58,7 +63,7 @@
 
 权限范围: `operate`（不带步骤、或只有 wait 的 act 只需要 look） · 在副屏队列里执行
 
-### `note [文字] | before "<步骤>" | after "<步骤>" | save <段名> "<步骤>" | show <段名> | human on|off | reply quiet|full | delete <编号|before|after|段名>`
+### `note [文字] | before "<步骤>" | after "<步骤>" | save <段名> "<步骤>" | show <段名> | human on|off | reply quiet|full | hold on|off | delete <编号|before|after|段名>`
 
 给当前应用记笔记（不带参数 = 列出笔记、段和前置/收尾步骤）。下次 launch 会列出来，并标明是谁、在应用哪个版本时记的。
 before / after：每段 act 开始前先做 before 的步骤，做完、观察完再做 after 的步骤（--bare 跳过）。
@@ -66,6 +71,7 @@ before / after：每段 act 开始前先做 before 的步骤，做完、观察�
 save：不执行，直接存下或改写一个段（示教存的段也一样），步骤写法和 act 相同，可以用 try / if / repeat、* 和 @N；note 列出的就是段的完整步骤。
 human on：这个应用以后每段 act 都用仿人节奏（同 act --human）；off 关掉。
 reply quiet|full：按当前 agent 保存默认回复模式（默认 quiet：符合预期时给短回复，full：每次都给完整回复），不需要先打开应用。
+hold on|off：按当前 agent 保存默认是否开启 act --hold（默认 off，仅 Android 14+ 生效），不需要先打开应用。
 
 权限范围: `operate` · 在副屏队列里执行
 
@@ -278,6 +284,9 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `INVALID_ARGS` | `fix_command` | 参数不对，命令没有执行。 |
 | `GESTURE_NEEDS_UNTIL` | `fix_command` | 闭环手势（hold / seek）必须带 until <条件>，整段没有执行。 |
 | `GESTURE_NEEDS_AREA` | `fix_command` | 闭环手势里的 text: / gone: 条件必须带区域（in x1,y1,x2,y2），整段没有执行。 |
+| `BAD_RULE` | `fix_command` | 短程规则（--on）写法不对，整条 act 没有执行。写法：--on "<条件> => <tap\|key back\|scroll\|wait 时长>[ x1..x3]"，最多 3 条，条件不能是 stable / still。 |
+| `RULE_OFF` | `none` | 本轮的一条 --on 规则已停用（次数用完、前台切走、目标找不到/有歧义或执行后画面无变化），本轮内不再检查。 |
+| `HOLD_UNSUPPORTED` | `none` | 当前系统或设备不支持 --hold（仅 Android 14 / API 34 及以上，或系统拒绝 am freeze），本次未暂停应用，其它照常。 |
 | `UNKNOWN_OPTION` | `fix_command` | 这个命令没有这个参数，命令没有执行。 |
 | `UNKNOWN_COMMAND` | `fix_command` | 没有这个命令。点击、输入、滑动、等待都写成 act 的步骤。 |
 | `FOCUS_ELSEWHERE` | `look` | 有焦点的输入框不是你刚点的地方，没有输入。 |
@@ -376,7 +385,7 @@ Returns four blocks; [Done] also lists the notes, saved segments and before/afte
 
 scope: `operate` · runs in the screen queue
 
-### `act ["step; step; …"] [--stop <condition>] [--watch <duration>] [--fast] [--bare] [--human] [--keep <notify|wake>] [--for <duration>] [--save <name>] [--full] [--async]`
+### `act ["step; step; …"] [--stop <condition>] [--on <cond => step>] [--hold] [--watch <duration>] [--fast] [--bare] [--human] [--keep <notify|wake>] [--for <duration>] [--save <name>] [--full] [--async]`
 
 do a stretch of steps (up to 40, separated by ; or newlines), returns four blocks. No steps = take a look (waits for the picture to settle, up to 3 s).
 steps:
@@ -399,9 +408,14 @@ e.g. act "tap Search; type headphones; key enter until text:All"
          act "drag 200 1500 540 600 hold until color:540,600=#4CAF50 2s"
          act "drag 100 800 980 800 seek until text:70 in 400,600,700,700"
          act "press 540 1600 hold until text:9* in 300,1400,800,1500 8s"
+         act --on "text:Promo => tap 980,420" "tap OK until text:Done"
+         act --on "text:Tap me => tap Tap me x3" --watch 10s
+         act "tap Start until text:Running" --hold
          act --stop "text:In stock" --keep notify --for 2h
 
 - `--stop <condition>` watched for the whole stretch; when met it stops and skips the rest
+- `--on <cond => step>` short-range rule for this act only (1–3 rules, never persisted): when cond holds, run one step (tap / key back / scroll / wait duration only; optional x1–x3, default x1; cond cannot be stable / still; text: / gone: requires 2 consecutive independent readings with 500ms cooldown; rules never auto-confirm payments or ask-every-time apps)
+- `--hold` pause the virtual screen's foreground app after the reply is sent and resume before the next command (max 120s, Android 14+ only; set default with note hold on). Limits: pausing only stops frame-timed apps; wall-clock apps skip ahead on resume; active network connections may time out while paused
 - `--watch <duration>` keep looking this long after the steps (moving pictures)
 - `--fast` do not wait for the picture to settle between actions (games, rapid taps); the last step still waits
 - `--bare` this stretch skips the before/after steps kept for this app
@@ -414,7 +428,7 @@ e.g. act "tap Search; type headphones; key enter until text:All"
 
 scope: `operate` (an act with no steps, or only wait steps, needs just look) · runs in the screen queue
 
-### `note [text] | before "<steps>" | after "<steps>" | save <segment> "<steps>" | show <segment> | human on|off | reply quiet|full | delete <number|before|after|segment>`
+### `note [text] | before "<steps>" | after "<steps>" | save <segment> "<steps>" | show <segment> | human on|off | reply quiet|full | hold on|off | delete <number|before|after|segment>`
 
 keep notes for the current app (no arguments = list notes, segments and before/after steps). The next launch lists them, with who wrote each and for which app version.
 before / after: every act first does the before steps, and after acting and looking does the after steps (--bare skips them).
@@ -422,6 +436,7 @@ e.g. for a picture that moves by itself (a game, a player) keep before = the ste
 save: store or rewrite a segment without running it (taught lessons too); the steps are written as for act, with try / if / repeat, * and @N; note lists each segment's full steps.
 human on: every act on this app uses human pacing from now on (as act --human); off turns it off.
 reply quiet|full: save this agent's default reply mode (default quiet: short reply when expected; full: always return full four blocks); works without an open app.
+hold on|off: save whether this agent enables act --hold by default (default off, Android 14+ only); works without an open app.
 
 scope: `operate` · runs in the screen queue
 
@@ -634,6 +649,9 @@ scope: `look`
 | `INVALID_ARGS` | `fix_command` | Bad arguments; the command did not run. |
 | `GESTURE_NEEDS_UNTIL` | `fix_command` | Closed-loop gestures (hold / seek) require until <condition>; nothing in the stretch ran. |
 | `GESTURE_NEEDS_AREA` | `fix_command` | text: / gone: conditions inside a closed-loop gesture must include a region (in x1,y1,x2,y2); nothing in the stretch ran. |
+| `BAD_RULE` | `fix_command` | Bad short-range rule (--on); nothing in this act ran. Syntax: --on "<cond> => <tap\|key back\|scroll\|wait duration>[ x1..x3]", at most 3 rules, condition cannot be stable / still. |
+| `RULE_OFF` | `none` | A short-range --on rule was disabled for the rest of this act (limit reached, app switched, target missing/ambiguous, or no visual change after running). |
+| `HOLD_UNSUPPORTED` | `none` | This device or Android version does not support --hold (Android 14 / API 34+ required, or am freeze failed); the app was not paused and the command ran normally. |
 | `UNKNOWN_OPTION` | `fix_command` | The command has no such option; it did not run. |
 | `UNKNOWN_COMMAND` | `fix_command` | No such command. Tapping, typing, swiping and waiting are all act steps. |
 | `FOCUS_ELSEWHERE` | `look` | The focused input box is not where you just tapped; nothing was typed. |

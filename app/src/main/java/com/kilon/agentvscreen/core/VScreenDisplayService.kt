@@ -519,6 +519,17 @@ class VScreenDisplayService : Binder {
                             out.writeInt(0)
                             out.writeString(gate.statusJson().toString())
                         }
+                        4 -> {
+                            val n = data.readInt().coerceIn(0, Gate.HOLD_MAX_PROCS)
+                            val procs = List(n) { data.readString().orEmpty() }
+                            val maxMs = data.readLong()
+                            out.writeInt(0)
+                            out.writeInt(gate.hold(procs, maxMs))
+                        }
+                        5 -> {
+                            out.writeInt(0)
+                            out.writeInt(gate.unhold())
+                        }
                         else -> throw IllegalArgumentException("unknown gate op $op")
                     }
                 }
@@ -1077,11 +1088,13 @@ class VScreenDisplayService : Binder {
          */
         const val FENCE = FIRST_CALL_TRANSACTION + 22
         /**
-         * 2.0.0-beta2 (protocol 16): TCP forwarder (Gate) in the privileged service process.
+         * 2.0.0-beta2 (protocol 16) & 2.0.0-beta5 (protocol 17): TCP forwarder (Gate) in the privileged service process.
          * op 0 START (wantPort, internalPort, pkg, processName, sdk) -> boundPort (-1 = failed)
          * op 1 BEAT -> ok
          * op 2 STOP -> ok
          * op 3 STATUS -> json string
+         * op 4 HOLD (n, n x proc, maxMs) -> frozen count
+         * op 5 UNHOLD -> unheld count
          */
         const val GATE = FIRST_CALL_TRANSACTION + 23
         /** The rule of [mayInject]: never the main screen; a display this service created, or one the app owns. */
@@ -1105,7 +1118,7 @@ class VScreenDisplayService : Binder {
         /** A display nobody touched for this long (app gone) is released. */
         const val ORPHAN_MS = 20 * 60_000L
         /** Bump when the protocol changes, so Shizuku restarts an old service process. */
-        const val PROTOCOL = 16
+        const val PROTOCOL = 17
         /** Shizuku's reserved "destroy user service" transaction. */
         const val DESTROY_CODE = 16777115
         private const val SHELL_PKG = "com.android.shell"

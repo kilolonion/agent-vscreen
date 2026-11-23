@@ -16,7 +16,9 @@ data class NativeOffloadRequest(val argv: List<String>, val sessionId: String?)
  *  - [softFail] a four-block reply whose stretch did not go as expected: before 1.2 (and still on /v1) these exit 0.
  */
 data class NativeOffloadResult(val exitCode: Int, val output: String, val code: String? = null,
-                               val data: org.json.JSONObject? = null, val softFail: Boolean = false) {
+                               val data: org.json.JSONObject? = null, val softFail: Boolean = false,
+                               /** 2.0.0-beta5 (5.6): callback run right after the HTTP/MCP reply is flushed (e.g. --hold freeze). */
+                               val afterSend: (() -> Unit)? = null) {
     val codeOrDefault: String get() = code ?: when (exitCode) { 0 -> "OK"; 2 -> "INVALID_ARGS"; else -> "OPERATION_FAILED" }
 }
 
@@ -75,7 +77,7 @@ class Notes {
     val isEmpty: Boolean get() = list.isEmpty()
     /** The code that decides the reply's outcome: the first coded note that is not mere information. */
     fun firstBlocking(): String? = list.firstOrNull { it.code != null && Codes.of(it.code)?.next != Codes.Next.NONE && it.code !in INFO }?.code
-    companion object { val INFO = setOf("NO_CHANGE", "MAIN_SCREEN_CHANGED", "KEEP_LIMIT", "OCR_DOWN") }
+    companion object { val INFO = setOf("NO_CHANGE", "MAIN_SCREEN_CHANGED", "KEEP_LIMIT", "OCR_DOWN", "HOLD_UNSUPPORTED", "RULE_OFF") }
 }
 
 /**
@@ -103,16 +105,19 @@ class StepOut(val n: String, val step: String, var status: String, var text: Str
     /** 2.0.0-beta4 (4.7): condition poll duration p50 / max (ms) for closed-loop gestures. */
     var pollMsP50: Long? = null
     var pollMsMax: Long? = null
+    /** 2.0.0-beta5 (5.7 #2): color condition hit frame age in ms (`ColorWatch.lastImgAgeMs`). */
+    var imgAgeMs: Long? = null
     fun json(): org.json.JSONObject = org.json.JSONObject().put("n", n).put("step", step).put("status", status)
         .also { o ->
             fact?.let { o.put("fact", it) }; code?.let { o.put("code", it) }
             waitedFor?.let { o.put("waited_for", it).put("met", waitMet == true).put("waited_ms", waitMs ?: 0) }
             point?.let { o.put("x", it.first).put("y", it.second) }
             changed?.let { o.put("changed", it) }
-            val g = gesture?.json() ?: if (pollMsP50 != null || pollMsMax != null) {
+            val g = gesture?.json() ?: if (pollMsP50 != null || pollMsMax != null || imgAgeMs != null) {
                 org.json.JSONObject().also { go ->
                     pollMsP50?.let { go.put("poll_ms_p50", it) }
                     pollMsMax?.let { go.put("poll_ms_max", it) }
+                    imgAgeMs?.let { go.put("img_age_ms", it) }
                 }
             } else null
             g?.let { o.put("gesture", it) }

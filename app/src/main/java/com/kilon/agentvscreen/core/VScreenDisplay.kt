@@ -256,8 +256,21 @@ class VScreenDisplay private constructor(
         @Volatile var maxImgAgeMs: Long = -1L
     }
 
-    /** While true (color-only press hold), skip heavy preview/full-frame copies while sampling ColorWatch at native fps. */
+    /**
+     * 2.0.0-beta5 (5.7 #1): lightweight color-fast mode during pure-color `press … hold`.
+     * Samples [ColorWatch] at native fps without holding pending ImageReader buffers, while still refreshing
+     * preview and full-frame conversion (and thus `VScreenRecorder`) at least every [COLOR_FAST_INTERVAL_MS] (500ms).
+     */
     @Volatile var colorFastMode: Boolean = false
+    private var lastColorFastFrameMs: Long = 0L
+    private val colorFastRecLock = Any()
+    private var colorFastRecFrame: Pair<Bitmap, Long>? = null
+    private var colorFastRecSeq: Long = 0L
+
+    /** Drain the latest lightweight 480px thumbnail produced during [colorFastMode] for [VScreenRecorder]; caller recycles. */
+    internal fun takeColorFastRecordFrame(): Pair<Bitmap, Long>? = synchronized(colorFastRecLock) {
+        colorFastRecFrame.also { colorFastRecFrame = null }
+    }
 
     private val colorWatches = java.util.concurrent.CopyOnWriteArrayList<ColorWatch>()
     private val colorSignal = Object()
@@ -350,13 +363,37 @@ class VScreenDisplay private constructor(
             lastFrameAtMs = now
             if (colorWatches.isNotEmpty()) sampleColors(img, now)
             if (colorFastMode && latestRaw != null) {
-                // Keep all ImageReader buffers free for SurfaceFlinger and avoid preview/full-frame copies
-                // during a pure-color press hold; ColorWatch already sampled the live RGBA buffer.
+                // 5.7 #1: never hold a pending ImageReader buffer or allocate a 10MB full-res LOS bitmap during
+                // pure-color hold; sample ColorWatch on every frame, and every 500ms update preview (reusing scratch)
+                // plus a lightweight 480px thumbnail for VScreenRecorder on the low-priority perception thread.
                 h.removeCallbacks(flushPending)
                 com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-pending") { pending?.close() }
                 pending = null
                 pendingWasPreviewed = false
+                val ref = maxOf(lastColorFastFrameMs, latestCaptureAtMs)
+                if (!colorFastFrameDue(now, ref)) {
+                    com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-close") { img.close() }
+                    return@setOnImageAvailableListener
+                }
+                lastColorFastFrameMs = now
+                val iw = img.width
+                val ih = img.height
+                val turn = bufferTurn
+                val sc = runCatching { copyToScratch(img) }.getOrNull()
                 com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-close") { img.close() }
+                if (sc != null && !sc.isRecycled) {
+                    if (previewIntervalMs != Long.MAX_VALUE) {
+                        runCatching { paintPreview(sc, iw, ih, turn) }
+                    }
+                    val small = runCatching { scaleForRecorder(sc, iw, ih, turn) }.getOrNull()
+                    if (small != null) {
+                        val recVer = _frameVersion.value * 1_000L + (++colorFastRecSeq)
+                        val old = synchronized(colorFastRecLock) {
+                            colorFastRecFrame.also { colorFastRecFrame = small to recVer }
+                        }
+                        old?.first?.recycle()
+                    }
+                }
                 return@setOnImageAvailableListener
             }
             val previewBefore = _previewVersion.value
@@ -555,6 +592,26 @@ class VScreenDisplay private constructor(
         _previewVersion.value = _previewVersion.value + 1
     }
 
+    /** Pump thread only: scale [src]'s top-left [sw]×[sh] (rotated by [turn]) down to [VScreenRecorder.MAX_SIDE]. */
+    private fun scaleForRecorder(src: Bitmap, sw: Int, sh: Int, turn: Int): Bitmap? {
+        if (sw <= 0 || sh <= 0 || src.isRecycled) return null
+        val k = minOf(1f, VScreenRecorder.MAX_SIDE.toFloat() / maxOf(sw, sh))
+        val turned = turn % 180 != 0
+        val ow = ((if (turned) sh else sw) * k).toInt().coerceAtLeast(2)
+        val oh = ((if (turned) sw else sh) * k).toInt().coerceAtLeast(2)
+        val out = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888).apply { setHasAlpha(false) }
+        val m = android.graphics.Matrix().apply { setScale(ow.toFloat() / (if (turned) sh else sw), oh.toFloat() / (if (turned) sw else sh)) }
+        if (turn != 0) {
+            m.setScale(k, k); m.postRotate(turn.toFloat())
+            val r = android.graphics.RectF(0f, 0f, sw.toFloat(), sh.toFloat()); m.mapRect(r); m.postTranslate(-r.left, -r.top)
+        }
+        val c = android.graphics.Canvas(out)
+        c.concat(m)
+        val box = android.graphics.Rect(0, 0, sw, sh)
+        c.drawBitmap(src, box, box, previewPaint)
+        return out
+    }
+
     /**
      * 1.2: wait for a frame newer than [afterVersion], at most [timeoutMs]; true when one came. Waiters are woken by
      * the frame itself, so loops that watch the screen run when the picture changes instead of on a fixed clock, and a
@@ -652,6 +709,7 @@ class VScreenDisplay private constructor(
         val h = pumpHandler
         synchronized(this) { viewers.clear(); previewLongSide = 0; previewIntervalMs = Long.MAX_VALUE }
         colorWatches.clear()
+        takeColorFastRecordFrame()?.first?.recycle()
         h?.removeCallbacks(flushPending)
         h?.removeCallbacks(refreshPreview)
         h?.removeCallbacks(trimPreview)
@@ -728,6 +786,16 @@ class VScreenDisplay private constructor(
             if (n == 0) return null
             return android.graphics.Color.rgb(sr / n, sg / n, sb / n)
         }
+
+        /** 2.0.0-beta5 (5.7 #1): minimum preview & full-frame refresh cadence during colorFastMode (500ms). */
+        const val COLOR_FAST_INTERVAL_MS = 500L
+
+        /** Pure check for whether a preview + full-frame conversion is due during [colorFastMode]. */
+        internal fun colorFastFrameDue(
+            nowMs: Long,
+            lastFrameMs: Long,
+            intervalMs: Long = COLOR_FAST_INTERVAL_MS,
+        ): Boolean = lastFrameMs <= 0L || nowMs - lastFrameMs >= intervalMs
 
         /** Why the last shell-display attempt failed (null = it worked). Shown in launch errors. */
         @Volatile var lastRemoteError: String? = null

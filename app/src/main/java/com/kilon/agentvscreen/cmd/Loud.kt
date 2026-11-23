@@ -70,6 +70,8 @@ internal object Loud {
     const val ESCALATE_TURNS = 10
     /** 3.8: NO_EXPECT coaching hint at most once every 10 turns per session. */
     const val NO_EXPECT_HINT_GAP = 10
+    /** 5.3: consecutive BEFORE full replies before showing the one-time --hold / --on hint. */
+    const val BEFORE_HINT_STREAK = 3
 
     private const val MAX_USE_DEPTH = 3
 
@@ -194,7 +196,7 @@ internal object Loud {
         return walk(steps, 0)
     }
 
-    // ── per-session reply tracking (3.8 NO_EXPECT hint + 3.11 auto-escalation + act --full window) ──
+    // ── per-session reply tracking (3.8 NO_EXPECT hint + 3.11 auto-escalation + 5.3 BEFORE hint + act --full window) ──
 
     internal class SessionState {
         var lastWasQuiet: Boolean = false
@@ -204,6 +206,8 @@ internal object Loud {
         var refetchCount: Int = 0
         var lastNoExpectHintTurn: Int = -NO_EXPECT_HINT_GAP
         var lastActWindow: LongArray? = null
+        var consecutiveBeforeFull: Int = 0
+        var beforeHintShown: Boolean = false
     }
 
     private val sessions: HashMap<String, SessionState> = VScreenOffloadHandler.recent()
@@ -254,6 +258,33 @@ internal object Loud {
             st.recentQuietRefetches.addLast(false)
             while (st.recentQuietRefetches.size > ESCALATE_WINDOW) st.recentQuietRefetches.removeFirst()
         }
+    }
+
+    /**
+     * 2.0.0-beta5 (5.3): track consecutive full replies caused by `BEFORE`.
+     * Returns true once per session when reaching [BEFORE_HINT_STREAK] (3) on Android 14+ without `--hold`.
+     */
+    fun recordBeforeAndShouldHint(
+        sid: String,
+        reasons: List<String>,
+        sdkInt: Int,
+        usedHold: Boolean,
+    ): Boolean = synchronized(sessions) {
+        val st = state(sid)
+        val isBeforeFull = reasons.isNotEmpty() && BEFORE in reasons
+        if (!isBeforeFull) {
+            st.consecutiveBeforeFull = 0
+            return false
+        }
+        st.consecutiveBeforeFull++
+        if (st.beforeHintShown || sdkInt < com.kilon.agentvscreen.core.Gate.MIN_UNFREEZE_SDK || usedHold) {
+            return false
+        }
+        if (st.consecutiveBeforeFull >= BEFORE_HINT_STREAK) {
+            st.beforeHintShown = true
+            return true
+        }
+        false
     }
 
     fun lastActWindow(sid: String): LongArray? = synchronized(sessions) { sessions[sid]?.lastActWindow?.copyOf() }

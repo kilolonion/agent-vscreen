@@ -2,6 +2,10 @@
 
 当前测试版的更新内容见 [1.4.2-beta3（versionCode 54）](../README.zh-CN.md#142-beta3-更新内容)。之后 `main` 上的改动列在最前面。
 
+## 2.0.0-beta5（`v2.0` 分支）
+
+- 新增 `act --hold` 与 `note hold on|off`（Android 14+，回复发出后由守门人暂停副屏前台应用，下条命令前、超时、接管或 App 退出时自动恢复）、单次 `act` 内生效的短程规则 `act --on "<条件> => <一步>[ x1..x3]"`（复用 `Probe` 与持续性去抖，规则触发窗口计入已认领变化），以及回复首行间隔时间提示（`距上次回复 X.Xs`）和连续 3 次 `BEFORE` 提示。
+
 ## 2.0.0-beta4（`v2.0` 分支）
 
 - 新增闭环手势（`press … hold until`、`drag … hold until`、`drag … seek until`），按住期间暂停后台整屏 OCR 并通过 `Probe` 做局部裁图识别（`readCrop`）；所有 `drag` 生成手势记录 `GestureRecord`（拿起/跟手/松手后 `stayed`/`snapped_back`/`elsewhere`/`unknown`），弹回触发 `SNAP_BACK` 完整回复，完整回复附 4 格拖动拼图条。

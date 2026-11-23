@@ -584,6 +584,7 @@ object BackgroundOperation {
     fun onScreenReleased(listener: (Int) -> Unit) { releaseListeners += listener }
 
     private fun releaseScreen(reason: String) {
+        com.kilon.agentvscreen.cmd.ActHold.unholdNow("release_screen")
         cancelIdleRelease()
         mainHandler.removeCallbacks(idlePark)
         _state.update { it.copy(powerSaving = false) }
@@ -739,6 +740,7 @@ object BackgroundOperation {
     fun beginTakeover(sessionId: String): Boolean {
         val s = _state.value
         if (s.displayId == null || s.ownerSessionId != sessionId) return false
+        com.kilon.agentvscreen.cmd.ActHold.unholdNow("takeover")
         // 1.4.2-beta4: the screen the user holds is never paused or released under them. Before, taking over an idle
         // screen left its 10-minute release timer running, and the screen went away in the user's hands.
         cancelIdleRelease()
@@ -766,6 +768,7 @@ object BackgroundOperation {
 
     /** 1.1: the user's Stop: refuse the agent (USER_STOPPED) until [userResume]; a finger the agent holds is lifted. */
     fun userStop() {
+        com.kilon.agentvscreen.cmd.ActHold.unholdNow("user_stop")
         _state.value.ownerSessionId?.let { TaskLog.stoppedByUser(it) }
         val wasHeld = _state.value.takeoverSessionId != null
         // 1.4.2-beta6: the fence cancels the agent's gesture in flight and its held fingers in the screen service (as a
