@@ -1345,7 +1345,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
             startPkg = actLoud.startPkg,
             endPkg = snap.activity?.substringBefore('/'),
             hasAppUntil = actLoud.hasAppUntil,
-            elementCount = snap.els.size,
+            elementCount = Loud.textElements(snap.els).size,
             lastExpectOnlyVisual = actLoud.lastExpectOnlyVisual,
             hasPageTextDiff = hasPageTextDiff,
             forced = actLoud.forced,
@@ -1376,7 +1376,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
                 baseInput.copy(
                     afterChanged = afterChanged,
                     endPkg = snap.activity?.substringBefore('/'),
-                    elementCount = snap.els.size,
+                    elementCount = Loud.textElements(snap.els).size,
                     hasPageTextDiff = if (afterChanged) PageBook.hasTextDiff(sid, snap.activity, snap.els) else hasPageTextDiff,
                     hasBlockingNote = notes.firstBlocking() != null,
                 )

@@ -65,11 +65,14 @@ internal object PageBook {
 
     private val books: HashMap<String, Book> = VScreenOffloadHandler.recent()
 
-    private fun matchesCard(card: Card, activity: String?, els: List<El>): Boolean {
+    private fun matchesCard(card: Card, activity: String?, now: List<El>): Boolean {
         if (card.activity != activity) return false
-        if (samePage(card.els, els)) return true
+        // 2.0 (detector): which page this is rests on what the app and OCR say, not on detected icon boxes.
+        val els = Loud.textElements(now).ifEmpty { now }
+        val prev = Loud.textElements(card.els).ifEmpty { card.els }
+        if (samePage(prev, els)) return true
         // 1-element page (e.g. Canvas HUD with a single button): exact unchanged element stays on the same card.
-        return els.size == 1 && card.els.size == 1 && sameEl(card.els[0], els[0])
+        return els.size == 1 && prev.size == 1 && sameEl(prev[0], els[0])
     }
 
     /**
@@ -124,13 +127,16 @@ internal object PageBook {
      * against the matching PageBook card (without mutating [books]).
      */
     fun hasTextDiff(sid: String, activity: String?, els: List<El>): Boolean = synchronized(books) {
-        if (els.isEmpty()) return false
+        // 2.0 (detector): places the optional detector found carry no text; an icon box that moves on a canvas is
+        // not a text difference, so they take no part in the comparison (Loud.textElements).
+        val now = Loud.textElements(els)
+        if (now.isEmpty()) return false
         val book = books[sid] ?: return true
         val existing = book.cards.values
-            .filter { matchesCard(it, activity, els) }
+            .filter { matchesCard(it, activity, now) }
             .maxByOrNull { it.seenTurn }
             ?: return true
-        diffElements(existing.els, els).totalChanges > 0
+        diffElements(Loud.textElements(existing.els), now).totalChanges > 0
     }
 
     /** Pure check of 3.4 reference rule: `turn - prevTurn <= 8` AND changed fraction < 40%. */

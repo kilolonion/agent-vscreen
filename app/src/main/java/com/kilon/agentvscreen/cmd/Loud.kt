@@ -38,6 +38,12 @@ internal fun loudReasons(input: LoudInput): List<String> {
 }
 
 internal object Loud {
+    /**
+     * 2.0 (detector): the elements NO_TEXT is about. Places only the optional detector found ("(no text icon)") are
+     * pictures, not text: a canvas full of detected icons still has no text, and still gets its picture.
+     */
+    fun textElements(els: List<El>): List<El> = els.filter { !it.detected }
+
     const val FAILED = "FAILED"
     const val NO_EXPECT = "NO_EXPECT"
     const val NOT_MET = "NOT_MET"
