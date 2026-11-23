@@ -664,13 +664,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
             var lastKeepAlive = holdStart
             while (true) {
                 Gesture.checkLoopInterrupts(d, call)
-                val now = SystemClock.elapsedRealtime()
-                if (now - lastKeepAlive >= Gesture.HOLD_KEEPALIVE_MS) {
-                    val mv = VScreenShell.finger(d.displayId, "move", 0, curPt.first, curPt.second).first
-                    if (!mv.ok) throw ActionError(mv.code, mv.message)
-                    lastKeepAlive = now
-                }
-                val sampleBefore = if (colorOnlyPress) d.latestColorSampleAtMs else -1L
+                val sampleBefore = if (colorOnlyPress) d.latestColorSampleSeq else -1L
                 val hit = timedPoll()
                 if (hit != null) {
                     hitElapsed = SystemClock.elapsedRealtime()
@@ -680,6 +674,11 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
                 }
                 val afterPoll = SystemClock.elapsedRealtime()
                 if (afterPoll - holdStart >= maxMs) break
+                if (afterPoll - lastKeepAlive >= Gesture.HOLD_KEEPALIVE_MS) {
+                    val mv = VScreenShell.finger(d.displayId, "move", 0, curPt.first, curPt.second).first
+                    if (!mv.ok) throw ActionError(mv.code, mv.message)
+                    lastKeepAlive = afterPoll
+                }
                 val waitSlice = minOf(Gesture.HOLD_POLL_MS, maxMs - (afterPoll - holdStart)).coerceAtLeast(1L)
                 if (colorOnlyPress) {
                     d.awaitColorSample(sampleBefore, waitSlice)
