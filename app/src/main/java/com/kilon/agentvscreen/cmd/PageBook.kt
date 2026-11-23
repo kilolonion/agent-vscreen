@@ -65,6 +65,13 @@ internal object PageBook {
 
     private val books: HashMap<String, Book> = VScreenOffloadHandler.recent()
 
+    private fun matchesCard(card: Card, activity: String?, els: List<El>): Boolean {
+        if (card.activity != activity) return false
+        if (samePage(card.els, els)) return true
+        // 1-element page (e.g. Canvas HUD with a single button): exact unchanged element stays on the same card.
+        return els.size == 1 && card.els.size == 1 && sameEl(card.els[0], els[0])
+    }
+
     /**
      * Match [els] on [activity] at [turn] against [sid]'s book.
      * Returns `(card, isNew)` per spec 3.4.
@@ -72,7 +79,7 @@ internal object PageBook {
     fun match(sid: String, activity: String?, els: List<El>, turn: Int): Pair<Card, Boolean> = synchronized(books) {
         val book = books.getOrPut(sid) { Book() }
         val existing = book.cards.values
-            .filter { it.activity == activity && samePage(it.els, els) }
+            .filter { matchesCard(it, activity, els) }
             .maxByOrNull { it.seenTurn }
 
         val title = pickTitle(els, activity)
@@ -110,6 +117,20 @@ internal object PageBook {
         book.cards[card.id] = card
         book.lastId = card.id
         return card to true
+    }
+
+    /**
+     * 2.0.0-beta3 (3.13): read-only check of whether [els] on [activity] has any `+`, `-`, or `~` diff
+     * against the matching PageBook card (without mutating [books]).
+     */
+    fun hasTextDiff(sid: String, activity: String?, els: List<El>): Boolean = synchronized(books) {
+        if (els.isEmpty()) return false
+        val book = books[sid] ?: return true
+        val existing = book.cards.values
+            .filter { matchesCard(it, activity, els) }
+            .maxByOrNull { it.seenTurn }
+            ?: return true
+        diffElements(existing.els, els).totalChanges > 0
     }
 
     /** Pure check of 3.4 reference rule: `turn - prevTurn <= 8` AND changed fraction < 40%. */

@@ -330,6 +330,7 @@ def run_task(token, task, return_events=False):
     image_tokens = 0
     phone_ms = 0
     reply_est_tokens = []
+    reply_image_tokens = []
     quiet_replies = 0
     refetch_after_quiet = 0
     loud_reasons = []
@@ -357,7 +358,9 @@ def run_task(token, task, return_events=False):
             et = int(meter.get("est_tokens", 0))
             est_tokens += et
             reply_est_tokens.append(et)
-            image_tokens += int(meter.get("image_tokens", 0))
+            itok = int(meter.get("image_tokens", 0))
+            image_tokens += itok
+            reply_image_tokens.append(itok)
             phone_ms += int((reply.get("timing") or {}).get("phone_ms", 0))
 
             cur_returned_at = int(reply.get("returned_at") or 0)
@@ -421,6 +424,7 @@ def run_task(token, task, return_events=False):
         "image_tokens": image_tokens,
         "phone_ms": phone_ms,
         "reply_est_tokens": reply_est_tokens,
+        "reply_image_tokens": reply_image_tokens,
         "quiet_replies": quiet_replies,
         "false_quiet": false_quiet,
         "false_quiet_details": false_quiet_details,
@@ -458,26 +462,45 @@ def compute_totals(rows):
 
 
 def compute_beta3_comparison(rows, baseline):
-    """3.10 & 3.12: compare `since == beta3` (b) tasks against same-scene baseline (a) tasks."""
+    """3.10, 3.12 & 3.13: compare `since == beta3` (b) tasks against same-scene (a) tasks.
+    Reports both:
+      - All replies (including `launch`) vs `baseline.json`;
+      - `act`-only replies (`[1:]`): text median vs `baseline.json` `[1:]`,
+        image token sum vs same-run same-scene `a` tasks `[1:]` (baseline has no per-reply image breakdown).
+    """
     b_rows = [r for r in rows if r.get("since") == "beta3"]
     if not b_rows or not baseline or "tasks" not in baseline:
         return None
     base_by_scene = {t["scene"]: t for t in (baseline.get("tasks") or []) if "scene" in t}
+    cur_a_by_scene = {r["scene"]: r for r in rows if not r.get("since") and "scene" in r}
     pairs = []
     base_replies = []
     new_replies = []
+    base_act_replies = []
+    new_act_replies = []
     base_img = 0
     new_img = 0
+    same_run_a_act_img = 0
+    new_act_img = 0
     for br in b_rows:
         ar = base_by_scene.get(br["scene"])
         if not ar:
             continue
+        cur_ar = cur_a_by_scene.get(br["scene"])
         ar_rep = ar.get("reply_est_tokens") or []
         br_rep = br.get("reply_est_tokens") or []
+        ar_act_rep = ar_rep[1:]
+        br_act_rep = br_rep[1:]
         base_replies.extend(ar_rep)
         new_replies.extend(br_rep)
+        base_act_replies.extend(ar_act_rep)
+        new_act_replies.extend(br_act_rep)
         base_img += int(ar.get("image_tokens", 0))
         new_img += int(br.get("image_tokens", 0))
+        cur_ar_act_img_val = sum((cur_ar.get("reply_image_tokens") or [])[1:]) if cur_ar else 0
+        br_act_img_val = sum((br.get("reply_image_tokens") or [])[1:])
+        same_run_a_act_img += cur_ar_act_img_val
+        new_act_img += br_act_img_val
         pairs.append({
             "scene": br["scene"],
             "base_id": ar["id"],
@@ -485,10 +508,14 @@ def compute_beta3_comparison(rows, baseline):
             "ok": bool(br["ok"]),
             "base_median": round(statistics.median(ar_rep), 1) if ar_rep else 0.0,
             "new_median": round(statistics.median(br_rep), 1) if br_rep else 0.0,
+            "base_act_median": round(statistics.median(ar_act_rep), 1) if ar_act_rep else 0.0,
+            "new_act_median": round(statistics.median(br_act_rep), 1) if br_act_rep else 0.0,
             "base_est_tokens": int(ar.get("est_tokens", 0)),
             "new_est_tokens": int(br.get("est_tokens", 0)),
             "base_image_tokens": int(ar.get("image_tokens", 0)),
             "new_image_tokens": int(br.get("image_tokens", 0)),
+            "same_run_a_act_image_tokens": cur_ar_act_img_val,
+            "new_act_image_tokens": br_act_img_val,
             "quiet_replies": int(br.get("quiet_replies", 0)),
             "false_quiet": int(br.get("false_quiet", 0)),
             "loud_reasons": br.get("loud_reasons") or [],
@@ -499,6 +526,11 @@ def compute_beta3_comparison(rows, baseline):
     new_med = round(statistics.median(new_replies), 1) if new_replies else 0.0
     med_drop = round((base_med - new_med) / base_med, 4) if base_med > 0 else 0.0
     img_drop = round((base_img - new_img) / base_img, 4) if base_img > 0 else 0.0
+
+    base_act_med = round(statistics.median(base_act_replies), 1) if base_act_replies else 0.0
+    new_act_med = round(statistics.median(new_act_replies), 1) if new_act_replies else 0.0
+    act_med_drop = round((base_act_med - new_act_med) / base_act_med, 4) if base_act_med > 0 else 0.0
+    act_img_drop = round((same_run_a_act_img - new_act_img) / same_run_a_act_img, 4) if same_run_a_act_img > 0 else 0.0
 
     # 3.10 scene checks (S02 popup BEFORE+弹出, S12 carousel no BEFORE/AFTER, S07 toast event)
     by_id = {r["id"]: r for r in rows}
@@ -530,6 +562,12 @@ def compute_beta3_comparison(rows, baseline):
         "base_image_tokens": base_img,
         "new_image_tokens": new_img,
         "image_tokens_drop_pct": img_drop,
+        "base_act_median_reply_est_tokens": base_act_med,
+        "new_act_median_reply_est_tokens": new_act_med,
+        "act_median_reply_drop_pct": act_med_drop,
+        "same_run_a_act_image_tokens": same_run_a_act_img,
+        "new_act_image_tokens": new_act_img,
+        "act_image_tokens_drop_pct": act_img_drop,
         "scene_checks": scene_checks,
     }
 
@@ -580,22 +618,27 @@ def render_markdown(app_version, rows, skipped, totals, diff, regressed, repeat_
     if beta3_cmp is not None:
         lines.extend([
             "",
-            "## 新写法对比（beta3 `b` 任务 vs baseline 同场景 `a` 任务）",
+            "## 新写法对比（beta3 `b` 任务 vs 同场景 `a` 任务）",
             "",
-            "| 场景 | baseline | beta3 | 结果 | baseline 中位 token | beta3 中位 token | baseline 图 token | beta3 图 token | 短回复 | loud 原因 |",
+            "| 场景 | baseline | beta3 | 结果 | act 中位 token (base → b) | act 图 token (本次 a → b) | 全回复中位 (base → b) | 全回复图 (base → b) | 短回复 | loud 原因 |",
             "| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |",
         ])
         for p in beta3_cmp["pairs"]:
             loud_str = "; ".join(",".join(x) if x else "quiet" for x in p["loud_reasons"]) or "-"
             lines.append(
                 f"| {p['scene']} | {p['base_id']} | {p['new_id']} | {'成功' if p['ok'] else '失败'} | "
-                f"{p['base_median']} | {p['new_median']} | {p['base_image_tokens']} | {p['new_image_tokens']} | "
+                f"{p['base_act_median']} → {p['new_act_median']} | "
+                f"{p['same_run_a_act_image_tokens']} → {p['new_act_image_tokens']} | "
+                f"{p['base_median']} → {p['new_median']} | "
+                f"{p['base_image_tokens']} → {p['new_image_tokens']} | "
                 f"{p['quiet_replies']} | `{loud_str}` |"
             )
         lines.extend([
             "",
-            f"- 每条回复估算 token 中位数：`{beta3_cmp['base_median_reply_est_tokens']}` → `{beta3_cmp['new_median_reply_est_tokens']}`（降幅 **{beta3_cmp['median_reply_drop_pct']:.1%}**，目标 ≥ 50%）",
-            f"- 图片 token 合计：`{beta3_cmp['base_image_tokens']}` → `{beta3_cmp['new_image_tokens']}`（降幅 **{beta3_cmp['image_tokens_drop_pct']:.1%}**，目标 ≥ 60%）",
+            f"- **仅 `act` 口径（3.13）文字中位数（vs baseline `[1:]`）**：`{beta3_cmp['base_act_median_reply_est_tokens']}` → `{beta3_cmp['new_act_median_reply_est_tokens']}`（降幅 **{beta3_cmp['act_median_reply_drop_pct']:.1%}**，目标 ≥ 50%）",
+            f"- **仅 `act` 口径（3.13）图片 token 合计（vs 本次同场景 `a` `[1:]`）**：`{beta3_cmp['same_run_a_act_image_tokens']}` → `{beta3_cmp['new_act_image_tokens']}`（降幅 **{beta3_cmp['act_image_tokens_drop_pct']:.1%}**，目标 ≥ 60%）",
+            f"- 全回复口径（含 `launch`）文字中位数（vs baseline）：`{beta3_cmp['base_median_reply_est_tokens']}` → `{beta3_cmp['new_median_reply_est_tokens']}`（降幅 **{beta3_cmp['median_reply_drop_pct']:.1%}**）",
+            f"- 全回复口径（含 `launch`）图片 token 合计（vs baseline）：`{beta3_cmp['base_image_tokens']}` → `{beta3_cmp['new_image_tokens']}`（降幅 **{beta3_cmp['image_tokens_drop_pct']:.1%}**）",
         ])
         sc = beta3_cmp["scene_checks"]
         lines.extend([
@@ -668,6 +711,11 @@ def main():
     token = seed_token()
     info = ping()
     app_version = info.get("version", "2.0.0-beta1")
+    # 3.13: acknowledge current version once before eval so AgentNews banner (~2000 tokens) does not skew tasks.
+    try:
+        call_api(token, ["remembered", "eval"], session="eval-setup", timeout=30)
+    except Exception as e:
+        print(f"WARN: remembered eval failed: {e}", flush=True)
 
     task_files = sorted(Path(args.tasks_dir).glob("*.json"))
     if not task_files:

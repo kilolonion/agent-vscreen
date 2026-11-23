@@ -108,15 +108,16 @@ internal fun samePage(prev: List<El>, now: List<El>): Boolean {
 /** What 【这段时间】 says, plus the frames for its sheet. */
 internal class Since(val lines: List<String>, val changed: Boolean, val from: Long, val to: Long)
 
-/** 2.0.0-beta3 (3.1–3.12): `act`-only facts passed into [fourBlocks] for Loud / quiet short-reply decisions. */
+/** 2.0.0-beta3 (3.1–3.13): `act`-only facts passed into [fourBlocks] for Loud / quiet short-reply decisions. */
 internal class ActLoudCtx(
     val stepsWritten: List<Step>,
     val firstNoExpectStep: Int?,
     val hasAppUntil: Boolean,
+    val lastExpectOnlyVisual: Boolean,
     val startPkg: String?,
     val firstActionMask: com.kilon.agentvscreen.core.Mask?,
     val beforeChanged: Boolean,
-    val afterBaseFrame: VScreenRecorder.Frame?,
+    val afterStartMs: Long,
     val forced: Boolean,
     val replayWindow: LongArray? = null,
     val prevReturnAt: Long? = null,
@@ -662,74 +663,114 @@ internal fun findPopupBox(before: Bitmap, after: Bitmap, changedBox: Rect): Rect
     return candidates.firstOrNull { isPopup(before, after, it) }
 }
 
-/** 2.0.0-beta3 (3.6 & 3.7): structured picture events so budget trimming can collapse detail lines cleanly. */
+/** 2.0.0-beta3 (3.6 & 3.13): one contiguous visual change span detected on the recording track. */
+internal class PicSpan(
+    val start: Long,
+    var end: Long,
+    var area: Rect,
+    var share: Double,
+    var popupArea: Rect? = null,
+)
+
+/** 2.0.0-beta3 (3.13): pure output of frame-sequence analysis shared by 【这段时间】 and BEFORE/AFTER. */
+internal data class FrameAnalysis(
+    val spans: List<PicSpan>,
+    val firstLast: Pair<Double, Rect?>?,
+) {
+    val maxShare: Double get() = spans.maxOfOrNull { it.share } ?: 0.0
+    val hasPopup: Boolean get() = spans.any { it.popupArea != null }
+    val hasSignificantChange: Boolean get() = maxShare >= Loud.CHANGE_RATIO || hasPopup
+}
+
+/**
+ * 2.0.0-beta3 (3.6 & 3.13), pure: analyze an ordered list of `(timestampMs, bitmap)` frames for visual
+ * change spans and popups, excluding cells in [mask]. Detects intermediate changes such as A → B → A
+ * even when the first and last frames are identical.
+ */
+internal fun analyzeFrameSequence(
+    pics: List<Pair<Long, Bitmap>>,
+    fw: Int,
+    fh: Int,
+    mask: com.kilon.agentvscreen.core.Mask?,
+): FrameAnalysis {
+    val spans = ArrayList<PicSpan>()
+    for ((a, b) in pics.zipWithNext()) {
+        val cols = mask?.cols ?: VScreenActivity.COLS
+        val rows = mask?.rows ?: VScreenActivity.rowsFor(a.second.width, a.second.height)
+        val c = VScreenActivity.cells(a.second, b.second, cols, rows)?.let { cc -> mask?.minus(cc) ?: cc } ?: continue
+        val share = VScreenActivity.share(c)
+        if (share < Report.MIN_SPAN_SHARE) continue
+        val bbSmall = VScreenActivity.bbox(c, cols, rows, a.second.width, a.second.height) ?: continue
+        val bb = VScreenActivity.bbox(c, cols, rows, fw, fh) ?: continue
+        val popSmall = findPopupBox(a.second, b.second, bbSmall)
+        val popFull = popSmall?.let { p ->
+            Rect(
+                (p.left.toLong() * fw / maxOf(1, a.second.width)).toInt(),
+                (p.top.toLong() * fh / maxOf(1, a.second.height)).toInt(),
+                (p.right.toLong() * fw / maxOf(1, a.second.width)).toInt(),
+                (p.bottom.toLong() * fh / maxOf(1, a.second.height)).toInt(),
+            )
+        }
+        val last = spans.lastOrNull()
+        if (last != null && a.first - last.end <= 600L && (popFull == null) == (last.popupArea == null)) {
+            last.end = b.first
+            last.area.union(bb)
+            last.share = maxOf(last.share, share)
+            if (popFull != null) last.popupArea = popFull
+        } else {
+            spans += PicSpan(a.first, b.first, Rect(bb), share, popFull)
+        }
+    }
+    val firstLast = if (spans.isNotEmpty() && pics.size >= 2) {
+        val a = pics.first().second; val b = pics.last().second
+        val cols = mask?.cols ?: VScreenActivity.COLS
+        val rows = mask?.rows ?: VScreenActivity.rowsFor(a.width, a.height)
+        VScreenActivity.cells(a, b, cols, rows)?.let { c0 -> mask?.minus(c0) ?: c0 }?.let { c ->
+            VScreenActivity.share(c) to VScreenActivity.bbox(c, cols, rows, fw, fh)
+        }
+    } else null
+    return FrameAnalysis(spans, firstLast)
+}
+
+/** 2.0.0-beta3 (3.6, 3.7 & 3.13): structured picture events shared by 【这段时间】 and BEFORE/AFTER. */
 internal data class PicEvents(
     val maskLine: String?,
     val detailLines: List<String>,
     val spanCount: Int,
     val changed: Boolean,
+    val maxShare: Double = 0.0,
+    val hasPopup: Boolean = false,
 ) {
     val allLines: List<String> get() = listOfNotNull(maskLine) + detailLines
+    val hasSignificantChange: Boolean get() = maxShare >= Loud.CHANGE_RATIO || hasPopup
 }
 
 /** Where and how long the picture changed between [from] and [to], from the recording track. */
-internal fun pictureEvents(d: VScreenDisplay, from: Long, to: Long): PicEvents {
+internal fun pictureEvents(
+    d: VScreenDisplay,
+    from: Long,
+    to: Long,
+    maskOverride: com.kilon.agentvscreen.core.Mask? = null,
+): PicEvents {
     // 1.3: an area that keeps playing (video, carousel) is said once and left out of the changes below.
-    val mask = VScreenPerception.mask(d.displayId)
+    val mask = maskOverride ?: VScreenPerception.mask(d.displayId)
     val maskLine = mask?.let { tr("一直在动的区域（视频、轮播或动画，里面的字不列出，稳定判断不算它）：${it.line(true)}", "areas that keep moving (video, carousel or animation; their words are not listed, settling ignores them): ${it.line(false)}") }
     val frames = VScreenRecorder.frames(d.displayId, from, to)
-    if (frames.isEmpty()) return PicEvents(maskLine, emptyList(), 0, false)
+    if (frames.isEmpty()) return PicEvents(maskLine, emptyList(), 0, false, maxShare = 0.0, hasPopup = false)
     val base = VScreenRecorder.frameAt(d.displayId, from)
     val sample = (listOfNotNull(base?.takeIf { it.atMs < (frames.firstOrNull()?.atMs ?: 0L) }) + frames.let { fs ->
         if (fs.size <= 24) fs else (0 until 24).map { fs[it * (fs.size - 1) / 23] }.distinct()
     })
     val pics = sample.mapNotNull { f -> VScreenRecorder.decode(f, 160)?.let { f.atMs to it } }
     val (fw, fh) = VScreenRecorder.frameSize(d.displayId) ?: (d.width to d.height)
-    class Span(
-        val start: Long,
-        var end: Long,
-        var area: Rect,
-        var share: Double,
-        var popupArea: Rect? = null,
-    )
-    val spans = ArrayList<Span>()
     try {
-        for ((a, b) in pics.zipWithNext()) {
-            val rows = VScreenActivity.rowsFor(a.second.width, a.second.height)
-            val c = VScreenActivity.cells(a.second, b.second, VScreenActivity.COLS, rows)?.let { cc -> mask?.takeIf { it.cols == VScreenActivity.COLS && it.rows == rows }?.minus(cc) ?: cc } ?: continue
-            val share = VScreenActivity.share(c)
-            if (share < Report.MIN_SPAN_SHARE) continue
-            val bbSmall = VScreenActivity.bbox(c, VScreenActivity.COLS, rows, a.second.width, a.second.height) ?: continue
-            val bb = VScreenActivity.bbox(c, VScreenActivity.COLS, rows, fw, fh) ?: continue
-            val popSmall = findPopupBox(a.second, b.second, bbSmall)
-            val popFull = popSmall?.let { p ->
-                Rect(
-                    (p.left.toLong() * fw / maxOf(1, a.second.width)).toInt(),
-                    (p.top.toLong() * fh / maxOf(1, a.second.height)).toInt(),
-                    (p.right.toLong() * fw / maxOf(1, a.second.width)).toInt(),
-                    (p.bottom.toLong() * fh / maxOf(1, a.second.height)).toInt(),
-                )
-            }
-            val last = spans.lastOrNull()
-            if (last != null && a.first - last.end <= 600L && (popFull == null) == (last.popupArea == null)) {
-                last.end = b.first
-                last.area.union(bb)
-                last.share = maxOf(last.share, share)
-                if (popFull != null) last.popupArea = popFull
-            } else {
-                spans += Span(a.first, b.first, Rect(bb), share, popFull)
-            }
-        }
-        if (spans.isEmpty()) return PicEvents(maskLine, emptyList(), 0, false)
-        val firstLast = if (pics.size >= 2) {
-            val a = pics.first().second; val b = pics.last().second
-            VScreenActivity.cells(a, b, VScreenActivity.COLS, VScreenActivity.rowsFor(a.width, a.height))?.let { c0 -> mask?.takeIf { it.cols == VScreenActivity.COLS && it.rows == VScreenActivity.rowsFor(a.width, a.height) }?.minus(c0) ?: c0 }?.let { c ->
-                VScreenActivity.share(c) to VScreenActivity.bbox(c, VScreenActivity.COLS, VScreenActivity.rowsFor(a.width, a.height), fw, fh)
-            }
-        } else null
+        val analysis = analyzeFrameSequence(pics, fw, fh, mask)
+        val spans = analysis.spans
+        if (spans.isEmpty()) return PicEvents(maskLine, emptyList(), 0, false, maxShare = 0.0, hasPopup = false)
+        val firstLast = analysis.firstLast
         val readings = VScreenPerception.readings(d.displayId, from, to)
         val priorWords = readings.firstOrNull()?.words?.map { VScreenOcr.norm(it) }?.toSet().orEmpty()
-        fun popupWords(sp: Span): String {
+        fun popupWords(sp: PicSpan): String {
             val box = sp.popupArea ?: return ""
             val found = LinkedHashSet<String>()
             for (r in readings) {
@@ -750,7 +791,7 @@ internal fun pictureEvents(d: VScreenDisplay, from: Long, to: Long): PicEvents {
 
         // 3.6: keep at most MAX_PIC_SPANS (3) spans (prioritizing popups, then size*duration), chronological order.
         val shown = spans.sortedWith(
-            compareByDescending<Span> { it.popupArea != null }
+            compareByDescending<PicSpan> { it.popupArea != null }
                 .thenByDescending { (it.end - it.start).coerceAtLeast(100L) * (it.share + 0.01) }
         ).take(Report.MAX_PIC_SPANS).sortedBy { it.start }
 
@@ -770,8 +811,32 @@ internal fun pictureEvents(d: VScreenDisplay, from: Long, to: Long): PicEvents {
             detailLines += if (share < Report.MIN_SPAN_SHARE) tr("开头和现在的画面一样（中间动过又回去了）", "the start and now look the same (it moved and came back)")
             else tr("开头和现在相比：${(share * 100).roundToInt()}% 的格子不同", "start vs now: ${(share * 100).roundToInt()}% of cells differ") + (bb?.let { " [${Report.box(it)}]" } ?: "")
         }
-        return PicEvents(maskLine, detailLines, spans.size, firstLast?.let { it.first >= Report.MIN_SPAN_SHARE } ?: true)
+        return PicEvents(
+            maskLine = maskLine,
+            detailLines = detailLines,
+            spanCount = spans.size,
+            changed = firstLast?.let { it.first >= Report.MIN_SPAN_SHARE } ?: true,
+            maxShare = analysis.maxShare,
+            hasPopup = analysis.hasPopup,
+        )
     } finally { pics.forEach { it.second.recycle() } }
+}
+
+/**
+ * 2.0.0-beta3 (3.13): unified BEFORE / AFTER detector built on [pictureEvents].
+ * Recording only stores frames on picture change:
+ * - Track does not cover [fromMs] (missing, older than retention, or pruned) -> true (uncertain = changed).
+ * - Track covers [fromMs] and window has no new frames -> false (unchanged).
+ * - Otherwise -> true iff any span has `share >= Loud.CHANGE_RATIO` or is marked as popup.
+ */
+internal fun hasPictureEvent(
+    d: VScreenDisplay,
+    fromMs: Long?,
+    toMs: Long,
+    maskOverride: com.kilon.agentvscreen.core.Mask? = null,
+): Boolean {
+    if (fromMs == null || !VScreenRecorder.coversFrom(d.displayId, fromMs, toMs)) return true
+    return pictureEvents(d, fromMs, toMs, maskOverride).hasSignificantChange
 }
 
 internal fun pictureFacts(d: VScreenDisplay, from: Long, to: Long): Pair<List<String>, Boolean> =
@@ -1233,6 +1298,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
     val reasons: List<String> = if (actLoud == null) {
         emptyList()
     } else {
+        val hasPageTextDiff = PageBook.hasTextDiff(sid, snap.activity, snap.els)
         val baseInput = LoudInput(
             outcome = outcome,
             hasBlockingNote = notes.firstBlocking() != null,
@@ -1244,38 +1310,41 @@ internal fun VScreenOffloadHandler.fourBlocks(
             endPkg = snap.activity?.substringBefore('/'),
             hasAppUntil = actLoud.hasAppUntil,
             elementCount = snap.els.size,
+            lastExpectOnlyVisual = actLoud.lastExpectOnlyVisual,
+            hasPageTextDiff = hasPageTextDiff,
             forced = actLoud.forced,
         )
         val pre = loudReasons(baseInput)
         if (pre.isEmpty()) {
-            // 3.2: only observe AFTER_MS = 800ms when all 7 other reasons are false; counts in timing.action_ms.
+            // 3.2 & 3.13: observe until AFTER_MS = 800ms after last expectation met, only when all 7 other reasons are false.
             val tAfter = SystemClock.elapsedRealtime()
-            val deadline = tAfter + Loud.AFTER_MS
+            val remainMs = (actLoud.afterStartMs + Loud.AFTER_MS - System.currentTimeMillis()).coerceAtLeast(0L)
+            val deadline = tAfter + remainMs
             while (SystemClock.elapsedRealtime() < deadline) {
                 if (Call.current()?.cancelled == true || connectionLost(d) != null) break
                 Thread.sleep(minOf(100L, (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(1L)))
             }
             totalActionMs += SystemClock.elapsedRealtime() - tAfter
-            d.requestFreshFrame()
             d.awaitFrameAfter(SystemClock.elapsedRealtime() - 50L, 100L)
-            val afterEndFrame = d.latestWithVersion()?.let { (bmp, ver) ->
+            d.latestWithVersion()?.let { (bmp, ver) ->
                 VScreenRecorder.offerFresh(d, bmp, ver, snap.activity?.substringBefore('/') ?: actLoud.startPkg)
-            } ?: VScreenRecorder.frameAt(d.displayId, System.currentTimeMillis())
-            val aBmp = actLoud.afterBaseFrame?.let { VScreenRecorder.decode(it) }
-            val bBmp = afterEndFrame?.let { VScreenRecorder.decode(it) }
-            val afterChanged = try {
-                Loud.compareWithMask(aBmp, bBmp, actLoud.firstActionMask)
-            } finally {
-                aBmp?.recycle()
-                bBmp?.recycle()
             }
+            val afterChanged = hasPictureEvent(d, actLoud.afterStartMs, System.currentTimeMillis(), actLoud.firstActionMask)
             if (afterChanged) {
                 val tRe = SystemClock.elapsedRealtime()
                 snap = snapshot(d)
                 extraLookMs = SystemClock.elapsedRealtime() - tRe
                 attachSnapNotes(snap)
             }
-            loudReasons(baseInput.copy(afterChanged = afterChanged, endPkg = snap.activity?.substringBefore('/'), elementCount = snap.els.size, hasBlockingNote = notes.firstBlocking() != null))
+            loudReasons(
+                baseInput.copy(
+                    afterChanged = afterChanged,
+                    endPkg = snap.activity?.substringBefore('/'),
+                    elementCount = snap.els.size,
+                    hasPageTextDiff = if (afterChanged) PageBook.hasTextDiff(sid, snap.activity, snap.els) else hasPageTextDiff,
+                    hasBlockingNote = notes.firstBlocking() != null,
+                )
+            )
         } else {
             pre
         }
@@ -1333,7 +1402,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
 
     val tTrack = SystemClock.elapsedRealtime()
     val picF = REPORT_POOL.submit<PicEvents>(com.kilon.agentvscreen.I18n.carry {
-        runCatching { pictureEvents(d, from, now) }.getOrElse {
+        runCatching { pictureEvents(d, from, now, actLoud?.firstActionMask) }.getOrElse {
             PicEvents(null, listOf(tr("（读不到录屏：${it.message}）", "(recording unreadable: ${it.message})")), 0, false)
         }
     })

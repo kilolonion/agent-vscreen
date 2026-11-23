@@ -120,13 +120,111 @@ class V200Beta3Test {
             loudReasons(clean.copy(startPkg = "com.example.a", endPkg = "com.example.b", hasAppUntil = true)),
         )
 
-        // 7. NO_TEXT (< 3 elements vs >= 3 elements)
-        assertEquals(listOf(Loud.NO_TEXT), loudReasons(clean.copy(elementCount = 2)))
-        assertEquals(emptyList<String>(), loudReasons(clean.copy(elementCount = 3)))
+        // 7. NO_TEXT (3.13): elementCount == 0 OR (lastExpectOnlyVisual && !hasPageTextDiff)
+        assertEquals(listOf(Loud.NO_TEXT), loudReasons(clean.copy(elementCount = 0)))
+        assertEquals(emptyList<String>(), loudReasons(clean.copy(elementCount = 1, lastExpectOnlyVisual = false, hasPageTextDiff = false)))
+        assertEquals(listOf(Loud.NO_TEXT), loudReasons(clean.copy(elementCount = 5, lastExpectOnlyVisual = true, hasPageTextDiff = false)))
+        assertEquals(emptyList<String>(), loudReasons(clean.copy(elementCount = 5, lastExpectOnlyVisual = true, hasPageTextDiff = true)))
 
         // 8. FORCED
         assertEquals(listOf(Loud.FORCED), loudReasons(clean.copy(forced = true)))
         assertEquals(emptyList<String>(), loudReasons(clean.copy(forced = false)))
+    }
+
+    @Test
+    fun loudNoTextFollowsSpec313FourRequiredCases() {
+        val sid = "s_no_text"
+        val act = "com.example/.GameOrPage"
+        val clean = LoudInput(startPkg = "com.example", endPkg = "com.example")
+
+        fun doneAction(n: String, step: String, waitedFor: String? = null, kind: CondKind? = null, typeOk: Boolean = false) =
+            StepOut(n, step, "done", "").apply {
+                this.waitedFor = waitedFor
+                this.waitMet = waitedFor != null
+                this.metCondKind = kind
+                this.typeVerified = typeOk
+                this.isActionOrRepeatUntil = true
+            }
+
+        // Case 1: 1-line page + until text: -> NOT NO_TEXT
+        val oneLine = listOf(el(1, "加载完成", 540, 1200))
+        PageBook.match(sid, act, oneLine, turn = 1)
+        val stepsText = listOf(doneAction("1", "tap 加载 until text:加载完成", "text:加载完成", CondKind.TEXT))
+        assertFalse(Loud.lastExpectOnlyVisual(stepsText))
+        assertEquals(
+            emptyList<String>(),
+            loudReasons(
+                clean.copy(
+                    elementCount = oneLine.size,
+                    lastExpectOnlyVisual = Loud.lastExpectOnlyVisual(stepsText),
+                    hasPageTextDiff = PageBook.hasTextDiff(sid, act, oneLine),
+                )
+            ),
+        )
+
+        // Case 2: until change: + no text diff against PageBook card (e.g. Canvas game with 3 HUD labels) -> NO_TEXT
+        val hud = listOf(el(1, "得分 0", 200, 100), el(2, "血量 100", 540, 100), el(3, "暂停", 900, 100))
+        PageBook.match(sid, act, hud, turn = 2)
+        val stepsChange = listOf(doneAction("1", "tap 540 900 until change", "change", CondKind.CHANGE))
+        assertTrue(Loud.lastExpectOnlyVisual(stepsChange))
+        assertFalse(PageBook.hasTextDiff(sid, act, hud))
+        assertEquals(
+            listOf(Loud.NO_TEXT),
+            loudReasons(
+                clean.copy(
+                    elementCount = hud.size,
+                    lastExpectOnlyVisual = Loud.lastExpectOnlyVisual(stepsChange),
+                    hasPageTextDiff = PageBook.hasTextDiff(sid, act, hud),
+                )
+            ),
+        )
+
+        // Case 3: until change: + ~ (text modified in place) diff against PageBook card -> NOT NO_TEXT
+        val hudScored = listOf(el(1, "得分 10", 200, 100), el(2, "血量 100", 540, 100), el(3, "暂停", 900, 100))
+        assertTrue(PageBook.hasTextDiff(sid, act, hudScored))
+        assertEquals(
+            emptyList<String>(),
+            loudReasons(
+                clean.copy(
+                    elementCount = hudScored.size,
+                    lastExpectOnlyVisual = Loud.lastExpectOnlyVisual(stepsChange),
+                    hasPageTextDiff = PageBook.hasTextDiff(sid, act, hudScored),
+                )
+            ),
+        )
+
+        // Case 4: 0 elements -> NO_TEXT (even if until text/color was satisfied)
+        assertEquals(
+            listOf(Loud.NO_TEXT),
+            loudReasons(
+                clean.copy(
+                    elementCount = 0,
+                    lastExpectOnlyVisual = false,
+                    hasPageTextDiff = false,
+                )
+            ),
+        )
+
+        // Additional 3.13 checks: repeat ... until, gone/color/app, verified type, and 1-element unchanged HUD
+        val repeatText = listOf(
+            doneAction("1.1.1", "drag 540 2000 540 500 350ms", "stable", CondKind.STABLE),
+            doneAction("1", "repeat 20 { drag 540 2000 540 500 350ms } until text:目标", "text:目标", CondKind.TEXT),
+        )
+        assertFalse("enclosing repeat ... until text: explains result", Loud.lastExpectOnlyVisual(repeatText))
+
+        val repeatChange = listOf(
+            doneAction("1.1.1", "tap 540 900", "stable", CondKind.STABLE),
+            doneAction("1", "repeat 3 { tap 540 900 } until change", "change", CondKind.CHANGE),
+        )
+        assertTrue("enclosing repeat ... until change is visual-only", Loud.lastExpectOnlyVisual(repeatChange))
+
+        assertFalse("gone explains result", Loud.lastExpectOnlyVisual(listOf(doneAction("1", "tap 关 until gone:关", "gone:关", CondKind.GONE))))
+        assertFalse("color explains result", Loud.lastExpectOnlyVisual(listOf(doneAction("1", "drag 1 2 3 4 until color:3,4=#4CAF50", "color:3,4=#4CAF50", CondKind.COLOR))))
+        assertFalse("app explains result", Loud.lastExpectOnlyVisual(listOf(doneAction("1", "key back until app:设置", "app:设置", CondKind.APP))))
+        assertFalse("verified type explains result", Loud.lastExpectOnlyVisual(listOf(doneAction("1", "type 你好", typeOk = true))))
+        assertTrue("still is visual-only", Loud.lastExpectOnlyVisual(listOf(doneAction("1", "tap A until still", "still", CondKind.STILL))))
+        assertTrue("stable is visual-only", Loud.lastExpectOnlyVisual(listOf(doneAction("1", "tap A until stable", "stable", CondKind.STABLE))))
+        assertFalse("1-element HUD with unchanged element has no text diff", PageBook.hasTextDiff(sid, act, oneLine))
     }
 
     @Test
@@ -186,27 +284,98 @@ class V200Beta3Test {
     }
 
     @Test
-    fun loudCompareWithMaskIgnoresMaskedRegion() {
-        val a = solidBitmap(160, 320, Color.WHITE)
-        val b = solidBitmap(160, 320, Color.WHITE)
+    fun pictureEventsDetectsABAIntermediateChangePopupAndRespectsMaskAndRetention() {
+        val w = 160
+        val h = 320
+        val frameA = solidBitmap(w, h, Color.rgb(245, 245, 245))
+        val frameB = solidBitmap(w, h, Color.rgb(245, 245, 245))
+        val frameA2 = solidBitmap(w, h, Color.rgb(245, 245, 245))
+        val framePopup = solidBitmap(w, h, Color.rgb(80, 80, 80))
+        val frameCarousel = solidBitmap(w, h, Color.rgb(245, 245, 245))
         try {
-            // Paint a bright blue rectangle in the top quarter (rows 0..3 out of 16)
-            Canvas(b).drawRect(0f, 0f, 160f, 80f, Paint().apply { color = Color.BLUE })
-            val cols = 8
-            val rows = 16
-            val maskCells = BooleanArray(cols * rows)
-            for (cy in 0 until 4) for (cx in 0 until cols) maskCells[cy * cols + cx] = true
-            val mask = Mask(maskCells, cols, rows, 160, 320)
+            // B changes a large center region (>= 2%), while A2 returns to identical A (A -> B -> A)
+            Canvas(frameB).drawRect(20f, 100f, 140f, 220f, Paint().apply { color = Color.BLUE })
+            // Popup: dimmed scrim + detached centered dialog [16, 48, 144, 176]
+            Canvas(framePopup).drawRect(16f, 48f, 144f, 176f, Paint().apply { color = Color.WHITE })
+            // Carousel: changes only inside top band [0, 0, 160, 80]
+            Canvas(frameCarousel).drawRect(0f, 0f, 160f, 80f, Paint().apply { color = Color.BLUE })
 
-            // With mask covering the blue band: identical -> false
-            assertFalse(Loud.compareWithMask(a, b, mask))
-            // Without mask: > 2% changed -> true
-            assertTrue(Loud.compareWithMask(a, b, null))
-            // Missing frame -> uncertain counts as changed (true)
-            assertTrue(Loud.compareWithMask(null, b, mask))
+            // 1. A -> B -> A: first and last frames match, yet intermediate change triggers BEFORE/AFTER
+            val aba = analyzeFrameSequence(
+                listOf(1_000L to frameA, 1_500L to frameB, 2_000L to frameA2),
+                fw = 1080,
+                fh = 2160,
+                mask = null,
+            )
+            assertTrue("A->B->A must detect intermediate change", aba.hasSignificantChange)
+            assertTrue("maxShare >= CHANGE_RATIO: ${aba.maxShare}", aba.maxShare >= Loud.CHANGE_RATIO)
+            assertEquals("first vs last should look the same", 0.0, aba.firstLast!!.first, 0.001)
+
+            // 2. A -> popup -> A (like T02a): detects popup and triggers BEFORE/AFTER
+            val pop = analyzeFrameSequence(
+                listOf(1_000L to frameA, 1_500L to framePopup, 2_000L to frameA2),
+                fw = 1080,
+                fh = 2160,
+                mask = null,
+            )
+            assertTrue("A->popup->A must detect popup", pop.hasPopup)
+            assertTrue("popup span must trigger significant change", pop.hasSignificantChange)
+
+            // 3. Moving mask (carousel in top quarter): masked change is ignored, unmasked change triggers
+            val cols = com.kilon.agentvscreen.core.VScreenActivity.COLS
+            val rows = com.kilon.agentvscreen.core.VScreenActivity.rowsFor(w, h)
+            val maskCells = BooleanArray(cols * rows)
+            for (cy in 0 until rows / 4 + 1) for (cx in 0 until cols) maskCells[cy * cols + cx] = true
+            val mask = Mask(maskCells, cols, rows, 1080, 2160)
+
+            val maskedCarousel = analyzeFrameSequence(
+                listOf(1_000L to frameA, 1_500L to frameCarousel, 2_000L to frameA2),
+                fw = 1080,
+                fh = 2160,
+                mask = mask,
+            )
+            assertFalse("carousel motion inside mask must not trigger BEFORE/AFTER", maskedCarousel.hasSignificantChange)
+
+            val unmaskedCarousel = analyzeFrameSequence(
+                listOf(1_000L to frameA, 1_500L to frameCarousel),
+                fw = 1080,
+                fh = 2160,
+                mask = null,
+            )
+            assertTrue("same change without mask must trigger", unmaskedCarousel.hasSignificantChange)
+
+            // 4. Recording retention coverage rule (3.13): covered + no frames = unchanged; missing/expired/pruned = changed
+            val now = 1_000_000L
+            assertTrue(
+                "recording on within KEEP_MS with frame at start is covered",
+                com.kilon.agentvscreen.core.VScreenRecorder.isCoveredBy(now - 60_000L, now, recordingOn = true, oldestFrameMs = now - 65_000L),
+            )
+            assertFalse(
+                "fromMs older than KEEP_MS is not covered (treat as changed)",
+                com.kilon.agentvscreen.core.VScreenRecorder.isCoveredBy(now - com.kilon.agentvscreen.core.VScreenRecorder.KEEP_MS - 1L, now, recordingOn = true, oldestFrameMs = 1L),
+            )
+            assertFalse(
+                "recording off and fromMs > 15s is not covered (treat as changed)",
+                com.kilon.agentvscreen.core.VScreenRecorder.isCoveredBy(now - 20_000L, now, recordingOn = false, oldestFrameMs = now - 25_000L),
+            )
+            assertTrue(
+                "recording off within 15s is covered",
+                com.kilon.agentvscreen.core.VScreenRecorder.isCoveredBy(now - 10_000L, now, recordingOn = false, oldestFrameMs = now - 12_000L),
+            )
+            assertFalse(
+                "oldest frame newer than fromMs + grace (pruned / started late) is not covered",
+                com.kilon.agentvscreen.core.VScreenRecorder.isCoveredBy(now - 10_000L, now, recordingOn = true, oldestFrameMs = now - 5_000L),
+            )
+            assertFalse(
+                "missing fromMs or empty track is not covered",
+                com.kilon.agentvscreen.core.VScreenRecorder.isCoveredBy(0L, now, recordingOn = true, oldestFrameMs = now - 1_000L),
+            )
         } finally {
-            a.recycle()
-            b.recycle()
+            frameA.recycle()
+            frameB.recycle()
+            frameA2.recycle()
+            framePopup.recycle()
+            frameCarousel.recycle()
         }
     }
 

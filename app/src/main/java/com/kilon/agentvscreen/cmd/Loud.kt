@@ -1,14 +1,7 @@
 package com.kilon.agentvscreen.cmd
 
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import com.kilon.agentvscreen.core.Mask
-import com.kilon.agentvscreen.core.ScreenSig
-
 /**
- * 2.0.0-beta3 (3.2 & 3.12): pure decision of whether an `act` reply must be loud (full four blocks)
+ * 2.0.0-beta3 (3.2, 3.12 & 3.13): pure decision of whether an `act` reply must be loud (full four blocks)
  * or may use the short quiet reply format.
  *
  * The 8 reason codes and their exact order are fixed by spec 3.2:
@@ -24,7 +17,9 @@ internal data class LoudInput(
     val startPkg: String? = null,
     val endPkg: String? = null,
     val hasAppUntil: Boolean = false,
-    val elementCount: Int = Loud.MIN_ELEMENTS,
+    val elementCount: Int = 1,
+    val lastExpectOnlyVisual: Boolean = false,
+    val hasPageTextDiff: Boolean = false,
     val forced: Boolean = false,
 )
 
@@ -37,7 +32,7 @@ internal fun loudReasons(input: LoudInput): List<String> {
     if (input.beforeChanged) out += Loud.BEFORE
     if (input.afterChanged) out += Loud.AFTER
     if (input.startPkg != null && input.endPkg != null && input.startPkg != input.endPkg && !input.hasAppUntil) out += Loud.APP_SWITCH
-    if (input.elementCount < Loud.MIN_ELEMENTS) out += Loud.NO_TEXT
+    if (input.elementCount == 0 || (input.lastExpectOnlyVisual && !input.hasPageTextDiff)) out += Loud.NO_TEXT
     if (input.forced) out += Loud.FORCED
     return out
 }
@@ -54,10 +49,11 @@ internal object Loud {
 
     /** Post-expectation quiet-observation window (ms), run only when no other loud reason holds. */
     const val AFTER_MS = 800L
-    /** Minimum ScreenSig.Change.ratio (with kind != NONE) counted as a BEFORE/AFTER change. */
+    /** Minimum pictureEvents span share counted as a BEFORE/AFTER change. */
     const val CHANGE_RATIO = 0.02
-    /** Fewer than this many elements triggers NO_TEXT (canvas / video screen). */
-    const val MIN_ELEMENTS = 3
+
+    /** 3.13: expectation kinds that only observe pixel motion without explaining textual/semantic result. */
+    val VISUAL_ONLY_CONDS: Set<CondKind> = setOf(CondKind.CHANGE, CondKind.STILL, CondKind.STABLE)
 
     /** 3.11 auto-escalation constants: >= 3 refetches in last 10 quiet replies -> force full for 10 turns. */
     const val ESCALATE_WINDOW = 10
@@ -66,7 +62,6 @@ internal object Loud {
     /** 3.8: NO_EXPECT coaching hint at most once every 10 turns per session. */
     const val NO_EXPECT_HINT_GAP = 10
 
-    private const val MASK_FILL_COLOR = Color.GRAY
     private const val MAX_USE_DEPTH = 3
 
     /**
@@ -137,6 +132,42 @@ internal object Loud {
         return null
     }
 
+    /**
+     * 3.13: whether the last action step's satisfied expectation (including an enclosing `repeat … until`)
+     * consists solely of `change` / `still` / `stable`. `text` / `gone` / `color` / `app` and verified `type`
+     * count as explaining the result (returns false).
+     */
+    fun lastExpectOnlyVisual(executed: List<StepOut>): Boolean {
+        val done = executed.filter { it.status == "done" && it.isActionOrRepeatUntil }
+        val last = done.lastOrNull() ?: return false
+        if (stepExplainsResult(last)) return false
+        if (last.step.trimStart().startsWith("repeat", ignoreCase = true)) {
+            val prefix = "${last.n}."
+            val lastInner = done.lastOrNull { it !== last && it.n.startsWith(prefix) }
+            if (lastInner != null && stepExplainsResult(lastInner)) return false
+        }
+        return stepHasVisualOnlyExpect(last)
+    }
+
+    private fun stepExplainsResult(so: StepOut): Boolean {
+        if (so.typeVerified) return true
+        if (so.waitMet != true) return false
+        val metKind = so.metCondKind
+        if (metKind != null) return metKind !in VISUAL_ONLY_CONDS
+        val waited = so.waitedFor ?: return false
+        val conds = runCatching { Steps.conds(waited) }.getOrNull().orEmpty()
+        return conds.isNotEmpty() && conds.any { it.kind !in VISUAL_ONLY_CONDS }
+    }
+
+    private fun stepHasVisualOnlyExpect(so: StepOut): Boolean {
+        if (so.typeVerified || so.waitMet != true) return false
+        val metKind = so.metCondKind
+        if (metKind != null) return metKind in VISUAL_ONLY_CONDS
+        val waited = so.waitedFor ?: return false
+        val conds = runCatching { Steps.conds(waited) }.getOrNull().orEmpty()
+        return conds.isNotEmpty() && conds.all { it.kind in VISUAL_ONLY_CONDS }
+    }
+
     /** Whether any written step (including inside blocks / `use`) has an `app:` condition. */
     fun hasAppUntil(steps: List<Step>, resolveUse: ((Step) -> List<Step>?)? = null): Boolean {
         fun walk(list: List<Step>, depth: Int): Boolean {
@@ -152,36 +183,6 @@ internal object Loud {
             return false
         }
         return walk(steps, 0)
-    }
-
-    /**
-     * 3.2 & 3.12: compare two frames after painting any moving-mask cells to the same solid color on both.
-     * Missing frames return true ("uncertain counts as changed").
-     */
-    fun compareWithMask(a: Bitmap?, b: Bitmap?, mask: Mask?): Boolean {
-        if (a == null || b == null || a.isRecycled || b.isRecycled) return true
-        val ma = applyMask(a, mask)
-        val mb = applyMask(b, mask)
-        return try {
-            val sigA = ScreenSig.of(ma) ?: return true
-            val sigB = ScreenSig.of(mb) ?: return true
-            val ch = sigA.compare(sigB)
-            ch.kind != ScreenSig.Kind.NONE && ch.ratio >= CHANGE_RATIO
-        } finally {
-            if (ma !== a) ma.recycle()
-            if (mb !== b) mb.recycle()
-        }
-    }
-
-    private fun applyMask(src: Bitmap, mask: Mask?): Bitmap {
-        if (mask == null) return src
-        val rects = mask.rectsIn(src.width, src.height)
-        if (rects.isEmpty()) return src
-        val copy = src.copy(Bitmap.Config.ARGB_8888, true) ?: return src
-        val canvas = Canvas(copy)
-        val paint = Paint().apply { color = MASK_FILL_COLOR; style = Paint.Style.FILL }
-        for (r in rects) canvas.drawRect(r, paint)
-        return copy
     }
 
     // ── per-session reply tracking (3.8 NO_EXPECT hint + 3.11 auto-escalation + act --full window) ──

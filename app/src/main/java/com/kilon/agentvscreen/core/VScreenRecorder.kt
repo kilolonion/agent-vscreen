@@ -152,19 +152,47 @@ object VScreenRecorder {
     }
 
     /**
-     * 2.0.0-beta3 (3.2): strict frame lookup for BEFORE / AFTER comparisons.
-     * Returns null when [atMs] is missing or older than [KEEP_MS] (or already pruned from the track),
-     * so callers treat uncertain/missing history as changed.
+     * 2.0.0-beta3 (3.2): strict frame lookup (used by 3.5 changed-region comparison).
+     * Returns null when [atMs] is missing or older than [KEEP_MS] (or already pruned from the track).
      */
     fun frameAtStrict(displayId: Int, atMs: Long): Frame? = existing(displayId)?.let { t ->
         if (atMs <= 0L) return null
         val now = System.currentTimeMillis()
-        val keep = if (t.on) KEEP_MS else OFF_KEEP_MS
+        val keep = if (t.on && BackgroundOperation.state.value.recording) KEEP_MS else OFF_KEEP_MS
         if (now - atMs > keep) return null
         synchronized(t) {
             if (t.frames.isEmpty()) return null
             t.frames.lastOrNull { it.atMs <= atMs }
                 ?: t.frames.first().takeIf { it.atMs - atMs <= STRICT_START_GRACE_MS }
+        }
+    }
+
+    /**
+     * 2.0.0-beta3 (3.13), pure: whether a track with [recordingOn] and [oldestFrameMs] reliably covers
+     * history from [fromMs] up to [nowMs]. Returns false when [fromMs] is missing, older than the active
+     * retention window ([KEEP_MS] when on, [OFF_KEEP_MS] when off), or precedes [oldestFrameMs] beyond grace.
+     */
+    internal fun isCoveredBy(
+        fromMs: Long,
+        nowMs: Long,
+        recordingOn: Boolean,
+        oldestFrameMs: Long?,
+    ): Boolean {
+        if (fromMs <= 0L || oldestFrameMs == null) return false
+        val keep = if (recordingOn) KEEP_MS else OFF_KEEP_MS
+        if (nowMs - fromMs > keep) return false
+        return oldestFrameMs <= fromMs + STRICT_START_GRACE_MS
+    }
+
+    /**
+     * 2.0.0-beta3 (3.13): whether [displayId]'s recording track covers [fromMs] without retention/pruning gaps.
+     * When true and no frames changed in `[fromMs, toMs]`, the screen was unchanged; when false, uncertain (= changed).
+     */
+    fun coversFrom(displayId: Int, fromMs: Long, nowMs: Long = System.currentTimeMillis()): Boolean {
+        val t = existing(displayId) ?: return false
+        return synchronized(t) {
+            if (t.closed) false
+            else isCoveredBy(fromMs, nowMs, t.on && BackgroundOperation.state.value.recording, t.frames.firstOrNull()?.atMs)
         }
     }
 
