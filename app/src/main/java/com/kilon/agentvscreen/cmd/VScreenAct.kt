@@ -200,16 +200,57 @@ internal class Probe(
         val recheck = finalLook || cropOnly
         fun inArea(r: Rect) = area == null || area.contains(r.centerX(), r.centerY())
         fun ok(r: Rect): Boolean = inArea(r) && counts(r, before, exclude, pageAt > 0)
-        if ((!afterAction || actionAt == 0L) && area == null) runCatching { com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId).shows(pat::hit, recheck) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
-        else if (!afterAction || actionAt == 0L) runCatching { com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId).find(pat::hit, recheck = recheck) }.getOrNull()?.firstOrNull { inArea(d.toFrame(it.second)) }?.let { return it.first }
-        else runCatching { com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId).find(pat::hit, recheck = recheck) }.getOrNull()?.firstOrNull { ok(d.toFrame(it.second)) }?.let { return it.first }
+        val a11ySnap = runCatching { com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId) }.getOrNull()
+        if (a11ySnap != null && a11ySnap.readable) {
+            val a11yHit = when {
+                (!afterAction || actionAt == 0L) && area == null ->
+                    a11ySnap.shows(pat::hit, recheck)?.takeIf { it.isNotEmpty() }
+                !afterAction || actionAt == 0L ->
+                    a11ySnap.find(pat::hit, recheck = recheck)?.firstOrNull { inArea(d.toFrame(it.second)) }?.first
+                else ->
+                    a11ySnap.find(pat::hit, recheck = recheck)?.firstOrNull { ok(d.toFrame(it.second)) }?.first
+            }
+            if (a11yHit != null) {
+                lastObsId = ++a11yObsSeq
+                return a11yHit
+            }
+        }
         if (cropOnly && area != null) {
             val items = readCropCached(full ?: d.latestFrame(), area) ?: return null
             items.firstOrNull { pat.hit(it.text) }?.let { return it.text.take(40) }
             return VScreenPerception.joinSplit(items).firstOrNull { pat.hit(it) }?.take(40)
         }
-        val r = VScreenPerception.reading(d.displayId, readFrom(), 0) ?: return null
-        return (if (finalLook) r.items else VScreenPerception.still(r.items, mask)).firstOrNull { pat.hit(it.text) && inArea(Rect(it.box)) && (!afterAction || actionAt == 0L || ok(Rect(it.box))) }?.text?.take(40)
+        val ocr = VScreenPerception.readingWithVersion(d.displayId, readFrom(), 0)
+        if (ocr != null) {
+            val r = ocr.result
+            val hit = (if (finalLook) r.items else VScreenPerception.still(r.items, mask))
+                .firstOrNull { pat.hit(it.text) && inArea(Rect(it.box)) && (!afterAction || actionAt == 0L || ok(Rect(it.box))) }
+                ?.text?.take(40)
+            if (hit != null) {
+                lastObsId = -(ocr.version + 1L)
+                lastObsEpochMs = ocr.epochMs.takeIf { it > 0L }
+                return hit
+            }
+        }
+        when {
+            a11ySnap != null && a11ySnap.readable && a11ySnap.texts(1)?.isNotEmpty() == true -> {
+                lastObsId = ++a11yObsSeq
+                lastObsEpochMs = null
+            }
+            ocr != null -> {
+                lastObsId = -(ocr.version + 1L)
+                lastObsEpochMs = ocr.epochMs.takeIf { it > 0L }
+            }
+            a11ySnap != null && a11ySnap.readable -> {
+                lastObsId = ++a11yObsSeq
+                lastObsEpochMs = null
+            }
+            else -> {
+                lastObsId = null
+                lastObsEpochMs = null
+            }
+        }
+        return null
     }
 
     /** True only when a reading taken late enough does not hold [q] (and the accessibility tree does not either). */
@@ -217,18 +258,32 @@ internal class Probe(
         val pat = TextPat(q)
         val recheck = finalLook || cropOnly
         fun inArea(r: Rect) = area == null || area.contains(r.centerX(), r.centerY())
-        if (area == null) {
-            if (!runCatching { com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId).shows(pat::hit, recheck) }.getOrNull().isNullOrEmpty()) return false
-        } else {
-            val hits = runCatching { com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId).find(pat::hit, recheck = recheck) }.getOrNull()
-            if (hits?.any { inArea(d.toFrame(it.second)) } == true) return false
+        val a11ySnap = runCatching { com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId) }.getOrNull()
+        if (a11ySnap != null && a11ySnap.readable) {
+            val present = if (area == null) {
+                !a11ySnap.shows(pat::hit, recheck).isNullOrEmpty()
+            } else {
+                a11ySnap.find(pat::hit, recheck = recheck)?.any { inArea(d.toFrame(it.second)) } == true
+            }
+            if (present) {
+                lastObsId = ++a11yObsSeq
+                lastObsEpochMs = null
+                return false
+            }
         }
         if (cropOnly && area != null) {
             val items = readCropCached(full ?: d.latestFrame(), area) ?: return false
             return items.none { pat.hit(it.text) } && VScreenPerception.joinSplit(items).none { pat.hit(it) }
         }
-        val r = VScreenPerception.reading(d.displayId, readFrom(), 0) ?: return false
-        return VScreenPerception.still(r.items, mask).none { pat.hit(it.text) && inArea(Rect(it.box)) }
+        val ocr = VScreenPerception.readingWithVersion(d.displayId, readFrom(), 0)
+        if (ocr == null) {
+            lastObsId = null
+            lastObsEpochMs = null
+            return false
+        }
+        lastObsId = -(ocr.version + 1L)
+        lastObsEpochMs = ocr.epochMs.takeIf { it > 0L }
+        return VScreenPerception.still(ocr.result.items, mask).none { pat.hit(it.text) && inArea(Rect(it.box)) }
     }
 
     /**
@@ -296,6 +351,8 @@ internal class Probe(
         val now = SystemClock.elapsedRealtime()
         val dt = if (lastPoll == 0L) 0L else now - lastPoll
         lastPoll = now
+        lastObsId = null
+        lastObsEpochMs = null
         if (wantsText && !cropOnly) VScreenPerception.hurry(d.displayId)
         val needFull = needsSmall || wantsText || conds.withIndex().any { (i, c) ->
             c.kind == CondKind.COLOR && colorWatches[i]?.let { it.sampledAtMs < 0L || it.sampledAtMs < d.latestCaptureAtMs } != false
@@ -360,6 +417,9 @@ internal class Probe(
                 }
                 if (hit != null) {
                     lastMetKind = c.kind
+                    lastHitImgAgeMs = if (c.kind == CondKind.COLOR) {
+                        colorWatches[i]?.lastImgAgeMs?.takeIf { it >= 0L }
+                    } else null
                     return tr("${c.raw}：$hit", "${c.raw}: $hit")
                 }
             }
@@ -370,6 +430,20 @@ internal class Probe(
     /** 2.0.0-beta3 (3.13): the kind of the condition that most recently matched in [poll]. */
     var lastMetKind: CondKind? = null
         private set
+
+    /** 2.0.0-beta5 (5.7 #2): frame age (ms) from [VScreenDisplay.ColorWatch.lastImgAgeMs] on the most recent COLOR hit. */
+    var lastHitImgAgeMs: Long? = null
+        private set
+
+    /** 2.0.0-beta5 (5.8 #3): independent observation ID of the latest poll (positive = A11y snapshot, negative = OCR readingVersion). */
+    var lastObsId: Long? = null
+        private set
+
+    /** 2.0.0-beta5 (5.8 #2): frame capture epoch ms when the latest observation came from OCR (null = live A11y poll time). */
+    var lastObsEpochMs: Long? = null
+        private set
+
+    private var a11yObsSeq = 0L
 }
 
 /**
@@ -392,13 +466,25 @@ internal fun steady(diffs: List<Double>): Boolean {
 /** How one wait ended: [met] = the condition's fact, [stopped] = a stop condition's fact, else it timed out. */
 internal class WaitOut(val met: String?, val stopped: String?, val ms: Long, val metKind: CondKind? = null)
 
+/** 2.0.0-beta5 (5.2): result of one short-range rule check pass inside [waitOn] or before a step. */
+internal data class RuleTick(val elapsedMs: Long, val stopped: String? = null)
+
 /**
- * Wait on [probe] (null = just time) up to [maxMs], checking [stop] too. 1.2: frame-driven: it looks when a new frame
- * arrives (at most every 33 ms) and at least every 100 ms, instead of on a fixed 100 ms clock; it ends at once when the
- * caller went away (CANCELLED) or the screen is gone (CONNECTION_LOST), instead of waiting out its time on a dead screen.
+ * Wait on [probe] (null = just time) up to [maxMs], checking [stop] and short-range [rules] too. 1.2: frame-driven:
+ * it looks when a new frame arrives (at most every 33 ms) and at least every 100 ms, instead of on a fixed 100 ms clock;
+ * it ends at once when the caller went away (CANCELLED) or the screen is gone (CONNECTION_LOST).
+ * 2.0.0-beta5 (5.2): when a rule fires via [runRules], [deadline] is extended by the time spent running/settling the rule.
  */
-internal fun waitOn(d: VScreenDisplay, probe: Probe?, maxMs: Long, stop: Probe?): WaitOut {
+internal fun waitOn(
+    d: VScreenDisplay,
+    probe: Probe?,
+    maxMs: Long,
+    stop: Probe?,
+    rules: List<RuleLive> = emptyList(),
+    runRules: (() -> RuleTick)? = null,
+): WaitOut {
     val t0 = SystemClock.elapsedRealtime()
+    var deadline = t0 + maxMs
     val call = Call.current()
     var seen = d.version
     while (true) {
@@ -409,8 +495,18 @@ internal fun waitOn(d: VScreenDisplay, probe: Probe?, maxMs: Long, stop: Probe?)
         val el = SystemClock.elapsedRealtime() - t0
         checkInterrupts(d, call)
         stop?.poll()?.let { return WaitOut(null, it, el) }
-        probe?.poll()?.let { return WaitOut(it, null, el, probe.lastMetKind) }
-        if (el >= maxMs) return WaitOut(null, null, el)
+        if (rules.isNotEmpty() && runRules != null) {
+            val rt = runRules()
+            if (rt.stopped != null) return WaitOut(null, rt.stopped, SystemClock.elapsedRealtime() - t0)
+            if (rt.elapsedMs > 0L) {
+                deadline += rt.elapsedMs
+                seen = d.version
+                checkInterrupts(d, call)
+                stop?.poll()?.let { return WaitOut(null, it, SystemClock.elapsedRealtime() - t0) }
+            }
+        }
+        probe?.poll()?.let { return WaitOut(it, null, SystemClock.elapsedRealtime() - t0, probe.lastMetKind) }
+        if (SystemClock.elapsedRealtime() >= deadline) return WaitOut(null, null, SystemClock.elapsedRealtime() - t0)
     }
 }
 
@@ -471,6 +567,7 @@ internal class SegmentOpts(
     val fast: Boolean,
     val human: Boolean = false,
     val skipLookSettle: Boolean = false,
+    val rules: List<RuleSpec> = emptyList(),
 )
 
 /** A step that was not done, and why (it ends the stretch; the reason goes to the notes). */
@@ -492,6 +589,8 @@ internal class SegmentOut(
     val firstActionMask: Mask? = null,
     val beforeChanged: Boolean = false,
     val afterStartMs: Long = 0L,
+    val excludeWindows: List<LongRange> = emptyList(),
+    val rulesFired: List<RuleFired> = emptyList(),
 )
 
 private fun s1(ms: Long) = "${(ms / 100) / 10.0}s"
@@ -524,6 +623,8 @@ internal fun VScreenOffloadHandler.runSegment(
     VScreenAwake.kick("act")
     VScreenPerception.ensure(d)
     val startPkg = runCatching { VScreenShell.topPackage(d.displayId) }.getOrNull()
+    val claimedWindows = ArrayList<LongRange>()
+    val rulesFired = ArrayList<RuleFired>()
     var beforeCaptured = false
     var firstActionMask: Mask? = null
     var beforeChanged = false
@@ -534,7 +635,7 @@ internal fun VScreenOffloadHandler.runSegment(
         d.latestWithVersion()?.let { (bmp, ver) ->
             VScreenRecorder.offerFresh(d, bmp, ver, startPkg)
         }
-        beforeChanged = hasPictureEvent(d, prevReturnAt, System.currentTimeMillis(), firstActionMask)
+        beforeChanged = hasPictureEvent(d, prevReturnAt, System.currentTimeMillis(), firstActionMask, claimedWindows.toList())
     }
     val app = workApp(sid, d)
     val prof = if (o.bare) emptyMap() else app?.let { VScreenMap.profile(it) }.orEmpty()
@@ -548,6 +649,12 @@ internal fun VScreenOffloadHandler.runSegment(
     }
     val beforeSteps = kept("before"); val afterSteps = kept("after")
     val stop = if (o.stop.isNotEmpty()) Probe(this, d, o.stop) else null
+    val ruleLives = o.rules.mapIndexed { idx, spec ->
+        RuleLive(spec, index = idx + 1, initialLastFalseEpochMs = prevReturnAt ?: start)
+    }
+    val ruleProbes = o.rules.map { spec -> Probe(this, d, listOf(spec.cond)) }
+    if (ruleLives.isNotEmpty()) d.boost((o.watchMs ?: 10_000L) + 5_000L)
+    var lastRulePkgCheckEl = 0L
     var beforeRan = false
     var stoppedBy: String? = null
     var stoppedAt: String? = null
@@ -577,17 +684,139 @@ internal fun VScreenOffloadHandler.runSegment(
     // 1.3.0-beta19: human pacing, asked for this stretch or kept for the app (note human on).
     if (o.human || prof["human"] == "true") { ctxAct.human = Human(); notes += tr("仿人节奏开着：每个动作前随机停一下，点击略偏、按住时长和滑动有波动，打字分小段", "Human pacing is on: a random pause before each action, taps slightly off-centre, varied holds and swipes, typing in small pieces") }
     fun put(so: StepOut): StepOut { outs += so; lines += so.text; Call.current()?.report(so.text); return so }
+    fun stepNumOf(label: String): Int = label.substringBefore('.').toIntOrNull() ?: 0
+    fun disableRulesForAppSwitch(curPkg: String) {
+        for (r in ruleLives) {
+            if (!r.active) continue
+            r.disable(tr("前台应用已从 $startPkg 变为 $curPkg", "front app changed from $startPkg to $curPkg"))
+            notes.add("RULE_OFF", tr("规则 ${r.index} 已停用：${r.off}", "Rule ${r.index} disabled: ${r.off}"))
+        }
+    }
+    /** 2.0.0-beta5 (5.2, 5.6, 5.8 #2/#3): poll short-range `--on` rules and execute at most one firing per pass. */
+    fun checkRules(duringStep: Int, contextKind: RuleFired.ContextKind, allowPreStepDebounce: Boolean = false): RuleTick {
+        if (ruleLives.none { it.active }) return RuleTick(0L)
+        val nowEl0 = SystemClock.elapsedRealtime()
+        if (startPkg != null && nowEl0 - lastRulePkgCheckEl >= ActRules.PKG_CHECK_INTERVAL_MS) {
+            lastRulePkgCheckEl = nowEl0
+            val curPkg = runCatching { VScreenShell.topPackage(d.displayId) }.getOrNull()
+            if (curPkg != null && curPkg != startPkg) {
+                disableRulesForAppSwitch(curPkg)
+                return RuleTick(0L)
+            }
+        }
+        for ((i, r) in ruleLives.withIndex()) {
+            if (!r.active) continue
+            val nowEl = SystemClock.elapsedRealtime()
+            if (!r.cooldownReady(nowEl)) continue
+            val probe = ruleProbes[i]
+            val pollStartEpoch = System.currentTimeMillis()
+            val hit = probe.poll()
+            val obsId = if (r.needsDebounce) probe.lastObsId else null
+            var shouldFire = r.recordObservation(obsId, hit != null, probe.lastObsEpochMs ?: pollStartEpoch)
+            if (!shouldFire && allowPreStepDebounce && hit != null && r.needsDebounce && obsId != null && obsId > 0L && r.trailingTrueCount() == 1) {
+                Thread.sleep(ActRules.PRE_STEP_DEBOUNCE_MS)
+                checkInterrupts(d, Call.current())
+                val poll2Epoch = System.currentTimeMillis()
+                val hit2 = probe.poll()
+                shouldFire = r.recordObservation(probe.lastObsId, hit2 != null, probe.lastObsEpochMs ?: poll2Epoch)
+            }
+            if (!shouldFire) continue
+
+            // Unthrottled foreground check right before firing so we never act on a switched app.
+            if (startPkg != null) {
+                val pkgCheck = runCatching { VScreenShell.topPackage(d.displayId) }.getOrNull()
+                lastRulePkgCheckEl = SystemClock.elapsedRealtime()
+                if (pkgCheck != null && pkgCheck != startPkg) {
+                    disableRulesForAppSwitch(pkgCheck)
+                    return RuleTick(0L)
+                }
+            }
+
+            val ruleStartEl = SystemClock.elapsedRealtime()
+            val fireEpochMs = System.currentTimeMillis()
+            if (r.spec.step.kind == StepKind.SLEEP) {
+                val sw = waitOn(d, null, r.spec.step.ms ?: 0L, stop)
+                val endEpochMs = System.currentTimeMillis()
+                claimedWindows += (r.lastFalseObsEpochMs + 1L).coerceAtMost(endEpochMs)..(endEpochMs + ActRules.CLAIMED_AFTER_MS)
+                r.markFired(SystemClock.elapsedRealtime())
+                r.lastFalseObsEpochMs = endEpochMs
+                rulesFired += RuleFired(r.index, fireEpochMs, duringStep, r.spec.cond.raw, r.spec.step.raw, contextKind)
+                r.off?.let { notes.add("RULE_OFF", tr("规则 ${r.index} 已停用：$it", "Rule ${r.index} disabled: $it")) }
+                return RuleTick(SystemClock.elapsedRealtime() - ruleStartEl, stopped = sw.stopped)
+            }
+
+            val beforeSmall = d.latestFrame()?.let { VScreenPerception.small(it) }
+            val settleProbe = Probe(this, d, listOf(Cond("stable", CondKind.STABLE)), afterAction = true)
+            try {
+                val ruleActEl = SystemClock.elapsedRealtime()
+                try {
+                    doAction(sid, d, r.spec.step, ctxAct, fromRule = true)
+                } catch (e: StepRefused) {
+                    if (e.code == "NOT_FOUND" || e.code == "AMBIGUOUS") {
+                        r.disable(e.message ?: e.code)
+                        notes.add("RULE_OFF", tr("规则 ${r.index} 已停用：${r.off}", "Rule ${r.index} disabled: ${r.off}"))
+                        continue
+                    }
+                    throw e
+                }
+                settleProbe.acted(r.spec.step.kind)
+                val ruleActionEndEpochMs = System.currentTimeMillis()
+                claimedWindows += (r.lastFalseObsEpochMs + 1L).coerceAtMost(ruleActionEndEpochMs)..(ruleActionEndEpochMs + ActRules.CLAIMED_AFTER_MS)
+                val settleOut = waitOn(d, settleProbe, ActRules.SETTLE_MAX_MS, stop)
+                d.awaitFrameAfter(SystemClock.elapsedRealtime() - 50L, 100L)
+                d.latestWithVersion()?.let { (bmp, ver) ->
+                    VScreenRecorder.offerFresh(d, bmp, ver, startPkg)
+                }
+                if (beforeSmall != null && settleOut.stopped == null) {
+                    val maskNow = VScreenPerception.mask(d.displayId)
+                    val visualSame = d.latestFrame()?.let { VScreenPerception.small(it) }?.let { afterSmall ->
+                        try {
+                            Change.same(beforeSmall, afterSmall, Change.Level.TINY, skip = maskNow?.rectsIn(afterSmall.width, afterSmall.height).orEmpty())
+                        } finally {
+                            afterSmall.recycle()
+                        }
+                    }
+                    val a11yChanged = com.kilon.agentvscreen.host.VScreenAccessibilityService.contentChangedAt(d.displayId) > ruleActEl ||
+                        com.kilon.agentvscreen.host.VScreenAccessibilityService.pageChangedAt(d.displayId) > ruleActEl
+                    if (visualSame == true && !a11yChanged) {
+                        r.disable(tr("执行后画面没有变化", "screen did not change after running rule step"))
+                    }
+                }
+                r.markFired(SystemClock.elapsedRealtime())
+                r.lastFalseObsEpochMs = System.currentTimeMillis()
+                rulesFired += RuleFired(r.index, fireEpochMs, duringStep, r.spec.cond.raw, r.spec.step.raw, contextKind)
+                r.off?.let { notes.add("RULE_OFF", tr("规则 ${r.index} 已停用：$it", "Rule ${r.index} disabled: $it")) }
+                return RuleTick(SystemClock.elapsedRealtime() - ruleStartEl, stopped = settleOut.stopped)
+            } finally {
+                settleProbe.close()
+                beforeSmall?.recycle()
+            }
+        }
+        return RuleTick(0L)
+    }
     // 1.3.0-beta18: steps really done in this stretch (a repeat runs its steps again): a bound against endless loops.
     var ran = 0
     /** An if / repeat check: [conds] within [ms] on the screen as it is (not "since an action"). null = stopped. */
     fun check(conds: List<Cond>, ms: Long, label: String, raw: String): WaitOut? {
         val p = Probe(this, d, conds)
-        val w = try { waitOn(d, p, ms, stop).let { w0 -> if (w0.met == null && w0.stopped == null) p.judgeFresh(3_000L)?.let { WaitOut(it, null, w0.ms, p.lastMetKind) } ?: w0 else w0 } } finally { p.close() }
+        val w = try {
+            waitOn(d, p, ms, stop, ruleLives) { checkRules(stepNumOf(label), RuleFired.ContextKind.DURING_WAIT) }
+                .let { w0 -> if (w0.met == null && w0.stopped == null) p.judgeFresh(3_000L)?.let { WaitOut(it, null, w0.ms, p.lastMetKind) } ?: w0 else w0 }
+        } finally { p.close() }
         if (w.stopped != null) { stoppedBy = w.stopped; stoppedAt = label; put(StepOut(label, raw, "stopped", tr("$label ${s1(w.ms)} 时停止条件 ${w.stopped}", "$label stop condition ${w.stopped} at ${s1(w.ms)}"))); return null }
         return w
     }
     fun runOne(step: Step, label: String, depth: Int, quick: Boolean, own: Boolean) {
         if (stoppedBy != null || missed != null || outcome != "done") { if (own) { skipped++; outs += StepOut(label, step.raw, "skipped", "") }; return }
+        if (own && ruleLives.isNotEmpty() && step.kind !in setOf(StepKind.USE, StepKind.CHECK, StepKind.TRY, StepKind.IF, StepKind.REPEAT)) {
+            val rt = checkRules(stepNumOf(label), RuleFired.ContextKind.BEFORE_STEP, allowPreStepDebounce = true)
+            if (rt.stopped != null) {
+                stoppedBy = rt.stopped
+                stoppedAt = label
+                put(StepOut(label, step.raw, "stopped", tr("$label 没做（${step.raw}）：停止条件 ${rt.stopped} 已经满足", "$label not done (${step.raw}): stop condition ${rt.stopped} already met")))
+                return
+            }
+        }
         if (step.kind == StepKind.USE) {
             // 1.3 示教: `use NAME a b` fills the segment's blanks {1} {2} … (a taught lesson's typed words) in order.
             var name = step.text!!
@@ -703,7 +932,7 @@ internal fun VScreenOffloadHandler.runSegment(
             return
         }
         if (step.kind == StepKind.SLEEP) {
-            val w = waitOn(d, null, step.ms ?: 0L, stop)
+            val w = waitOn(d, null, step.ms ?: 0L, stop, ruleLives) { checkRules(stepNumOf(label), RuleFired.ContextKind.DURING_WAIT) }
             val so = StepOut(label, step.raw, "done", "").also { it.waitMs = w.ms }
             if (w.stopped != null) { stoppedBy = w.stopped; stoppedAt = label; so.status = "stopped"; so.text = tr("$label 等 ${s1(step.ms ?: 0)}：${s1(w.ms)} 时停止条件 ${w.stopped}", "$label wait ${s1(step.ms ?: 0)}: stop condition ${w.stopped} at ${s1(w.ms)}") }
             else so.text = tr("$label 等了 ${s1(w.ms)}", "$label waited ${s1(w.ms)}")
@@ -713,7 +942,7 @@ internal fun VScreenOffloadHandler.runSegment(
             val p = Probe(this, d, step.until!!)
             val want = step.until.joinToString(" or ") { it.raw }
             try {
-                val w = waitOn(d, p, step.untilMs ?: Steps.WAIT_DEFAULT_MS, stop)
+                val w = waitOn(d, p, step.untilMs ?: Steps.WAIT_DEFAULT_MS, stop, ruleLives) { checkRules(stepNumOf(label), RuleFired.ContextKind.DURING_WAIT) }
                 val so = StepOut(label, step.raw, "done", "").also { it.waitedFor = want; it.waitMs = w.ms; it.waitMet = w.met != null }
                 when {
                     w.stopped != null -> { stoppedBy = w.stopped; stoppedAt = label; so.status = "stopped"; so.text = tr("$label 等 $want：${s1(w.ms)} 时停止条件 ${w.stopped}", "$label wait $want: stop condition ${w.stopped} at ${s1(w.ms)}") }
@@ -754,6 +983,7 @@ internal fun VScreenOffloadHandler.runSegment(
                 it.gesture = out.record
                 it.pollMsP50 = out.pollMsP50
                 it.pollMsMax = out.pollMsMax
+                it.imgAgeMs = out.imgAgeMs
             }
             if (out.met) {
                 so.text = tr("$label ${step.raw} → ${out.actionFact}；等到 ${out.metFact}（${s1(out.ms)}）", "$label ${step.raw} → ${out.actionFact}; got ${out.metFact} (${s1(out.ms)})")
@@ -796,7 +1026,7 @@ internal fun VScreenOffloadHandler.runSegment(
             }
             if (probe == null) { so.text = "$label ${step.raw} → $fact"; put(so); Thread.sleep(80); return }
             val tWait = SystemClock.elapsedRealtime()
-            val w = waitOn(d, probe, maxMs, stop)
+            val w = waitOn(d, probe, maxMs, stop, ruleLives) { checkRules(stepNumOf(label), RuleFired.ContextKind.DURING_WAIT) }
             so.waitedFor = conds.joinToString(" or ") { it.raw }; so.waitMs = w.ms; so.waitMet = w.met != null; so.metCondKind = w.metKind
             var waitTxt = when {
                 w.stopped != null -> { stoppedBy = w.stopped; stoppedAt = label; so.status = "stopped"; tr("${s1(w.ms)} 时停止条件 ${w.stopped}", "stop condition ${w.stopped} at ${s1(w.ms)}") }
@@ -824,7 +1054,10 @@ internal fun VScreenOffloadHandler.runSegment(
                     val late = lookLate(Probe.LATE_MS, { SystemClock.elapsedRealtime() - tWait },
                         nextSame = { d.awaitNewFrame(seen, 100, urgent = true); seen = d.version; checkInterrupts(d, call); sameAsBefore() },
                         stop = { stop?.poll() },
-                        settle = { val p = Probe(this, d, listOf(Cond("stable", CondKind.STABLE))); try { waitOn(d, p, 3_000L, stop) } finally { p.close() } })
+                        settle = {
+                            val p = Probe(this, d, listOf(Cond("stable", CondKind.STABLE)))
+                            try { waitOn(d, p, 3_000L, stop, ruleLives) { checkRules(stepNumOf(label), RuleFired.ContextKind.DURING_WAIT) } } finally { p.close() }
+                        })
                     same = late.same
                     late.waitText()?.let {
                         waitTxt = it; so.waitMs = late.endMs; so.waitMet = late.stopped == null && late.settle?.met != null
@@ -869,7 +1102,7 @@ internal fun VScreenOffloadHandler.runSegment(
         lines += tr("（从这里起没做：$code）", "(not done from here: $code)")
         outs.lastOrNull { it.status == "skipped" && it.n == at } ?: outs.add(StepOut(at, "", "refused", "").also { it.code = code })
     }
-    val acting = steps.isNotEmpty() || o.watchMs != null
+    val acting = steps.isNotEmpty() || o.watchMs != null || ruleLives.isNotEmpty()
     try {
         try {
             if (beforeSteps != null && acting) {
@@ -877,31 +1110,32 @@ internal fun VScreenOffloadHandler.runSegment(
                 beforeRan = true
             }
             runList(steps, "", quickAll = o.fast, lastWaits = true, own = true)
+            if (steps.isEmpty() && !o.skipLookSettle && !o.fast && stoppedBy == null && outcome == "done") {
+                val p = Probe(this, d, listOf(Cond("stable", CondKind.STABLE)), look = true)
+                try {
+                    val w = waitOn(d, p, 3_000L, stop, ruleLives) { checkRules(0, RuleFired.ContextKind.WATCHING) }
+                    lines += when {
+                        w.stopped != null -> { stoppedBy = w.stopped; tr("看了一眼：${s1(w.ms)} 时停止条件 ${w.stopped}", "looked: stop condition ${w.stopped} at ${s1(w.ms)}") }
+                        w.met != null -> tr("看了一眼（画面稳定，${s1(w.ms)}）", "looked (screen settled, ${s1(w.ms)})")
+                        else -> tr("看了一眼（3 秒内画面一直在变，没等到稳定；有没有明显变化看【这段时间】）", "looked (the picture kept changing for 3 s, never settled; see [Meanwhile] for clear changes)")
+                    }
+                } finally { p.close() }
+            }
+            val watch = o.watchMs ?: 0L
+            if (watch > 0 && stoppedBy == null && missed == null && outcome == "done") {
+                d.boost(watch + 1_000)
+                val w = waitOn(d, null, watch, stop, ruleLives) { checkRules(0, RuleFired.ContextKind.WATCHING) }
+                lines += if (w.stopped != null) { stoppedBy = w.stopped; tr("观察 ${s1(watch)}：${s1(w.ms)} 时停止条件 ${w.stopped}", "watch ${s1(watch)}: stop condition ${w.stopped} at ${s1(w.ms)}") } else tr("观察了 ${s1(w.ms)}", "watched ${s1(w.ms)}")
+            }
         } catch (e: StepRefused) {
             fail(e.code, e.message ?: e.code, (outs.count { it.status != "skipped" && !it.n.contains(' ') } + 1).toString())
-        }
-        if (steps.isEmpty() && !o.skipLookSettle && !o.fast && stoppedBy == null && outcome == "done") {
-            val p = Probe(this, d, listOf(Cond("stable", CondKind.STABLE)), look = true)
-            try {
-                val w = waitOn(d, p, 3_000L, stop)
-                lines += when {
-                    w.stopped != null -> { stoppedBy = w.stopped; tr("看了一眼：${s1(w.ms)} 时停止条件 ${w.stopped}", "looked: stop condition ${w.stopped} at ${s1(w.ms)}") }
-                    w.met != null -> tr("看了一眼（画面稳定，${s1(w.ms)}）", "looked (screen settled, ${s1(w.ms)})")
-                    else -> tr("看了一眼（3 秒内画面一直在变，没等到稳定；有没有明显变化看【这段时间】）", "looked (the picture kept changing for 3 s, never settled; see [Meanwhile] for clear changes)")
-                }
-            } finally { p.close() }
-        }
-        val watch = o.watchMs ?: 0L
-        if (watch > 0 && stoppedBy == null && missed == null && outcome == "done") {
-            d.boost(watch + 1_000)
-            val w = waitOn(d, null, watch, stop)
-            lines += if (w.stopped != null) { stoppedBy = w.stopped; tr("观察 ${s1(watch)}：${s1(w.ms)} 时停止条件 ${w.stopped}", "watch ${s1(watch)}: stop condition ${w.stopped} at ${s1(w.ms)}") } else tr("观察了 ${s1(w.ms)}", "watched ${s1(w.ms)}")
         }
     } catch (e: ActionError) {
         fail(e.code, e.message ?: e.code, (outs.count { it.status != "skipped" } + 1).toString())
         connectionLost(d)?.let { notes.add("CONNECTION_LOST", it) }
     } finally {
         stop?.close()
+        ruleProbes.forEach { it.close() }
         if (afterSteps != null && acting && (beforeRan || beforeSteps == null) && connectionLost(d) == null && outcome != "interrupted") {
             // The after steps run even when the stretch stopped early (a game must not keep running while the caller thinks).
             val m = missed; val oc = outcome; val sb = stoppedBy; missed = null; outcome = "done"; stoppedBy = null
@@ -950,6 +1184,8 @@ internal fun VScreenOffloadHandler.runSegment(
         firstActionMask = firstActionMask,
         beforeChanged = beforeChanged,
         afterStartMs = afterStartMs,
+        excludeWindows = claimedWindows.toList(),
+        rulesFired = rulesFired.toList(),
     )
 }
 
@@ -1126,14 +1362,26 @@ internal fun nearMiss(els: List<El>, want: String): String {
  * 1.2: a press on a money / irreversible button is confirmed by the user on the phone (Consent), not by a flag the
  * agent adds itself. The button's words and the app are shown to the user.
  */
-internal fun VScreenOffloadHandler.payGuard(sid: String, d: VScreenDisplay, label: String?, x: Int, y: Int) {
+internal fun VScreenOffloadHandler.payGuard(sid: String, d: VScreenDisplay, label: String?, x: Int, y: Int, fromRule: Boolean = false) =
+    payGuardCheck(sid, d.displayId, label, x, y, fromRule)
+
+internal fun VScreenOffloadHandler.payGuardCheck(sid: String, displayId: Int, label: String?, x: Int, y: Int, fromRule: Boolean = false) {
     val l = label ?: return
     // A button on the row of an input box (its "clear" ×) acts on the box, not on the user's data.
     val besideInput = synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] }?.list
         ?.any { it.editable && y in it.box.top..it.box.bottom } == true
     val kind = VScreenGame.commitKind(l, besideInput) ?: return
-    val pkg = runCatching { VScreenShell.topPackage(d.displayId) }.getOrNull() ?: "?"
+    val pkg = runCatching { VScreenShell.topPackage(displayId) }.getOrNull() ?: "?"
     val app = VScreenKnowledge.label(pkg) ?: pkg
+    if (fromRule) {
+        throw StepRefused(
+            "CONFIRM_PENDING",
+            tr(
+                "规则不能自动点击付费/不可撤销按钮“${l.take(20)}”（$app）：需要用户确认，整条 act 已中止",
+                "Rules cannot auto-tap payment / irreversible button \"${l.take(20)}\" ($app): user confirmation required, act aborted",
+            ),
+        )
+    }
     try {
         com.kilon.agentvscreen.host.Consent.require(context, "commit:$pkg:${VScreenOcr.norm(l).take(40)}",
             if (kind != "irreversible") tr("点付费/购买按钮“${l.take(20)}”", "tap the payment / purchase button \"${l.take(20)}\"") else tr("点不可撤销的按钮“${l.take(20)}”", "tap the irreversible button \"${l.take(20)}\""),
@@ -1142,9 +1390,13 @@ internal fun VScreenOffloadHandler.payGuard(sid: String, d: VScreenDisplay, labe
 }
 
 /** The user's per-app rule for the app on the screen (read-only: no taps / typing / gestures; blocked: only key back; ask: confirmed on the phone). */
-internal fun VScreenOffloadHandler.appRule(d: VScreenDisplay, step: Step) {
+internal fun VScreenOffloadHandler.appRule(d: VScreenDisplay, step: Step, fromRule: Boolean = false) {
     if (VScreenStore.rules.value.isEmpty()) return
     val pkg = runCatching { VScreenShell.topPackage(d.displayId) }.getOrNull() ?: return
+    appRuleForPkg(pkg, step, fromRule)
+}
+
+internal fun VScreenOffloadHandler.appRuleForPkg(pkg: String, step: Step, fromRule: Boolean = false) {
     val act = when {
         step.kind == StepKind.KEY && step.text == "back" -> com.kilon.agentvscreen.core.Guard.Act.BACK
         step.kind == StepKind.SCROLL || step.kind == StepKind.KEY -> com.kilon.agentvscreen.core.Guard.Act.SCROLL
@@ -1154,6 +1406,15 @@ internal fun VScreenOffloadHandler.appRule(d: VScreenDisplay, step: Step) {
         is com.kilon.agentvscreen.core.Guard.Verdict.Deny -> throw StepRefused(v.code, v.text)
         is com.kilon.agentvscreen.core.Guard.Verdict.Ask -> {
             val app = VScreenKnowledge.label(pkg) ?: pkg
+            if (fromRule) {
+                throw StepRefused(
+                    "CONFIRM_PENDING",
+                    tr(
+                        "规则不能在“每次询问”的应用 $app 里自动执行“${step.raw.take(40)}”：整条 act 已中止",
+                        "Rules cannot auto-run \"${step.raw.take(40)}\" in ask-every-time app $app: act aborted",
+                    ),
+                )
+            }
             try { com.kilon.agentvscreen.host.Consent.require(context, v.key, tr("在 $app 里操作", "act in $app"), tr("这一段从“${step.raw.take(40)}”开始；允许后 5 分钟内不再问", "this stretch starts with \"${step.raw.take(40)}\"; once allowed you are not asked again for 5 minutes"), reusable = true, kind = "app") }
             catch (e: ActionError) { throw StepRefused(e.code, e.message ?: e.code) }
         }
@@ -1179,8 +1440,15 @@ internal class Done(
 )
 
 /** Do one action and say what was done (facts: where, with which method). */
-private fun VScreenOffloadHandler.doAction(sid: String, d: VScreenDisplay, step: Step, ctx: ActCtx, tappedAt: Pair<Int, Int>? = null): Done {
-    appRule(d, step)
+private fun VScreenOffloadHandler.doAction(
+    sid: String,
+    d: VScreenDisplay,
+    step: Step,
+    ctx: ActCtx,
+    tappedAt: Pair<Int, Int>? = null,
+    fromRule: Boolean = false,
+): Done {
+    appRule(d, step, fromRule = fromRule)
     ctx.point = null
     var miss: String? = null
     var missCode: String? = null
@@ -1196,7 +1464,7 @@ private fun VScreenOffloadHandler.doAction(sid: String, d: VScreenDisplay, step:
         when (step.kind) {
             StepKind.TAP -> {
                 val t = target(sid, dd, step.target!!, ctx)
-                payGuard(sid, dd, t.label, t.x, t.y)
+                payGuard(sid, dd, t.label, t.x, t.y, fromRule = fromRule)
                 ctx.focusBefore = com.kilon.agentvscreen.core.VScreenTyping.focusedFieldKey(dd.displayId)
                 val (x, y) = hu?.near(t.x, t.y, t.box, dd.width, dd.height) ?: (t.x to t.y)
                 okOr(if (hu != null) VScreenShell.tap(dd.displayId, x, y, hu.holdMs()) else VScreenShell.tap(dd.displayId, x, y)); pts += intArrayOf(x, y); ctx.point = x to y
@@ -1204,7 +1472,7 @@ private fun VScreenOffloadHandler.doAction(sid: String, d: VScreenDisplay, step:
             }
             StepKind.PRESS -> {
                 val t = target(sid, dd, step.target!!, ctx)
-                payGuard(sid, dd, t.label, t.x, t.y)
+                payGuard(sid, dd, t.label, t.x, t.y, fromRule = fromRule)
                 val (x, y) = hu?.near(t.x, t.y, t.box, dd.width, dd.height) ?: (t.x to t.y)
                 val ms = hu?.vary(step.ms ?: 800L, 0.15) ?: (step.ms ?: 800L)
                 okOr(VScreenShell.longPress(dd.displayId, x, y, ms.toInt())); pts += intArrayOf(x, y); ctx.point = x to y
@@ -1254,7 +1522,7 @@ private fun VScreenOffloadHandler.doAction(sid: String, d: VScreenDisplay, step:
                 dragRecord = rec
                 path.forEach { pts += intArrayOf(it.first, it.second) }
                 tr("按住拖过 ", "held and dragged through ") + path.joinToString(" → ") { "(${it.first},${it.second})" } +
-                    tr("，${ms}ms", ", ${ms}ms") + rec.describeSuffix() + (if (hu != null) Human.said(pause ?: 0) else "")
+                    tr("，${ms}ms", ", ${ms}ms") + rec.describeSuffix(omitUnknownWhenNotPicked = path.size == 2) + (if (hu != null) Human.said(pause ?: 0) else "")
             }
             StepKind.SCROLL -> {
                 val c = step.target?.let { val t = target(sid, dd, it, ctx); t.x to t.y } ?: (dd.width / 2 to dd.height / 2)
@@ -1413,18 +1681,21 @@ internal fun VScreenOffloadHandler.mainCheckLines(w: MainWatch, sid: String? = n
 
 // ── the command ──────────────────────────────────────────────────────
 
-/** `act ["<steps>"] [--stop C] [--watch T] [--fast] [--bare] [--full] [--keep notify|wake] [--for T] [--save NAME]` */
+/** `act ["<steps>"] [--stop C] [--on R] [--hold] [--watch T] [--fast] [--bare] [--full] [--keep notify|wake] [--for T] [--save NAME]` */
 internal fun VScreenOffloadHandler.act(sid: String?, args: OffloadArgs): NativeOffloadResult {
     val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
     val body = args.positional.joinToString(" ").trim()
     val steps = if (body.isEmpty()) emptyList() else Steps.parseAll(body)
     val fullFlag = args.hasFlag("full")
     val stop = args.get("stop")?.let { Steps.conds(it) }.orEmpty()
+    val rules = ActRules.parseAll(args.getAll("on"))
     val keep = args.get("keep")?.lowercase()?.also {
         if (it !in setOf("notify", "wake")) throw ActionError("INVALID_ARGS", tr("--keep notify（通知用户）或 --keep wake（发事件给调用方，用 events 取）", "--keep notify (notifies the user) or --keep wake (sends an event to the caller, collect with events)"))
         if (stop.isEmpty()) throw ActionError("INVALID_ARGS", tr("--keep 盯的是 --stop 的条件：一起写，如 --stop \"text:到货\" --keep notify", "--keep watches the --stop condition: write them together, e.g. --stop \"text:In stock\" --keep notify"))
     }
     val watch = args.getLong("watch")?.let { bounded("watch", it, 0L, 120_000L) }
+    val agentId = Call.current()?.tokenId ?: com.kilon.agentvscreen.api.Agents.ofSession(s)
+    val wantHold = args.hasFlag("hold") || com.kilon.agentvscreen.api.AgentLedger.holdDefault(agentId)
     // handoff park: the app the session works on is on the parking display, so this stretch would act on the wrong
     // page (or on nothing). Refused here, before the screen is read, with the way out (handoff unpark).
     BackgroundOperation.requireNotParked(s)
@@ -1439,7 +1710,7 @@ internal fun VScreenOffloadHandler.act(sid: String?, args: OffloadArgs): NativeO
     // 3.12: read lastReturn[sid] BEFORE fourBlocks overwrites it.
     val prevReturnAt = synchronized(VScreenOffloadHandler.lastReturn) { VScreenOffloadHandler.lastReturn[s] }
     // 3.11: `act --full` with no steps replays the last act window without re-running steps.
-    val replayWindow = if (fullFlag && steps.isEmpty() && watch == null) Loud.lastActWindow(s) else null
+    val replayWindow = if (fullFlag && steps.isEmpty() && watch == null && rules.isEmpty()) Loud.lastActWindow(s) else null
     val out = runSegment(
         s, d, steps,
         SegmentOpts(
@@ -1449,6 +1720,7 @@ internal fun VScreenOffloadHandler.act(sid: String?, args: OffloadArgs): NativeO
             fast = args.hasFlag("fast"),
             human = args.hasFlag("human"),
             skipLookSettle = replayWindow != null,
+            rules = rules,
         ),
         prevReturnAt = prevReturnAt,
     )
@@ -1482,7 +1754,6 @@ internal fun VScreenOffloadHandler.act(sid: String?, args: OffloadArgs): NativeO
     val firstNoExpect = Loud.firstUnexpectedStep(steps, verifiedTypes, resolveUse)
     val hasAppUntil = Loud.hasAppUntil(steps, resolveUse)
     val lastExpectOnlyVisual = Loud.lastExpectOnlyVisual(out.steps)
-    val agentId = Call.current()?.tokenId ?: com.kilon.agentvscreen.api.Agents.ofSession(s)
     val replyModeFull = com.kilon.agentvscreen.api.AgentLedger.replyMode(agentId) == com.kilon.agentvscreen.api.AgentLedger.REPLY_FULL
     val explicitForced = fullFlag || steps.isEmpty() || replyModeFull
     val (escalated, explainEsc) = if (!explicitForced) Loud.consumeEscalation(s) else (false to false)
@@ -1504,6 +1775,10 @@ internal fun VScreenOffloadHandler.act(sid: String?, args: OffloadArgs): NativeO
         forced = explicitForced || escalated,
         replayWindow = replayWindow,
         prevReturnAt = prevReturnAt,
+        excludeWindows = out.excludeWindows,
+        rulesFired = out.rulesFired,
+        hasRules = rules.isNotEmpty(),
+        usedHold = wantHold,
     )
     return fourBlocks(
         s, d, lines, out.notes, out.start, out.actionMs, "act",

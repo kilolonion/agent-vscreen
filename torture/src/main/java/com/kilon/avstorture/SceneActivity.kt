@@ -114,6 +114,11 @@ class SceneActivity : Activity() {
                 data = JSONObject().put("seed", currentSeed),
             )
         }
+        val keepCycling = if (intent?.hasExtra(PresetReceiver.EXTRA_KEEP_CYCLING) == true) {
+            intent.getBooleanExtra(PresetReceiver.EXTRA_KEEP_CYCLING, false)
+        } else {
+            prefs.getBoolean(PresetReceiver.EXTRA_KEEP_CYCLING, false)
+        }
         val rng = SceneRng(currentSeed)
         when (currentScene) {
             "S01" -> buildS01List()
@@ -124,7 +129,7 @@ class SceneActivity : Activity() {
             "S06" -> buildS06Canvas(rng)
             "S07" -> buildS07Toast()
             "S08" -> buildS08Keyboard()
-            "S09" -> buildS09Timing(rng)
+            "S09" -> buildS09Timing(rng, keepCycling)
             "S10" -> buildS10Slider(rng)
             "S11" -> buildS11Charge(rng)
             "S12" -> buildS12Noise(rng)
@@ -531,7 +536,7 @@ class SceneActivity : Activity() {
     }
 
     // ── S09: every 3s shows "点我" at random seeded pos for 800ms ─────────────
-    private fun buildS09Timing(rng: SceneRng) {
+    private fun buildS09Timing(rng: SceneRng, keepCycling: Boolean = false) {
         val dm = resources.displayMetrics
         val w = dm.widthPixels
         val h = dm.heightPixels
@@ -574,7 +579,7 @@ class SceneActivity : Activity() {
 
         val cycleRunnable = object : Runnable {
             override fun run() {
-                if (goalEmitted) return
+                if (goalEmitted && !keepCycling) return
                 round++
                 activeRound = round
                 val minX = dp(24f)
@@ -594,7 +599,7 @@ class SceneActivity : Activity() {
                     data = JSONObject().put("round", round).put("x", x + btnW / 2).put("y", y + btnH / 2),
                 )
                 handler.postDelayed(missRunnable, S09_STAY_MS)
-                if (!goalEmitted) handler.postDelayed(this, S09_PERIOD_MS)
+                if (!goalEmitted || keepCycling) handler.postDelayed(this, S09_PERIOD_MS)
             }
         }
         handler.postDelayed(cycleRunnable, S09_INITIAL_DELAY_MS)

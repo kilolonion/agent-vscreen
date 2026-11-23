@@ -59,9 +59,9 @@ internal object CommandSpec {
         }
     }
 
-    /** An act that only looks: no steps or only waits, and nothing kept or saved. */
+    /** An act that only looks: no steps or only waits, and nothing kept, saved, held, or rule-driven. */
     private fun looksOnly(a: OffloadArgs): Boolean {
-        if (a.get("keep") != null || a.get("save") != null) return false
+        if (a.get("keep") != null || a.get("save") != null || a.hasFlag("hold") || a.getAll("on").isNotEmpty()) return false
         val body = a.positional.joinToString(" ").trim()
         if (body.isEmpty()) return true
         return runCatching { Steps.parseAll(body).all { it.kind == StepKind.WAIT || it.kind == StepKind.SLEEP } }.getOrDefault(false)
@@ -105,6 +105,9 @@ internal object CommandSpec {
                 "    act \"drag 200 1500 540 600 hold until color:540,600=#4CAF50 2s\"",
                 "    act \"drag 100 800 980 800 seek until text:70 in 400,600,700,700\"",
                 "    act \"press 540 1600 hold until text:9* in 300,1400,800,1500 8s\"",
+                "    act --on \"text:限时优惠 => tap 980,420\" \"tap 确定 until text:已确定\"",
+                "    act --on \"text:点我 => tap 点我 x3\" --watch 10s",
+                "    act \"tap 开始 until text:进行中\" --hold",
                 "    act --stop \"text:到货\" --keep notify --for 2h"),
             listOf("do a stretch of steps (up to 40, separated by ; or newlines), returns four blocks. No steps = take a look (waits for the picture to settle, up to 3 s).",
                 "steps:",
@@ -127,8 +130,13 @@ internal object CommandSpec {
                 "     act \"drag 200 1500 540 600 hold until color:540,600=#4CAF50 2s\"",
                 "     act \"drag 100 800 980 800 seek until text:70 in 400,600,700,700\"",
                 "     act \"press 540 1600 hold until text:9* in 300,1400,800,1500 8s\"",
+                "     act --on \"text:Promo => tap 980,420\" \"tap OK until text:Done\"",
+                "     act --on \"text:Tap me => tap Tap me x3\" --watch 10s",
+                "     act \"tap Start until text:Running\" --hold",
                 "     act --stop \"text:In stock\" --keep notify --for 2h"),
             listOf(Opt("stop", Kind.VALUE, "条件", "condition", "整段一直盯着，满足就停下，后面的步骤不做", "watched for the whole stretch; when met it stops and skips the rest"),
+                Opt("on", Kind.VALUE, "条件 => 一步", "cond => step", "短程规则（仅本次 act 生效，可写 1–3 条，不跨轮）：条件成立时执行一步（只允许 tap / key back / scroll / wait 时长，可选 x1–x3，默认 x1；条件不能是 stable / still；text: / gone: 连续 2 次独立读屏才触发，间隔 500ms；规则不能触发付款或“每次询问”应用）", "short-range rule for this act only (1–3 rules, never persisted): when cond holds, run one step (tap / key back / scroll / wait duration only; optional x1–x3, default x1; cond cannot be stable / still; text: / gone: requires 2 consecutive independent readings with 500ms cooldown; rules never auto-confirm payments or ask-every-time apps)"),
+                Opt("hold", Kind.SWITCH, null, null, "回复发出后暂停副屏前台应用，下一条命令前自动恢复（最长 120 秒，仅 Android 14+；一直要就 note hold on）。限制：暂停只对按帧计时的应用有效；按真实时钟计时的应用恢复后会直接跳过这段时间；暂停期间应用的网络连接可能超时", "pause the virtual screen's foreground app after the reply is sent and resume before the next command (max 120s, Android 14+ only; set default with note hold on). Limits: pausing only stops frame-timed apps; wall-clock apps skip ahead on resume; active network connections may time out while paused"),
                 Opt("watch", Kind.DURATION, "时长", "duration", "步骤做完再看这么久（会动的画面）", "keep looking this long after the steps (moving pictures)"),
                 Opt("fast", Kind.SWITCH, null, null, "动作之间不等画面稳定（游戏、连续点击）；最后一步仍会等", "do not wait for the picture to settle between actions (games, rapid taps); the last step still waits"),
                 Opt("bare", Kind.SWITCH, null, null, "这一段不做这个应用记下的前置/收尾步骤", "this stretch skips the before/after steps kept for this app"),
@@ -143,20 +151,22 @@ internal object CommandSpec {
             sumEn = "run a stretch of steps on the screen (tap, swipe, type, wait) and return the screen now; no steps = look",
             scopeOf = { a -> if (looksOnly(a)) Scope.LOOK else Scope.OPERATE },
             scopeNoteZh = "不带步骤、或只有 wait 的 act 只需要 look", scopeNoteEn = "an act with no steps, or only wait steps, needs just look"),
-        Cmd("note", "[文字] | before \"<步骤>\" | after \"<步骤>\" | save <段名> \"<步骤>\" | show <段名> | human on|off | reply quiet|full | delete <编号|before|after|段名>", "[text] | before \"<steps>\" | after \"<steps>\" | save <segment> \"<steps>\" | show <segment> | human on|off | reply quiet|full | delete <number|before|after|segment>",
+        Cmd("note", "[文字] | before \"<步骤>\" | after \"<步骤>\" | save <段名> \"<步骤>\" | show <段名> | human on|off | reply quiet|full | hold on|off | delete <编号|before|after|段名>", "[text] | before \"<steps>\" | after \"<steps>\" | save <segment> \"<steps>\" | show <segment> | human on|off | reply quiet|full | hold on|off | delete <number|before|after|segment>",
             listOf("给当前应用记笔记（不带参数 = 列出笔记、段和前置/收尾步骤）。下次 launch 会列出来，并标明是谁、在应用哪个版本时记的。",
                 "before / after：每段 act 开始前先做 before 的步骤，做完、观察完再做 after 的步骤（--bare 跳过）。",
                 "例：会自己走的画面（游戏、播放器）记 before = 继续的步骤、after = 暂停的步骤，你思考时画面就停着；每次进页面都弹的窗记 before = 关掉它的步骤。",
                 "save：不执行，直接存下或改写一个段（示教存的段也一样），步骤写法和 act 相同，可以用 try / if / repeat、* 和 @N；note 列出的就是段的完整步骤。",
                 "human on：这个应用以后每段 act 都用仿人节奏（同 act --human）；off 关掉。",
-                "reply quiet|full：按当前 agent 保存默认回复模式（默认 quiet：符合预期时给短回复，full：每次都给完整回复），不需要先打开应用。"),
+                "reply quiet|full：按当前 agent 保存默认回复模式（默认 quiet：符合预期时给短回复，full：每次都给完整回复），不需要先打开应用。",
+                "hold on|off：按当前 agent 保存默认是否开启 act --hold（默认 off，仅 Android 14+ 生效），不需要先打开应用。"),
             listOf("keep notes for the current app (no arguments = list notes, segments and before/after steps). The next launch lists them, with who wrote each and for which app version.",
                 "before / after: every act first does the before steps, and after acting and looking does the after steps (--bare skips them).",
                 "e.g. for a picture that moves by itself (a game, a player) keep before = the steps that resume and after = the steps that pause, so it stands still while you think; for a popup shown on every visit keep before = the steps that close it.",
                 "save: store or rewrite a segment without running it (taught lessons too); the steps are written as for act, with try / if / repeat, * and @N; note lists each segment's full steps.",
                 "human on: every act on this app uses human pacing from now on (as act --human); off turns it off.",
-                "reply quiet|full: save this agent's default reply mode (default quiet: short reply when expected; full: always return full four blocks); works without an open app."),
-            sumZh = "给当前应用记笔记、前置/收尾步骤，或设回复模式", sumEn = "keep notes and before/after steps for the current app, or set reply mode"),
+                "reply quiet|full: save this agent's default reply mode (default quiet: short reply when expected; full: always return full four blocks); works without an open app.",
+                "hold on|off: save whether this agent enables act --hold by default (default off, Android 14+ only); works without an open app."),
+            sumZh = "给当前应用记笔记、前置/收尾步骤，或设回复/暂停默认模式", sumEn = "keep notes and before/after steps for the current app, or set reply/hold defaults"),
         Cmd("events", "", "",
             listOf("取盯守（act --keep wake）看到条件时发来的事件。事件有序号，取走后在你下一次 events 时才删除（中途断了不会丢）。",
                 "这个会话没有正在运行的 --keep wake 盯守时不等，直接说明。"),
@@ -426,8 +436,18 @@ internal object CommandSpec {
         }
         if (options != null) for (o in c.allOpts) {
             val k = listOf(o.name, o.name.replace('-', '_')).firstOrNull { options.has(it) } ?: continue
-            if (o.kind == Kind.SWITCH) { if (options.optBoolean(k, false)) out += "--${o.name}" }
-            else options.opt(k)?.toString()?.takeIf { it.isNotEmpty() && it != "null" }?.let { out += "--${o.name}"; out += it }
+            if (o.kind == Kind.SWITCH) {
+                if (options.optBoolean(k, false)) out += "--${o.name}"
+            } else {
+                val v = options.opt(k)
+                if (v is JSONArray) {
+                    for (idx in 0 until v.length()) {
+                        v.optString(idx).takeIf { it.isNotEmpty() && it != "null" }?.let { out += "--${o.name}"; out += it }
+                    }
+                } else {
+                    v?.toString()?.takeIf { it.isNotEmpty() && it != "null" }?.let { out += "--${o.name}"; out += it }
+                }
+            }
         }
         return out
     }

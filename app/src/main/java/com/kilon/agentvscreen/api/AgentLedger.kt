@@ -58,6 +58,7 @@ object AgentLedger {
     const val REPLY_QUIET = "quiet"
     const val REPLY_FULL = "full"
     private val replyModes = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val holdDefaults = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     fun init(ctx: Context) {
         prefs = ctx.getSharedPreferences("agent_vscreen_ledger", Context.MODE_PRIVATE)
@@ -69,7 +70,11 @@ object AgentLedger {
         }
         val ids = prefs.all.keys.filter { it.contains('.') && !it.startsWith("ack") }.map { it.substringBefore('.') }.toSet()
         replyModes.clear()
-        ids.forEach { id -> prefs.getString("$id.reply_mode", null)?.let { replyModes[id] = it } }
+        holdDefaults.clear()
+        ids.forEach { id ->
+            prefs.getString("$id.reply_mode", null)?.let { replyModes[id] = it }
+            if (prefs.contains("$id.hold_default")) holdDefaults[id] = prefs.getBoolean("$id.hold_default", false)
+        }
         _agents.value = ids.associateWith { id ->
             Snapshot(prefs.getLong("$id.install_at", 0L), prefs.getLong("$id.remembered_at", 0L), prefs.getString("$id.remembered_where", null),
                 prefs.getLong("$id.last_call_at", 0L), prefs.getInt("$id.comebacks", 0), prefs.getLong("$id.last_comeback_at", 0L),
@@ -91,6 +96,17 @@ object AgentLedger {
     }
 
     internal fun resetReplyModesForTest() { replyModes.clear() }
+
+    /** 2.0.0-beta5 (5.1): per-agent default `--hold` switch (`note hold on|off`), default false. */
+    fun holdDefault(agentId: String): Boolean =
+        holdDefaults[agentId] ?: if (::prefs.isInitialized) prefs.getBoolean("$agentId.hold_default", false) else false
+
+    fun setHoldDefault(agentId: String, on: Boolean) {
+        holdDefaults[agentId] = on
+        if (::prefs.isInitialized) prefs.edit().putBoolean("$agentId.hold_default", on).apply()
+    }
+
+    internal fun resetHoldDefaultsForTest() { holdDefaults.clear() }
 
     private fun combined(all: Collection<Snapshot>): Snapshot {
         fun mx(f: (Snapshot) -> Long) = all.maxOfOrNull(f) ?: 0L
@@ -122,6 +138,7 @@ object AgentLedger {
     fun forget(id: String) {
         _agents.value = _agents.value - id
         replyModes.remove(id)
+        holdDefaults.remove(id)
         _snap.value = combined(_agents.value.values)
         if (::prefs.isInitialized) prefs.edit().apply { prefs.all.keys.filter { it.startsWith("$id.") || it == "ack_$id" || it == "ack_at_$id" }.forEach { remove(it) } }.apply()
     }

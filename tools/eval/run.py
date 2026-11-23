@@ -226,12 +226,27 @@ def check_baseline_regressions(rows, baseline):
 FALSE_QUIET_EVENTS = frozenset({"popup_shown", "snap_back", "fail", "target_missed"})
 REFETCH_CMDS = frozenset({"look", "zoom", "frames"})
 ACT_VALUE_OPTS = frozenset({
-    "--stop", "--watch", "--timeout", "--wait", "--after", "--detail",
+    "--stop", "--on", "--watch", "--timeout", "--wait", "--after", "--detail",
     "--every", "--for", "--for-ms", "--session", "--id", "--retry",
 })
 ACT_FLAG_OPTS = frozenset({
-    "--full", "--fast", "--bare", "--human", "--async", "--keep", "--no-wait",
+    "--full", "--fast", "--bare", "--human", "--async", "--keep", "--no-wait", "--hold",
 })
+
+
+def _extras_argv(extras):
+    """Convert optional task `extras` dict into `am` CLI flags (--ez / --ei / --es)."""
+    if not isinstance(extras, dict):
+        return []
+    out = []
+    for k, v in extras.items():
+        if isinstance(v, bool):
+            out.extend(["--ez", str(k), "true" if v else "false"])
+        elif isinstance(v, int):
+            out.extend(["--ei", str(k), str(v)])
+        elif v is not None:
+            out.extend(["--es", str(k), str(v)])
+    return out
 
 
 def is_quiet_reply(argv, reply):
@@ -274,8 +289,10 @@ def is_refetch_command(argv):
 
 
 def count_false_quiet(cmd_records, events):
-    """3.11 & 3.12: count quiet replies whose wall-clock window `(prev_returned_at, returned_at]`
+    """3.11, 3.12 & 5.8 #2: count quiet replies whose wall-clock window `(prev_returned_at, returned_at]`
     contained any AVST event in FALSE_QUIET_EVENTS (`popup_shown`, `snap_back`, `fail`, `target_missed`).
+    5.8 #2: a `popup_shown` closed by a fired `--on` rule within the same quiet turn (`rules_fired` non-empty
+    and `popup_closed` in `(prev_ret, cur_ret]`) is intentionally handled and does not count as false quiet.
     """
     count = 0
     details = []
@@ -286,10 +303,16 @@ def count_false_quiet(cmd_records, events):
         if cur_ret <= 0:
             continue
         prev_ret = int(rec.get("prev_returned_at") or 0)
+        rule_closed_popup = bool(rec.get("rules_fired")) and any(
+            ev.get("ev") == "popup_closed" and prev_ret < int(ev.get("t") or 0) <= cur_ret
+            for ev in events
+        )
         hits = []
         for ev in events:
             name = ev.get("ev")
             if name not in FALSE_QUIET_EVENTS:
+                continue
+            if name == "popup_shown" and rule_closed_popup:
                 continue
             t = int(ev.get("t") or 0)
             if prev_ret < t <= cur_ret:
@@ -310,6 +333,7 @@ def run_task(token, task, return_events=False):
     task_id = task["id"]
     scene = task["scene"]
     seed_val = int(task.get("seed", 7))
+    extras_args = _extras_argv(task.get("extras"))
     max_seconds = float(task.get("max_seconds", 60))
     expect_list = task.get("expect") or []
     forbid_list = task.get("forbid") or []
@@ -321,6 +345,7 @@ def run_task(token, task, return_events=False):
         "-n", f"{TORTURE_PKG}/.PresetReceiver",
         "--es", "scene", scene,
         "--ei", "seed", str(seed_val),
+        *extras_args,
     )
     adb_shell("logcat", "-c")
 
@@ -334,6 +359,7 @@ def run_task(token, task, return_events=False):
     quiet_replies = 0
     refetch_after_quiet = 0
     loud_reasons = []
+    rules_fired_all = []
     reply_texts = []
     step_gestures = []
     cmd_records = []
@@ -370,6 +396,9 @@ def run_task(token, task, return_events=False):
                 quiet_replies += 1
             if argv and argv[0] == "act" and isinstance(reply.get("loud"), list):
                 loud_reasons.append(list(reply["loud"]))
+            rf = list(reply.get("rules_fired") or []) if isinstance(reply.get("rules_fired"), list) else []
+            if rf:
+                rules_fired_all.append(rf)
             for st in (reply.get("steps") or []):
                 if isinstance(st, dict) and isinstance(st.get("gesture"), dict):
                     step_gestures.append(dict(st["gesture"]))
@@ -380,6 +409,7 @@ def run_task(token, task, return_events=False):
                 "prev_returned_at": prev_returned_at,
                 "returned_at": cur_returned_at,
                 "is_quiet": is_q,
+                "rules_fired": rf,
             })
             if cur_returned_at > 0:
                 prev_returned_at = cur_returned_at
@@ -395,6 +425,7 @@ def run_task(token, task, return_events=False):
                         "-n", f"{TORTURE_PKG}/.SceneActivity",
                         "--es", "scene", scene,
                         "--ei", "seed", str(seed_val),
+                        *extras_args,
                     )
                     time.sleep(0.15)
 
@@ -434,6 +465,7 @@ def run_task(token, task, return_events=False):
         "false_quiet_details": false_quiet_details,
         "refetch_after_quiet": refetch_after_quiet,
         "loud_reasons": loud_reasons,
+        "rules_fired": rules_fired_all,
         "gestures": step_gestures,
         "reply_has_popup": ("弹出" in all_text) or (" popup [" in all_text),
         "reply_has_toast": ("toast：" in all_text) or ("toast:" in all_text),
@@ -722,7 +754,7 @@ def _pick_s04_outside_target(card, slots):
     return best
 
 
-def _start_scene_on_display(disp_id, scene, seed_val):
+def _start_scene_on_display(disp_id, scene, seed_val, extras=None):
     adb_shell("logcat", "-c")
     adb_shell(
         "am", "start", "-W", "--activity-clear-top",
@@ -730,6 +762,7 @@ def _start_scene_on_display(disp_id, scene, seed_val):
         "-n", f"{TORTURE_PKG}/.SceneActivity",
         "--es", "scene", scene,
         "--ei", "seed", str(seed_val),
+        *_extras_argv(extras),
     )
     time.sleep(0.25)
 
@@ -745,13 +778,14 @@ def _wait_enter_event(scene, timeout_s=3.0):
     return None
 
 
-def _launch_scene_session(token, scene, seed_val, session):
+def _launch_scene_session(token, scene, seed_val, session, extras=None):
     adb_shell("am", "force-stop", TORTURE_PKG)
     adb_shell(
         "am", "broadcast", "-W", "--include-stopped-packages",
         "-n", f"{TORTURE_PKG}/.PresetReceiver",
         "--es", "scene", scene,
         "--ei", "seed", str(seed_val),
+        *_extras_argv(extras),
     )
     adb_shell("logcat", "-c")
     call_api(token, ["launch", TORTURE_PKG], session=session, timeout=120)
@@ -762,7 +796,7 @@ def _launch_scene_session(token, scene, seed_val, session):
 
 
 def run_gesture_stats(token, out_dir, app_version, s04_runs=40, s10_runs=20, s11_runs=20, s05_runs=20):
-    """2.0.0-beta4 (4.6 & 4.7): run 40x S04 (half in-slot, half out-of-slot), 20x S10, 20x S11, 20x S05."""
+    """2.0.0-beta4 (4.6 & 4.7) & beta5 (5.7 #2): run 40x S04, 20x S10, 20x S11 (with img_age_ms), 20x S05."""
     from collections import Counter
 
     stats = {
@@ -941,11 +975,13 @@ def run_gesture_stats(token, out_dir, app_version, s04_runs=40, s10_runs=20, s11
                     "end_ms": end_ms,
                     "poll_ms_p50": g.get("poll_ms_p50"),
                     "poll_ms_max": g.get("poll_ms_max"),
+                    "img_age_ms": g.get("img_age_ms"),
                 }
                 stats["s11"]["runs"].append(rec)
                 print(
                     f"[S11 {i + 1}/{s11_runs}] seed={seed_val} goal={goal} overload={overloaded} "
-                    f"held_ms={held_ms} end_ms={end_ms} poll={rec['poll_ms_p50']}/{rec['poll_ms_max']} code={rec['code']}",
+                    f"held_ms={held_ms} end_ms={end_ms} poll={rec['poll_ms_p50']}/{rec['poll_ms_max']} "
+                    f"img_age={rec['img_age_ms']} code={rec['code']}",
                     flush=True,
                 )
         finally:
@@ -1062,6 +1098,9 @@ def run_gesture_stats(token, out_dir, app_version, s04_runs=40, s10_runs=20, s11
         [r["poll_ms_p50"] for r in s11_list if r["poll_ms_p50"] is not None],
         [r["poll_ms_max"] for r in s11_list if r["poll_ms_max"] is not None],
     )
+    s11_ages = [r["img_age_ms"] for r in s11_list if r.get("img_age_ms") is not None]
+    s11_age_p50 = round(statistics.median(s11_ages), 1) if s11_ages else None
+    s11_age_max = max(s11_ages) if s11_ages else None
     stats["s11"]["summary"] = {
         "total": len(s11_list),
         "passed": s11_ok,
@@ -1070,6 +1109,8 @@ def run_gesture_stats(token, out_dir, app_version, s04_runs=40, s10_runs=20, s11
         "overload_rate": round(s11_over / len(s11_list), 4) if s11_list else 0.0,
         "poll_ms_p50": s11_p50,
         "poll_ms_max": s11_max,
+        "img_age_ms_p50": s11_age_p50,
+        "img_age_ms_max": s11_age_max,
         "failures": dict(s11_fail),
     }
 
@@ -1121,9 +1162,14 @@ def run_gesture_stats(token, out_dir, app_version, s04_runs=40, s10_runs=20, s11
         )
     if s11_list:
         s11 = stats["s11"]["summary"]
+        age_txt = (
+            f"帧龄 p50={s11['img_age_ms_p50']}ms / max={s11['img_age_ms_max']}ms"
+            if s11["img_age_ms_p50"] is not None
+            else "帧龄 - / -"
+        )
         md_lines.append(
             f"| S11 | {s11['total']} | {s11['passed']}/{s11['total']} ({s11['rate']:.1%}) | "
-            f"goal {s11['passed']}/{s11['total']}，过载 {s11['overload']}/{s11['total']} ({s11['overload_rate']:.1%}) | "
+            f"goal {s11['passed']}/{s11['total']}，过载 {s11['overload']}/{s11['total']} ({s11['overload_rate']:.1%})，{age_txt} | "
             f"goal ≥ 90%，过载 ≤ 5% | {s11['poll_ms_p50']} / {s11['poll_ms_max']} | {fmt_fail(s11['failures'])} |"
         )
     if s05_list:
@@ -1138,6 +1184,360 @@ def run_gesture_stats(token, out_dir, app_version, s04_runs=40, s10_runs=20, s11
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "gesture-stats.json").write_text(json.dumps(stats, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     (out_dir / "gesture-stats.md").write_text(md, encoding="utf-8")
+    print("\n" + md, flush=True)
+    return stats
+
+
+def _wchan_of(pkg):
+    try:
+        out = adb_shell("ps", "-A", "-o", "NAME,WCHAN")
+    except subprocess.CalledProcessError:
+        return ""
+    for line in out.splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 2 and parts[0] == pkg:
+            return parts[1]
+    return ""
+
+
+def _pid_of(pkg):
+    try:
+        return adb_shell("pidof", pkg).strip()
+    except subprocess.CalledProcessError:
+        return ""
+
+
+def run_s5_stats(token, out_dir, app_version, s02_runs=20, s09_runs=20, hold_rounds=2, hold_wait_s=10.0):
+    """2.0.0-beta5 (5.5 & 5.8 #1/#4): Stage 5 acceptance stats:
+      - S02 x20: `--on "text:限时优惠 => tap 980,420" "wait 3.2s; tap 确定 until text:已确定"`
+        (goal >= 19/20, AVST touch_down == 1 + len(rules_fired), quiet short replies counted).
+      - S09 (keep_cycling=true) x20: `--on "text:点我 => tap 点我 x3" --watch 10s`
+        (>= 18/20 with target_hit >= 2 and AVST touch_down == len(rules_fired)).
+      - S09 + --hold (API 34/35): 2 consecutive HOLD/UNHOLD rounds (10s each, 0 target_shown while held,
+        resumes after next command), then send app to background (Settings + HOME) and reopen same process
+        confirming target_shown resumes with no lingering sticky freeze.
+    """
+    from collections import Counter
+
+    sdk = int(adb_shell("getprop", "ro.build.version.sdk") or "0")
+    stats = {
+        "app_version": app_version,
+        "sdk": sdk,
+        "generated_at": int(time.time()),
+        "s02": {"runs": [], "summary": {}},
+        "s09": {"runs": [], "summary": {}},
+        "hold": {"rounds": [], "reopen": {}, "summary": {}},
+    }
+
+    # ── S02 x20 ──
+    if s02_runs > 0:
+        session = "s5_s02"
+        try:
+            disp_id = _launch_scene_session(token, "S02", 100, session)
+            for i in range(s02_runs):
+                seed_val = 100 + i
+                _start_scene_on_display(disp_id, "S02", seed_val)
+                reply = call_api(
+                    token,
+                    ["act", "--on", "text:限时优惠 => tap 980,420", "wait 3.2s; tap 确定 until text:已确定"],
+                    session=session,
+                    timeout=90,
+                )
+                time.sleep(0.15)
+                evs = read_avst_events("S02")
+                goal = any(e.get("ev") == "goal" and e.get("ok") is True for e in evs)
+                popup_closed = any(e.get("ev") == "popup_closed" and e.get("ok") is True for e in evs)
+                touch_downs = sum(
+                    1 for e in evs
+                    if e.get("ev") == "touch" and isinstance(e.get("data"), dict) and e["data"].get("a") == "down"
+                )
+                rf = list(reply.get("rules_fired") or []) if isinstance(reply.get("rules_fired"), list) else []
+                expected_touches = 1 + len(rf)
+                touch_exact = (touch_downs == expected_touches)
+                loud = list(reply.get("loud") or []) if isinstance(reply.get("loud"), list) else ["missing"]
+                quiet = (len(loud) == 0)
+                ok = goal and popup_closed and touch_exact
+                reason = "ok" if ok else (
+                    "no_goal" if not goal else ("no_popup_closed" if not popup_closed else f"touches({touch_downs}!={expected_touches})")
+                )
+                rec = {
+                    "run": i + 1,
+                    "seed": seed_val,
+                    "goal": goal,
+                    "popup_closed": popup_closed,
+                    "rules_fired": len(rf),
+                    "touch_downs": touch_downs,
+                    "expected_touches": expected_touches,
+                    "touch_exact": touch_exact,
+                    "quiet": quiet,
+                    "loud": loud,
+                    "ok": ok,
+                    "reason": reason,
+                    "code": reply.get("code"),
+                }
+                stats["s02"]["runs"].append(rec)
+                print(
+                    f"[S5-S02 {i + 1}/{s02_runs}] seed={seed_val} goal={goal} closed={popup_closed} "
+                    f"rf={len(rf)} touches={touch_downs}/{expected_touches} quiet={quiet} loud={loud} ok={ok}",
+                    flush=True,
+                )
+        finally:
+            try:
+                call_api(token, ["release"], session=session, timeout=30)
+            except Exception:
+                pass
+            adb_shell("am", "force-stop", TORTURE_PKG)
+
+    # ── S09 keep_cycling=true x20 ──
+    if s09_runs > 0:
+        session = "s5_s09"
+        try:
+            disp_id = _launch_scene_session(token, "S09", 200, session, extras={"keep_cycling": True})
+            for i in range(s09_runs):
+                seed_val = 200 + i
+                _start_scene_on_display(disp_id, "S09", seed_val, extras={"keep_cycling": True})
+                reply = call_api(
+                    token,
+                    ["act", "--on", "text:点我 => tap 点我 x3", "--watch", "10s"],
+                    session=session,
+                    timeout=90,
+                )
+                time.sleep(0.15)
+                evs = read_avst_events("S09")
+                hits = sum(1 for e in evs if e.get("ev") == "target_hit" and e.get("ok") is True)
+                goals = sum(1 for e in evs if e.get("ev") == "goal" and e.get("ok") is True)
+                shown = sum(1 for e in evs if e.get("ev") == "target_shown")
+                touch_downs = sum(
+                    1 for e in evs
+                    if e.get("ev") == "touch" and isinstance(e.get("data"), dict) and e["data"].get("a") == "down"
+                )
+                rf = list(reply.get("rules_fired") or []) if isinstance(reply.get("rules_fired"), list) else []
+                touch_exact = (touch_downs == len(rf))
+                ok = (hits >= 2) and (goals == 1) and touch_exact
+                reason = "ok" if ok else (
+                    f"hits({hits}<2)" if hits < 2 else (f"goals({goals}!=1)" if goals != 1 else f"touches({touch_downs}!={len(rf)})")
+                )
+                rec = {
+                    "run": i + 1,
+                    "seed": seed_val,
+                    "target_shown": shown,
+                    "target_hit": hits,
+                    "goal_count": goals,
+                    "rules_fired": len(rf),
+                    "touch_downs": touch_downs,
+                    "touch_exact": touch_exact,
+                    "ok": ok,
+                    "reason": reason,
+                    "code": reply.get("code"),
+                }
+                stats["s09"]["runs"].append(rec)
+                print(
+                    f"[S5-S09 {i + 1}/{s09_runs}] seed={seed_val} shown={shown} hits={hits} goals={goals} "
+                    f"rf={len(rf)} touches={touch_downs} ok={ok}",
+                    flush=True,
+                )
+        finally:
+            try:
+                call_api(token, ["release"], session=session, timeout=30)
+            except Exception:
+                pass
+            adb_shell("am", "force-stop", TORTURE_PKG)
+
+    # ── S09 + --hold (2 consecutive HOLD/UNHOLD rounds + background/reopen check per 5.5 & 5.8 #1) ──
+    if hold_rounds > 0 and sdk >= 34:
+        session = "s5_hold"
+        try:
+            disp_id = _launch_scene_session(token, "S09", 900, session, extras={"keep_cycling": True})
+            _start_scene_on_display(disp_id, "S09", 900, extras={"keep_cycling": True})
+            # Wait for initial target_shown so we know S09 is actively cycling before round 1.
+            t_init = time.monotonic()
+            while time.monotonic() - t_init < 5.0:
+                if any(e.get("ev") == "target_shown" for e in read_avst_events("S09")):
+                    break
+                time.sleep(0.2)
+
+            for r in range(1, hold_rounds + 1):
+                h_rep = call_api(token, ["act", "--hold"], session=session, timeout=60)
+                # Wait briefly for post-send freeze to settle, then clear logcat and hold for hold_wait_s.
+                wchan_held = ""
+                for _ in range(25):
+                    wchan_held = _wchan_of(TORTURE_PKG)
+                    if wchan_held == "do_freezer_trap":
+                        break
+                    time.sleep(0.2)
+                adb_shell("logcat", "-c")
+                time.sleep(hold_wait_s)
+                evs_held = read_avst_events("S09")
+                shown_during_hold = sum(1 for e in evs_held if e.get("ev") == "target_shown")
+
+                # Next command must unhold before doing anything, and report "已恢复".
+                adb_shell("logcat", "-c")
+                u_rep = call_api(token, ["look"], session=session, timeout=60)
+                wchan_after = _wchan_of(TORTURE_PKG)
+                resumed_ms = u_rep.get("resumed_after_ms")
+                has_resumed_text = ("已恢复" in str(u_rep.get("text") or "")) or ("Resumed" in str(u_rep.get("text") or ""))
+                # Wait up to 5s for target_shown to resume (period 3s).
+                shown_after = 0
+                t_res = time.monotonic()
+                while time.monotonic() - t_res < 5.0:
+                    shown_after = sum(1 for e in read_avst_events("S09") if e.get("ev") == "target_shown")
+                    if shown_after >= 1:
+                        break
+                    time.sleep(0.25)
+
+                round_ok = (
+                    h_rep.get("ok") is True
+                    and wchan_held == "do_freezer_trap"
+                    and shown_during_hold == 0
+                    and u_rep.get("ok") is True
+                    and wchan_after != "do_freezer_trap"
+                    and shown_after >= 1
+                    and has_resumed_text
+                    and isinstance(resumed_ms, int) and resumed_ms > 0
+                )
+                rrec = {
+                    "round": r,
+                    "wchan_held": wchan_held,
+                    "shown_during_hold": shown_during_hold,
+                    "wchan_after": wchan_after,
+                    "shown_after": shown_after,
+                    "resumed_after_ms": resumed_ms,
+                    "has_resumed_text": has_resumed_text,
+                    "ok": round_ok,
+                }
+                stats["hold"]["rounds"].append(rrec)
+                print(
+                    f"[S5-HOLD R{r}/{hold_rounds} API {sdk}] held_wchan={wchan_held!r} "
+                    f"shown_during={shown_during_hold} after_wchan={wchan_after!r} "
+                    f"shown_after={shown_after} resumed_ms={resumed_ms} ok={round_ok}",
+                    flush=True,
+                )
+
+            # 5.8 #1: after round 2, return to home/background, wait 3s, reopen app without force-stop -> target_shown still fires!
+            pid_before = _pid_of(TORTURE_PKG)
+            adb_shell("input", "keyevent", "KEYCODE_HOME")
+            adb_shell("am", "start", "-W", "--display", str(disp_id), "-n", "com.android.settings/.Settings")
+            time.sleep(3.0)
+            wchan_bg = _wchan_of(TORTURE_PKG)
+            adb_shell("logcat", "-c")
+            adb_shell(
+                "am", "start", "-W", "--activity-clear-top",
+                "--display", str(disp_id),
+                "-n", f"{TORTURE_PKG}/.SceneActivity",
+                "--es", "scene", "S09",
+                "--ei", "seed", "909",
+                "--ez", "keep_cycling", "true",
+            )
+            pid_after = _pid_of(TORTURE_PKG)
+            wchan_reopen = _wchan_of(TORTURE_PKG)
+            shown_reopen = 0
+            t_ro = time.monotonic()
+            while time.monotonic() - t_ro < 6.0:
+                shown_reopen = sum(1 for e in read_avst_events("S09") if e.get("ev") == "target_shown")
+                if shown_reopen >= 1:
+                    break
+                time.sleep(0.25)
+            reopen_ok = (wchan_reopen != "do_freezer_trap") and (shown_reopen >= 1)
+            stats["hold"]["reopen"] = {
+                "pid_before": pid_before,
+                "pid_after": pid_after,
+                "wchan_bg": wchan_bg,
+                "wchan_reopen": wchan_reopen,
+                "shown_reopen": shown_reopen,
+                "ok": reopen_ok,
+            }
+            print(
+                f"[S5-HOLD REOPEN API {sdk}] pid={pid_before}->{pid_after} wchan_bg={wchan_bg!r} "
+                f"wchan_reopen={wchan_reopen!r} shown_reopen={shown_reopen} ok={reopen_ok}",
+                flush=True,
+            )
+        finally:
+            try:
+                call_api(token, ["release"], session=session, timeout=30)
+            except Exception:
+                pass
+            try:
+                adb_shell("am", "unfreeze", "--sticky", TORTURE_PKG)
+                adb_shell("am", "unfreeze", TORTURE_PKG)
+            except Exception:
+                pass
+            adb_shell("am", "force-stop", TORTURE_PKG)
+
+    # ── Summaries & Markdown ──
+    s02_list = stats["s02"]["runs"]
+    s02_ok = sum(1 for r in s02_list if r["ok"])
+    s02_goal = sum(1 for r in s02_list if r["goal"])
+    s02_touch_ok = sum(1 for r in s02_list if r["touch_exact"])
+    s02_quiet = sum(1 for r in s02_list if r["quiet"])
+    s02_fail = Counter(r["reason"] for r in s02_list if not r["ok"])
+    stats["s02"]["summary"] = {
+        "total": len(s02_list),
+        "passed": s02_ok,
+        "goal": s02_goal,
+        "touch_exact": s02_touch_ok,
+        "quiet": s02_quiet,
+        "rate": round(s02_ok / len(s02_list), 4) if s02_list else 0.0,
+        "failures": dict(s02_fail),
+    }
+
+    s09_list = stats["s09"]["runs"]
+    s09_ok = sum(1 for r in s09_list if r["ok"])
+    s09_hits2 = sum(1 for r in s09_list if r["target_hit"] >= 2)
+    s09_touch_ok = sum(1 for r in s09_list if r["touch_exact"])
+    s09_fail = Counter(r["reason"] for r in s09_list if not r["ok"])
+    stats["s09"]["summary"] = {
+        "total": len(s09_list),
+        "passed": s09_ok,
+        "hits_ge_2": s09_hits2,
+        "touch_exact": s09_touch_ok,
+        "rate": round(s09_ok / len(s09_list), 4) if s09_list else 0.0,
+        "failures": dict(s09_fail),
+    }
+
+    h_rounds = stats["hold"]["rounds"]
+    h_reopen = stats["hold"]["reopen"]
+    h_ok = bool(h_rounds) and all(r["ok"] for r in h_rounds) and bool(h_reopen.get("ok"))
+    stats["hold"]["summary"] = {
+        "rounds_passed": sum(1 for r in h_rounds if r["ok"]),
+        "rounds_total": len(h_rounds),
+        "reopen_ok": bool(h_reopen.get("ok")),
+        "ok": h_ok,
+    }
+
+    def fmt_fail(d):
+        return ", ".join(f"{k}:{v}" for k, v in sorted(d.items())) if d else "无"
+
+    md_lines = [
+        f"# 阶段 5 专项验收统计（{app_version}，API {sdk}）",
+        "",
+        "| 场景 | 次数 | 达标 / 总数 | 指标详情 | 验收标准 | 失败分布 |",
+        "| --- | ---: | ---: | --- | --- | --- |",
+    ]
+    if s02_list:
+        s2 = stats["s02"]["summary"]
+        md_lines.append(
+            f"| S02 (`--on`) | {s2['total']} | {s2['passed']}/{s2['total']} ({s2['rate']:.1%}) | "
+            f"goal {s2['goal']}/{s2['total']}，touch 精确 {s2['touch_exact']}/{s2['total']}，短回复 {s2['quiet']}/{s2['total']} | "
+            f"≥ 19/20 goal 且无多余点击 | {fmt_fail(s2['failures'])} |"
+        )
+    if s09_list:
+        s9 = stats["s09"]["summary"]
+        md_lines.append(
+            f"| S09 (`--on`, `keep_cycling`) | {s9['total']} | {s9['passed']}/{s9['total']} ({s9['rate']:.1%}) | "
+            f"target_hit ≥ 2: {s9['hits_ge_2']}/{s9['total']}，touch==触发数 {s9['touch_exact']}/{s9['total']} | "
+            f"≥ 18/20 target_hit ≥ 2 且 touch==触发数 | {fmt_fail(s9['failures'])} |"
+        )
+    if h_rounds:
+        hs = stats["hold"]["summary"]
+        md_lines.append(
+            f"| S09 (`--hold` API {sdk}) | {hs['rounds_total']} 轮 + 重开 | {'通过' if hs['ok'] else '失败'} | "
+            f"冻结轮次 {hs['rounds_passed']}/{hs['rounds_total']}，后台重开恢复={'通过' if hs['reopen_ok'] else '失败'} | "
+            f"冻结期 0 target_shown，解冻及重开后恢复 | {'无' if hs['ok'] else '见 JSON'} |"
+        )
+    md = "\n".join(md_lines) + "\n"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "s5-stats.json").write_text(json.dumps(stats, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (out_dir / "s5-stats.md").write_text(md, encoding="utf-8")
     print("\n" + md, flush=True)
     return stats
 
@@ -1180,6 +1580,10 @@ def main():
     parser.add_argument("--s10-runs", type=int, default=20, help="S10 seek runs for --gesture-stats")
     parser.add_argument("--s11-runs", type=int, default=20, help="S11 press-hold charge runs for --gesture-stats")
     parser.add_argument("--s05-runs", type=int, default=20, help="S05 press-hold menu runs for --gesture-stats")
+    parser.add_argument("--s5-stats", action="store_true", help="Run Stage 5 acceptance suite (20x S02, 20x S09 keep_cycling, S09 --hold 2 rounds + reopen)")
+    parser.add_argument("--s02-runs", type=int, default=20, help="S02 rule runs for --s5-stats")
+    parser.add_argument("--s09-runs", type=int, default=20, help="S09 keep_cycling rule runs for --s5-stats")
+    parser.add_argument("--hold-rounds", type=int, default=2, help="S09 --hold consecutive rounds for --s5-stats")
     parser.add_argument(
         "--repeat-check",
         action="store_true",
@@ -1216,6 +1620,28 @@ def main():
             s11_runs=args.s11_runs,
             s05_runs=args.s05_runs,
         )
+        return
+    if args.s5_stats:
+        s5 = run_s5_stats(
+            token,
+            out_dir,
+            app_version,
+            s02_runs=args.s02_runs,
+            s09_runs=args.s09_runs,
+            hold_rounds=args.hold_rounds,
+        )
+        failed = False
+        if args.s02_runs > 0 and s5["s02"]["summary"]["passed"] < max(1, int(args.s02_runs * 0.95)):
+            print(f"FAIL: S02 --on passed {s5['s02']['summary']['passed']}/{args.s02_runs}", file=sys.stderr)
+            failed = True
+        if args.s09_runs > 0 and s5["s09"]["summary"]["passed"] < max(1, int(args.s09_runs * 0.90)):
+            print(f"FAIL: S09 --on passed {s5['s09']['summary']['passed']}/{args.s09_runs}", file=sys.stderr)
+            failed = True
+        if args.hold_rounds > 0 and s5["sdk"] >= 34 and not s5["hold"]["summary"]["ok"]:
+            print(f"FAIL: S09 --hold failed: {s5['hold']['summary']}", file=sys.stderr)
+            failed = True
+        if failed:
+            sys.exit(1)
         return
 
     task_files = sorted(Path(args.tasks_dir).glob("*.json"))

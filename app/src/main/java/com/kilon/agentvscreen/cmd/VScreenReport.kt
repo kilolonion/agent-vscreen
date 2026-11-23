@@ -110,7 +110,7 @@ internal fun samePage(prev: List<El>, now: List<El>): Boolean {
 /** What 【这段时间】 says, plus the frames for its sheet. */
 internal class Since(val lines: List<String>, val changed: Boolean, val from: Long, val to: Long)
 
-/** 2.0.0-beta3 (3.1–3.13): `act`-only facts passed into [fourBlocks] for Loud / quiet short-reply decisions. */
+/** 2.0.0-beta3 (3.1–3.13) & 2.0.0-beta5 (5.1–5.3, 5.8): `act`-only facts passed into [fourBlocks]. */
 internal class ActLoudCtx(
     val stepsWritten: List<Step>,
     val firstNoExpectStep: Int?,
@@ -123,6 +123,10 @@ internal class ActLoudCtx(
     val forced: Boolean,
     val replayWindow: LongArray? = null,
     val prevReturnAt: Long? = null,
+    val excludeWindows: List<LongRange> = emptyList(),
+    val rulesFired: List<RuleFired> = emptyList(),
+    val hasRules: Boolean = false,
+    val usedHold: Boolean = false,
 )
 
 internal object Report {
@@ -168,10 +172,20 @@ internal object Report {
     const val POPUP_DIM_DROP = 0.15
     const val MIN_CONSECUTIVE_READINGS = 2
 
+    /** 5.3: max gap (10 min) for showing "距上次回复 X.Xs" on the first line. */
+    const val TIME_HINT_MAX_MS = 10 * 60_000L
+
     /** "-3.2s" relative to [now]. */
     fun ago(t: Long, now: Long): String = "-${((now - t).coerceAtLeast(0) / 100) / 10.0}s"
 
     fun box(r: Rect) = "${r.left},${r.top},${r.right},${r.bottom}"
+}
+
+/** 2.0.0-beta5 (5.3), pure: " · 距上次回复 X.Xs" when `0 <= sinceLastMs <= TIME_HINT_MAX_MS`, else "". */
+internal fun timeHintPart(sinceLastMs: Long?): String {
+    if (sinceLastMs == null || sinceLastMs < 0L || sinceLastMs > Report.TIME_HINT_MAX_MS) return ""
+    val sec = "${(sinceLastMs / 100) / 10.0}s"
+    return tr(" · 距上次回复 $sec", " · $sec since last reply")
 }
 
 // ── elements ─────────────────────────────────────────────────────────
@@ -526,22 +540,23 @@ internal fun wordFactsFromReadings(rs: List<VScreenPerception.Reading>, screenH:
 
     val startSlot = slots.first()
     val endSlot = slots.last()
-    val prevEndSlot = slots[slots.lastIndex - 1]
     val thenN = startSlot.normSet
     val nowN = endSlot.normSet
 
     fun partOf(k: String, of: Collection<String>) = k.isNotEmpty() && of.any { it.length > k.length && it.contains(k) }
 
-    // Appeared: absent at start, present in the last 2 consecutive readings.
+    // Appeared: absent at start, persisted in the trailing MIN_CONSECUTIVE_READINGS (2) readings (shared with 5.2 rules).
     val appeared = endSlot.words.filter { w ->
         val k = VScreenOcr.norm(w)
-        k.isNotEmpty() && k !in thenN && k in prevEndSlot.normSet && !partOf(k, nowN)
+        k.isNotEmpty() && k !in thenN && !partOf(k, nowN) &&
+            Persistence.trailingPersisted(slots.mapIndexed { idx, s -> Obs(idx.toLong(), k in s.normSet) })
     }.distinctBy { VScreenOcr.norm(it) }
 
-    // Disappeared: present at start, absent in the last 2 consecutive readings.
+    // Disappeared: present at start, absent across the trailing MIN_CONSECUTIVE_READINGS (2) readings.
     val gone = startSlot.words.filter { w ->
         val k = VScreenOcr.norm(w)
-        k.isNotEmpty() && k !in nowN && k !in prevEndSlot.normSet && !partOf(k, nowN)
+        k.isNotEmpty() && !partOf(k, nowN) &&
+            Persistence.trailingPersisted(slots.mapIndexed { idx, s -> Obs(idx.toLong(), k !in s.normSet) })
     }.distinctBy { VScreenOcr.norm(it) }
 
     // Transient words (appeared after start and disappeared before end): classify as toast or >=2-reading between.
@@ -570,23 +585,21 @@ internal fun wordFactsFromReadings(rs: List<VScreenPerception.Reading>, screenH:
         var firstAt = -1L
         var lastAt = -1L
         var firstSlotNew = Int.MAX_VALUE
-        var curRun = 0
-        var maxRun = 0
         var box: Rect? = null
+        val obsSeq = ArrayList<Obs>(slots.size)
         for ((idx, s) in slots.withIndex()) {
-            if (k in s.normSet) {
+            val present = k in s.normSet
+            obsSeq += Obs(idx.toLong(), present)
+            if (present) {
                 if (firstAt < 0L) {
                     firstAt = s.atMs
                     firstSlotNew = slotNewCounts[idx]
                 }
                 lastAt = maxOf(lastAt, s.lastAtMs)
-                curRun++
-                if (curRun > maxRun) maxRun = curRun
                 if (box == null) box = s.boxes[k]
-            } else {
-                curRun = 0
             }
         }
+        val maxRun = Persistence.maxRun(obsSeq)
         if (firstAt >= 0L) mids[k] = MidInfo(raw, firstAt, lastAt, maxRun, box, firstSlotNew)
     }
 
@@ -728,9 +741,11 @@ internal fun analyzeFrameSequence(
     fw: Int,
     fh: Int,
     mask: com.kilon.agentvscreen.core.Mask?,
+    excludeWindows: List<LongRange> = emptyList(),
 ): FrameAnalysis {
     val spans = ArrayList<PicSpan>()
     for ((a, b) in pics.zipWithNext()) {
+        if (excludeWindows.isNotEmpty() && excludeWindows.any { b.first in it }) continue
         val cols = mask?.cols ?: VScreenActivity.COLS
         val rows = mask?.rows ?: VScreenActivity.rowsFor(a.second.width, a.second.height)
         val c = VScreenActivity.cells(a.second, b.second, cols, rows)?.let { cc -> mask?.minus(cc) ?: cc } ?: continue
@@ -787,6 +802,7 @@ internal fun pictureEvents(
     from: Long,
     to: Long,
     maskOverride: com.kilon.agentvscreen.core.Mask? = null,
+    excludeWindows: List<LongRange> = emptyList(),
 ): PicEvents {
     // 1.3: an area that keeps playing (video, carousel) is said once and left out of the changes below.
     val mask = maskOverride ?: VScreenPerception.mask(d.displayId)
@@ -794,13 +810,25 @@ internal fun pictureEvents(
     val frames = VScreenRecorder.frames(d.displayId, from, to)
     if (frames.isEmpty()) return PicEvents(maskLine, emptyList(), 0, false, maxShare = 0.0, hasPopup = false)
     val base = VScreenRecorder.frameAt(d.displayId, from)
-    val sample = (listOfNotNull(base?.takeIf { it.atMs < (frames.firstOrNull()?.atMs ?: 0L) }) + frames.let { fs ->
-        if (fs.size <= 24) fs else (0 until 24).map { fs[it * (fs.size - 1) / 23] }.distinct()
-    })
+    val sampledFrames = frames.let { fs ->
+        if (fs.size <= 24) {
+            fs
+        } else {
+            val basePick = (0 until 24).map { fs[it * (fs.size - 1) / 23] }
+            if (excludeWindows.isEmpty()) {
+                basePick.distinct()
+            } else {
+                // Preserve the last frame inside each rule-claimed window so subsampling never drops the post-rule settled anchor.
+                val anchors = excludeWindows.mapNotNull { w -> fs.lastOrNull { it.atMs in w } }
+                (basePick + anchors).distinct().sortedBy { it.atMs }
+            }
+        }
+    }
+    val sample = listOfNotNull(base?.takeIf { it.atMs < (sampledFrames.firstOrNull()?.atMs ?: 0L) }) + sampledFrames
     val pics = sample.mapNotNull { f -> VScreenRecorder.decode(f, 160)?.let { f.atMs to it } }
     val (fw, fh) = VScreenRecorder.frameSize(d.displayId) ?: (d.width to d.height)
     try {
-        val analysis = analyzeFrameSequence(pics, fw, fh, mask)
+        val analysis = analyzeFrameSequence(pics, fw, fh, mask, excludeWindows)
         val spans = analysis.spans
         if (spans.isEmpty()) return PicEvents(maskLine, emptyList(), 0, false, maxShare = 0.0, hasPopup = false)
         val firstLast = analysis.firstLast
@@ -859,20 +887,21 @@ internal fun pictureEvents(
 }
 
 /**
- * 2.0.0-beta3 (3.13): unified BEFORE / AFTER detector built on [pictureEvents].
+ * 2.0.0-beta3 (3.13) & 2.0.0-beta5 (5.8 #2): unified BEFORE / AFTER detector built on [pictureEvents].
  * Recording only stores frames on picture change:
  * - Track does not cover [fromMs] (missing, older than retention, or pruned) -> true (uncertain = changed).
  * - Track covers [fromMs] and window has no new frames -> false (unchanged).
- * - Otherwise -> true iff any span has `share >= Loud.CHANGE_RATIO` or is marked as popup.
+ * - Otherwise -> true iff any non-excluded span has `share >= Loud.CHANGE_RATIO` or is marked as popup.
  */
 internal fun hasPictureEvent(
     d: VScreenDisplay,
     fromMs: Long?,
     toMs: Long,
     maskOverride: com.kilon.agentvscreen.core.Mask? = null,
+    excludeWindows: List<LongRange> = emptyList(),
 ): Boolean {
     if (fromMs == null || !VScreenRecorder.coversFrom(d.displayId, fromMs, toMs)) return true
-    return pictureEvents(d, fromMs, toMs, maskOverride).hasSignificantChange
+    return pictureEvents(d, fromMs, toMs, maskOverride, excludeWindows).hasSignificantChange
 }
 
 internal fun pictureFacts(d: VScreenDisplay, from: Long, to: Long): Pair<List<String>, Boolean> =
@@ -1087,6 +1116,9 @@ internal fun formatShortReply(
     totalMs: Long,
     els: List<El>,
     notes: Notes = Notes(),
+    sinceLastMs: Long? = null,
+    rulesFired: List<RuleFired> = emptyList(),
+    nowMs: Long = System.currentTimeMillis(),
 ): String {
     val sb = StringBuilder()
     val execRaw = steps.filter { it.status != "skipped" }
@@ -1097,10 +1129,11 @@ internal fun formatShortReply(
     val stepCount = exec.size
     val totalSec = "${(maxOf(0L, totalMs) / 100) / 10.0}s"
     val pageTag = "P${card.id} ${card.title}".trim()
+    val timeHint = timeHintPart(sinceLastMs)
     sb.append(
         tr(
-            "✓ 第 $turn 轮 · $pageTag · $stepCount 步都符合预期 · $totalSec",
-            "✓ Turn $turn · $pageTag · ${com.kilon.agentvscreen.steps(stepCount)} as expected · $totalSec",
+            "✓ 第 $turn 轮$timeHint · $pageTag · $stepCount 步都符合预期 · $totalSec",
+            "✓ Turn $turn$timeHint · $pageTag · ${com.kilon.agentvscreen.steps(stepCount)} as expected · $totalSec",
         )
     ).append('\n')
 
@@ -1115,6 +1148,9 @@ internal fun formatShortReply(
         val cond = s.waitedFor ?: if (s.typeVerified) tr("已输入", "typed") else "ok"
         val waitSec = "${(maxOf(0L, s.waitMs ?: 0L) / 100) / 10.0}s"
         sb.append("${s.n} $clean → $cond ✓ $waitSec").append('\n')
+    }
+    for (rf in rulesFired) {
+        sb.append(rf.line(nowMs)).append('\n')
     }
 
     val diff = PageBook.diffElements(card.prevEls, els)
@@ -1277,6 +1313,8 @@ internal fun VScreenOffloadHandler.fourBlocks(
     val from = actLoud?.replayWindow?.get(0)
         ?: if (last != null && now0 - last <= VScreenRecorder.KEEP_MS && last <= segmentStart) last else segmentStart
     val received = Call.current()?.receivedAt ?: segmentStart
+    val sinceLastMs = last?.let { received - it }?.takeIf { it in 0L..Report.TIME_HINT_MAX_MS }
+    val timeHint = timeHintPart(sinceLastMs)
     var totalActionMs = actionMs
 
     fun recordReturned(frame: Bitmap?, version: Long, pkg: String?, quiet: Boolean?, windowFrom: Long): Long {
@@ -1294,7 +1332,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
         val total = System.currentTimeMillis() - received
         val timing = Timing(received, totalActionMs)
         val sb = StringBuilder()
-        sb.append(tr("第 $turn 轮", "Turn $turn")).append('\n')
+        sb.append(tr("第 $turn 轮$timeHint", "Turn $turn$timeHint")).append('\n')
         sb.append(Blocks.done + "\n"); lines.forEach { sb.append(it).append('\n') }
         sb.append(timing.line(total)).append('\n')
         sb.append("\n" + Blocks.meanwhile + "\n" + tr("（副屏已不存在，没有录屏）", "(the screen no longer exists, no recording)") + "\n\n" + Blocks.now + "\n" + tr("（没有副屏）", "(no screen)") + "\n")
@@ -1311,7 +1349,12 @@ internal fun VScreenOffloadHandler.fourBlocks(
             .put("stopped_at", stoppedAt ?: org.json.JSONObject.NULL)
             .put("done", org.json.JSONArray(lines))
             .put("notes", org.json.JSONArray(notes.list.map { it.json() }))
-        if (actLoud != null) data.put("loud", org.json.JSONArray(listOf(Loud.FAILED)))
+        if (actLoud != null) {
+            data.put("loud", org.json.JSONArray(listOf(Loud.FAILED)))
+            if (actLoud.hasRules || actLoud.rulesFired.isNotEmpty()) {
+                data.put("rules_fired", org.json.JSONArray(actLoud.rulesFired.map { it.json() }))
+            }
+        }
         return NativeOffloadResult(1, sb.toString(), notes.firstBlocking() ?: "CONNECTION_LOST", data, softFail = true)
     }
 
@@ -1366,7 +1409,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
             d.latestWithVersion()?.let { (bmp, ver) ->
                 VScreenRecorder.offerFresh(d, bmp, ver, snap.activity?.substringBefore('/') ?: actLoud.startPkg)
             }
-            val afterChanged = hasPictureEvent(d, actLoud.afterStartMs, System.currentTimeMillis(), actLoud.firstActionMask)
+            val afterChanged = hasPictureEvent(d, actLoud.afterStartMs, System.currentTimeMillis(), actLoud.firstActionMask, actLoud.excludeWindows)
             if (afterChanged) {
                 val tRe = SystemClock.elapsedRealtime()
                 snap = snapshot(d)
@@ -1392,6 +1435,35 @@ internal fun VScreenOffloadHandler.fourBlocks(
     synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] = ElSet(d.generation, now, els, snap.activity, snapAt) }
     val (card, _) = PageBook.match(sid, snap.activity, els, turn)
 
+    // 5.1 & 5.6: prepare post-reply --hold (freezes after HTTP/MCP reply flushes; non-blocking HOLD_UNSUPPORTED on API <= 33).
+    var holdFooter: String? = null
+    var holdJson: org.json.JSONObject? = null
+    var holdAfterSend: (() -> Unit)? = null
+    if (actLoud?.usedHold == true && outcome != "interrupted") {
+        val holdPkg = snap.activity?.substringBefore('/')
+        val holdAppName = holdPkg?.let { com.kilon.agentvscreen.core.VScreenKnowledge.label(it) ?: it }.orEmpty()
+        when (val prep = ActHold.prepare(sid, d.displayId, holdPkg, holdAppName, handoffSkip(), mainTop()?.substringBefore('/'))) {
+            is ActHold.PrepareOutcome.Unsupported -> notes.add("HOLD_UNSUPPORTED", prep.text)
+            is ActHold.PrepareOutcome.Skipped -> {}
+            is ActHold.PrepareOutcome.Armed -> {
+                holdFooter = prep.footerLine
+                holdJson = org.json.JSONObject()
+                    .put("app", prep.pkg)
+                    .put("name", prep.appName)
+                    .put("max_ms", prep.maxMs)
+                holdAfterSend = prep.afterSend
+            }
+        }
+    }
+
+    // 5.3: track consecutive BEFORE full replies across BOTH quiet (resets streak) and full paths.
+    val showBeforeHint = if (actLoud != null) {
+        Loud.recordBeforeAndShouldHint(sid, reasons, ActHold.sdkIntFn(), actLoud.usedHold)
+    } else false
+
+    val ruleLines = actLoud?.rulesFired?.map { it.line(now) }.orEmpty()
+    val doneWithRules = if (ruleLines.isEmpty()) lines else lines + ruleLines
+
     val timing = Timing(received, totalActionMs).also { it.lookMs = lookMs0 + extraLookMs }
     val ok = outcome == "done" || outcome == "stopped"
     val code = if (ok) "OK" else notes.firstBlocking() ?: "STEP_MISSED"
@@ -1399,7 +1471,13 @@ internal fun VScreenOffloadHandler.fourBlocks(
     // ── Quiet short reply path (act only, loudReasons empty) ──
     if (actLoud != null && reasons.isEmpty()) {
         val total = System.currentTimeMillis() - received
-        val shortText = formatShortReply(turn, card, steps, total, els, notes)
+        val baseShort = formatShortReply(
+            turn, card, steps, total, els, notes,
+            sinceLastMs = sinceLastMs,
+            rulesFired = actLoud.rulesFired,
+            nowMs = now,
+        )
+        val shortText = if (holdFooter != null) baseShort + holdFooter + "\n" else baseShort
         val returnedAt = recordReturned(snap.frame, snap.version, snap.activity?.substringBefore('/'), quiet = true, windowFrom = from)
         val screen = org.json.JSONObject()
             .put("app", snap.activity?.substringBefore('/') ?: org.json.JSONObject.NULL)
@@ -1419,15 +1497,25 @@ internal fun VScreenOffloadHandler.fourBlocks(
             .put("outcome", outcome)
             .put("steps", org.json.JSONArray(steps.map { it.json() }))
             .put("stopped_at", stoppedAt ?: org.json.JSONObject.NULL)
-            .put("done", org.json.JSONArray(lines))
+            .put("done", org.json.JSONArray(doneWithRules))
             .put("notes", org.json.JSONArray(notes.list.map { it.json() }))
             .put("meanwhile", org.json.JSONArray())
             .put("picture_changed", false)
             .put("screen", screen)
-        return NativeOffloadResult(0, shortText, "OK", data, softFail = false)
+        if (actLoud.hasRules || actLoud.rulesFired.isNotEmpty()) {
+            data.put("rules_fired", org.json.JSONArray(actLoud.rulesFired.map { it.json() }))
+        }
+        holdJson?.let { data.put("hold", it) }
+        return NativeOffloadResult(0, shortText, "OK", data, softFail = false, afterSend = holdAfterSend)
     }
 
     // ── Full reply path (loud act, launch, handoff) ──
+    if (showBeforeHint) {
+        notes += tr(
+            "你思考时画面一直在变：可以加 --hold 让应用在两轮之间暂停，或用 --on 让手机当场处理",
+            "The screen kept changing while you thought: add --hold to pause the app between turns, or --on to handle it on the spot",
+        )
+    }
     // 3.8: NO_EXPECT coaching hint (only when NO_EXPECT is the sole reason, at most once every 10 turns per sid).
     if (actLoud != null && reasons == listOf(Loud.NO_EXPECT) && actLoud.firstNoExpectStep != null && Loud.allowNoExpectHint(sid, turn)) {
         val stN = actLoud.firstNoExpectStep
@@ -1558,10 +1646,10 @@ internal fun VScreenOffloadHandler.fourBlocks(
 
     val total = System.currentTimeMillis() - received
     val pageTag = "P${card.id} ${card.title}".trim()
-    val fullText = applyReplyBudget(
+    val baseFull = applyReplyBudget(
         FullReplyParts(
-            header = tr("第 $turn 轮 · $pageTag", "Turn $turn · $pageTag"),
-            doneLines = lines,
+            header = tr("第 $turn 轮$timeHint · $pageTag", "Turn $turn$timeHint · $pageTag"),
+            doneLines = doneWithRules,
             timingLine = timing.line(total),
             meanwhileHeader = sinceHead,
             maskLine = picEv.maskLine,
@@ -1575,6 +1663,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
             notesLines = notes.list.map { it.line() },
         )
     )
+    val fullText = if (holdFooter != null) baseFull + holdFooter + "\n" else baseFull
 
     val returnedAt = recordReturned(snap.frame, snap.version, snap.activity?.substringBefore('/'), quiet = if (actLoud != null) false else null, windowFrom = from)
     val screen = org.json.JSONObject()
@@ -1594,13 +1683,19 @@ internal fun VScreenOffloadHandler.fourBlocks(
         .put("outcome", outcome)
         .put("steps", org.json.JSONArray(steps.map { it.json() }))
         .put("stopped_at", stoppedAt ?: org.json.JSONObject.NULL)
-        .put("done", org.json.JSONArray(lines))
+        .put("done", org.json.JSONArray(doneWithRules))
         .put("notes", org.json.JSONArray(notes.list.map { it.json() }))
         .put("meanwhile", org.json.JSONArray(allSinceLines))
         .put("picture_changed", pic != null && (picEv.changed || changedShare > 0.0 || changedRegions.isNotEmpty() || from != last || isLookOrFullCmd))
         .put("screen", screen)
-    if (actLoud != null) data.put("loud", org.json.JSONArray(reasons))
-    return NativeOffloadResult(if (ok) 0 else 1, fullText, code, data, softFail = !ok)
+    if (actLoud != null) {
+        data.put("loud", org.json.JSONArray(reasons))
+        if (actLoud.hasRules || actLoud.rulesFired.isNotEmpty()) {
+            data.put("rules_fired", org.json.JSONArray(actLoud.rulesFired.map { it.json() }))
+        }
+    }
+    holdJson?.let { data.put("hold", it) }
+    return NativeOffloadResult(if (ok) 0 else 1, fullText, code, data, softFail = !ok, afterSend = holdAfterSend)
 }
 
 private val REPORT_POOL = java.util.concurrent.Executors.newCachedThreadPool { r -> Thread(r, "vscreen-report").apply { isDaemon = true } }

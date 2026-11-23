@@ -351,6 +351,19 @@ internal object VScreenRemoteDisplay {
 
     fun gateStatus(): Result<String> = call(VScreenDisplayService.GATE, { it.writeInt(3) }) { it.readString().orEmpty() }
 
+    /** 2.0.0-beta5 (5.1): ask Gate to freeze [processes] for up to [maxMs] ms; returns count frozen. */
+    fun gateHold(processes: List<String>, maxMs: Long): Result<Int> =
+        call(VScreenDisplayService.GATE, {
+            it.writeInt(4)
+            val list = processes.take(Gate.HOLD_MAX_PROCS)
+            it.writeInt(list.size)
+            list.forEach { p -> it.writeString(p) }
+            it.writeLong(maxMs)
+        }) { it.readInt() }
+
+    /** 2.0.0-beta5 (5.1): ask Gate to unfreeze all held processes and clear its hold file. */
+    fun gateUnhold(): Result<Int> = call(VScreenDisplayService.GATE, { it.writeInt(5) }) { it.readInt() }
+
     /** [gateStatus] only when the service is already connected (never binds or waits); null otherwise. */
     fun gateStatusIfConnected(): String? {
         if (binder?.isBinderAlive != true) return null

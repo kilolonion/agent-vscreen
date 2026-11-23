@@ -83,6 +83,22 @@ internal fun VScreenOffloadHandler.noteCmd(sid: String?, args: OffloadArgs): Nat
                 "Default reply mode set to quiet: expected act calls return a short reply, unexpected ones still return full four blocks (for one full reply use act --full)")
         return NativeOffloadResult(0, replyMsg + "\n", "OK", org.json.JSONObject().put("reply_mode", mode))
     }
+    if (p.firstOrNull()?.lowercase() == "hold") {
+        val me = Call.current()?.tokenId ?: com.kilon.agentvscreen.api.Agents.ofSession(sid ?: VScreenOffloadHandler.DEFAULT_SESSION)
+        val on = when (p.getOrNull(1)?.lowercase()) {
+            "on", "true", "1", "开" -> true
+            "off", "false", "0", "关" -> false
+            else -> throw ActionError("INVALID_ARGS", tr("note hold on|off", "note hold on|off"))
+        }
+        com.kilon.agentvscreen.api.AgentLedger.setHoldDefault(me, on)
+        val holdMsg = if (on)
+            tr("已设为默认开启 --hold（仅 Android 14+）：之后每条 act 回复发出后暂停副屏前台应用，下一条命令到达时恢复（note hold off 关掉）",
+                "Default --hold set to on (Android 14+ only): after each act reply is sent, the foreground app on the screen is paused until the next command arrives (note hold off to turn off)")
+        else
+            tr("已关掉默认 --hold（单次暂停加 act --hold）",
+                "Default --hold set to off (for one turn use act --hold)")
+        return NativeOffloadResult(0, holdMsg + "\n", "OK", org.json.JSONObject().put("hold_default", on))
+    }
     val pkg = noteApp(sid)
     val ver = appVersion(pkg)
     val first = p.firstOrNull()?.lowercase()?.let { VScreenMap.LEGACY_KEYS[it] ?: it }

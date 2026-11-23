@@ -256,9 +256,6 @@ class VScreenDisplay private constructor(
         @Volatile var maxImgAgeMs: Long = -1L
     }
 
-    /** While true (color-only press hold), skip heavy preview/full-frame copies while sampling ColorWatch at native fps. */
-    @Volatile var colorFastMode: Boolean = false
-
     private val colorWatches = java.util.concurrent.CopyOnWriteArrayList<ColorWatch>()
     private val colorSignal = Object()
     @Volatile private var colorSampleSeq = 0L
@@ -329,11 +326,6 @@ class VScreenDisplay private constructor(
     private val flushPending = Runnable {
         val p = pending ?: return@Runnable
         pending = null
-        if (colorFastMode && latestRaw != null) {
-            pendingWasPreviewed = false
-            com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-flush") { p.close() }
-            return@Runnable
-        }
         // The trailing frame is also the picture the viewer must end on.
         val copiedScratch = if (previewIntervalMs != Long.MAX_VALUE && !pendingWasPreviewed) drawPreview(p) else null
         pendingWasPreviewed = false
@@ -349,16 +341,6 @@ class VScreenDisplay private constructor(
             val now = SystemClock.elapsedRealtime()
             lastFrameAtMs = now
             if (colorWatches.isNotEmpty()) sampleColors(img, now)
-            if (colorFastMode && latestRaw != null) {
-                // Keep all ImageReader buffers free for SurfaceFlinger and avoid preview/full-frame copies
-                // during a pure-color press hold; ColorWatch already sampled the live RGBA buffer.
-                h.removeCallbacks(flushPending)
-                com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-pending") { pending?.close() }
-                pending = null
-                pendingWasPreviewed = false
-                com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-close") { img.close() }
-                return@setOnImageAvailableListener
-            }
             val previewBefore = _previewVersion.value
             val copiedScratch = if (now - lastPreviewMs >= previewIntervalMs) drawPreview(img) else null
             val previewed = _previewVersion.value != previewBefore

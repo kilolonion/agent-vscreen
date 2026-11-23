@@ -68,6 +68,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
 
         /** Drop everything remembered about [displayId] (called when BackgroundOperation releases it). */
         internal fun forgetDisplay(displayId: Int) {
+            ActHold.unholdNow("display_released")
             synchronized(lastActivity) { lastActivity.remove(displayId) }
             com.kilon.agentvscreen.core.VScreenPerception.stop(displayId)
             com.kilon.agentvscreen.core.VScreenRecorder.stop(displayId)
@@ -113,19 +114,31 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         if (sub == null || sub == "--help" || sub == "-h") return NativeOffloadResult(0, helpFor(null) + "\n")
         if (sub == "help") return NativeOffloadResult(0, helpFor(argv.getOrNull(1)) + "\n")
         if (argv.drop(1).contains("--help")) return NativeOffloadResult(0, helpFor(sub) + "\n")
+        // 2.0.0-beta5 (5.1 & 5.6): unfreeze any held app BEFORE any command logic (including `look` and `status`).
+        val resumed = ActHold.unholdBeforeCommand()
         // 1.2.0-beta2: a look-only token cannot open a screen of its own, so its commands look at the screen that exists
         // (whoever owns it) instead of meeting NO_SCREEN / BUSY for ever.
         val sid = (request.sessionId?.takeIf { it.isNotBlank() } ?: DEFAULT_SESSION).let { own ->
             if (Call.current()?.scopes == setOf("look")) BackgroundOperation.state.value.ownerSessionId ?: own else own
         }
+        fun attachResumed(res: NativeOffloadResult): NativeOffloadResult {
+            if (resumed == null) return res
+            val data = (res.data ?: org.json.JSONObject()).put("resumed_after_ms", resumed.pausedMs)
+            val text = if (resumed.sid == sid && !res.output.trimStart().startsWith("{")) {
+                resumed.line() + "\n" + res.output
+            } else {
+                res.output
+            }
+            return res.copy(output = text, data = data)
+        }
         takeAdjusted()
-        return try {
-            val spec = CommandSpec.of(sub) ?: return unknown(sub)
+        return attachResumed(try {
+            val spec = CommandSpec.of(sub) ?: return attachResumed(unknown(sub))
             val rest = VScreenOptions.normalize(sub, argv.drop(1))
             checkOptions(sub, rest)
             val args = VScreenOptions.args(sub, rest)
             allowed(spec, spec.scopeFor(args))
-            if (spec.long && args.hasFlag("async")) return Tasks.start(this, sid, sub, argv.filter { it != "--async" })
+            if (spec.long && args.hasFlag("async")) return attachResumed(Tasks.start(this, sid, sub, argv.filter { it != "--async" }))
             queued(spec, sid) {
                 BackgroundOperation.refreshStatus()
                 if (sub == "look") BackgroundOperation.requireNotParked(sid)
@@ -146,7 +159,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         } catch (t: Exception) {
             AppLogger.error(TAG, "$sub failed", t)
             err("OPERATION_FAILED", "${t.javaClass.simpleName}: ${t.message}")
-        }
+        })
     }
 
     /** The caller's token must cover what the command does (look ⊂ operate ⊂ system). */

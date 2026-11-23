@@ -34,12 +34,16 @@ object VScreenPerception {
         var lastAtMs: Long = atMs,
     )
 
+    /** 2.0.0-beta5 (5.8 #2/#3): latest OCR result with its frame version and capture epoch ms. */
+    internal data class OcrReading(val result: VScreenOcr.Result, val version: Long, val epochMs: Long)
+
     private class Watcher(val d: VScreenDisplay) {
         @Volatile var running = true
         @Volatile var lastUse = SystemClock.elapsedRealtime()
         val readings = ArrayDeque<Reading>()
         @Volatile var reading: VScreenOcr.Result? = null
         @Volatile var readingAt = 0L            // elapsedRealtime of the frame behind [reading]
+        @Volatile var readingEpoch = 0L         // wall-clock epoch ms of the frame behind [reading]
         @Volatile var readingVersion = -1L      // frame version behind [reading]
         @Volatile var readingSmall: Bitmap? = null  // small copy of that frame (is the picture still the same?)
         @Volatile var forceOcr = false
@@ -149,6 +153,29 @@ object VScreenPerception {
     }
 
     /**
+     * 2.0.0-beta5 (5.8 #2/#3): latest OCR reading together with its frame [Watcher.readingVersion] and capture epoch,
+     * so callers can distinguish fresh OCR readings from cached polls and anchor rule claimed windows to frame time.
+     */
+    internal fun readingWithVersion(displayId: Int, notBefore: Long, waitMs: Long): OcrReading? {
+        val w = watcher(displayId) ?: return null
+        fun pick(): OcrReading? = synchronized(w.lock) {
+            val r = w.reading
+            if (r != null && w.readingAt >= notBefore) OcrReading(r, w.readingVersion, w.readingEpoch) else null
+        }
+        pick()?.let { return it }
+        w.forceOcr = true
+        if (waitMs > 0) {
+            val t = SystemClock.elapsedRealtime()
+            synchronized(w.lock) {
+                while (w.running && (w.reading == null || w.readingAt < notBefore) && SystemClock.elapsedRealtime() - t < waitMs) {
+                    w.lock.wait(100L)
+                }
+            }
+        }
+        return pick()
+    }
+
+    /**
      * v0.5: the latest reading when it was taken of exactly this picture: the same frame [version], or a frame that
      * looks the same (no sampled pixel differs). Null = the words of [frame] are not known yet.
      */
@@ -239,7 +266,7 @@ object VScreenPerception {
                 w.lock.notifyAll()
                 return
             }
-            w.reading = r; w.readingAt = SystemClock.elapsedRealtime(); w.readingVersion = version
+            w.reading = r; w.readingAt = SystemClock.elapsedRealtime(); w.readingEpoch = frameEpochMs; w.readingVersion = version
             w.readingSmall?.recycle(); w.readingSmall = sm
             w.forceOcr = false
             recordReadingLocked(w, frameEpochMs, words, boxes)
@@ -346,13 +373,11 @@ object VScreenPerception {
         while (w.running && !d.released && SystemClock.elapsedRealtime() - w.lastUse < IDLE_STOP_MS) {
             val t0 = SystemClock.elapsedRealtime()
             if (d.parked) { Thread.sleep(500); continue }
-            if (d.colorFastMode) { Thread.sleep(100); continue }
             // 1.2: frame-driven. The loop sleeps until the picture changes (or someone asks for a reading, or the
             // heartbeat is due) instead of waking 5 times a second whatever the screen does.
             var slept = 0L
-            while (w.running && !w.forceOcr && !d.colorFastMode && slept < HEARTBEAT_MS && !d.awaitNewFrame(seen, MIN_GAP_MS)) slept += MIN_GAP_MS
+            while (w.running && !w.forceOcr && slept < HEARTBEAT_MS && !d.awaitNewFrame(seen, MIN_GAP_MS)) slept += MIN_GAP_MS
             seen = d.version
-            if (d.colorFastMode) continue
             val fv = d.latestWithVersion()
             if (fv == null) { Thread.sleep(MIN_GAP_MS); continue }
             val now = SystemClock.elapsedRealtime()
@@ -402,7 +427,7 @@ object VScreenPerception {
                                         sm.recycle()
                                     } else {
                                         if (frameVer >= w.readingVersion) {
-                                            w.reading = r; w.readingAt = frameAt; w.readingVersion = frameVer
+                                            w.reading = r; w.readingAt = frameAt; w.readingEpoch = frameEpoch; w.readingVersion = frameVer
                                             w.readingSmall?.recycle(); w.readingSmall = sm
                                         } else {
                                             sm.recycle()
