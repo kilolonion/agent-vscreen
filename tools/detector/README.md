@@ -9,6 +9,8 @@
 | `to_yolo.py` | 样本 → YOLO 数据集（一类 `icon` = 可点元素）。不引用任何 YOLO 库。 |
 | `yolo_eval.py` | 用 agent 关心的指标评估 ONNX：无字目标命中率（检测框中心落在目标里）、落在可点元素上的比例、体积、单线程延迟。 |
 | `train.py` | MIT 对照模型（MobileNetV3 + CenterNet，自写训练/导出），同一指标。 |
+| `collect.py` | 任何安卓设备/模拟器经 adb 随机走一遍应用，存截图 + `uiautomator dump`（放进 Drive `vscreen-detector/extra/<名字>/` 就会被 notebook 用来训练和单独评估）。只在模拟器或测试机上跑。`.github/workflows/detector-data.yml` 手动触发，在 CI 模拟器上跑它。 |
+| `failures.py` | 从 `vscreen diag` 的命令记录统计失败原因（找不到目标 / 没点中 / 坐标出界 / 其它），用来看检测器上线前后有没有真的变少。 |
 | `train_colab.ipynb` | Colab 一键训练：RICO → 手机模型 `student`（YOLO11n）+ `teacher`（OmniParser icon_detect 微调）→ fp16 存储 ONNX + `manifest.json`（sha256）。 |
 
 **许可证**：仓库里这些脚本是 MIT。训练出的 YOLO 权重继承 Ultralytics / OmniParser icon_detect，是 **AGPL-3.0**，单独发布、App 按需下载，不进 APK。
