@@ -49,7 +49,7 @@ internal object Gesture {
     const val HOLD_ARRIVE_FRAME_WAIT_MS = 100L
     const val SEEK_FRAME_POLL_SLICE_MS = 20L
     private const val DRAG_MARK_MARGIN_MS = 500L
-    const val OCR_IDLE_WAIT_MS = 8_000L
+    const val OCR_IDLE_WAIT_MS = 5_000L
 
     // 4.4 & 4.8 drag GestureRecord constants (recording-frame coordinates, long side 640)
     const val PATCH = 64
@@ -582,6 +582,8 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
     val colorOnlyPress = !isDrag && conds.all { it.kind == CondKind.COLOR }
     if (!colorOnlyPress) {
         d.boost(maxMs + (if (isDrag && step.loop == Loop.HOLD) dragMs.toLong() else 0L) + Gesture.BOOST_EXTRA_MS)
+    } else {
+        d.colorFastMode = true
     }
     VScreenPerception.setOcrPaused(d.displayId, true)
     val probe = Probe(this, d, conds, afterAction = false, cropOnly = true)
@@ -604,6 +606,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
     var preUpAt = downAt
     var upAt = downAt
     var upElapsed = tStart
+    var hitElapsed = -1L
 
     try {
         Gesture.checkLoopInterrupts(d, call)
@@ -667,8 +670,10 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
                     if (!mv.ok) throw ActionError(mv.code, mv.message)
                     lastKeepAlive = now
                 }
+                val sampleBefore = if (colorOnlyPress) d.latestColorSampleAtMs else -1L
                 val hit = timedPoll()
                 if (hit != null) {
+                    hitElapsed = SystemClock.elapsedRealtime()
                     metFact = hit
                     metKind = probe.lastMetKind
                     break
@@ -676,7 +681,11 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
                 val afterPoll = SystemClock.elapsedRealtime()
                 if (afterPoll - holdStart >= maxMs) break
                 val waitSlice = minOf(Gesture.HOLD_POLL_MS, maxMs - (afterPoll - holdStart)).coerceAtLeast(1L)
-                Thread.sleep(waitSlice)
+                if (colorOnlyPress) {
+                    d.awaitColorSample(sampleBefore, waitSlice)
+                } else {
+                    Thread.sleep(waitSlice)
+                }
             }
             if (isDrag) {
                 d.latestWithVersion()?.let { (bmp, ver) -> VScreenRecorder.offerFresh(d, bmp, ver, pkg) }
@@ -728,6 +737,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
                 d.latestWithVersion()?.let { (bmp, ver) -> VScreenRecorder.offer(d, bmp, ver, pkg) }
                 val hit = timedPoll()
                 if (hit != null) {
+                    hitElapsed = SystemClock.elapsedRealtime()
                     metFact = hit
                     metKind = probe.lastMetKind
                     break
@@ -748,6 +758,12 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
             upElapsed = SystemClock.elapsedRealtime()
         }
     } finally {
+        if (colorOnlyPress) {
+            d.colorFastMode = false
+            d.requestFreshFrame()
+            val diag = probe.colorDiag(hitElapsed, upElapsed, tStart)
+            com.kilon.agentvscreen.host.AppLogger.info("Gesture", "colorHold $diag")
+        }
         com.kilon.agentvscreen.host.quiet("closedLoop-cancel") { VScreenShell.finger(d.displayId, "cancel", 0, -1, -1) }
         probe.close()
         VScreenPerception.setOcrPaused(d.displayId, false)

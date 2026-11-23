@@ -243,11 +243,27 @@ internal class Probe(
         return out.distinct()
     }
 
+    private var colorWatchHits = 0
+    private var colorFallbackHits = 0
+
     /** Read live color at condition [i] from [VScreenDisplay.ColorWatch] when fresh, falling back to [full]. */
     private fun liveColor(i: Int, c: Cond, full: Bitmap?): Int? {
         val w = colorWatches[i]
-        if (w != null && w.sampledAtMs >= 0L && w.sampledAtMs >= d.latestCaptureAtMs) return w.color
+        if (w != null && w.sampledAtMs >= 0L && w.sampledAtMs >= d.latestCaptureAtMs) {
+            colorWatchHits++
+            return w.color
+        }
+        colorFallbackHits++
         return full?.takeIf { c.x in 0 until it.width && c.y in 0 until it.height }?.let { VPixels.at(it, c.x, c.y) }
+    }
+
+    internal fun colorDiag(hitElapsed: Long, upElapsed: Long, startElapsed: Long): String {
+        val w = colorWatches.values.firstOrNull()
+        val sampleLag = if (w != null && hitElapsed > 0L && w.sampledAtMs > 0L) hitElapsed - w.sampledAtMs else -1L
+        val hitToUp = if (hitElapsed > 0L) upElapsed - hitElapsed else -1L
+        return "totalMs=${upElapsed - startElapsed} hitToUp=$hitToUp watchHits=$colorWatchHits fbHits=$colorFallbackHits " +
+            "samples=${w?.samples ?: -1} lastImgAge=${w?.lastImgAgeMs ?: -1} maxImgAge=${w?.maxImgAgeMs ?: -1} " +
+            "sampleLag=$sampleLag previewMs=${d.previewIntervalMs} ocrBusy=${com.kilon.agentvscreen.core.VScreenPaddleOcr.busy()}"
     }
 
     /** For a wait that timed out: what each condition sees now (a fact the caller can compare with what it asked). */

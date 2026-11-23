@@ -89,15 +89,38 @@ private class TurningSweep(val colors: List<Color>, val deg: Float) : ShaderBrus
 /** False only in layout snapshots (an infinite animation never lets a test clock settle). */
 @Volatile var animateLook = true
 
+/** Respect both [animateLook] and the system `animator_duration_scale = 0` setting (reduced motion / headless CI). */
+@Composable
+internal fun shouldAnimateLook(): Boolean {
+    if (!animateLook) return false
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    return androidx.compose.runtime.remember(ctx) {
+        runCatching {
+            android.provider.Settings.Global.getFloat(
+                ctx.contentResolver,
+                android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f,
+            ) > 0f
+        }.getOrDefault(true)
+    }
+}
+
 @Composable
 fun Modifier.glowBorder(mode: Mode, corner: Dp, width: Dp = 2.5.dp, pad: Dp = 6.dp): Modifier {
-    var turn = 30f; var breath = 0.8f
-    if (animateLook) {
+    val anim = shouldAnimateLook()
+    val turnState: androidx.compose.runtime.State<Float>?
+    val breathState: androidx.compose.runtime.State<Float>?
+    if (anim) {
         val t = rememberInfiniteTransition(label = "glow")
-        turn = t.animateFloat(0f, 360f, infiniteRepeatable(tween(if (mode == Mode.ACTING) 2400 else 12000, easing = LinearEasing)), label = "turn").value
-        breath = t.animateFloat(0f, 1f, infiniteRepeatable(tween(if (mode == Mode.ACTING) 900 else 1800, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "breath").value
+        turnState = t.animateFloat(0f, 360f, infiniteRepeatable(tween(if (mode == Mode.ACTING) 2400 else 12000, easing = LinearEasing)), label = "turn")
+        breathState = t.animateFloat(0f, 1f, infiniteRepeatable(tween(if (mode == Mode.ACTING) 900 else 1800, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "breath")
+    } else {
+        turnState = null
+        breathState = null
     }
     return this.drawBehind {
+        val turn = turnState?.value ?: 30f
+        val breath = breathState?.value ?: 0.8f
         val stroke = width.toPx()
         val r = corner.toPx()
         val brush: Brush = if (mode == Mode.ACTING) TurningSweep(Palette.rainbow, turn) else SolidColor(Palette.of(mode))

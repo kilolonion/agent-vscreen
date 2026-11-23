@@ -86,9 +86,10 @@ object VScreenPerception {
      * latency-sensitive closed-loop gesture touches down. Returns immediately (0ms) when idle.
      */
     fun awaitOcrIdle(displayId: Int, timeoutMs: Long, onTick: () -> Unit = {}) {
-        if (!isOcrRunning(displayId) && !VScreenPaddleOcr.busy()) return
+        fun active() = isOcrRunning(displayId) || (VScreenPaddleOcr.busy() && VScreenPaddleOcr.busyMs() < 10_000L)
+        if (!active()) return
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
-        while (isOcrRunning(displayId) || VScreenPaddleOcr.busy()) {
+        while (active()) {
             onTick()
             val left = deadline - SystemClock.elapsedRealtime()
             if (left <= 0L) break
@@ -96,7 +97,7 @@ object VScreenPerception {
             val slice = minOf(50L, left)
             if (w != null) {
                 synchronized(w.lock) {
-                    if (w.ocrRunning || VScreenPaddleOcr.busy()) w.lock.wait(slice)
+                    if (active()) w.lock.wait(slice)
                 }
             } else {
                 Thread.sleep(slice)

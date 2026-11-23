@@ -106,7 +106,10 @@ fun Modifier.glassSheet(shape: Shape = RoundedCornerShape(28.dp)): Modifier {
  * the background screen, never recorded in a lesson). Its own buttons still get their taps: nothing is consumed here.
  */
 /** A one-line title too long for its room scrolls through in a loop instead of ending in "…"; one that fits stays still. */
-fun Modifier.scrollIfLong(): Modifier = this.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1500, repeatDelayMillis = 2000, velocity = 28.dp)
+@Composable
+fun Modifier.scrollIfLong(): Modifier =
+    if (shouldAnimateLook()) this.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1500, repeatDelayMillis = 2000, velocity = 28.dp)
+    else this
 
 fun Modifier.eatTouches(): Modifier = this.pointerInput(Unit) {
     awaitEachGesture {

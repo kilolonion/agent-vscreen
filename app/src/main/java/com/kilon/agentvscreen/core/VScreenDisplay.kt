@@ -251,9 +251,18 @@ class VScreenDisplay private constructor(
     internal class ColorWatch(val x: Int, val y: Int, val radius: Int = 2) {
         @Volatile var color: Int = 0
         @Volatile var sampledAtMs: Long = -1L
+        @Volatile var samples: Int = 0
+        @Volatile var lastImgAgeMs: Long = -1L
+        @Volatile var maxImgAgeMs: Long = -1L
     }
 
+    /** While true (color-only press hold), throttle heavy preview/full-frame copies while sampling ColorWatch at native fps. */
+    @Volatile var colorFastMode: Boolean = false
+
     private val colorWatches = java.util.concurrent.CopyOnWriteArrayList<ColorWatch>()
+    private val colorSignal = Object()
+    @Volatile private var lastColorSampleMs = -1L
+    internal val latestColorSampleAtMs: Long get() = lastColorSampleMs
 
     internal fun watchColor(x: Int, y: Int, radius: Int = 2): ColorWatch {
         val w = ColorWatch(x, y, radius)
@@ -265,6 +274,20 @@ class VScreenDisplay private constructor(
         colorWatches.remove(w)
     }
 
+    /** Wait up to [timeoutMs] for a live color sample newer than [afterMs]; wakes immediately on the next frame. */
+    internal fun awaitColorSample(afterMs: Long, timeoutMs: Long): Long {
+        if (lastColorSampleMs > afterMs || timeoutMs <= 0L) return lastColorSampleMs
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        synchronized(colorSignal) {
+            while (!released && lastColorSampleMs <= afterMs) {
+                val left = deadline - SystemClock.elapsedRealtime()
+                if (left <= 0L) break
+                colorSignal.wait(left)
+            }
+        }
+        return lastColorSampleMs
+    }
+
     /** Pump thread only: sample all active [colorWatches] directly from [img]'s raw RGBA buffer (zero allocations). */
     private fun sampleColors(img: android.media.Image, capturedAt: Long) {
         if (released || colorWatches.isEmpty()) return
@@ -274,15 +297,25 @@ class VScreenDisplay private constructor(
             val rowStride = plane.rowStride
             val pixelStride = plane.pixelStride
             val turn = bufferTurn
+            val imgAge = (capturedAt - img.timestamp / 1_000_000L).coerceAtLeast(0L)
+            var updated = false
             for (w in colorWatches) {
                 val c = sampleRgbaColor(buf, img.width, img.height, rowStride, pixelStride, turn, w.x, w.y, w.radius)
                 if (c != null) {
                     w.color = c
+                    w.lastImgAgeMs = imgAge
+                    if (imgAge > w.maxImgAgeMs) w.maxImgAgeMs = imgAge
+                    w.samples = w.samples + 1
                     w.sampledAtMs = capturedAt
+                    updated = true
                 }
             }
-        } catch (_: Throwable) {
-            // Best-effort; Probe falls back to VPixels.at(latestFrame()) when no live sample was recorded.
+            if (updated) {
+                lastColorSampleMs = capturedAt
+                synchronized(colorSignal) { colorSignal.notifyAll() }
+            }
+        } catch (t: Throwable) {
+            AppLogger.warning(TAG, "sampleColors failed on display $displayId: ${t.javaClass.simpleName}: ${t.message}")
         }
     }
 
@@ -309,11 +342,19 @@ class VScreenDisplay private constructor(
             val now = SystemClock.elapsedRealtime()
             lastFrameAtMs = now
             if (colorWatches.isNotEmpty()) sampleColors(img, now)
+            val fastColor = colorFastMode
+            val effPreviewMs = if (fastColor && previewIntervalMs != Long.MAX_VALUE) maxOf(previewIntervalMs, 1_000L) else previewIntervalMs
+            val effFrameMs = if (fastColor) maxOf(frameInterval, 1_000L) else frameInterval
             val previewBefore = _previewVersion.value
-            val copiedScratch = if (now - lastPreviewMs >= previewIntervalMs) drawPreview(img) else null
+            val copiedScratch = if (now - lastPreviewMs >= effPreviewMs) drawPreview(img) else null
             val previewed = _previewVersion.value != previewBefore
-            val wait = throttle.delayMs(now, frameInterval)
+            val wait = throttle.delayMs(now, effFrameMs)
             if (wait > 0 && latestRaw != null) {
+                if (fastColor) {
+                    // Keep all ImageReader buffers free for SurfaceFlinger during color-fast hold; ColorWatch already read it.
+                    com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-close") { img.close() }
+                    return@setOnImageAvailableListener
+                }
                 // Throttled. Keep this frame as the trailing one instead of dropping it:
                 // otherwise the LAST frame of an animation (a list snapping back, a page
                 // sliding in) can be lost and a static screen keeps showing a mid-animation
@@ -606,6 +647,7 @@ class VScreenDisplay private constructor(
         h?.removeCallbacks(refreshPreview)
         h?.removeCallbacks(trimPreview)
         synchronized(frameSignal) { frameSignal.notifyAll() }
+        synchronized(colorSignal) { colorSignal.notifyAll() }
         if (shellOwned) runCatching { VScreenRemoteDisplay.release(displayId) }
         else runCatching { virtualDisplay?.release() }
         // The reader is closed on the pump thread: convert() runs there and reads the image's
