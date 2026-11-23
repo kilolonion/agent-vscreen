@@ -11,7 +11,10 @@ TAGS="ts_omit_aws,ts_omit_bird,ts_omit_tap,ts_omit_kube,ts_omit_completion,ts_om
 CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -trimpath -tags "$TAGS" -ldflags "-s -w -buildid=" -o "$OUT" .
 ls -l "$OUT"
 # 2.0: the debug APK also targets the x86_64 CI emulator (app/build.gradle.kts); release keeps arm64 only.
+# Go refuses android/amd64 without cgo (external linking), so this copy is a static linux/amd64 build. It is only there
+# so the x86_64 test build has every library the arm64 one has (tools/android-smoke/check_abis.sh); DNS does not
+# depend on the target (dns.go brings its own resolvers), and no emulator test drives the built-in Tailscale node.
 OUT64=../app/src/main/jniLibs/x86_64/libtsbridge.so
 mkdir -p "$(dirname "$OUT64")"
-CGO_ENABLED=0 GOOS=android GOARCH=amd64 go build -trimpath -tags "$TAGS" -ldflags "-s -w -buildid=" -o "$OUT64" .
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -tags "$TAGS" -ldflags "-s -w -buildid=" -o "$OUT64" .
 ls -l "$OUT64"
