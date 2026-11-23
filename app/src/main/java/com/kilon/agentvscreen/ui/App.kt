@@ -147,14 +147,17 @@ class Nav(val stack: NavBackStack, private val selectTab: (Int) -> Unit) {
 
 /** What several pages read: the setup check, the switch, background trouble; refreshed every 2 s while shown. */
 @Stable
+/** Setup items that never count as "left to do": accessibility (only the user can turn it on) and the detector (optional, AGPL notice). */
+private val NOT_COUNTED = setOf("accessibility", "detector")
+
 class AppState {
     var items by mutableStateOf(emptyList<Setup.Item>())
     var serviceOn by mutableStateOf(false)
     var liveProblem by mutableStateOf<String?>(null)
     /** Bumped after an action so lists read their store again. */
     var tick by mutableIntStateOf(0)
-    val allOk get() = items.isNotEmpty() && items.filter { it.key != "accessibility" }.all { it.ok }
-    val left get() = items.count { !it.ok && it.key != "accessibility" }
+    val allOk get() = items.isNotEmpty() && items.filter { it.key !in NOT_COUNTED }.all { it.ok }
+    val left get() = items.count { !it.ok && it.key !in NOT_COUNTED }
     fun bump() { tick++ }
 }
 

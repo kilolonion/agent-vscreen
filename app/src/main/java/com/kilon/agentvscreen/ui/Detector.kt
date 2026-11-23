@@ -55,9 +55,7 @@ fun DetectorPreference() {
                 Text(tr("在本机找出图标、×、开关这类没有文字的可点目标，agent 的元素列表里会多出“（无文字 图标）”，可以直接 tap #编号。",
                     "Finds tappable things without words (icons, ×, switches) on this phone; the agent's element list gains \"(no text icon)\" entries it can tap by #number."),
                     fontSize = 13.sp, color = small)
-                if (!accepted) Text(tr("许可说明：识别模型是随 App 附带的单独文件，采用 ${DetectorModels.LICENSE} 许可（App 本身是 MIT）。它基于 Ultralytics YOLO 和 OmniParser 训练，训练代码在 tools/detector 公开。开启即表示你已了解这一点；关闭后 App 照常使用。",
-                    "License: the model is a separate file shipped with the app under ${DetectorModels.LICENSE} (the app itself is MIT). It is trained from Ultralytics YOLO and OmniParser; the training code is public in tools/detector. Turning it on means you have read this; the app works the same with it off."),
-                    fontSize = 13.sp)
+                if (!accepted) Text(tr("许可说明：", "License: ") + VScreenDetector.licenseNote(), fontSize = 13.sp)
                 else Text(VScreenDetector.status(ctx), fontSize = 12.sp, color = small)
                 if (pct >= 0) Text(tr("下载中 $pct%", "Downloading $pct%"), fontSize = 13.sp)
                 note?.let { Text(it, fontSize = 12.sp, color = Palette.stopped) }
