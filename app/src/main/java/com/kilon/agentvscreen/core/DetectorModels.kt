@@ -24,9 +24,14 @@ object DetectorModels {
     private const val TAG = "DetectorModels"
     private const val DIR = "detector"
 
-    /** Where a release lives, tried in order; each is a base URL that `manifest.json` and the files sit under. */
+    /**
+     * Where a release lives, tried in order; each is a base URL that `manifest.json` and the files sit under. The
+     * files are committed to the kilolonion/agent-vscreen-models repository (main) — no GitHub Release needed — and
+     * jsDelivr serves the same files from a CDN that phones in mainland China usually reach when GitHub does not.
+     */
     val SOURCES = listOf(
-        "GitHub" to "https://github.com/kilolonion/agent-vscreen-models/releases/latest/download/",
+        "GitHub" to "https://raw.githubusercontent.com/kilolonion/agent-vscreen-models/main/",
+        "jsDelivr" to "https://cdn.jsdelivr.net/gh/kilolonion/agent-vscreen-models@main/",
         "ModelScope" to "https://modelscope.cn/models/kilolonion/agent-vscreen-detector/resolve/master/",
         "Hugging Face" to "https://huggingface.co/kilolonion/agent-vscreen-detector/resolve/main/",
     )
