@@ -37,8 +37,8 @@ internal object Gesture {
     const val BOOST_EXTRA_MS = 3_000L
     const val HUMAN_START_DRIFT_PX = 3
     private const val INTERRUPT_SLICE_MS = 50L
-    private const val MAX_PICKUP_FRAMES = 6
-    private const val SETTLE_FRAME_WAIT_MS = 250L
+    private const val MAX_PICKUP_FRAMES = 3
+    private const val SETTLE_FRAME_WAIT_MS = 100L
     private const val SETTLE_FRAME_SLACK_MS = 30L
     const val HOLD_ARRIVE_FRAME_WAIT_MS = 100L
     const val SEEK_FRAME_POLL_SLICE_MS = 20L
@@ -53,27 +53,39 @@ internal object Gesture {
     const val PICKUP_FROM_MS = 150L
     const val PICKUP_TO_MS = 450L
     const val SETTLE_MS = 350L
+    private const val PATCH_TRACK_SCALE = 0.5f
+    private const val REFINE_RADIUS = 4
 
     const val AFTER_STAYED = "stayed"
     const val AFTER_SNAPPED_BACK = "snapped_back"
     const val AFTER_ELSEWHERE = "elsewhere"
     const val AFTER_UNKNOWN = "unknown"
 
-    /** Build a grayscale [VScreenGame.Patch] of [size]x[size] centered on ([cx], [cy]) in [frame]. */
-    fun makePatch(frame: Bitmap, cx: Int, cy: Int, size: Int = PATCH): VScreenGame.Patch? {
+    /** Build a grayscale [VScreenGame.Patch] of [size]x[size] centered on ([cx], [cy]) in [frame] at [scale]. */
+    fun makePatch(frame: Bitmap, cx: Int, cy: Int, size: Int = PATCH, scale: Float = 1f): VScreenGame.Patch? {
         if (frame.isRecycled || frame.width < 4 || frame.height < 4) return null
-        val w = minOf(size, frame.width)
-        val h = minOf(size, frame.height)
-        val left = (cx - w / 2).coerceIn(0, maxOf(0, frame.width - w))
-        val top = (cy - h / 2).coerceIn(0, maxOf(0, frame.height - h))
-        val box = Rect(left, top, left + w, top + h)
+        val bw = minOf(size, frame.width)
+        val bh = minOf(size, frame.height)
+        val left = (cx - bw / 2).coerceIn(0, maxOf(0, frame.width - bw))
+        val top = (cy - bh / 2).coerceIn(0, maxOf(0, frame.height - bh))
+        val box = Rect(left, top, left + bw, top + bh)
+        val w = (bw * scale).roundToInt().coerceAtLeast(2)
+        val h = (bh * scale).roundToInt().coerceAtLeast(2)
         val px = IntArray(w * h)
-        frame.getPixels(px, 0, w, left, top, w, h)
+        if (w == bw && h == bh) {
+            frame.getPixels(px, 0, w, left, top, w, h)
+        } else {
+            val sub = Bitmap.createBitmap(frame, left, top, bw, bh)
+            val sc = Bitmap.createScaledBitmap(sub, w, h, true)
+            if (sub !== frame && sub !== sc) sub.recycle()
+            sc.getPixels(px, 0, w, 0, 0, w, h)
+            if (sc !== frame) sc.recycle()
+        }
         val gray = IntArray(w * h) { i ->
             val p = px[i]
             (((p shr 16) and 0xff) * 3 + ((p shr 8) and 0xff) * 6 + (p and 0xff)) / 10
         }
-        return VScreenGame.Patch(box, gray, w, h, 1f)
+        return VScreenGame.Patch(box, gray, w, h, scale)
     }
 
     /** Re-anchor [patch]'s search box around ([cx], [cy]) without altering [VScreenGame.track]. */
@@ -85,12 +97,36 @@ internal object Gesture {
         return VScreenGame.Patch(Rect(left, top, left + bw, top + bh), patch.px, patch.w, patch.h, patch.scale)
     }
 
-    /** Full-frame search via unmodified [VScreenGame.track] in step-1 tiles (`radius = 60`, area <= 40,000 px). */
-    private fun trackFullFrame(patch: VScreenGame.Patch, frame: Bitmap): Pair<Rect, Double>? {
-        val r = MATCH_DIST_PX.toInt()
-        val stride = r * 2
-        val halfW = patch.box.width() / 2
-        val halfH = patch.box.height() / 2
+    /** Refine a coarse [VScreenGame.track] hit at full 1x resolution within [REFINE_RADIUS] px (<1ms). */
+    private fun refineHit(patch1x: VScreenGame.Patch, frame: Bitmap, coarse: Pair<Rect, Double>): Pair<Rect, Double> {
+        val fine = VScreenGame.track(
+            shiftPatch(patch1x, coarse.first.centerX(), coarse.first.centerY(), frame.width, frame.height),
+            frame,
+            radius = REFINE_RADIUS,
+        )
+        return if (fine != null && fine.second >= coarse.second) fine else coarse
+    }
+
+    /** Search around ([cx], [cy]) within [radius] using 0.5x patch (~25ms) and 1x local refinement (<1ms). */
+    private fun trackNear(
+        patchHalf: VScreenGame.Patch,
+        patch1x: VScreenGame.Patch,
+        frame: Bitmap,
+        cx: Int,
+        cy: Int,
+        radius: Int,
+    ): Pair<Rect, Double>? {
+        val shifted = shiftPatch(patchHalf, cx, cy, frame.width, frame.height)
+        val hit = VScreenGame.track(shifted, frame, radius = radius) ?: return null
+        return refineHit(patch1x, frame, hit)
+    }
+
+    /** Full-frame search via unmodified [VScreenGame.track] at 0.5x in step-1 bands (2 calls on 288x640, ~200ms). */
+    private fun trackFullFrame(patchHalf: VScreenGame.Patch, patch1x: VScreenGame.Patch, frame: Bitmap): Pair<Rect, Double>? {
+        val r = TRACK_RADIUS
+        val stride = r * 2 - PATCH
+        val halfW = patchHalf.box.width() / 2
+        val halfH = patchHalf.box.height() / 2
         var best: Pair<Rect, Double>? = null
         var cy = halfH + r
         while (true) {
@@ -98,8 +134,8 @@ internal object Gesture {
             var cx = halfW + r
             while (true) {
                 val x = cx.coerceAtMost(maxOf(halfW, frame.width - halfW))
-                val hit = VScreenGame.track(shiftPatch(patch, x, y, frame.width, frame.height), frame, radius = r)
-                if (hit != null && hit.second >= TRACK_SCORE_MIN && (best == null || hit.second > best.second)) {
+                val hit = VScreenGame.track(shiftPatch(patchHalf, x, y, frame.width, frame.height), frame, radius = r)
+                if (hit != null && (best == null || hit.second > best.second)) {
                     best = hit
                 }
                 if (x >= frame.width - halfW - r) break
@@ -108,7 +144,7 @@ internal object Gesture {
             if (y >= frame.height - halfH - r) break
             cy += stride
         }
-        return best
+        return best?.let { refineHit(patch1x, frame, it) }?.takeIf { it.second >= TRACK_SCORE_MIN }
     }
 
     /** Convert display pixel coordinate [pt] into recording frame coordinate space ([frameW]x[frameH]). */
@@ -170,11 +206,12 @@ internal object Gesture {
         if (preFrame == null || preFrame.isRecycled) {
             return GestureRecord(null, null, AFTER_UNKNOWN, 0.0, pollMsP50, pollMsMax, keyTimesMs)
         }
-        val patch = makePatch(preFrame, startF.first, startF.second, PATCH)
+        val patch1x = makePatch(preFrame, startF.first, startF.second, PATCH, 1f)
             ?: return GestureRecord(null, null, AFTER_UNKNOWN, 0.0, pollMsP50, pollMsMax, keyTimesMs)
+        val patchHalf = makePatch(preFrame, startF.first, startF.second, PATCH, PATCH_TRACK_SCALE) ?: patch1x
 
-        val offX = patch.box.centerX() - startF.first
-        val offY = patch.box.centerY() - startF.second
+        val offX = patch1x.box.centerX() - startF.first
+        val offY = patch1x.box.centerY() - startF.second
         val nearR = MATCH_DIST_PX.toInt()
 
         // 1. Picked up (150–450ms after down)
@@ -184,14 +221,13 @@ internal object Gesture {
             pickupFrames.any { f ->
                 if (f.isRecycled) return@any false
                 val ratioChanged = f.width == preFrame.width && f.height == preFrame.height &&
-                    Change.ratio(preFrame, f, patch.box) >= Change.REGION_CHANGED
+                    Change.ratio(preFrame, f, patch1x.box) >= Change.REGION_CHANGED
                 if (ratioChanged) return@any true
-                val tracked = VScreenGame.track(patch, f, radius = nearR)
-                    ?: VScreenGame.track(patch, f, radius = TRACK_RADIUS)
+                val tracked = trackNear(patchHalf, patch1x, f, patch1x.box.centerX(), patch1x.box.centerY(), nearR)
                 tracked != null && tracked.second >= TRACK_SCORE_MIN &&
                     hypot(
-                        (tracked.first.centerX() - patch.box.centerX()).toDouble(),
-                        (tracked.first.centerY() - patch.box.centerY()).toDouble(),
+                        (tracked.first.centerX() - patch1x.box.centerX()).toDouble(),
+                        (tracked.first.centerY() - patch1x.box.centerY()).toDouble(),
                     ) >= PICKUP_SHIFT_PX
             }
         }
@@ -200,14 +236,13 @@ internal object Gesture {
         val followed: Boolean? = if (midFrame == null || midFrame.isRecycled) {
             null
         } else {
-            val midPatch = shiftPatch(patch, midF.first + offX, midF.second + offY, midFrame.width, midFrame.height)
-            // Check exact step-1 radius=60 around midpoint first (184x184 <= 40,000), fallback to radius=160.
-            val hit = VScreenGame.track(midPatch, midFrame, radius = nearR)
-                ?: VScreenGame.track(midPatch, midFrame, radius = TRACK_RADIUS)
+            val midCx = (midF.first + offX).coerceIn(0, maxOf(0, midFrame.width - 1))
+            val midCy = (midF.second + offY).coerceIn(0, maxOf(0, midFrame.height - 1))
+            val hit = trackNear(patchHalf, patch1x, midFrame, midCx, midCy, nearR)
             hit != null && hit.second >= TRACK_SCORE_MIN &&
                 hypot(
-                    (hit.first.centerX() - midPatch.box.centerX()).toDouble(),
-                    (hit.first.centerY() - midPatch.box.centerY()).toDouble(),
+                    (hit.first.centerX() - midCx).toDouble(),
+                    (hit.first.centerY() - midCy).toDouble(),
                 ) <= MATCH_DIST_PX
         }
 
@@ -215,18 +250,20 @@ internal object Gesture {
         val (afterRelease, score) = if (settleFrame == null || settleFrame.isRecycled) {
             AFTER_UNKNOWN to 0.0
         } else {
-            val endPatch = shiftPatch(patch, endF.first + offX, endF.second + offY, settleFrame.width, settleFrame.height)
-            val endHit = VScreenGame.track(endPatch, settleFrame, radius = nearR)?.takeIf { (box, sc) ->
+            val endCx = (endF.first + offX).coerceIn(0, maxOf(0, settleFrame.width - 1))
+            val endCy = (endF.second + offY).coerceIn(0, maxOf(0, settleFrame.height - 1))
+            val endHit = trackNear(patchHalf, patch1x, settleFrame, endCx, endCy, nearR)?.takeIf { (box, sc) ->
                 sc >= TRACK_SCORE_MIN && hypot(
-                    (box.centerX() - endPatch.box.centerX()).toDouble(),
-                    (box.centerY() - endPatch.box.centerY()).toDouble(),
+                    (box.centerX() - endCx).toDouble(),
+                    (box.centerY() - endCy).toDouble(),
                 ) <= MATCH_DIST_PX
             }
-            val startPatch = shiftPatch(patch, startF.first + offX, startF.second + offY, settleFrame.width, settleFrame.height)
-            val startHit = VScreenGame.track(startPatch, settleFrame, radius = nearR)?.takeIf { (box, sc) ->
+            val startCx = (startF.first + offX).coerceIn(0, maxOf(0, settleFrame.width - 1))
+            val startCy = (startF.second + offY).coerceIn(0, maxOf(0, settleFrame.height - 1))
+            val startHit = trackNear(patchHalf, patch1x, settleFrame, startCx, startCy, nearR)?.takeIf { (box, sc) ->
                 sc >= TRACK_SCORE_MIN && hypot(
-                    (box.centerX() - startPatch.box.centerX()).toDouble(),
-                    (box.centerY() - startPatch.box.centerY()).toDouble(),
+                    (box.centerX() - startCx).toDouble(),
+                    (box.centerY() - startCy).toDouble(),
                 ) <= MATCH_DIST_PX
             }
             when {
@@ -236,7 +273,7 @@ internal object Gesture {
                 endHit != null -> AFTER_STAYED to endHit.second
                 startHit != null -> AFTER_SNAPPED_BACK to startHit.second
                 else -> {
-                    val fullHit = trackFullFrame(patch, settleFrame)
+                    val fullHit = trackFullFrame(patchHalf, patch1x, settleFrame)
                     if (fullHit != null) AFTER_ELSEWHERE to fullHit.second
                     else AFTER_UNKNOWN to 0.0
                 }

@@ -158,6 +158,17 @@ internal class Probe(
     /** Readings count from: this probe's start, or (after an action) the moment the change calmed down. */
     private fun readFrom(): Long = if (afterAction && changedAt > 0) maxOf(calmAt, changedAt) else since
 
+    /** True when every pixel in [bmp] has the exact same ARGB color (provably zero text / contrast). */
+    private fun isUniformSolid(bmp: Bitmap): Boolean {
+        val n = bmp.width * bmp.height
+        if (n <= 0) return true
+        val px = IntArray(n)
+        bmp.getPixels(px, 0, bmp.width, 0, 0, bmp.width, bmp.height)
+        val first = px[0]
+        for (i in 1 until n) if (px[i] != first) return false
+        return true
+    }
+
     /** Crop-only OCR of [area] in [full], reusing cached items when pixels in [area] are unchanged since last poll. */
     private fun readCropCached(full: Bitmap?, area: Rect): List<VScreenOcr.Item>? {
         if (full == null || full.isRecycled) return null
@@ -169,7 +180,7 @@ internal class Probe(
             snap.recycle()
             return prevEntry.second
         }
-        val items = runCatching { VScreenOcr.readCrop(full, area) }.getOrDefault(emptyList())
+        val items = if (isUniformSolid(snap)) emptyList() else runCatching { VScreenOcr.readCrop(full, area) }.getOrDefault(emptyList())
         prevEntry?.first?.recycle()
         cropCache[Rect(area)] = snap to items
         return items
