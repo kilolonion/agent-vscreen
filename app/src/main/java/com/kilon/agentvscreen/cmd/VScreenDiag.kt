@@ -32,6 +32,7 @@ internal fun diagText(context: android.content.Context): String = buildString {
         "native_allocated_kib=${android.os.Debug.getNativeHeapAllocatedSize() / 1024}")
     appendLine(com.kilon.agentvscreen.host.Privileged.diagnostics(context))
     appendLine("gate: ${com.kilon.agentvscreen.host.Liveness.gateJson()?.toString() ?: "off"}")
+    appendLine("detector: ${com.kilon.agentvscreen.core.VScreenDetector.status(context)}")
     // 1.4.0-beta2: a real reading on this phone, not the state of a flag.
     append("\n" + tr("文字识别自检（本机真实识别一张已知图片）", "text recognition self-test (a real reading of a known picture on this phone)") + ":\n")
     append(runCatching { com.kilon.agentvscreen.core.VScreenOcr.selfTest(context) }.getOrElse { "self-test crashed: ${it.javaClass.simpleName}: ${it.message}" }.prependIndent("  ") + "\n")
