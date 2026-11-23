@@ -1179,7 +1179,7 @@ internal fun DockTab(mode: Mode, right: Boolean, asking: Int = 0) {
     // notification shade). Amber, pulsing, with a question mark where the little phone is: unlike standby and acting.
     if (asking > 0) {
         // 1.3 beta3: the same glass as the window, an orchid edge that breathes, and the question mark in its place.
-        val pulse = if (animateLook) {
+        val pulse = if (shouldAnimateLook()) {
             val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "ask")
             t.animateFloat(0.35f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(900), androidx.compose.animation.core.RepeatMode.Reverse), label = "pulse").value
         } else 1f

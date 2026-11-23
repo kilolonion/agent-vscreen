@@ -383,6 +383,29 @@ def session_and_control(target, x=None, y=None):
     r = api("act")
     check("the stopped long press tapped nothing", before is None or activity(r) == before, "%s -> %s" % (before, activity(r)))
 
+    # 2.0.0-beta4 (4.6): user takeover midway through a closed-loop drag cancels the finger and returns USER_TAKEOVER.
+    scr = r.get("screen") or {}
+    sw = int(scr.get("width") or 1080)
+    sh = int(scr.get("height") or 2400)
+    dx1, dx2, dy = max(20, sw // 4), min(sw - 20, (sw * 3) // 4), max(40, sh // 2)
+    drag_res = {}
+    def run_drag():
+        t0 = time.time()
+        drag_res["r"] = api('act "drag %d %d %d %d 2s hold until color:10,10=#010203~0 6s"' % (dx1, dy, dx2, dy))
+        drag_res["s"] = time.time() - t0
+    dth = threading.Thread(target=run_drag)
+    dth.start()
+    time.sleep(1.2)
+    control("takeover")
+    dth.join(60)
+    dr = drag_res.get("r") or {}
+    check("mid-drag user takeover cancels finger and returns USER_TAKEOVER",
+          dr.get("code") == "USER_TAKEOVER" and drag_res.get("s", 99) < 6.0,
+          "%s after %.1fs" % (why(dr), drag_res.get("s", -1)))
+    control("handback")
+    r = api("act")
+    check("after mid-drag takeover hand-back the agent can look", r.get("ok") is True, why(r))
+
 
 def main():
     global TOKEN

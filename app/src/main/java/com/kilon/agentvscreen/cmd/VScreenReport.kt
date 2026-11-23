@@ -1345,6 +1345,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
             startPkg = actLoud.startPkg,
             endPkg = snap.activity?.substringBefore('/'),
             hasAppUntil = actLoud.hasAppUntil,
+            snappedBack = steps.any { it.gesture?.afterRelease == Gesture.AFTER_SNAPPED_BACK },
             elementCount = Loud.textElements(snap.els).size,
             lastExpectOnlyVisual = actLoud.lastExpectOnlyVisual,
             hasPageTextDiff = hasPageTextDiff,
@@ -1352,7 +1353,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
         )
         val pre = loudReasons(baseInput)
         if (pre.isEmpty()) {
-            // 3.2 & 3.13: observe until AFTER_MS = 800ms after last expectation met, only when all 7 other reasons are false.
+            // 3.2 & 3.13: observe until AFTER_MS = 800ms after last expectation met, only when all other reasons are false.
             val tAfter = SystemClock.elapsedRealtime()
             val remainMs = (actLoud.afterStartMs + Loud.AFTER_MS - System.currentTimeMillis()).coerceAtLeast(0L)
             val deadline = tAfter + remainMs
@@ -1442,29 +1443,47 @@ internal fun VScreenOffloadHandler.fourBlocks(
             PicEvents(null, listOf(tr("（读不到录屏：${it.message}）", "(recording unreadable: ${it.message})")), 0, false)
         }
     })
+    // 4.4: full reply for any drag uses a fixed 4-cell strip (before down, drag midpoint, before release, 350ms after release).
+    val dragKeyTimes = steps.lastOrNull { it.gesture?.afterRelease == Gesture.AFTER_SNAPPED_BACK }?.gesture?.keyTimesMs
+        ?: steps.lastOrNull { it.gesture?.keyTimesMs != null }?.gesture?.keyTimesMs
     val hasNoChange = notes.list.any { it.code == "NO_CHANGE" }
-    val cellsF = if (hasNoChange) {
-        REPORT_POOL.submit<Picked> { runCatching { pickCells(d.displayId, from, now, Report.MAX_CELLS, Report.CELL_SIDE) }.getOrDefault(Picked(emptyList(), 0, 0, 0)) }
-    } else null
+    val cellsF = when {
+        dragKeyTimes != null -> REPORT_POOL.submit<Picked>(com.kilon.agentvscreen.I18n.carry {
+            val dc = runCatching { Gesture.pickDragCells(d.displayId, dragKeyTimes, Report.CELL_SIDE) }.getOrDefault(emptyList())
+            Picked(dc, 0, dc.size, if (dc.isNotEmpty()) 1 else 0)
+        })
+        hasNoChange -> REPORT_POOL.submit<Picked>(com.kilon.agentvscreen.I18n.carry {
+            runCatching { pickCells(d.displayId, from, now, Report.MAX_CELLS, Report.CELL_SIDE) }.getOrDefault(Picked(emptyList(), 0, 0, 0))
+        })
+        else -> null
+    }
 
     val picEv = runCatching { picF.get(5, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault(PicEvents(null, emptyList(), 0, false))
     val picked = cellsF?.let { runCatching { it.get(5, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault(Picked(emptyList(), 0, 0, 0)) }
         ?: Picked(emptyList(), 0, 0, 0)
     val cells = picked.cells
-    // 3.5: contact sheet ONLY when NO_CHANGE and the stretch touched the screen.
+    // 3.5 & 4.4: contact sheet when drag 4-cell strip is available, or when NO_CHANGE and the stretch touched the screen.
+    val isDragStrip = dragKeyTimes != null && cells.isNotEmpty()
     val touched = cells.any { c -> c.marks.any { it.pts.isNotEmpty() } }
-    val sheet = hasNoChange && touched && cells.isNotEmpty()
+    val sheet = isDragStrip || (hasNoChange && touched && cells.isNotEmpty())
     val shownCells = if (sheet) cells else { cells.forEach { it.bmp.recycle() }; emptyList() }
     timing.trackMs = SystemClock.elapsedRealtime() - tTrack
 
     val wordEv = wordEvents(d, from, System.currentTimeMillis())
     val sinceHead = sinceHeader(from, now, totalActionMs, received)
-    val sheetNote = if (sheet) {
-        val before = shownCells.count { it.marks.isNotEmpty() }
-        tr("拼图 ${shownCells.size} 张：${before} 张是动作之前（圈和编号是点的位置，拖动是线），其余是开头和动作之后的结果，每张下面写着是哪一种", "Sheet of ${shownCells.size}: $before before actions (ring and number where it touched, a line for a drag), the others the start and what actions led to; each says which under it") +
-            (if (picked.leftOut > 0) tr("；前 ${picked.leftOut} 个动作没放进来", "; the first ${picked.leftOut} actions are not in it") else "") +
-            tr("。要更密、更长或别的时间段：vscreen look --last", ". Denser, longer or another stretch: vscreen look --last")
-    } else null
+    val sheetNote = when {
+        isDragStrip -> tr(
+            "拖动拼图 ${shownCells.size} 格：按下前、滑动中点、松手前、松手后 350ms",
+            "Drag strip (${shownCells.size} frames): before down, drag midpoint, before release, 350ms after release",
+        )
+        sheet -> {
+            val before = shownCells.count { it.marks.isNotEmpty() }
+            tr("拼图 ${shownCells.size} 张：${before} 张是动作之前（圈和编号是点的位置，拖动是线），其余是开头和动作之后的结果，每张下面写着是哪一种", "Sheet of ${shownCells.size}: $before before actions (ring and number where it touched, a line for a drag), the others the start and what actions led to; each says which under it") +
+                (if (picked.leftOut > 0) tr("；前 ${picked.leftOut} 个动作没放进来", "; the first ${picked.leftOut} actions are not in it") else "") +
+                tr("。要更密、更长或别的时间段：vscreen look --last", ". Denser, longer or another stretch: vscreen look --last")
+        }
+        else -> null
+    }
     val allSinceLines = buildList {
         add(sinceHead)
         picEv.maskLine?.let { add(it) }

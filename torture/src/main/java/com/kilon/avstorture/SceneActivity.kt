@@ -106,12 +106,14 @@ class SceneActivity : Activity() {
         } else {
             prefs.getInt(PresetReceiver.EXTRA_SEED, PresetReceiver.DEFAULT_SEED)
         }
-        AvstLog.emit(
-            scene = currentScene,
-            ev = "enter",
-            ok = true,
-            data = JSONObject().put("seed", currentSeed),
-        )
+        if (currentScene != "S04" && currentScene != "S11") {
+            AvstLog.emit(
+                scene = currentScene,
+                ev = "enter",
+                ok = true,
+                data = JSONObject().put("seed", currentSeed),
+            )
+        }
         val rng = SceneRng(currentSeed)
         when (currentScene) {
             "S01" -> buildS01List()
@@ -649,6 +651,24 @@ class SceneActivity : Activity() {
         })
 
         val barView = ChargeBarView(this)
+        var s11EnterSent = false
+        barView.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+            if (s11EnterSent || v.width <= 0 || v.height <= 0) return@addOnLayoutChangeListener
+            s11EnterSent = true
+            val loc = IntArray(2)
+            v.getLocationOnScreen(loc)
+            val bx = loc[0] + maxOf(v.height, (v.width * 0.12f).roundToInt())
+            val by = loc[1] + v.height / 2
+            AvstLog.emit(
+                scene = "S11",
+                ev = "enter",
+                ok = true,
+                data = JSONObject()
+                    .put("seed", currentSeed)
+                    .put("bar", org.json.JSONArray().put(loc[0]).put(loc[1]).put(loc[0] + v.width).put(loc[1] + v.height))
+                    .put("bar_probe", org.json.JSONArray().put(bx).put(by)),
+            )
+        }
         layer.addView(barView, FrameLayout.LayoutParams((w * 0.76f).roundToInt(), dp(32f)).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
             topMargin = (h * (1300f / 2400f)).roundToInt()
@@ -948,6 +968,16 @@ private class DragBoardView(
             val hy = h * (1500f / 2400f) + j()
             cards += Card(i + 1, hx, hy, hx, hy, -1, colors[i])
         }
+        val cardsArr = org.json.JSONArray()
+        for (c in cards) cardsArr.put(org.json.JSONArray().put(c.homeX.roundToInt()).put(c.homeY.roundToInt()))
+        val slotsArr = org.json.JSONArray()
+        for (s in slots) slotsArr.put(org.json.JSONArray().put(s.x.roundToInt()).put(s.y.roundToInt()))
+        AvstLog.emit(
+            scene = "S04",
+            ev = "enter",
+            ok = true,
+            data = JSONObject().put("seed", seed).put("cards", cardsArr).put("slots", slotsArr),
+        )
     }
 
     private fun nearestFreeSlot(card: Card): Int {

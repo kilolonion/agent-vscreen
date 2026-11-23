@@ -2,6 +2,10 @@
 
 For [1.4.2-beta3 (versionCode 54)](../README.md#whats-new-in-142-beta3), see the current beta notes. Changes on `main` since then come first.
 
+## 2.0.0-beta4 (`v2.0` branch)
+
+- Added closed-loop gestures (`press … hold until`, `drag … hold until`, `drag … seek until`) using existing `Probe` with region-only crop OCR (`readCrop`) and paused background OCR while fingers are down; added `GestureRecord` (pickup, follow, after-release `stayed`/`snapped_back`/`elsewhere`/`unknown`), `SNAP_BACK` loud reason, and fixed 4-cell drag strips in full replies.
+
 ## 2.0.0-beta3 (`v2.0` branch)
 
 - Added reply protocol v3 (`Loud`, short quiet replies when all actions meet expectations with escape hatches `act --full` / `note reply quiet|full` / auto-escalation, `PageBook` page cards, cropped change images at 960/360/640 px, event-based `[Meanwhile]` with toast and popup detection, 1200-token reply budget) and externalized session memory (turn counter, `task recap`, layered core + 8-topic `guide`).

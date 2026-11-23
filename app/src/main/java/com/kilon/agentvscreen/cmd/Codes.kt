@@ -31,6 +31,8 @@ internal object Codes {
         Code("OUT_OF_BOUNDS", Next.FIX, "坐标在副屏外面。", "The point is outside the screen."),
         Code("INVALID_STEP", Next.FIX, "步骤写法不对，整段没有执行。", "A step is written wrong; nothing in the stretch ran."),
         Code("INVALID_ARGS", Next.FIX, "参数不对，命令没有执行。", "Bad arguments; the command did not run."),
+        Code("GESTURE_NEEDS_UNTIL", Next.FIX, "闭环手势（hold / seek）必须带 until <条件>，整段没有执行。", "Closed-loop gestures (hold / seek) require until <condition>; nothing in the stretch ran."),
+        Code("GESTURE_NEEDS_AREA", Next.FIX, "闭环手势里的 text: / gone: 条件必须带区域（in x1,y1,x2,y2），整段没有执行。", "text: / gone: conditions inside a closed-loop gesture must include a region (in x1,y1,x2,y2); nothing in the stretch ran."),
         Code("UNKNOWN_OPTION", Next.FIX, "这个命令没有这个参数，命令没有执行。", "The command has no such option; it did not run."),
         Code("UNKNOWN_COMMAND", Next.FIX, "没有这个命令。点击、输入、滑动、等待都写成 act 的步骤。", "No such command. Tapping, typing, swiping and waiting are all act steps."),
         Code("FOCUS_ELSEWHERE", Next.LOOK, "有焦点的输入框不是你刚点的地方，没有输入。", "The focused input box is not where you just tapped; nothing was typed."),

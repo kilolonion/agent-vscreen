@@ -2,6 +2,10 @@
 
 当前测试版的更新内容见 [1.4.2-beta3（versionCode 54）](../README.zh-CN.md#142-beta3-更新内容)。之后 `main` 上的改动列在最前面。
 
+## 2.0.0-beta4（`v2.0` 分支）
+
+- 新增闭环手势（`press … hold until`、`drag … hold until`、`drag … seek until`），按住期间暂停后台整屏 OCR 并通过 `Probe` 做局部裁图识别（`readCrop`）；所有 `drag` 生成手势记录 `GestureRecord`（拿起/跟手/松手后 `stayed`/`snapped_back`/`elsewhere`/`unknown`），弹回触发 `SNAP_BACK` 完整回复，完整回复附 4 格拖动拼图条。
+
 ## 2.0.0-beta3（`v2.0` 分支）
 
 - 新增回复协议 v3 与外置记忆：符合预期的 `act` 返回短回复并不发图，支持 `act --full`、`note reply quiet|full` 与补看自动升级；引入页面卡 `PageBook` 替代旧 60% 差异逻辑、960/360/640 变化区域出图、事件化【这段时间】（含 toast 与弹出识别）、1200 token 回复预算、会话轮次、`task recap` 及核心+8 主题分层 `guide`。

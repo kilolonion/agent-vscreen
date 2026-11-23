@@ -10,7 +10,7 @@
     ],
     [
       "act",
-      "press 540 1600 hold until text:9* in 300,1400,800,1500 8s"
+      "press 540 1600 hold until color:220,1340=#16A34A~40 8s"
     ]
   ],
   "expect": [

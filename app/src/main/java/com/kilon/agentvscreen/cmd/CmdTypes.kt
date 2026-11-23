@@ -98,12 +98,24 @@ class StepOut(val n: String, val step: String, var status: String, var text: Str
     internal var metCondKind: CondKind? = null
     /** 2.0.0-beta3 (3.13): true for agent-owned action steps and enclosing `repeat … until` completion entries. */
     var isActionOrRepeatUntil: Boolean = false
+    /** 2.0.0-beta4 (4.4): drag pickup/follow/after-release record. */
+    internal var gesture: GestureRecord? = null
+    /** 2.0.0-beta4 (4.7): condition poll duration p50 / max (ms) for closed-loop gestures. */
+    var pollMsP50: Long? = null
+    var pollMsMax: Long? = null
     fun json(): org.json.JSONObject = org.json.JSONObject().put("n", n).put("step", step).put("status", status)
         .also { o ->
             fact?.let { o.put("fact", it) }; code?.let { o.put("code", it) }
             waitedFor?.let { o.put("waited_for", it).put("met", waitMet == true).put("waited_ms", waitMs ?: 0) }
             point?.let { o.put("x", it.first).put("y", it.second) }
             changed?.let { o.put("changed", it) }
+            val g = gesture?.json() ?: if (pollMsP50 != null || pollMsMax != null) {
+                org.json.JSONObject().also { go ->
+                    pollMsP50?.let { go.put("poll_ms_p50", it) }
+                    pollMsMax?.let { go.put("poll_ms_max", it) }
+                }
+            } else null
+            g?.let { o.put("gesture", it) }
         }
 }
 fun interface NativeOffloadHandler {

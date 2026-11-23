@@ -226,6 +226,8 @@ class VScreenDisplay private constructor(
         }
     private val throttle = CaptureThrottle()
     @Volatile private var latestCaptureMs = -1L
+    /** Elapsed-realtime when [latestFrame] was captured (-1 = none yet). */
+    val latestCaptureAtMs: Long get() = latestCaptureMs
     @Volatile private var fullConversions = 0L
     @Volatile var released = false
         private set
@@ -245,6 +247,80 @@ class VScreenDisplay private constructor(
     @Volatile var lastFrameAtMs: Long = 0L
         private set
 
+    /** Live single-point mean color watch sampled directly from each incoming ImageReader frame with zero allocation. */
+    internal class ColorWatch(val x: Int, val y: Int, val radius: Int = 2) {
+        @Volatile var color: Int = 0
+        @Volatile var sampledAtMs: Long = -1L
+        @Volatile var samples: Int = 0
+        @Volatile var lastImgAgeMs: Long = -1L
+        @Volatile var maxImgAgeMs: Long = -1L
+    }
+
+    /** While true (color-only press hold), skip heavy preview/full-frame copies while sampling ColorWatch at native fps. */
+    @Volatile var colorFastMode: Boolean = false
+
+    private val colorWatches = java.util.concurrent.CopyOnWriteArrayList<ColorWatch>()
+    private val colorSignal = Object()
+    @Volatile private var colorSampleSeq = 0L
+    internal val latestColorSampleSeq: Long get() = colorSampleSeq
+
+    internal fun watchColor(x: Int, y: Int, radius: Int = 2): ColorWatch {
+        val w = ColorWatch(x, y, radius)
+        colorWatches.add(w)
+        return w
+    }
+
+    internal fun unwatchColor(w: ColorWatch) {
+        colorWatches.remove(w)
+    }
+
+    /** Wait up to [timeoutMs] for a live color sample newer than [afterSeq]; wakes immediately on the next frame. */
+    internal fun awaitColorSample(afterSeq: Long, timeoutMs: Long): Long {
+        if (colorSampleSeq > afterSeq || timeoutMs <= 0L) return colorSampleSeq
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        synchronized(colorSignal) {
+            while (!released && colorSampleSeq <= afterSeq) {
+                val left = deadline - SystemClock.elapsedRealtime()
+                if (left <= 0L) break
+                colorSignal.wait(left)
+            }
+            return colorSampleSeq
+        }
+    }
+
+    /** Pump thread only: sample all active [colorWatches] directly from [img]'s raw RGBA buffer (zero allocations). */
+    private fun sampleColors(img: android.media.Image, capturedAt: Long) {
+        if (released || colorWatches.isEmpty()) return
+        try {
+            val plane = img.planes[0]
+            val buf = plane.buffer
+            val rowStride = plane.rowStride
+            val pixelStride = plane.pixelStride
+            val turn = bufferTurn
+            val imgAge = (capturedAt - img.timestamp / 1_000_000L).coerceAtLeast(0L)
+            var updated = false
+            for (w in colorWatches) {
+                val c = sampleRgbaColor(buf, img.width, img.height, rowStride, pixelStride, turn, w.x, w.y, w.radius)
+                if (c != null) {
+                    w.color = c
+                    w.lastImgAgeMs = imgAge
+                    if (imgAge > w.maxImgAgeMs) w.maxImgAgeMs = imgAge
+                    w.samples = w.samples + 1
+                    w.sampledAtMs = capturedAt
+                    updated = true
+                }
+            }
+            if (updated) {
+                synchronized(colorSignal) {
+                    colorSampleSeq++
+                    colorSignal.notifyAll()
+                }
+            }
+        } catch (t: Throwable) {
+            AppLogger.warning(TAG, "sampleColors failed on display $displayId: ${t.javaClass.simpleName}: ${t.message}")
+        }
+    }
+
     /** Pump-thread only: the newest frame skipped by the throttle, converted when the throttle opens. */
     private var pending: android.media.Image? = null
     private var pumpHandler: Handler? = null
@@ -253,10 +329,15 @@ class VScreenDisplay private constructor(
     private val flushPending = Runnable {
         val p = pending ?: return@Runnable
         pending = null
+        if (colorFastMode && latestRaw != null) {
+            pendingWasPreviewed = false
+            com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-flush") { p.close() }
+            return@Runnable
+        }
         // The trailing frame is also the picture the viewer must end on.
-        if (previewIntervalMs != Long.MAX_VALUE && !pendingWasPreviewed) drawPreview(p)
+        val copiedScratch = if (previewIntervalMs != Long.MAX_VALUE && !pendingWasPreviewed) drawPreview(p) else null
         pendingWasPreviewed = false
-        convert(p, pendingCaptureMs)
+        convert(p, pendingCaptureMs, preCopied = copiedScratch)
     }
 
     private fun startPump() {
@@ -267,8 +348,19 @@ class VScreenDisplay private constructor(
             val img = runCatching { r.acquireLatestImage() }.getOrNull() ?: return@setOnImageAvailableListener
             val now = SystemClock.elapsedRealtime()
             lastFrameAtMs = now
+            if (colorWatches.isNotEmpty()) sampleColors(img, now)
+            if (colorFastMode && latestRaw != null) {
+                // Keep all ImageReader buffers free for SurfaceFlinger and avoid preview/full-frame copies
+                // during a pure-color press hold; ColorWatch already sampled the live RGBA buffer.
+                h.removeCallbacks(flushPending)
+                com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-pending") { pending?.close() }
+                pending = null
+                pendingWasPreviewed = false
+                com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-close") { img.close() }
+                return@setOnImageAvailableListener
+            }
             val previewBefore = _previewVersion.value
-            if (now - lastPreviewMs >= previewIntervalMs) drawPreview(img)
+            val copiedScratch = if (now - lastPreviewMs >= previewIntervalMs) drawPreview(img) else null
             val previewed = _previewVersion.value != previewBefore
             val wait = throttle.delayMs(now, frameInterval)
             if (wait > 0 && latestRaw != null) {
@@ -288,29 +380,49 @@ class VScreenDisplay private constructor(
             com.kilon.agentvscreen.host.quiet("VScreenDisplay:245") { pending?.close() }
             pending = null
             pendingWasPreviewed = false
-            convert(img, now)
+            convert(img, now, preCopied = copiedScratch)
         }, h)
     }
 
+    /** Pump thread only: copy [img]'s raw RGBA plane into the reused pump-local [scratch] bitmap. */
+    private fun copyToScratch(img: android.media.Image): Bitmap {
+        val plane = img.planes[0]
+        val rowPx = plane.rowStride / plane.pixelStride
+        var sc = scratch
+        if (sc == null || sc.isRecycled || sc.width != rowPx || sc.height != img.height) {
+            sc?.recycle()
+            sc = Bitmap.createBitmap(rowPx, img.height, Bitmap.Config.ARGB_8888)
+            scratch = sc
+        }
+        val buf = plane.buffer
+        buf.rewind()
+        sc.copyPixelsFromBuffer(buf)
+        buf.rewind()
+        return sc
+    }
+
     /** Convert [img] into the shared bitmap and close it. Pump thread only. */
-    private fun convert(img: android.media.Image, capturedAt: Long) {
+    private fun convert(img: android.media.Image, capturedAt: Long, preCopied: Bitmap? = null) {
         try {
             if (released) return
             throttle.onConvert(SystemClock.elapsedRealtime())
             val plane = img.planes[0]
-            val pixelStride = plane.pixelStride
-            val rowStride = plane.rowStride
-            val rowPadding = rowStride - pixelStride * img.width
-            val padded = Bitmap.createBitmap(
-                img.width + rowPadding / pixelStride, img.height, Bitmap.Config.ARGB_8888,
-            )
-            padded.copyPixelsFromBuffer(plane.buffer.also { it.rewind() })
-            val cut = if (padded.width == img.width) padded
-            else Bitmap.createBitmap(padded, 0, 0, img.width, img.height).also { padded.recycle() }
+            val rowPx = plane.rowStride / plane.pixelStride
             val turn = bufferTurn
-            val exact = if (turn == 0) cut else {
-                val m = android.graphics.Matrix().apply { postRotate(turn.toFloat()) }
-                Bitmap.createBitmap(cut, 0, 0, cut.width, cut.height, m, false).also { if (it !== cut) cut.recycle() }
+            val exact: Bitmap = if (rowPx == img.width && turn == 0 && preCopied == null) {
+                Bitmap.createBitmap(img.width, img.height, Bitmap.Config.ARGB_8888).also {
+                    val buf = plane.buffer
+                    buf.rewind()
+                    it.copyPixelsFromBuffer(buf)
+                }
+            } else {
+                val src = if (preCopied != null && !preCopied.isRecycled) preCopied else copyToScratch(img)
+                if (turn == 0) {
+                    Bitmap.createBitmap(src, 0, 0, img.width, img.height)
+                } else {
+                    val m = android.graphics.Matrix().apply { postRotate(turn.toFloat()) }
+                    Bitmap.createBitmap(src, 0, 0, img.width, img.height, m, false)
+                }
             }
             // The old bitmap is NOT recycled: a preview frame may still be
             // drawing it. Letting the GC reclaim it is the safe choice.
@@ -402,22 +514,16 @@ class VScreenDisplay private constructor(
     /** The viewer's picture (scaled to the size it is shown at); null before the first one. Do not recycle it. */
     fun previewFrame(): Bitmap? = previewBitmap
 
-    /** Pump thread only. */
-    private fun drawPreview(img: android.media.Image) {
-        try {
-            if (released) return
-            val plane = img.planes[0]
-            val rowPx = plane.rowStride / plane.pixelStride
-            var sc = scratch
-            if (sc == null || sc.width != rowPx || sc.height != img.height) {
-                sc?.recycle()
-                sc = Bitmap.createBitmap(rowPx, img.height, Bitmap.Config.ARGB_8888); scratch = sc
-            }
-            val buf = plane.buffer
-            buf.rewind(); sc!!.copyPixelsFromBuffer(buf); buf.rewind()
+    /** Pump thread only. Returns the populated [scratch] bitmap so [convert] can reuse it without re-copying. */
+    private fun drawPreview(img: android.media.Image): Bitmap? {
+        return try {
+            if (released) return null
+            val sc = copyToScratch(img)
             paintPreview(sc, img.width, img.height, bufferTurn)
+            sc
         } catch (t: Throwable) {
             AppLogger.warning(TAG, "preview frame failed on display $displayId: ${t.message}")
+            null
         }
     }
 
@@ -545,10 +651,12 @@ class VScreenDisplay private constructor(
         com.kilon.agentvscreen.host.quiet("VScreenDisplay:403") { reader.setOnImageAvailableListener(null, null) }
         val h = pumpHandler
         synchronized(this) { viewers.clear(); previewLongSide = 0; previewIntervalMs = Long.MAX_VALUE }
+        colorWatches.clear()
         h?.removeCallbacks(flushPending)
         h?.removeCallbacks(refreshPreview)
         h?.removeCallbacks(trimPreview)
         synchronized(frameSignal) { frameSignal.notifyAll() }
+        synchronized(colorSignal) { colorSignal.notifyAll() }
         if (shellOwned) runCatching { VScreenRemoteDisplay.release(displayId) }
         else runCatching { virtualDisplay?.release() }
         // The reader is closed on the pump thread: convert() runs there and reads the image's
@@ -570,6 +678,56 @@ class VScreenDisplay private constructor(
         private const val TAG = "VScreenDisplay"
         const val DEFAULT_FRAME_INTERVAL_MS = 120L
         private var generationCounter = 0L
+
+        /**
+         * Pure mean-color sampler over `(2*radius+1)^2` pixels around upright coordinate ([x], [y]) directly from
+         * a raw RGBA_8888 [buf] of size [rawW]x[rawH] rotated clockwise by [turn] degrees. Does not mutate [buf]'s
+         * position or limit. Returns null when ([x], [y]) is out of bounds.
+         */
+        internal fun sampleRgbaColor(
+            buf: java.nio.ByteBuffer,
+            rawW: Int,
+            rawH: Int,
+            rowStride: Int,
+            pixelStride: Int,
+            turn: Int,
+            x: Int,
+            y: Int,
+            radius: Int = 2,
+        ): Int? {
+            if (rawW <= 0 || rawH <= 0 || pixelStride < 3 || rowStride < rawW * pixelStride) return null
+            val t = ((turn % 360) + 360) % 360
+            val fw = if (t == 90 || t == 270) rawH else rawW
+            val fh = if (t == 90 || t == 270) rawW else rawH
+            if (x !in 0 until fw || y !in 0 until fh) return null
+            val lim = buf.limit()
+            var sr = 0
+            var sg = 0
+            var sb = 0
+            var n = 0
+            for (dy in -radius..radius) {
+                val py = (y + dy).coerceIn(0, fh - 1)
+                for (dx in -radius..radius) {
+                    val px = (x + dx).coerceIn(0, fw - 1)
+                    val sx: Int
+                    val sy: Int
+                    when (t) {
+                        90 -> { sx = py; sy = rawH - 1 - px }
+                        180 -> { sx = rawW - 1 - px; sy = rawH - 1 - py }
+                        270 -> { sx = rawW - 1 - py; sy = px }
+                        else -> { sx = px; sy = py }
+                    }
+                    val off = sy * rowStride + sx * pixelStride
+                    if (off < 0 || off + 2 >= lim) continue
+                    sr += buf.get(off).toInt() and 0xFF
+                    sg += buf.get(off + 1).toInt() and 0xFF
+                    sb += buf.get(off + 2).toInt() and 0xFF
+                    n++
+                }
+            }
+            if (n == 0) return null
+            return android.graphics.Color.rgb(sr / n, sg / n, sb / n)
+        }
 
         /** Why the last shell-display attempt failed (null = it worked). Shown in launch errors. */
         @Volatile var lastRemoteError: String? = null

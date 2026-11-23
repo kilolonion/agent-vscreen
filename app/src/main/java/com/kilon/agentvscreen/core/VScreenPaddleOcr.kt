@@ -151,6 +151,9 @@ internal object VScreenPaddleOcr {
     /** A reading is running (maybe one its caller gave up on): it takes CPU from whatever reads the screen meanwhile. */
     fun busy(): Boolean = slot.availablePermits() == 0
 
+    /** How long the current PP-OCRv6 reading has been running (0 when idle). */
+    fun busyMs(): Long = if (busy() && busySince > 0L) (android.os.SystemClock.elapsedRealtime() - busySince).coerceAtLeast(0L) else 0L
+
     /**
      * Items in frame pixels. Throws on any failure. Not on the main thread.
      *

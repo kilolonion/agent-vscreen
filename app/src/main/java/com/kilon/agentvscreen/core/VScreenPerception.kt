@@ -55,8 +55,54 @@ object VScreenPerception {
     }
 
     private val watchers = HashMap<Int, Watcher>()
+    private val ocrPaused = java.util.concurrent.ConcurrentHashMap<Int, java.util.concurrent.atomic.AtomicInteger>()
     private val ocrPool = java.util.concurrent.Executors.newCachedThreadPool { r ->
         Thread(r, "vscreen-percept-ocr").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }
+    }
+
+    /** 2.0.0-beta4 (4.7): pause/resume starting new background full-screen OCR jobs for [displayId] (ref-counted). */
+    fun setOcrPaused(displayId: Int, paused: Boolean) {
+        if (paused) {
+            ocrPaused.computeIfAbsent(displayId) { java.util.concurrent.atomic.AtomicInteger(0) }.incrementAndGet()
+        } else {
+            ocrPaused[displayId]?.let { c ->
+                val v = c.decrementAndGet()
+                if (v <= 0) {
+                    c.set(0)
+                    ocrPaused.remove(displayId, c)
+                }
+            }
+        }
+    }
+
+    /** Whether new background full-screen OCR jobs are paused for [displayId]. */
+    fun isOcrPaused(displayId: Int): Boolean = (ocrPaused[displayId]?.get() ?: 0) > 0
+
+    /** Whether a background full-screen OCR job is currently executing for [displayId]. */
+    fun isOcrRunning(displayId: Int): Boolean = watcher(displayId)?.ocrRunning == true
+
+    /**
+     * Wait up to [timeoutMs] for any in-flight background full-screen OCR (or PP-OCRv6 job) to finish before a
+     * latency-sensitive closed-loop gesture touches down. Returns immediately (0ms) when idle.
+     */
+    fun awaitOcrIdle(displayId: Int, timeoutMs: Long, onTick: () -> Unit = {}) {
+        fun active() = isOcrRunning(displayId) || (VScreenPaddleOcr.busy() && VScreenPaddleOcr.busyMs() < 10_000L)
+        if (!active()) return
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (active()) {
+            onTick()
+            val left = deadline - SystemClock.elapsedRealtime()
+            if (left <= 0L) break
+            val w = watcher(displayId)
+            val slice = minOf(50L, left)
+            if (w != null) {
+                synchronized(w.lock) {
+                    if (active()) w.lock.wait(slice)
+                }
+            } else {
+                Thread.sleep(slice)
+            }
+        }
     }
 
     /** Start (or keep alive) the watcher for [d]. Cheap to call on every command. */
@@ -300,11 +346,13 @@ object VScreenPerception {
         while (w.running && !d.released && SystemClock.elapsedRealtime() - w.lastUse < IDLE_STOP_MS) {
             val t0 = SystemClock.elapsedRealtime()
             if (d.parked) { Thread.sleep(500); continue }
+            if (d.colorFastMode) { Thread.sleep(100); continue }
             // 1.2: frame-driven. The loop sleeps until the picture changes (or someone asks for a reading, or the
             // heartbeat is due) instead of waking 5 times a second whatever the screen does.
             var slept = 0L
-            while (w.running && !w.forceOcr && slept < HEARTBEAT_MS && !d.awaitNewFrame(seen, MIN_GAP_MS)) slept += MIN_GAP_MS
+            while (w.running && !w.forceOcr && !d.colorFastMode && slept < HEARTBEAT_MS && !d.awaitNewFrame(seen, MIN_GAP_MS)) slept += MIN_GAP_MS
             seen = d.version
+            if (d.colorFastMode) continue
             val fv = d.latestWithVersion()
             if (fv == null) { Thread.sleep(MIN_GAP_MS); continue }
             val now = SystemClock.elapsedRealtime()
@@ -326,7 +374,7 @@ object VScreenPerception {
             if (uniform) { if (w.blankSince == 0L) w.blankSince = now } else w.blankSince = 0L
             val forced = w.forceOcr
             val gap = maxOf(1_000L, w.ocrMs * 2)
-            if (!w.ocrRunning && (forced || (now - lastOcr >= gap && (changedSinceOcr || now - lastOcr >= 5_000L)))) {
+            if (!w.ocrRunning && !isOcrPaused(d.displayId) && (forced || (now - lastOcr >= gap && (changedSinceOcr || now - lastOcr >= 5_000L)))) {
                 val frameCopy = runCatching { fv.first.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull()
                 if (frameCopy != null) {
                     lastOcr = now; w.forceOcr = false; changedSinceOcr = false; w.ocrRunning = true
@@ -335,12 +383,14 @@ object VScreenPerception {
                     val frameVer = fv.second
                     ocrPool.execute {
                         try {
+                            if (!w.running || d.released || isOcrPaused(d.displayId)) return@execute
                             val a11yPairs = runCatching {
                                 A11yTree.snapshot(d.displayId).nodes.asSequence()
                                     .filter { it.visible }
                                     .mapNotNull { n -> n.words?.take(120)?.let { it to d.toFrame(n.box) } }
                                     .take(200).toList()
                             }.getOrNull().orEmpty()
+                            if (!w.running || d.released || isOcrPaused(d.displayId)) return@execute
                             val r = runCatching { VScreenOcr.recognize(d.displayId, frameCopy, frameVer, accurate = VScreenOcr.accurateEnabled()) }.getOrNull()
                             if (r != null) { w.ocrMs = r.ms; w.ocrEngine = r.engine }
                             if (r != null && r.error == null && w.running && !d.released) {
