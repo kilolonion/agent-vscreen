@@ -589,6 +589,8 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
     val colorOnlyPress = !isDrag && conds.all { it.kind == CondKind.COLOR }
     if (!colorOnlyPress) {
         d.boost(maxMs + (if (isDrag && step.loop == Loop.HOLD) dragMs.toLong() else 0L) + Gesture.BOOST_EXTRA_MS)
+    } else {
+        d.colorFastMode = true
     }
     VScreenPerception.setOcrPaused(d.displayId, true)
     val probe = Probe(this, d, conds, afterAction = false, cropOnly = true)
@@ -766,6 +768,8 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
         }
     } finally {
         if (colorOnlyPress) {
+            d.colorFastMode = false
+            d.requestFreshFrame()
             val diag = probe.colorDiag(hitElapsed, upElapsed, tStart)
             com.kilon.agentvscreen.host.AppLogger.info("Gesture", "colorHold $diag")
         }

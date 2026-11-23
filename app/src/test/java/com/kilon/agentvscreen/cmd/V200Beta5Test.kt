@@ -719,5 +719,11 @@ class V200Beta5Test {
         // When pickedUp == true, still reports "松手后位置不明".
         val pickedUnknown = GestureRecord(pickedUp = true, followed = true, afterRelease = Gesture.AFTER_UNKNOWN, score = 0.9)
         assertTrue(pickedUnknown.describe(omitUnknownWhenNotPicked = true).contains("松手后位置不明"))
+
+        // 5.7 #1: lightweight colorFastMode refreshes preview + full-frame recording every 500ms.
+        assertEquals(500L, com.kilon.agentvscreen.core.VScreenDisplay.COLOR_FAST_INTERVAL_MS)
+        assertTrue(com.kilon.agentvscreen.core.VScreenDisplay.colorFastFrameDue(nowMs = 1_000L, lastFrameMs = 0L))
+        assertFalse(com.kilon.agentvscreen.core.VScreenDisplay.colorFastFrameDue(nowMs = 1_499L, lastFrameMs = 1_000L))
+        assertTrue(com.kilon.agentvscreen.core.VScreenDisplay.colorFastFrameDue(nowMs = 1_500L, lastFrameMs = 1_000L))
     }
 }

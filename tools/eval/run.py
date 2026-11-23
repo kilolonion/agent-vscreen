@@ -1356,13 +1356,23 @@ def run_s5_stats(token, out_dir, app_version, s02_runs=20, s09_runs=20, hold_rou
                     break
                 time.sleep(0.2)
 
+            def _hold_file_text():
+                return adb_shell("cat", "/data/local/tmp/avs-holds.txt", "2>/dev/null", "||", "true")
+
+            def _wchan_readable(w):
+                return w not in ("", "0", "-")
+
             for r in range(1, hold_rounds + 1):
                 h_rep = call_api(token, ["act", "--hold"], session=session, timeout=60)
-                # Wait briefly for post-send freeze to settle, then clear logcat and hold for hold_wait_s.
+                # Wait briefly for post-send freeze to settle (check avs-holds.txt; WCHAN may be '0' as uid 2000).
                 wchan_held = ""
+                hold_file_held = ""
+                held_confirmed = False
                 for _ in range(25):
+                    hold_file_held = _hold_file_text()
                     wchan_held = _wchan_of(TORTURE_PKG)
-                    if wchan_held == "do_freezer_trap":
+                    if TORTURE_PKG in hold_file_held and (not _wchan_readable(wchan_held) or wchan_held == "do_freezer_trap"):
+                        held_confirmed = True
                         break
                     time.sleep(0.2)
                 adb_shell("logcat", "-c")
@@ -1373,6 +1383,7 @@ def run_s5_stats(token, out_dir, app_version, s02_runs=20, s09_runs=20, hold_rou
                 # Next command must unhold before doing anything, and report "已恢复".
                 adb_shell("logcat", "-c")
                 u_rep = call_api(token, ["look"], session=session, timeout=60)
+                hold_file_after = _hold_file_text()
                 wchan_after = _wchan_of(TORTURE_PKG)
                 resumed_ms = u_rep.get("resumed_after_ms")
                 has_resumed_text = ("已恢复" in str(u_rep.get("text") or "")) or ("Resumed" in str(u_rep.get("text") or ""))
@@ -1387,9 +1398,10 @@ def run_s5_stats(token, out_dir, app_version, s02_runs=20, s09_runs=20, hold_rou
 
                 round_ok = (
                     h_rep.get("ok") is True
-                    and wchan_held == "do_freezer_trap"
+                    and held_confirmed
                     and shown_during_hold == 0
                     and u_rep.get("ok") is True
+                    and TORTURE_PKG not in hold_file_after
                     and wchan_after != "do_freezer_trap"
                     and shown_after >= 1
                     and has_resumed_text
@@ -1397,8 +1409,11 @@ def run_s5_stats(token, out_dir, app_version, s02_runs=20, s09_runs=20, hold_rou
                 )
                 rrec = {
                     "round": r,
+                    "held_confirmed": held_confirmed,
+                    "hold_file_held": hold_file_held,
                     "wchan_held": wchan_held,
                     "shown_during_hold": shown_during_hold,
+                    "hold_file_after": hold_file_after,
                     "wchan_after": wchan_after,
                     "shown_after": shown_after,
                     "resumed_after_ms": resumed_ms,
@@ -1407,7 +1422,7 @@ def run_s5_stats(token, out_dir, app_version, s02_runs=20, s09_runs=20, hold_rou
                 }
                 stats["hold"]["rounds"].append(rrec)
                 print(
-                    f"[S5-HOLD R{r}/{hold_rounds} API {sdk}] held_wchan={wchan_held!r} "
+                    f"[S5-HOLD R{r}/{hold_rounds} API {sdk}] held={held_confirmed} wchan={wchan_held!r} "
                     f"shown_during={shown_during_hold} after_wchan={wchan_after!r} "
                     f"shown_after={shown_after} resumed_ms={resumed_ms} ok={round_ok}",
                     flush=True,

@@ -565,21 +565,32 @@ def run_hold_force_stop_unhold(label):
         c_h, b_h, _ = _api_args(["act", "--hold"], session="gate-hold34", timeout=60)
         print(f"[{label}] act --hold: http={c_h} ok={b_h.get('ok')} hold={b_h.get('hold')}", flush=True)
 
-        # Wait briefly for post-send freeze to complete and verify target is frozen + hold file written.
+        # Wait briefly for post-send freeze to complete: avs-holds.txt must list target app;
+        # when WCHAN is readable (root mode; uid 2000 shell sees '0' due to kptr_restrict), also require do_freezer_trap.
+        def _wchan_readable(w):
+            return w not in ("", "0", "-")
+
         frozen = False
         wchan_held = ""
         hold_file_txt = ""
         for _ in range(25):
             wchan_held = _wchan_of(TORTURE_PKG)
             hold_file_txt = shell("cat", HOLD_FILE, "2>/dev/null", "||", "true")
-            if wchan_held == "do_freezer_trap" and TORTURE_PKG in hold_file_txt:
+            if TORTURE_PKG in hold_file_txt and (not _wchan_readable(wchan_held) or wchan_held == "do_freezer_trap"):
                 frozen = True
                 break
             time.sleep(0.2)
+
+        # Behaviorally verify target is actually paused (S09 keep_cycling period is 3.0s -> expect 0 target_shown over 3.5s).
+        shown_while_held = -1
+        if frozen:
+            shell("logcat", "-c")
+            time.sleep(3.5)
+            shown_while_held = _count_avst_target_shown()
         check(
             f"[{label}] act --hold froze target app and recorded avs-holds.txt",
-            c_h == 200 and b_h.get("ok") is True and frozen,
-            f"http={c_h} wchan={wchan_held!r} hold_file={hold_file_txt!r}",
+            c_h == 200 and b_h.get("ok") is True and frozen and shown_while_held == 0,
+            f"http={c_h} wchan={wchan_held!r} hold_file={hold_file_txt!r} shown_while_held={shown_while_held}",
         )
         if not frozen:
             return
@@ -597,7 +608,7 @@ def run_hold_force_stop_unhold(label):
         while time.monotonic() - t_kill <= 13.5:
             wchan_after = _wchan_of(TORTURE_PKG)
             hold_file_after = shell("cat", HOLD_FILE, "2>/dev/null", "||", "true")
-            if wchan_after != "do_freezer_trap" and TORTURE_PKG not in hold_file_after:
+            if TORTURE_PKG not in hold_file_after and wchan_after != "do_freezer_trap":
                 thawed_at = time.monotonic() - t_kill
                 break
             time.sleep(0.3)
