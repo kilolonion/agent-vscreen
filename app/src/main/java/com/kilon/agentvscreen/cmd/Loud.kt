@@ -4,8 +4,8 @@ package com.kilon.agentvscreen.cmd
  * 2.0.0-beta3 (3.2, 3.12 & 3.13): pure decision of whether an `act` reply must be loud (full four blocks)
  * or may use the short quiet reply format.
  *
- * The 8 reason codes and their exact order are fixed by spec 3.2:
- * FAILED, NO_EXPECT, NOT_MET, BEFORE, AFTER, APP_SWITCH, NO_TEXT, FORCED.
+ * The reason codes and their exact order are fixed by spec 3.2 & 4.4:
+ * FAILED, NO_EXPECT, NOT_MET, BEFORE, AFTER, APP_SWITCH, SNAP_BACK, NO_TEXT, FORCED.
  */
 internal data class LoudInput(
     val outcome: String = "done",
@@ -17,6 +17,7 @@ internal data class LoudInput(
     val startPkg: String? = null,
     val endPkg: String? = null,
     val hasAppUntil: Boolean = false,
+    val snappedBack: Boolean = false,
     val elementCount: Int = 1,
     val lastExpectOnlyVisual: Boolean = false,
     val hasPageTextDiff: Boolean = false,
@@ -25,13 +26,14 @@ internal data class LoudInput(
 
 /** Pure function: returns empty list iff the reply may be short (quiet). */
 internal fun loudReasons(input: LoudInput): List<String> {
-    val out = ArrayList<String>(8)
+    val out = ArrayList<String>(9)
     if (input.outcome != "done" || input.hasBlockingNote) out += Loud.FAILED
     if (input.hasNoExpect) out += Loud.NO_EXPECT
     if (input.hasNotMet) out += Loud.NOT_MET
     if (input.beforeChanged) out += Loud.BEFORE
     if (input.afterChanged) out += Loud.AFTER
     if (input.startPkg != null && input.endPkg != null && input.startPkg != input.endPkg && !input.hasAppUntil) out += Loud.APP_SWITCH
+    if (input.snappedBack) out += Loud.SNAP_BACK
     if (input.elementCount == 0 || (input.lastExpectOnlyVisual && !input.hasPageTextDiff)) out += Loud.NO_TEXT
     if (input.forced) out += Loud.FORCED
     return out
@@ -50,6 +52,7 @@ internal object Loud {
     const val BEFORE = "BEFORE"
     const val AFTER = "AFTER"
     const val APP_SWITCH = "APP_SWITCH"
+    const val SNAP_BACK = "SNAP_BACK"
     const val NO_TEXT = "NO_TEXT"
     const val FORCED = "FORCED"
 

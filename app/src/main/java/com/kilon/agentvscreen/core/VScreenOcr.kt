@@ -503,8 +503,18 @@ internal object VScreenOcr {
             if (ctx != null) recoverIfNeeded(ctx)
             val items = when {
                 mlkitCrashed && paddleCrashed -> emptyList()
-                ctx != null && !paddleCrashed && (accurateEnabled() || (mlkitCrashed && VScreenPaddleOcr.available(ctx))) ->
-                    VScreenPaddleOcr.recognize(ctx, padded)
+                ctx != null && !paddleCrashed && (accurateEnabled() || (mlkitCrashed && VScreenPaddleOcr.available(ctx))) -> {
+                    if (VScreenPaddleOcr.busy() && !mlkitCrashed) {
+                        recognizeFast(-4, padded, -System.nanoTime()).items
+                    } else {
+                        try {
+                            VScreenPaddleOcr.recognize(ctx, padded)
+                        } catch (t: Throwable) {
+                            AppLogger.warning(TAG, "readCrop PP-OCRv6 failed (${t.javaClass.simpleName}: ${t.message}); fallback to ML Kit")
+                            if (!mlkitCrashed) recognizeFast(-4, padded, -System.nanoTime()).items else emptyList()
+                        }
+                    }
+                }
                 !mlkitCrashed -> recognizeFast(-4, padded, -System.nanoTime()).items
                 else -> emptyList()
             }

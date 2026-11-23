@@ -55,9 +55,28 @@ object VScreenPerception {
     }
 
     private val watchers = HashMap<Int, Watcher>()
+    private val ocrPaused = java.util.concurrent.ConcurrentHashMap<Int, java.util.concurrent.atomic.AtomicInteger>()
     private val ocrPool = java.util.concurrent.Executors.newCachedThreadPool { r ->
         Thread(r, "vscreen-percept-ocr").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }
     }
+
+    /** 2.0.0-beta4 (4.7): pause/resume starting new background full-screen OCR jobs for [displayId] (ref-counted). */
+    fun setOcrPaused(displayId: Int, paused: Boolean) {
+        if (paused) {
+            ocrPaused.computeIfAbsent(displayId) { java.util.concurrent.atomic.AtomicInteger(0) }.incrementAndGet()
+        } else {
+            ocrPaused[displayId]?.let { c ->
+                val v = c.decrementAndGet()
+                if (v <= 0) {
+                    c.set(0)
+                    ocrPaused.remove(displayId, c)
+                }
+            }
+        }
+    }
+
+    /** Whether new background full-screen OCR jobs are paused for [displayId]. */
+    fun isOcrPaused(displayId: Int): Boolean = (ocrPaused[displayId]?.get() ?: 0) > 0
 
     /** Start (or keep alive) the watcher for [d]. Cheap to call on every command. */
     fun ensure(d: VScreenDisplay) {
@@ -326,7 +345,7 @@ object VScreenPerception {
             if (uniform) { if (w.blankSince == 0L) w.blankSince = now } else w.blankSince = 0L
             val forced = w.forceOcr
             val gap = maxOf(1_000L, w.ocrMs * 2)
-            if (!w.ocrRunning && (forced || (now - lastOcr >= gap && (changedSinceOcr || now - lastOcr >= 5_000L)))) {
+            if (!w.ocrRunning && !isOcrPaused(d.displayId) && (forced || (now - lastOcr >= gap && (changedSinceOcr || now - lastOcr >= 5_000L)))) {
                 val frameCopy = runCatching { fv.first.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull()
                 if (frameCopy != null) {
                     lastOcr = now; w.forceOcr = false; changedSinceOcr = false; w.ocrRunning = true

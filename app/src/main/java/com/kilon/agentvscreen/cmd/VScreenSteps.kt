@@ -61,6 +61,9 @@ internal enum class StepKind(val key: String, private val zh: String, private va
 internal data class Cond(val raw: String, val kind: CondKind, val text: String? = null, val area: Rect? = null,
                          val x: Int = 0, val y: Int = 0, val color: Int = 0, val tol: Int = 40)
 
+/** 2.0.0-beta4 (4.1-4.2): closed-loop gesture mode on `press` / `drag`. */
+internal enum class Loop { NONE, HOLD, SEEK }
+
 /** One step of a segment. */
 internal data class Step(
     val raw: String,
@@ -77,6 +80,8 @@ internal data class Step(
     val body: List<Step> = emptyList(),
     val alt: List<Step> = emptyList(),
     val times: Int = 0,
+    /** 2.0.0-beta4 (4.2): closed-loop modifier (`hold` / `seek`) on `press` / `drag`. */
+    val loop: Loop = Loop.NONE,
 ) {
     val isAction: Boolean get() = kind !in BLOCKS && kind !in setOf(StepKind.WAIT, StepKind.SLEEP, StepKind.USE, StepKind.CHECK)
     companion object { val BLOCKS = setOf(StepKind.TRY, StepKind.IF, StepKind.REPEAT) }
@@ -101,6 +106,11 @@ internal object Steps {
     const val WAIT_DEFAULT_MS = 10_000L
     const val MAX_WAIT_MS = 120_000L
     const val MAX_STEPS = 40
+    /** 2.0.0-beta4 (4.1): closed-loop gesture wait defaults and caps. */
+    const val HOLD_DEFAULT_MS = 5_000L
+    const val HOLD_MAX_MS = 10_000L
+    const val SEEK_DEFAULT_MS = 15_000L
+    const val SEEK_MAX_MS = 30_000L
 
     /** 1.2: key names come from the one key table (VScreenShell.KEYS); a number is a keycode. */
     /** 1.4.0-beta13: `type "…" slow`: the gap between characters by default, and the most characters. */
@@ -370,17 +380,46 @@ internal object Steps {
         return when (verb) {
             "tap", "click", "点" -> Step(raw, StepKind.TAP, target = target(raw, args, allowDuration = false).first, until = until, untilMs = untilMs)
             "press", "longpress", "hold", "长按" -> {
-                val (t, ms) = target(raw, args, allowDuration = true)
-                Step(raw, StepKind.PRESS, target = t, ms = (ms ?: 800L).coerceIn(100L, 10_000L), until = until, untilMs = untilMs)
+                val isHoldLoop = args.size >= 2 && args.last().lowercase() == "hold"
+                if (isHoldLoop) {
+                    if (until == null) throw ActionError("GESTURE_NEEDS_UNTIL", tr("press … hold 必须带 until <条件>", "press … hold requires until <condition>"))
+                    validateLoopConds(until)
+                    val (t, _) = target(raw, args.dropLast(1), allowDuration = false)
+                    val maxWait = capMs(raw, untilMs ?: HOLD_DEFAULT_MS, HOLD_MAX_MS, withValue = false).coerceAtLeast(100L)
+                    Step(raw, StepKind.PRESS, target = t, until = until, untilMs = maxWait, loop = Loop.HOLD)
+                } else {
+                    val (t, ms) = target(raw, args, allowDuration = true)
+                    Step(raw, StepKind.PRESS, target = t, ms = (ms ?: 800L).coerceIn(100L, 10_000L), until = until, untilMs = untilMs)
+                }
             }
             "swipe", "drag", "滑", "拖" -> {
                 val isDrag = verb == "drag" || verb == "拖"
-                val ms = args.lastOrNull()?.takeIf { it.any { c -> c.isLetter() } }?.let { duration(it) ?: bad(raw, tr("时长写成 300ms / 1s", "write the duration as 300ms / 1s")) }
-                val nums = numbers(if (ms != null) args.dropLast(1) else args) ?: bad(raw, run { val more = if (isDrag) " [x3 y3 …]" else ""; tr("坐标写成数字：$verb x1 y1 x2 y2$more [时长]", "coordinates are numbers: $verb x1 y1 x2 y2$more [duration]") })
-                if (nums.size < 4 || nums.size % 2 != 0) bad(raw, run { val more = if (isDrag) " [x3 y3 …]" else ""; tr("$verb 要成对的坐标：x1 y1 x2 y2$more（收到 ${nums.size} 个数）", "$verb needs coordinate pairs: x1 y1 x2 y2$more (got ${nums.size} numbers)") })
-                if (!isDrag && nums.size != 4) bad(raw, tr("swipe 只有起点和终点；经过多个点用 drag", "swipe has only a start and an end; use drag to pass through more points"))
-                val pts = nums.chunked(2).map { it[0] to it[1] }
-                Step(raw, if (isDrag) StepKind.DRAG else StepKind.SWIPE, points = pts, ms = (ms ?: if (isDrag) 600L else 300L).coerceIn(50L, 10_000L), until = until, untilMs = untilMs)
+                val tail = args.lastOrNull()?.lowercase()
+                val loop = if (isDrag && tail == "hold") Loop.HOLD else if (isDrag && tail == "seek") Loop.SEEK else Loop.NONE
+                if (loop != Loop.NONE) {
+                    if (until == null) throw ActionError("GESTURE_NEEDS_UNTIL", tr("drag … $tail 必须带 until <条件>", "drag … $tail requires until <condition>"))
+                    val rest = args.dropLast(1)
+                    val ms = if (loop == Loop.HOLD) {
+                        rest.lastOrNull()?.takeIf { it.any { c -> c.isLetter() } }?.let { duration(it) ?: bad(raw, tr("时长写成 300ms / 1s", "write the duration as 300ms / 1s")) }
+                    } else null
+                    val numArgs = if (ms != null) rest.dropLast(1) else rest
+                    val nums = numbers(numArgs) ?: bad(raw, run { val more = if (loop == Loop.HOLD) " [x3 y3 …] [时长]" else ""; tr("坐标写成数字：$verb x1 y1 x2 y2$more $tail until <条件>", "coordinates are numbers: $verb x1 y1 x2 y2$more $tail until <condition>") })
+                    if (nums.size < 4 || nums.size % 2 != 0) bad(raw, run { val more = if (loop == Loop.HOLD) " [x3 y3 …]" else ""; tr("$verb 要成对的坐标：x1 y1 x2 y2$more（收到 ${nums.size} 个数）", "$verb needs coordinate pairs: x1 y1 x2 y2$more (got ${nums.size} numbers)") })
+                    val pts = nums.chunked(2).map { it[0] to it[1] }
+                    if (loop == Loop.SEEK && pts.size != 2) throw ActionError("INVALID_ARGS", tr("drag … seek 只支持两个点（一条直线），收到 ${pts.size} 个点", "drag … seek supports only 2 points (a straight line), got ${pts.size} points"))
+                    validateLoopConds(until)
+                    val defaultWait = if (loop == Loop.SEEK) SEEK_DEFAULT_MS else HOLD_DEFAULT_MS
+                    val maxCap = if (loop == Loop.SEEK) SEEK_MAX_MS else HOLD_MAX_MS
+                    val maxWait = capMs(raw, untilMs ?: defaultWait, maxCap, withValue = false).coerceAtLeast(100L)
+                    Step(raw, StepKind.DRAG, points = pts, ms = if (loop == Loop.HOLD) (ms ?: 600L).coerceIn(50L, 10_000L) else null, until = until, untilMs = maxWait, loop = loop)
+                } else {
+                    val ms = args.lastOrNull()?.takeIf { it.any { c -> c.isLetter() } }?.let { duration(it) ?: bad(raw, tr("时长写成 300ms / 1s", "write the duration as 300ms / 1s")) }
+                    val nums = numbers(if (ms != null) args.dropLast(1) else args) ?: bad(raw, run { val more = if (isDrag) " [x3 y3 …]" else ""; tr("坐标写成数字：$verb x1 y1 x2 y2$more [时长]", "coordinates are numbers: $verb x1 y1 x2 y2$more [duration]") })
+                    if (nums.size < 4 || nums.size % 2 != 0) bad(raw, run { val more = if (isDrag) " [x3 y3 …]" else ""; tr("$verb 要成对的坐标：x1 y1 x2 y2$more（收到 ${nums.size} 个数）", "$verb needs coordinate pairs: x1 y1 x2 y2$more (got ${nums.size} numbers)") })
+                    if (!isDrag && nums.size != 4) bad(raw, tr("swipe 只有起点和终点；经过多个点用 drag", "swipe has only a start and an end; use drag to pass through more points"))
+                    val pts = nums.chunked(2).map { it[0] to it[1] }
+                    Step(raw, if (isDrag) StepKind.DRAG else StepKind.SWIPE, points = pts, ms = (ms ?: if (isDrag) 600L else 300L).coerceIn(50L, 10_000L), until = until, untilMs = untilMs)
+                }
             }
             "scroll", "滚" -> {
                 val dir = args.firstOrNull()?.lowercase()?.let { d -> mapOf("上" to "up", "下" to "down", "左" to "left", "右" to "right")[d] ?: d }
@@ -532,6 +571,19 @@ internal object Steps {
 
     /** Conditions of a --stop / keep value. */
     fun conds(spec: String): List<Cond> = condsWithMax(tokens(resolvePct(spec))).first
+
+    /** 2.0.0-beta4 (4.1): text:/gone: conditions inside hold/seek must include `in x1,y1,x2,y2`. */
+    private fun validateLoopConds(conds: List<Cond>) {
+        conds.firstOrNull { (it.kind == CondKind.TEXT || it.kind == CondKind.GONE) && it.area == null }?.let { c ->
+            throw ActionError(
+                "GESTURE_NEEDS_AREA",
+                tr(
+                    "闭环手势里的 ${c.kind.key}: 条件必须带区域（如 ${c.kind.key}:${c.text} in x1,y1,x2,y2）；整屏 OCR 在按住期间太慢",
+                    "${c.kind.key}: inside a closed-loop gesture requires a region (e.g. ${c.kind.key}:${c.text} in x1,y1,x2,y2); full-screen OCR is too slow while holding",
+                ),
+            )
+        }
+    }
 
     private fun bad(raw: String, why: String): Nothing = throw ActionError("INVALID_STEP",
         tr("步骤“$raw”：$why。整段没有执行。步骤写法：tap x y | tap #N | tap 字 | press x y [时长] | swipe x1 y1 x2 y2 [时长] | " +

@@ -335,6 +335,7 @@ def run_task(token, task, return_events=False):
     refetch_after_quiet = 0
     loud_reasons = []
     reply_texts = []
+    step_gestures = []
     cmd_records = []
     prev_returned_at = 0
     prev_was_quiet = False
@@ -369,6 +370,9 @@ def run_task(token, task, return_events=False):
                 quiet_replies += 1
             if argv and argv[0] == "act" and isinstance(reply.get("loud"), list):
                 loud_reasons.append(list(reply["loud"]))
+            for st in (reply.get("steps") or []):
+                if isinstance(st, dict) and isinstance(st.get("gesture"), dict):
+                    step_gestures.append(dict(st["gesture"]))
             reply_texts.append(str(reply.get("text") or ""))
             cmd_records.append({
                 "index": idx,
@@ -430,6 +434,7 @@ def run_task(token, task, return_events=False):
         "false_quiet_details": false_quiet_details,
         "refetch_after_quiet": refetch_after_quiet,
         "loud_reasons": loud_reasons,
+        "gestures": step_gestures,
         "reply_has_popup": ("弹出" in all_text) or (" popup [" in all_text),
         "reply_has_toast": ("toast：" in all_text) or ("toast:" in all_text),
         "act_reply_previews": [t[:400] for i, t in enumerate(reply_texts) if i < len(task["commands"]) and task["commands"][i] and task["commands"][i][0] == "act"],
@@ -682,6 +687,450 @@ def render_markdown(app_version, rows, skipped, totals, diff, regressed, repeat_
     return "\n".join(lines) + "\n"
 
 
+def _extract_gesture(reply):
+    for st in (reply.get("steps") or []):
+        if isinstance(st, dict) and isinstance(st.get("gesture"), dict):
+            return dict(st["gesture"])
+    return {}
+
+
+def _fmt_ms_stats(p50s, maxs):
+    p50_txt = f"{round(statistics.median(p50s), 1)}" if p50s else "-"
+    max_txt = f"{max(maxs)}" if maxs else "-"
+    return p50_txt, max_txt
+
+
+def _pick_s04_outside_target(card, slots):
+    """Pick a release coordinate clearly outside every slot's 60dp (~158px) snap zone and >300px from start card."""
+    import math
+    candidates = [
+        (200, 1080),
+        (880, 1080),
+        (200, 1140),
+        (880, 1140),
+        (540, 1220),
+    ]
+    best = candidates[0]
+    best_score = -1.0
+    for cx, cy in candidates:
+        min_slot = min(math.hypot(cx - s[0], cy - s[1]) for s in slots) if slots else 999.0
+        dist_card = math.hypot(cx - card[0], cy - card[1])
+        score = min(min_slot, dist_card)
+        if score > best_score:
+            best_score = score
+            best = (cx, cy)
+    return best
+
+
+def _start_scene_on_display(disp_id, scene, seed_val):
+    adb_shell("logcat", "-c")
+    adb_shell(
+        "am", "start", "-W", "--activity-clear-top",
+        "--display", str(disp_id),
+        "-n", f"{TORTURE_PKG}/.SceneActivity",
+        "--es", "scene", scene,
+        "--ei", "seed", str(seed_val),
+    )
+    time.sleep(0.25)
+
+
+def _wait_enter_event(scene, timeout_s=3.0):
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        evs = read_avst_events(scene)
+        for ev in evs:
+            if ev.get("ev") == "enter":
+                return ev
+        time.sleep(0.15)
+    return None
+
+
+def _launch_scene_session(token, scene, seed_val, session):
+    adb_shell("am", "force-stop", TORTURE_PKG)
+    adb_shell(
+        "am", "broadcast", "-W", "--include-stopped-packages",
+        "-n", f"{TORTURE_PKG}/.PresetReceiver",
+        "--es", "scene", scene,
+        "--ei", "seed", str(seed_val),
+    )
+    adb_shell("logcat", "-c")
+    call_api(token, ["launch", TORTURE_PKG], session=session, timeout=120)
+    disp_id = find_scene_display_id()
+    if not disp_id:
+        raise RuntimeError(f"Could not find torture display id after launching {scene}")
+    return disp_id
+
+
+def run_gesture_stats(token, out_dir, app_version, s04_runs=40, s10_runs=20, s11_runs=20, s05_runs=20):
+    """2.0.0-beta4 (4.6 & 4.7): run 40x S04 (half in-slot, half out-of-slot), 20x S10, 20x S11, 20x S05."""
+    from collections import Counter
+
+    stats = {
+        "app_version": app_version,
+        "generated_at": int(time.time()),
+        "s04": {"runs": [], "summary": {}},
+        "s10": {"runs": [], "summary": {}},
+        "s11": {"runs": [], "summary": {}},
+        "s05": {"runs": [], "summary": {}},
+    }
+
+    # ── S04: 40 drags (even=in-slot via hold until color, odd=outside-slot via normal drag) ──
+    if s04_runs > 0:
+        session = "gstats_s04"
+        try:
+            disp_id = _launch_scene_session(token, "S04", 100, session)
+            for i in range(s04_runs):
+                seed_val = 100 + i
+                want_in_slot = (i % 2 == 0)
+                _start_scene_on_display(disp_id, "S04", seed_val)
+                enter = _wait_enter_event("S04")
+                data = (enter or {}).get("data") or {}
+                cards = data.get("cards") or [[200, 1500]]
+                slots = data.get("slots") or [[220, 600], [540, 600], [860, 600], [540, 960]]
+                card = cards[0]
+                slot = slots[1] if len(slots) > 1 else slots[0]
+                if want_in_slot:
+                    step = f"drag {card[0]} {card[1]} {slot[0]} {slot[1]} hold until color:{slot[0]},{slot[1]}=#4CAF50 2s"
+                else:
+                    tx, ty = _pick_s04_outside_target(card, slots)
+                    step = f"drag {card[0]} {card[1]} {tx} {ty} 600ms"
+                reply = call_api(token, ["act", step], session=session, timeout=90)
+                time.sleep(0.15)
+                evs = read_avst_events("S04")
+                avst = "snap" if any(e.get("ev") == "snap" for e in evs) else (
+                    "snap_back" if any(e.get("ev") == "snap_back" for e in evs) else "none"
+                )
+                g = _extract_gesture(reply)
+                ar = g.get("after_release") or "missing"
+                expected_ar = "stayed" if avst == "snap" else ("snapped_back" if avst == "snap_back" else "")
+                matched = bool(expected_ar and ar == expected_ar)
+                loud = list(reply.get("loud") or [])
+                rec = {
+                    "run": i + 1,
+                    "seed": seed_val,
+                    "mode": "in_slot" if want_in_slot else "out_slot",
+                    "avst": avst,
+                    "after_release": ar,
+                    "score": g.get("score"),
+                    "picked_up": g.get("picked_up"),
+                    "followed": g.get("followed"),
+                    "poll_ms_p50": g.get("poll_ms_p50"),
+                    "poll_ms_max": g.get("poll_ms_max"),
+                    "loud": loud,
+                    "matched": matched,
+                }
+                stats["s04"]["runs"].append(rec)
+                print(
+                    f"[S04 {i + 1}/{s04_runs}] seed={seed_val} mode={rec['mode']} avst={avst} "
+                    f"after_release={ar} score={rec['score']} poll={rec['poll_ms_p50']}/{rec['poll_ms_max']} "
+                    f"loud={loud} match={matched}",
+                    flush=True,
+                )
+        finally:
+            try:
+                call_api(token, ["release"], session=session, timeout=30)
+            except Exception:
+                pass
+            adb_shell("am", "force-stop", TORTURE_PKG)
+
+    # ── S10: 20 seek runs (`drag 100 800 980 800 seek until text:70 in 400,600,700,700`) ──
+    if s10_runs > 0:
+        session = "gstats_s10"
+        try:
+            disp_id = _launch_scene_session(token, "S10", 200, session)
+            for i in range(s10_runs):
+                seed_val = 200 + i
+                _start_scene_on_display(disp_id, "S10", seed_val)
+                reply = call_api(
+                    token,
+                    ["act", "drag 100 800 980 800 seek until text:70 in 400,600,700,700"],
+                    session=session,
+                    timeout=90,
+                )
+                time.sleep(0.15)
+                evs = read_avst_events("S10")
+                val_evs = [e for e in evs if e.get("ev") == "value"]
+                val = (val_evs[-1].get("data") or {}).get("value") if val_evs else None
+                ok = isinstance(val, int) and 68 <= val <= 72
+                g = _extract_gesture(reply)
+                reason = "ok" if ok else (
+                    "no_value" if val is None else (f"low({val})" if val < 68 else f"high({val})")
+                )
+                rec = {
+                    "run": i + 1,
+                    "seed": seed_val,
+                    "value": val,
+                    "ok": ok,
+                    "reason": reason,
+                    "code": reply.get("code"),
+                    "poll_ms_p50": g.get("poll_ms_p50"),
+                    "poll_ms_max": g.get("poll_ms_max"),
+                }
+                stats["s10"]["runs"].append(rec)
+                print(
+                    f"[S10 {i + 1}/{s10_runs}] seed={seed_val} value={val} ok={ok} "
+                    f"poll={rec['poll_ms_p50']}/{rec['poll_ms_max']} code={rec['code']}",
+                    flush=True,
+                )
+        finally:
+            try:
+                call_api(token, ["release"], session=session, timeout=30)
+            except Exception:
+                pass
+            adb_shell("am", "force-stop", TORTURE_PKG)
+
+    # ── S11: 20 press-hold charge runs (`press 540 1600 hold until text:9* in 300,1400,800,1500 8s`) ──
+    if s11_runs > 0:
+        session = "gstats_s11"
+        try:
+            disp_id = _launch_scene_session(token, "S11", 5300, session)
+            for i in range(s11_runs):
+                seed_val = 5300 + i
+                _start_scene_on_display(disp_id, "S11", seed_val)
+                reply = call_api(
+                    token,
+                    ["act", "press 540 1600 hold until text:9* in 300,1400,800,1500 8s"],
+                    session=session,
+                    timeout=90,
+                )
+                time.sleep(0.15)
+                evs = read_avst_events("S11")
+                goal = any(e.get("ev") == "goal" and e.get("ok") is True for e in evs)
+                overloaded = any(e.get("ev") == "fail" for e in evs)
+                g = _extract_gesture(reply)
+                reason = "ok" if (goal and not overloaded) else ("overload" if overloaded else "early_or_missed")
+                rec = {
+                    "run": i + 1,
+                    "seed": seed_val,
+                    "goal": goal,
+                    "overload": overloaded,
+                    "ok": goal and not overloaded,
+                    "reason": reason,
+                    "code": reply.get("code"),
+                    "poll_ms_p50": g.get("poll_ms_p50"),
+                    "poll_ms_max": g.get("poll_ms_max"),
+                }
+                stats["s11"]["runs"].append(rec)
+                print(
+                    f"[S11 {i + 1}/{s11_runs}] seed={seed_val} goal={goal} overload={overloaded} "
+                    f"poll={rec['poll_ms_p50']}/{rec['poll_ms_max']} code={rec['code']}",
+                    flush=True,
+                )
+        finally:
+            try:
+                call_api(token, ["release"], session=session, timeout=30)
+            except Exception:
+                pass
+            adb_shell("am", "force-stop", TORTURE_PKG)
+
+    # ── S05: 20 press-hold menu runs (`press 540 1200 hold until text:菜单已打开 in 280,760,800,1060 3s`) ──
+    if s05_runs > 0:
+        session = "gstats_s05"
+        try:
+            disp_id = _launch_scene_session(token, "S05", 300, session)
+            for i in range(s05_runs):
+                seed_val = 300 + i
+                _start_scene_on_display(disp_id, "S05", seed_val)
+                reply = call_api(
+                    token,
+                    ["act", "press 540 1200 hold until text:菜单已打开 in 280,760,800,1060 3s"],
+                    session=session,
+                    timeout=90,
+                )
+                time.sleep(0.15)
+                evs = read_avst_events("S05")
+                menu_evs = [e for e in evs if e.get("ev") == "menu_shown" and e.get("ok") is True]
+                up_evs = [
+                    e for e in evs
+                    if e.get("ev") == "touch" and isinstance(e.get("data"), dict) and e["data"].get("a") == "up"
+                ]
+                menu_shown = bool(menu_evs)
+                lag_ms = None
+                if menu_shown and up_evs:
+                    mt = int(menu_evs[0].get("t") or 0)
+                    after_ups = [int(u.get("t") or 0) for u in up_evs if int(u.get("t") or 0) >= mt]
+                    if after_ups:
+                        lag_ms = after_ups[0] - mt
+                ok = menu_shown and (lag_ms is not None) and lag_ms <= 300
+                g = _extract_gesture(reply)
+                reason = "ok" if ok else ("no_menu" if not menu_shown else (f"lag>{300}ms({lag_ms})" if lag_ms is not None else "no_up_after_menu"))
+                rec = {
+                    "run": i + 1,
+                    "seed": seed_val,
+                    "menu_shown": menu_shown,
+                    "release_lag_ms": lag_ms,
+                    "ok": ok,
+                    "reason": reason,
+                    "code": reply.get("code"),
+                    "poll_ms_p50": g.get("poll_ms_p50"),
+                    "poll_ms_max": g.get("poll_ms_max"),
+                }
+                stats["s05"]["runs"].append(rec)
+                print(
+                    f"[S05 {i + 1}/{s05_runs}] seed={seed_val} menu={menu_shown} lag_ms={lag_ms} ok={ok} "
+                    f"poll={rec['poll_ms_p50']}/{rec['poll_ms_max']} code={rec['code']}",
+                    flush=True,
+                )
+        finally:
+            try:
+                call_api(token, ["release"], session=session, timeout=30)
+            except Exception:
+                pass
+            adb_shell("am", "force-stop", TORTURE_PKG)
+
+    # ── Summaries & Markdown table ("手势统计") ──
+    s04_list = stats["s04"]["runs"]
+    s04_match = sum(1 for r in s04_list if r["matched"])
+    s04_in = [r for r in s04_list if r["mode"] == "in_slot"]
+    s04_out = [r for r in s04_list if r["mode"] == "out_slot"]
+    s04_fail = Counter(f"{r['mode']}:{r['avst']}->{r['after_release']}" for r in s04_list if not r["matched"])
+    s04_p50, s04_max = _fmt_ms_stats(
+        [r["poll_ms_p50"] for r in s04_list if r["poll_ms_p50"] is not None],
+        [r["poll_ms_max"] for r in s04_list if r["poll_ms_max"] is not None],
+    )
+    stats["s04"]["summary"] = {
+        "total": len(s04_list),
+        "matched": s04_match,
+        "rate": round(s04_match / len(s04_list), 4) if s04_list else 0.0,
+        "in_slot_matched": sum(1 for r in s04_in if r["matched"]),
+        "in_slot_total": len(s04_in),
+        "out_slot_matched": sum(1 for r in s04_out if r["matched"]),
+        "out_slot_total": len(s04_out),
+        "snap_back_loud": sum(1 for r in s04_out if "SNAP_BACK" in r["loud"]),
+        "poll_ms_p50": s04_p50,
+        "poll_ms_max": s04_max,
+        "failures": dict(s04_fail),
+    }
+
+    s10_list = stats["s10"]["runs"]
+    s10_ok = sum(1 for r in s10_list if r["ok"])
+    s10_fail = Counter(
+        "no_value" if r["value"] is None else ("low(<68)" if r["value"] < 68 else "high(>72)")
+        for r in s10_list if not r["ok"]
+    )
+    s10_p50, s10_max = _fmt_ms_stats(
+        [r["poll_ms_p50"] for r in s10_list if r["poll_ms_p50"] is not None],
+        [r["poll_ms_max"] for r in s10_list if r["poll_ms_max"] is not None],
+    )
+    stats["s10"]["summary"] = {
+        "total": len(s10_list),
+        "passed": s10_ok,
+        "rate": round(s10_ok / len(s10_list), 4) if s10_list else 0.0,
+        "values": [r["value"] for r in s10_list],
+        "poll_ms_p50": s10_p50,
+        "poll_ms_max": s10_max,
+        "failures": dict(s10_fail),
+    }
+
+    s11_list = stats["s11"]["runs"]
+    s11_ok = sum(1 for r in s11_list if r["ok"])
+    s11_over = sum(1 for r in s11_list if r["overload"])
+    s11_fail = Counter(r["reason"] for r in s11_list if not r["ok"])
+    s11_p50, s11_max = _fmt_ms_stats(
+        [r["poll_ms_p50"] for r in s11_list if r["poll_ms_p50"] is not None],
+        [r["poll_ms_max"] for r in s11_list if r["poll_ms_max"] is not None],
+    )
+    stats["s11"]["summary"] = {
+        "total": len(s11_list),
+        "passed": s11_ok,
+        "rate": round(s11_ok / len(s11_list), 4) if s11_list else 0.0,
+        "overload": s11_over,
+        "overload_rate": round(s11_over / len(s11_list), 4) if s11_list else 0.0,
+        "poll_ms_p50": s11_p50,
+        "poll_ms_max": s11_max,
+        "failures": dict(s11_fail),
+    }
+
+    s05_list = stats["s05"]["runs"]
+    s05_menu = sum(1 for r in s05_list if r["menu_shown"])
+    s05_ok = sum(1 for r in s05_list if r["ok"])
+    s05_lags = [r["release_lag_ms"] for r in s05_list if r["release_lag_ms"] is not None]
+    s05_fail = Counter(
+        "no_menu" if not r["menu_shown"] else ("no_up_after_menu" if r["release_lag_ms"] is None else "lag>300ms")
+        for r in s05_list if not r["ok"]
+    )
+    s05_p50, s05_max = _fmt_ms_stats(
+        [r["poll_ms_p50"] for r in s05_list if r["poll_ms_p50"] is not None],
+        [r["poll_ms_max"] for r in s05_list if r["poll_ms_max"] is not None],
+    )
+    stats["s05"]["summary"] = {
+        "total": len(s05_list),
+        "menu_shown": s05_menu,
+        "within_300ms": s05_ok,
+        "rate": round(s05_ok / len(s05_list), 4) if s05_list else 0.0,
+        "lag_ms_p50": round(statistics.median(s05_lags), 1) if s05_lags else None,
+        "lag_ms_max": max(s05_lags) if s05_lags else None,
+        "poll_ms_p50": s05_p50,
+        "poll_ms_max": s05_max,
+        "failures": dict(s05_fail),
+    }
+
+    def fmt_fail(d):
+        return ", ".join(f"{k}:{v}" for k, v in sorted(d.items())) if d else "无"
+
+    md_lines = [
+        f"# 手势统计（{app_version}）",
+        "",
+        "| 场景 | 次数 | 达标 / 总数 | 指标详情 | 验收标准 | poll_ms p50 / max | 失败分布 |",
+        "| --- | ---: | ---: | --- | --- | ---: | --- |",
+    ]
+    if s04_list:
+        s4 = stats["s04"]["summary"]
+        md_lines.append(
+            f"| S04 | {s4['total']} | {s4['matched']}/{s4['total']} ({s4['rate']:.1%}) | "
+            f"进槽 {s4['in_slot_matched']}/{s4['in_slot_total']}，槽外 {s4['out_slot_matched']}/{s4['out_slot_total']}（SNAP_BACK {s4['snap_back_loud']}/{s4['out_slot_total']}） | "
+            f"一致率 ≥ 95% | {s4['poll_ms_p50']} / {s4['poll_ms_max']} | {fmt_fail(s4['failures'])} |"
+        )
+    if s10_list:
+        s10 = stats["s10"]["summary"]
+        md_lines.append(
+            f"| S10 | {s10['total']} | {s10['passed']}/{s10['total']} ({s10['rate']:.1%}) | "
+            f"68–72 命中 {s10['passed']} 次 | ≥ 90% | {s10['poll_ms_p50']} / {s10['poll_ms_max']} | {fmt_fail(s10['failures'])} |"
+        )
+    if s11_list:
+        s11 = stats["s11"]["summary"]
+        md_lines.append(
+            f"| S11 | {s11['total']} | {s11['passed']}/{s11['total']} ({s11['rate']:.1%}) | "
+            f"goal {s11['passed']}/{s11['total']}，过载 {s11['overload']}/{s11['total']} ({s11['overload_rate']:.1%}) | "
+            f"goal ≥ 90%，过载 ≤ 5% | {s11['poll_ms_p50']} / {s11['poll_ms_max']} | {fmt_fail(s11['failures'])} |"
+        )
+    if s05_list:
+        s5 = stats["s05"]["summary"]
+        md_lines.append(
+            f"| S05 | {s5['total']} | {s5['within_300ms']}/{s5['total']} ({s5['rate']:.1%}) | "
+            f"菜单出现 {s5['menu_shown']}/{s5['total']}，松手延迟 p50={s5['lag_ms_p50']}ms / max={s5['lag_ms_max']}ms | "
+            f"全部出现且 ≤ 300ms | {s5['poll_ms_p50']} / {s5['poll_ms_max']} | {fmt_fail(s5['failures'])} |"
+        )
+    md = "\n".join(md_lines) + "\n"
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "gesture-stats.json").write_text(json.dumps(stats, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (out_dir / "gesture-stats.md").write_text(md, encoding="utf-8")
+    print("\n" + md, flush=True)
+    return stats
+
+
+def render_times_markdown(app_version, grouped_rows):
+    lines = [
+        f"# 手势统计（{app_version}，`--times` 多 seed 运行）",
+        "",
+        "| 任务 | 场景 | 次数 | 成功 / 总数 | 成功率 | poll_ms p50 / max | 备注 |",
+        "| --- | --- | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for tid, runs in grouped_rows.items():
+        scene = runs[0]["scene"]
+        passed = sum(1 for r in runs if r["ok"])
+        p50s = [g["poll_ms_p50"] for r in runs for g in (r.get("gestures") or []) if g.get("poll_ms_p50") is not None]
+        maxs = [g["poll_ms_max"] for r in runs for g in (r.get("gestures") or []) if g.get("poll_ms_max") is not None]
+        p50_txt, max_txt = _fmt_ms_stats(p50s, maxs)
+        fails = [f"seed={r['seed']}({r['error'] or 'miss'})" for r in runs if not r["ok"]]
+        note = ", ".join(fails[:5]) + (f" ...+{len(fails) - 5}" if len(fails) > 5 else "") if fails else "全部通过"
+        lines.append(
+            f"| {tid} | {scene} | {len(runs)} | {passed}/{len(runs)} | {passed / len(runs):.1%} | {p50_txt} / {max_txt} | {note} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
 def main():
     repo_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description="Run Agent-VScreen evaluation suite.")
@@ -692,6 +1141,13 @@ def main():
     parser.add_argument("--tasks-dir", default=str(repo_root / "tools" / "eval" / "tasks"))
     parser.add_argument("--baseline", default=str(repo_root / "tools" / "eval" / "baseline.json"))
     parser.add_argument("--write-baseline", action="store_true", help="Copy result.json to baseline path")
+    parser.add_argument("--tasks", default=None, help="Comma-separated task IDs to run (e.g. T04b,T10b,T11b,T05b)")
+    parser.add_argument("--times", type=int, default=1, help="Repeat each selected task N times with seed +1 per run")
+    parser.add_argument("--gesture-stats", action="store_true", help="Run Stage 4 gesture acceptance suite (40x S04, 20x S10, 20x S11, 20x S05)")
+    parser.add_argument("--s04-runs", type=int, default=40, help="S04 drag runs for --gesture-stats")
+    parser.add_argument("--s10-runs", type=int, default=20, help="S10 seek runs for --gesture-stats")
+    parser.add_argument("--s11-runs", type=int, default=20, help="S11 press-hold charge runs for --gesture-stats")
+    parser.add_argument("--s05-runs", type=int, default=20, help="S05 press-hold menu runs for --gesture-stats")
     parser.add_argument(
         "--repeat-check",
         action="store_true",
@@ -717,9 +1173,55 @@ def main():
     except Exception as e:
         print(f"WARN: remembered eval failed: {e}", flush=True)
 
+    out_dir = Path(args.out)
+    if args.gesture_stats:
+        run_gesture_stats(
+            token,
+            out_dir,
+            app_version,
+            s04_runs=args.s04_runs,
+            s10_runs=args.s10_runs,
+            s11_runs=args.s11_runs,
+            s05_runs=args.s05_runs,
+        )
+        return
+
     task_files = sorted(Path(args.tasks_dir).glob("*.json"))
     if not task_files:
         raise SystemExit(f"No task files in {args.tasks_dir}")
+    only_ids = {x.strip() for x in args.tasks.split(",") if x.strip()} if args.tasks else None
+
+    if args.times > 1:
+        grouped = {}
+        for tf in task_files:
+            task = json.loads(tf.read_text(encoding="utf-8"))
+            if only_ids is not None and task["id"] not in only_ids:
+                continue
+            if not version_allows(app_version, task.get("since")):
+                continue
+            base_seed = int(task.get("seed", 7))
+            runs = []
+            for k in range(args.times):
+                t_copy = dict(task)
+                t_copy["seed"] = base_seed + k
+                res = run_task(token, t_copy)
+                runs.append(res)
+                print(
+                    f"[{'PASS' if res['ok'] else 'FAIL'}] {res['id']} ({res['scene']}) "
+                    f"run={k + 1}/{args.times} seed={t_copy['seed']} gestures={res['gestures']} "
+                    f"phone_ms={res['phone_ms']}" + (f" err={res['error']}" if res["error"] else ""),
+                    flush=True,
+                )
+            grouped[task["id"]] = runs
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "result.json").write_text(
+            json.dumps({"app_version": app_version, "times": args.times, "tasks": grouped}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        md = render_times_markdown(app_version, grouped)
+        (out_dir / "result.md").write_text(md, encoding="utf-8")
+        print("\n" + md, flush=True)
+        return
 
     rows = []
     skipped = []
@@ -727,6 +1229,8 @@ def main():
 
     for tf in task_files:
         task = json.loads(tf.read_text(encoding="utf-8"))
+        if only_ids is not None and task["id"] not in only_ids:
+            continue
         since = task.get("since")
         if not version_allows(app_version, since):
             skipped.append({"id": task["id"], "scene": task["scene"], "since": since})
@@ -811,7 +1315,6 @@ def main():
             "tasks": repeat_rows,
         }
 
-    out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "result.json").write_text(json.dumps(result_obj, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     md = render_markdown(
@@ -834,7 +1337,7 @@ def main():
     if totals["false_quiet"] > 0:
         print(f"FAIL: false_quiet (误静默) = {totals['false_quiet']} (must be 0)", file=sys.stderr)
         failed_gate = True
-    if regressed:
+    if regressed and only_ids is None:
         print(f"FAIL: baseline-passing task(s) failed or missing: {', '.join(regressed)}", file=sys.stderr)
         failed_gate = True
     if repeat_rows is not None:

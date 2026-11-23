@@ -25,6 +25,7 @@
 做一段操作（最多 40 步，用 ; 或换行分开），返回四段。不带步骤 = 看一眼（等画面稳定，最多 3 秒）。
 步骤：
       tap 目标 | press 目标 [时长，如 1.2s；纯数字是毫秒] | swipe x1 y1 x2 y2 [时长] | drag x1 y1 x2 y2 [x3 y3 …] [时长]
+      闭环手势（按着边看边松手）：press 目标 hold until <条件> [最长]（默认 5s，上限 10s）| drag x1 y1 x2 y2 […] [时长] hold until <条件> [最长] | drag x1 y1 x2 y2 seek until <条件> [最长]（两点直线小步移动，默认 15s，上限 30s）；手势里的 text:/gone: 必须带 in x1,y1,x2,y2；不做 swipe … until，翻找用 repeat { swipe … } until text:…
       scroll up|down|left|right [#N | x y] | type 文字 | type+ 文字（追加） | type "文字" slow [200ms]（逐字输入） | key 键名 | key ctrl+a（组合键：ctrl/shift/alt + 键） | back | enter
       wait <条件> [or <条件>] [最长时长] | wait 2s | use 段名
       目标 = x y | #N（上次【现在】列表里的编号）| 画面上的字（先找完全一样的，再找包含的；只写一个数＝点画面上的这个数字）
@@ -39,6 +40,9 @@
 真正付钱的按钮（支付、提交订单、转账）、用户设为“每次询问”的应用（用户选“谨慎”档时还有删除等不可撤销的按钮）：手机上会弹出确认，用户点了允许才会做（最多等 60 秒；没答复是 CONFIRM_PENDING，告诉用户去手机上允许，再重发）。
 例：act "tap 搜索; type 耳机; key enter until text:综合"
         act "drag 300 900 800 900" --watch 2s
+        act "drag 200 1500 540 600 hold until color:540,600=#4CAF50 2s"
+        act "drag 100 800 980 800 seek until text:70 in 400,600,700,700"
+        act "press 540 1600 hold until text:9* in 300,1400,800,1500 8s"
         act --stop "text:到货" --keep notify --for 2h
 
 - `--stop <条件>` 整段一直盯着，满足就停下，后面的步骤不做
@@ -272,6 +276,8 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `OUT_OF_BOUNDS` | `fix_command` | 坐标在副屏外面。 |
 | `INVALID_STEP` | `fix_command` | 步骤写法不对，整段没有执行。 |
 | `INVALID_ARGS` | `fix_command` | 参数不对，命令没有执行。 |
+| `GESTURE_NEEDS_UNTIL` | `fix_command` | 闭环手势（hold / seek）必须带 until <条件>，整段没有执行。 |
+| `GESTURE_NEEDS_AREA` | `fix_command` | 闭环手势里的 text: / gone: 条件必须带区域（in x1,y1,x2,y2），整段没有执行。 |
 | `UNKNOWN_OPTION` | `fix_command` | 这个命令没有这个参数，命令没有执行。 |
 | `UNKNOWN_COMMAND` | `fix_command` | 没有这个命令。点击、输入、滑动、等待都写成 act 的步骤。 |
 | `FOCUS_ELSEWHERE` | `look` | 有焦点的输入框不是你刚点的地方，没有输入。 |
@@ -375,6 +381,7 @@ scope: `operate` · runs in the screen queue
 do a stretch of steps (up to 40, separated by ; or newlines), returns four blocks. No steps = take a look (waits for the picture to settle, up to 3 s).
 steps:
       tap <target> | press <target> [duration, e.g. 1.2s; a bare number is ms] | swipe x1 y1 x2 y2 [duration] | drag x1 y1 x2 y2 [x3 y3 …] [duration]
+      closed-loop gestures (judge while holding): press <target> hold until <cond> [max] (default 5s, max 10s) | drag x1 y1 x2 y2 […] [duration] hold until <cond> [max] | drag x1 y1 x2 y2 seek until <cond> [max] (2-point line in small steps, default 15s, max 30s); text:/gone: inside hold/seek must include in x1,y1,x2,y2; no swipe … until — use repeat { swipe … } until text:…
       scroll up|down|left|right [#N | x y] | type <text> | type+ <text> (append) | type "<text>" slow [200ms] (one character at a time) | key <name> | key ctrl+a (shortcut: ctrl/shift/alt + key) | back | enter
       wait <condition> [or <condition>] [max duration] | wait 2s | use <segment>
       target = x y | #N (number in the last [Now] list) | text on the screen (exact match first, then contains; a single number = tap that number on the screen)
@@ -389,6 +396,9 @@ A step that does not reach what it expects stops the stretch there, skips the re
 Buttons that actually spend money (pay, place order, transfer) and apps the user set to "ask every time" (in the user's "careful" mode also irreversible buttons such as delete): the phone asks the user, and the step is done only after the user allows it (waits up to 60 s; no answer is CONFIRM_PENDING: tell the user to allow it on the phone, then send again).
 e.g. act "tap Search; type headphones; key enter until text:All"
          act "drag 300 900 800 900" --watch 2s
+         act "drag 200 1500 540 600 hold until color:540,600=#4CAF50 2s"
+         act "drag 100 800 980 800 seek until text:70 in 400,600,700,700"
+         act "press 540 1600 hold until text:9* in 300,1400,800,1500 8s"
          act --stop "text:In stock" --keep notify --for 2h
 
 - `--stop <condition>` watched for the whole stretch; when met it stops and skips the rest
@@ -622,6 +632,8 @@ scope: `look`
 | `OUT_OF_BOUNDS` | `fix_command` | The point is outside the screen. |
 | `INVALID_STEP` | `fix_command` | A step is written wrong; nothing in the stretch ran. |
 | `INVALID_ARGS` | `fix_command` | Bad arguments; the command did not run. |
+| `GESTURE_NEEDS_UNTIL` | `fix_command` | Closed-loop gestures (hold / seek) require until <condition>; nothing in the stretch ran. |
+| `GESTURE_NEEDS_AREA` | `fix_command` | text: / gone: conditions inside a closed-loop gesture must include a region (in x1,y1,x2,y2); nothing in the stretch ran. |
 | `UNKNOWN_OPTION` | `fix_command` | The command has no such option; it did not run. |
 | `UNKNOWN_COMMAND` | `fix_command` | No such command. Tapping, typing, swiping and waiting are all act steps. |
 | `FOCUS_ELSEWHERE` | `look` | The focused input box is not where you just tapped; nothing was typed. |

@@ -1,0 +1,104 @@
+name: Gesture stats (manual)
+# 2.0.0-beta4 (4.6 & 4.7): manual repeated gesture acceptance suite (40x S04, 20x S10, 20x S11, 20x S05)
+# using the same emulator setup as device.yml. Not triggered on every PR to keep device.yml fast.
+on:
+  workflow_dispatch:
+    inputs:
+      s04_runs:
+        description: "Number of S04 drag runs (half in-slot, half out-of-slot)"
+        required: false
+        default: "40"
+      s10_runs:
+        description: "Number of S10 seek slider runs"
+        required: false
+        default: "20"
+      s11_runs:
+        description: "Number of S11 press-hold charge runs"
+        required: false
+        default: "20"
+      s05_runs:
+        description: "Number of S05 press-hold menu runs"
+        required: false
+        default: "20"
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      AVS_BUILD_DIR: ${{ github.workspace }}/.avs-build
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: tsbridge/go.mod
+          cache-dependency-path: tsbridge/go.sum
+      - uses: gradle/actions/setup-gradle@v5
+      - run: ./tsbridge/build.sh
+      - run: ./gradlew --no-daemon :app:assembleDebug :torture:assembleDebug
+      - uses: actions/upload-artifact@v5
+        with:
+          name: gesture-stats-apks
+          path: |
+            ${{ env.AVS_BUILD_DIR }}/app/outputs/apk/debug/app-debug.apk
+            ${{ env.AVS_BUILD_DIR }}/torture/outputs/apk/debug/torture-debug.apk
+          retention-days: 3
+  gesture-stats:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: gesture-stats-apks
+          path: test-apks
+      - name: Fetch Shizuku
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find test-apks -name '*.apk' -exec mv {} test-apks/ \;
+          gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --output test-apks/shizuku.apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          disable-animations: true
+          script: |
+            mkdir -p gesture-out
+            python3 tools/eval/run.py \
+              --apk test-apks/torture-debug.apk \
+              --out gesture-out \
+              --gesture-stats \
+              --s04-runs "${{ inputs.s04_runs || '40' }}" \
+              --s10-runs "${{ inputs.s10_runs || '20' }}" \
+              --s11-runs "${{ inputs.s11_runs || '20' }}" \
+              --s05-runs "${{ inputs.s05_runs || '20' }}" \
+              > gesture-out/gesture-stats.log 2>&1
+            rc=$?
+            adb logcat -d > gesture-out/logcat.txt
+            cat gesture-out/gesture-stats.log
+            if [ -f gesture-out/gesture-stats.md ] && [ -n "$GITHUB_STEP_SUMMARY" ]; then
+              cat gesture-out/gesture-stats.md >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit "$rc"
+      - if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: gesture-stats-results
+          path: gesture-out/*
+          if-no-files-found: warn
+          retention-days: 7

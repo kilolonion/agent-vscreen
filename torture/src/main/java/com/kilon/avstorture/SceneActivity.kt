@@ -106,12 +106,14 @@ class SceneActivity : Activity() {
         } else {
             prefs.getInt(PresetReceiver.EXTRA_SEED, PresetReceiver.DEFAULT_SEED)
         }
-        AvstLog.emit(
-            scene = currentScene,
-            ev = "enter",
-            ok = true,
-            data = JSONObject().put("seed", currentSeed),
-        )
+        if (currentScene != "S04") {
+            AvstLog.emit(
+                scene = currentScene,
+                ev = "enter",
+                ok = true,
+                data = JSONObject().put("seed", currentSeed),
+            )
+        }
         val rng = SceneRng(currentSeed)
         when (currentScene) {
             "S01" -> buildS01List()
@@ -948,6 +950,16 @@ private class DragBoardView(
             val hy = h * (1500f / 2400f) + j()
             cards += Card(i + 1, hx, hy, hx, hy, -1, colors[i])
         }
+        val cardsArr = org.json.JSONArray()
+        for (c in cards) cardsArr.put(org.json.JSONArray().put(c.homeX.roundToInt()).put(c.homeY.roundToInt()))
+        val slotsArr = org.json.JSONArray()
+        for (s in slots) slotsArr.put(org.json.JSONArray().put(s.x.roundToInt()).put(s.y.roundToInt()))
+        AvstLog.emit(
+            scene = "S04",
+            ev = "enter",
+            ok = true,
+            data = JSONObject().put("seed", seed).put("cards", cardsArr).put("slots", slotsArr),
+        )
     }
 
     private fun nearestFreeSlot(card: Card): Int {

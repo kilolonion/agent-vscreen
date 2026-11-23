@@ -226,6 +226,8 @@ class VScreenDisplay private constructor(
         }
     private val throttle = CaptureThrottle()
     @Volatile private var latestCaptureMs = -1L
+    /** Elapsed-realtime when [latestFrame] was captured (-1 = none yet). */
+    val latestCaptureAtMs: Long get() = latestCaptureMs
     @Volatile private var fullConversions = 0L
     @Volatile var released = false
         private set
