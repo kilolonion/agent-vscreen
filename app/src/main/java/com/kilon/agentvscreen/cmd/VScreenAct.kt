@@ -1491,8 +1491,9 @@ internal fun VScreenOffloadHandler.payGuardCheck(sid: String, displayId: Int, la
     // A button on the row of an input box (its "clear" ×) acts on the box, not on the user's data.
     val besideInput = synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] }?.list
         ?.any { it.editable && y in it.box.top..it.box.bottom } == true
-    val kind = VScreenGame.commitKind(l, besideInput) ?: return
     val pkg = runCatching { VScreenShell.topPackage(displayId) }.getOrNull() ?: "?"
+    val screenText = synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] }?.list?.joinToString(" ") { it.text }.orEmpty()
+    val kind = consentClass(context, pkg, l, besideInput, screenText) ?: return
     val app = VScreenKnowledge.label(pkg) ?: pkg
     if (fromRule) {
         throw StepRefused(
@@ -1504,10 +1505,51 @@ internal fun VScreenOffloadHandler.payGuardCheck(sid: String, displayId: Int, la
         )
     }
     try {
-        com.kilon.agentvscreen.host.Consent.require(context, "commit:$pkg:${VScreenOcr.norm(l).take(40)}",
-            if (kind != "irreversible") tr("点付费/购买按钮“${l.take(20)}”", "tap the payment / purchase button \"${l.take(20)}\"") else tr("点不可撤销的按钮“${l.take(20)}”", "tap the irreversible button \"${l.take(20)}\""),
-            tr("在 $app 里点 ($x,$y) 的“${l.take(30)}”", "tap \"${l.take(30)}\" at ($x,$y) in $app"), kind = kind)
+        val what = when (kind) {
+            com.kilon.agentvscreen.host.Consent.MONEY -> tr("点付钱的按钮“${l.take(20)}”", "tap the payment button \"${l.take(20)}\"")
+            com.kilon.agentvscreen.host.Consent.DESTROY -> tr("点做了就回不来的按钮“${l.take(20)}”", "tap \"${l.take(20)}\", which cannot be undone")
+            else -> tr("点要小心的按钮“${l.take(20)}”", "tap \"${l.take(20)}\", which needs care")
+        }
+        com.kilon.agentvscreen.host.Consent.require(context, "commit:$pkg:${VScreenOcr.norm(l).take(40)}", what,
+            tr("在 $app 里点 ($x,$y) 的“${l.take(30)}”", "tap \"${l.take(30)}\" at ($x,$y) in $app"), kind = kind, pkg = pkg)
     } catch (e: ActionError) { throw StepRefused(e.code, e.message ?: e.code) }
+}
+
+/**
+ * 2.0.0-beta8 (feedback 4): the class of a tap. The button's own words first ([VScreenGame.consentKind]); then one
+ * generic signal for system dialogs whose button only says "OK": the confirm button of the phone's own uninstaller
+ * (whatever its package on this ROM: the app that handles ACTION_DELETE) or of the system settings asking to clear an
+ * app's data is a step that cannot be undone. No app or brand is named.
+ */
+internal fun consentClass(ctx: android.content.Context, pkg: String, label: String, besideInput: Boolean, screenText: String): String? {
+    VScreenGame.consentKind(label, besideInput)?.let { return it }
+    if (!CONFIRM_WORD.matches(label.trim())) return null
+    val sys = SystemDialogs.of(ctx)
+    return when {
+        pkg in sys.uninstallers && UNINSTALL_TEXT.containsMatchIn(screenText) -> com.kilon.agentvscreen.host.Consent.DESTROY
+        pkg in sys.settings && CLEAR_DATA_TEXT.containsMatchIn(screenText) -> com.kilon.agentvscreen.host.Consent.DESTROY
+        else -> null
+    }
+}
+
+private val CONFIRM_WORD = Regex("^(确定|确认|好|好的|是|继续|卸载|删除|清除|ok|yes|continue|uninstall|delete|clear)$", RegexOption.IGNORE_CASE)
+private val UNINSTALL_TEXT = Regex("卸载|uninstall", RegexOption.IGNORE_CASE)
+private val CLEAR_DATA_TEXT = Regex("清除数据|清除存储|清除应用数据|删除应用数据|清空数据|删除所有数据|clear data|clear storage|delete app data|all.*data.*deleted", RegexOption.IGNORE_CASE)
+
+/** The packages of this phone's uninstaller and settings, resolved from the system (cached). */
+internal class SystemDialogs(val uninstallers: Set<String>, val settings: Set<String>) {
+    companion object {
+        @Volatile private var cached: SystemDialogs? = null
+        fun of(ctx: android.content.Context): SystemDialogs = cached ?: runCatching {
+            val pm = ctx.packageManager
+            fun handlers(i: android.content.Intent) = pm.queryIntentActivities(i, 0).mapNotNull { it.activityInfo?.packageName }.toSet()
+            val del = handlers(android.content.Intent(android.content.Intent.ACTION_DELETE, android.net.Uri.parse("package:${ctx.packageName}"))) +
+                handlers(android.content.Intent(android.content.Intent.ACTION_UNINSTALL_PACKAGE, android.net.Uri.parse("package:${ctx.packageName}")))
+            val set = handlers(android.content.Intent(android.provider.Settings.ACTION_SETTINGS)) +
+                handlers(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:${ctx.packageName}")))
+            SystemDialogs(del, set)
+        }.getOrDefault(SystemDialogs(emptySet(), emptySet())).also { cached = it }
+    }
 }
 
 /** The user's per-app rule for the app on the screen (read-only: no taps / typing / gestures; blocked: only key back; ask: confirmed on the phone). */
@@ -1536,7 +1578,7 @@ internal fun VScreenOffloadHandler.appRuleForPkg(pkg: String, step: Step, fromRu
                     ),
                 )
             }
-            try { com.kilon.agentvscreen.host.Consent.require(context, v.key, tr("在 $app 里操作", "act in $app"), tr("这一段从“${step.raw.take(40)}”开始；允许后 5 分钟内不再问", "this stretch starts with \"${step.raw.take(40)}\"; once allowed you are not asked again for 5 minutes"), reusable = true, kind = "app") }
+            try { com.kilon.agentvscreen.host.Consent.require(context, v.key, tr("在 $app 里操作", "act in $app"), tr("这一段从“${step.raw.take(40)}”开始", "this stretch starts with \"${step.raw.take(40)}\""), kind = com.kilon.agentvscreen.host.Consent.APP, pkg = pkg) }
             catch (e: ActionError) { throw StepRefused(e.code, e.message ?: e.code) }
         }
         else -> {}

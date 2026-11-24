@@ -100,14 +100,11 @@ object ApiConfig {
         set(v) { prefs.edit().putBoolean("remote_signed", v).apply() }
 
     /**
-     * 1.2.0-beta2: how much the agent may do without asking the user on the phone. "auto" (default): only steps that
-     * move money ask. "careful": steps toward a purchase, irreversible buttons, force-stop and taking an app off the
-     * main screen ask too. An app the user set to "ask every time" always asks.
+     * The global "放手跑 / 谨慎" before 2.0.0-beta8 (feedback 2). Read once to migrate each agent to its own level
+     * ([com.kilon.agentvscreen.api.Tokens.migrateLevel]); nothing sets it any more.
      */
-    var autonomy: String
-        get() = prefs.getString("autonomy", "auto").takeIf { it in AUTONOMY } ?: "auto"
-        set(v) { prefs.edit().putString("autonomy", if (v in AUTONOMY) v else "auto").apply() }
-    val AUTONOMY = listOf("auto", "careful")
+    val legacyAutonomy: String
+        get() = prefs.getString("autonomy", "auto").takeIf { it == "auto" || it == "careful" } ?: "auto"
 
     /** 1.2: the one app that receives event broadcasts (null = none are sent; events are still queued for `events`). */
     var eventTarget: String?
@@ -140,6 +137,16 @@ object ApiConfig {
       "type": "http",
       "url": "$base/mcp",
       "headers": { "Authorization": "Bearer $token" }
+    }
+  }
+}"""
+
+    /** 2.0.0-beta9 (feedback 1): public MCP config: the address only (OAuth, no token header). */
+    fun mcpJsonPublic(url: String): String = """{
+  "mcpServers": {
+    "agent-vscreen": {
+      "type": "http",
+      "url": "$url"
     }
   }
 }"""

@@ -92,7 +92,7 @@ class V200Beta6Test {
         assertEquals(Risk.NEW_CLIENT, Risk.evaluate(call, spec("look"), emptyArgs(), nowMs.get()))
         assertEquals(Risk.NEW_CLIENT, Risk.evaluate(call, spec("launch"), emptyArgs(), nowMs.get()))
 
-        // Approve NEW_CLIENT for local; local look commands now pass, tailnet peer still blocked.
+        // Approve NEW_CLIENT; 2.0.0-beta9 (changed on purpose): the approval is per agent, so the same agent on a tailnet device passes too.
         val req = StrongConfirm.createUiRequest(ctx, Risk.NEW_CLIENT, Tokens.Token("tok1", "agent-a", "k", "system", 1L), "apps") {}
         assertTrue(StrongConfirm.approve(ctx, req.id, StrongConfirm.BY_BIOMETRIC))
         assertNull(Risk.evaluate(call, spec("apps"), emptyArgs(), nowMs.get()))
@@ -100,74 +100,41 @@ class V200Beta6Test {
         val remoteCall = Call("s1", tokenId = "tok1", tokenName = "agent-a", scopes = setOf("look", "operate", "system"), peer = "laptop.ts.net")
         assertNull(Risk.evaluate(remoteCall, spec("status"), emptyArgs(), nowMs.get()))
         assertEquals(0, Call.with(remoteCall) { handler.handle(NativeOffloadRequest(listOf("vscreen", "help"), "s1")) }.exitCode)
-        assertEquals(Risk.NEW_CLIENT, Risk.evaluate(remoteCall, spec("apps"), emptyArgs(), nowMs.get()))
+        assertNull(Risk.evaluate(remoteCall, spec("apps"), emptyArgs(), nowMs.get()))
     }
 
     @Test
-    fun scopeOperateSystemSessionAgeAndRateTriggerAndExpire() {
-        // 2.0.0-beta8 (B2 / Ruling 5): default level is STANDARD; explicitly exercise STRICT 8h/24h expiry rules here.
-        Risk.setSecurityLevel(ctx, Risk.SecurityLevel.STRICT)
+    fun rateAsksAtCarefulAndARoundAllowSlidesThenExpires() {
+        // 2.0.0-beta9 (changed on purpose): SCOPE_OPERATE / SCOPE_SYSTEM / SESSION_AGE and the global security level are
+        // gone; the agent's own table decides. What is left here: NEW_CLIENT once, then RATE with a tap "this run" allow.
+        StrongConfirm.roundIdleMs = { 10 * 60_000L }
         val t0 = nowMs.get()
         val call = Call("s1", tokenId = "tok2", tokenName = "agent-b", scopes = setOf("look", "operate", "system"), peer = null)
         val tok = Tokens.Token("tok2", "agent-b", "k", "system", t0)
-
-        // 1) Approve NEW_CLIENT first.
         val rNew = StrongConfirm.createUiRequest(ctx, Risk.NEW_CLIENT, tok, "launch") {}
         StrongConfirm.approve(ctx, rNew.id, StrongConfirm.BY_BIOMETRIC)
-
-        // 2) SCOPE_OPERATE does not trigger on LOOK, triggers on OPERATE, passes once approved (permanent).
-        assertNull(Risk.evaluate(call, spec("apps"), emptyArgs(), t0))
-        assertEquals(Risk.SCOPE_OPERATE, Risk.evaluate(call, spec("launch"), emptyArgs(), t0))
-        val rOp = StrongConfirm.createUiRequest(ctx, Risk.SCOPE_OPERATE, tok, "launch") {}
-        StrongConfirm.approve(ctx, rOp.id, StrongConfirm.BY_BIOMETRIC)
-        assertNull(Risk.evaluate(call, spec("launch"), emptyArgs(), t0))
-
-        // 3) SCOPE_SYSTEM triggers on SYSTEM (`stop --force`), valid 24h, expires at 24h + 1ms.
         val forceArgs = VScreenOptions.args("stop", listOf("com.example.a", "--force"))
-        assertEquals(Risk.SCOPE_SYSTEM, Risk.evaluate(call, spec("stop"), forceArgs, t0))
-        val rSys = StrongConfirm.createUiRequest(ctx, Risk.SCOPE_SYSTEM, tok, "stop") {}
-        StrongConfirm.approve(ctx, rSys.id, StrongConfirm.BY_BIOMETRIC)
-        assertNull(Risk.evaluate(call, spec("stop"), forceArgs, t0 + Risk.SESSION_AGE_MS))
+        // No age or scope dimension any more, even a day later.
+        assertNull(Risk.evaluate(call, spec("launch"), emptyArgs(), t0 + 25 * 60 * 60_000L))
+        assertNull(Risk.evaluate(call, spec("stop"), forceArgs, t0 + 25 * 60 * 60_000L))
 
-        // 4) SESSION_AGE: at 8h still passes; at 8h + 1ms triggers on OPERATE/SYSTEM but NOT on LOOK.
-        val tWithin = t0 + Risk.SESSION_AGE_MS
-        assertNull(Risk.evaluate(call, spec("launch"), emptyArgs(), tWithin))
-        val tExpired = t0 + Risk.SESSION_AGE_MS + 1L
-        assertNull(Risk.evaluate(call, spec("apps"), emptyArgs(), tExpired))
-        assertEquals(Risk.SESSION_AGE, Risk.evaluate(call, spec("launch"), emptyArgs(), tExpired))
-        assertEquals(Risk.SESSION_AGE, Risk.evaluate(call, spec("stop"), forceArgs, tExpired))
-
-        // Re-confirm SESSION_AGE at t0 + 18h so SESSION_AGE is fresh across the 24h SCOPE_SYSTEM boundary.
-        val tReconfirm = t0 + 18 * 60 * 60_000L
-        nowMs.set(tReconfirm)
-        val rAge = StrongConfirm.createUiRequest(ctx, Risk.SESSION_AGE, tok, "launch") {}
-        StrongConfirm.approve(ctx, rAge.id, StrongConfirm.BY_HOLD)
-        assertNull(Risk.evaluate(call, spec("launch"), emptyArgs(), tReconfirm + 1_000L))
-        // SCOPE_SYSTEM still valid at 24h - 1ms, expires at 24h + 1ms.
-        assertNull(Risk.evaluate(call, spec("stop"), forceArgs, t0 + Risk.SCOPE_SYSTEM_MS - 1L))
-        assertEquals(Risk.SCOPE_SYSTEM, Risk.evaluate(call, spec("stop"), forceArgs, t0 + Risk.SCOPE_SYSTEM_MS + 1L))
-
-        // 5) RATE: 120 input actions within 60s allowed; 121st triggers RATE; approval lasts 60 min; sliding window expires.
-        val tRate = tReconfirm + 10_000L
-        nowMs.set(tRate)
-        repeat(Risk.RATE_MAX_PER_MIN) { Risk.recordInputAction("tok2", tRate) }
-        assertNull(Risk.evaluate(call, spec("launch"), emptyArgs(), tRate))
-        Risk.recordInputAction("tok2", tRate) // 121st
-        assertEquals(Risk.RATE, Risk.evaluate(call, spec("launch"), emptyArgs(), tRate))
-
-        // Approve RATE -> quiet for 60 min even when still >120/min.
-        val rRate = StrongConfirm.createUiRequest(ctx, Risk.RATE, tok, "act") {}
-        StrongConfirm.approve(ctx, rRate.id, StrongConfirm.BY_BIOMETRIC)
-        assertNull(Risk.evaluate(call, spec("launch"), emptyArgs(), tRate + 500L))
-
-        // After 60 min + 1ms, RATE approval expired; fresh burst of 121 actions triggers RATE again.
-        val tAfterRateExp = tRate + Risk.RATE_APPROVAL_MS + 1L
-        nowMs.set(tAfterRateExp)
-        // Old 60s window emptied -> no RATE yet.
-        assertEquals(0, Risk.inputActionCount("tok2", tAfterRateExp))
-        assertNull(Risk.evaluate(call, spec("launch"), emptyArgs(), tAfterRateExp))
-        repeat(Risk.RATE_MAX_PER_MIN + 1) { Risk.recordInputAction("tok2", tAfterRateExp) }
-        assertEquals(Risk.RATE, Risk.evaluate(call, spec("launch"), emptyArgs(), tAfterRateExp))
+        // RATE: 120 a minute pass; the 121st asks (unknown token → asks, like 稳妥).
+        repeat(Risk.RATE_MAX_PER_MIN) { Risk.recordInputAction("tok2", t0) }
+        assertNull(Risk.evaluate(call, spec("launch"), emptyArgs(), t0))
+        Risk.recordInputAction("tok2", t0)
+        assertEquals(Risk.RATE, Risk.evaluate(call, spec("launch"), emptyArgs(), t0))
+        val err = try { Risk.check(ctx, call, spec("launch"), emptyArgs()); null } catch (e: com.kilon.agentvscreen.core.BackgroundOperation.ActionError) { e }
+        assertEquals("NEEDS_CONFIRM", err?.code)
+        val id = err!!.data!!.getJSONObject("confirm").getString("id")
+        val req = StrongConfirm.pending.value.first { it.id == id }
+        assertEquals(Risk.Strength.TAP, req.strength)
+        assertTrue(StrongConfirm.approve(ctx, id, StrongConfirm.BY_TAP, range = StrongConfirm.Range.ROUND))
+        assertNull(Risk.evaluate(call, spec("launch"), emptyArgs(), t0 + 500L))
+        // Used again 9 min later → slides; 10 min after the last use without a call → asks again.
+        repeat(Risk.RATE_MAX_PER_MIN + 1) { Risk.recordInputAction("tok2", t0 + 9 * 60_000L) }
+        assertNull(Risk.evaluate(call, spec("launch"), emptyArgs(), t0 + 9 * 60_000L))
+        repeat(Risk.RATE_MAX_PER_MIN + 1) { Risk.recordInputAction("tok2", t0 + 20 * 60_000L) }
+        assertEquals(Risk.RATE, Risk.evaluate(call, spec("launch"), emptyArgs(), t0 + 20 * 60_000L))
     }
 
     @Test
@@ -217,6 +184,7 @@ class V200Beta6Test {
 
     @Test
     fun beta6MigrationMigratesOnlyUsedLocalTokensNeverTailnet() {
+        // 2.0.0-beta9 (changed on purpose): only NEW_CLIENT is migrated; the old scope approvals no longer exist.
         val t0 = nowMs.get()
         val usedOperate = Tokens.Token("u1", "used-op", "k1", "operate", t0 - 10_000, lastUsedAt = t0 - 5_000)
         val usedLook = Tokens.Token("u2", "used-look", "k2", "look", t0 - 10_000, lastUsedAt = t0 - 5_000)
@@ -224,18 +192,12 @@ class V200Beta6Test {
         val revokedOp = Tokens.Token("u4", "revoked-op", "k4", "operate", t0 - 10_000, lastUsedAt = t0 - 1_000, revoked = true)
 
         val added = StrongConfirm.migrateTokens(listOf(usedOperate, usedLook, unusedOp, revokedOp), t0)
-        assertEquals(3, added) // u1: NEW_CLIENT + SCOPE_OPERATE, u2: NEW_CLIENT only
-
+        assertEquals(2, added)
         assertTrue(StrongConfirm.hasApproval(Risk.NEW_CLIENT, "u1", Risk.CLIENT_LOCAL, t0))
-        assertTrue(StrongConfirm.hasApproval(Risk.SCOPE_OPERATE, "u1", Risk.CLIENT_LOCAL, t0))
-        assertFalse(StrongConfirm.hasApproval(Risk.NEW_CLIENT, "u1", "macbook", t0)) // tailnet NOT migrated
-
+        assertFalse(StrongConfirm.hasApproval(Risk.NEW_CLIENT, "u1", "macbook", t0))
         assertTrue(StrongConfirm.hasApproval(Risk.NEW_CLIENT, "u2", Risk.CLIENT_LOCAL, t0))
-        assertFalse(StrongConfirm.hasApproval(Risk.SCOPE_OPERATE, "u2", Risk.CLIENT_LOCAL, t0))
-
         assertFalse(StrongConfirm.hasApproval(Risk.NEW_CLIENT, "u3", Risk.CLIENT_LOCAL, t0))
         assertFalse(StrongConfirm.hasApproval(Risk.NEW_CLIENT, "u4", Risk.CLIENT_LOCAL, t0))
-
         val records = StrongConfirm.approvals.value
         assertTrue(records.all { it.by == StrongConfirm.BY_MIGRATED && it.client == Risk.CLIENT_LOCAL })
     }
@@ -244,10 +206,11 @@ class V200Beta6Test {
     fun consentRequireRoutesThroughStrongConfirmAndTrustSetRunsOnApproveOnly() {
         val call = Call("s1", tokenId = "tokC", tokenName = "agent-c", scopes = setOf("look", "operate", "system"))
         // Consent.require creates a StrongConfirm HIGH_RISK request and throws CONFIRM_PENDING on timeout.
+        // 2.0.0-beta9 (changed on purpose): no `reusable`; money is a fingerprint, once, and a tap cannot answer it.
         var caught: com.kilon.agentvscreen.core.BackgroundOperation.ActionError? = null
         Call.with(call) {
             try {
-                Consent.require(ctx, "pay:demo", "付款", "支付 10 元", reusable = true, kind = "pay")
+                Consent.require(ctx, "pay:demo", "付款", "支付 10 元", kind = Consent.MONEY)
             } catch (e: com.kilon.agentvscreen.core.BackgroundOperation.ActionError) {
                 caught = e
             }
@@ -256,12 +219,15 @@ class V200Beta6Test {
         val reqId = caught!!.data!!.getJSONObject("confirm").getString("id")
         assertTrue(StrongConfirm.pending.value.any { it.id == reqId && it.risk == Risk.HIGH_RISK })
 
-        // Approving allows resend (and reusable works twice within VALID_MS).
+        assertFalse(StrongConfirm.approve(ctx, reqId, StrongConfirm.BY_TAP))
+        // Approving allows exactly one resend.
         assertTrue(StrongConfirm.approve(ctx, reqId, StrongConfirm.BY_BIOMETRIC))
-        Call.with(call) {
-            Consent.require(ctx, "pay:demo", "付款", "支付 10 元", reusable = true, kind = "pay")
-            Consent.require(ctx, "pay:demo", "付款", "支付 10 元", reusable = true, kind = "pay")
+        Call.with(call) { Consent.require(ctx, "pay:demo", "付款", "支付 10 元", kind = Consent.MONEY) }
+        val again = Call.with(call) {
+            try { Consent.require(ctx, "pay:demo", "付款", "支付 10 元", kind = Consent.MONEY); null }
+            catch (e: com.kilon.agentvscreen.core.BackgroundOperation.ActionError) { e.code }
         }
+        assertEquals("CONFIRM_PENDING", again)
 
         // TRUST_SET runs callback ONLY on approve, never on deny.
         val tok = Tokens.Token("tokT", "agent-t", "k", "operate", nowMs.get())

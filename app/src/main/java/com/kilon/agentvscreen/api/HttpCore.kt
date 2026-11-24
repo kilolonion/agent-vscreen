@@ -208,8 +208,11 @@ internal class AuthFailLimiter(
                 lockedUntil[who] = now + HttpCore.LOCK_MS
                 was < now
             }
-            if (first) {
-                Audit.security("locked_out", who)
+            // 2.0.0-beta9 (rainbow P19): several sources locked within a few minutes made several alerts. Every lockout is
+            // still logged; the user is alerted at most once per lock period (the alert already says what to do).
+            val alert = first && synchronized(fails) { (now - lastAlertAt >= HttpCore.LOCK_MS).also { if (it) lastAlertAt = now } }
+            if (first) Audit.security("locked_out", who)
+            if (alert) {
                 quiet("lockout-notify") {
                     com.kilon.agentvscreen.core.VScreenHandoff.alert(
                         ctx,
@@ -229,8 +232,11 @@ internal class AuthFailLimiter(
         return ApiServer.Resp.err(status, code, msg).plus(headers)
     }
 
+    private var lastAlertAt = 0L
+
     internal fun resetForTests() {
         synchronized(fails) {
+            lastAlertAt = 0L
             fails.clear()
             lockedUntil.clear()
         }

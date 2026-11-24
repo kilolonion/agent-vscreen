@@ -45,7 +45,10 @@ internal fun diagText(context: android.content.Context): String = buildString {
     sw.sortedByDescending { it.second.count }.take(30).forEach { (tag, e) -> append("  $tag ×${e.count}  ${fmt.format(Date(e.at))}  ${e.last.take(160)}\n") }
     append("\n" + tr("最近的命令（不含输入的文字）", "recent commands (typed text not included)") + ":\n")
     Audit.tail(40).forEach { o ->
-        append("  ${fmt.format(Date(o.optLong("at")))} ${o.optString("kind")} ${o.optString("token")} ${o.optString("cmd", o.optString("what"))} → ${o.optString("code", o.optString("answer"))} ${o.optLong("ms").takeIf { it > 0 }?.let { "${it}ms" } ?: ""}\n")
+        // 2.0.0-beta9: where the call came from (tailnet peer, or the real public address of a public client).
+        val from = listOfNotNull(o.optString("source").takeIf { it.isNotEmpty() && it != "local" }, o.optString("src").takeIf { it.isNotEmpty() }?.let { "src=$it" },
+            o.optString("peer").takeIf { it.isNotEmpty() && it != "null" && o.optString("source") == "tailnet" }).joinToString(" ").let { if (it.isEmpty()) "" else " [$it]" }
+        append("  ${fmt.format(Date(o.optLong("at")))} ${o.optString("kind")} ${o.optString("token")}$from ${o.optString("cmd", o.optString("what"))} → ${o.optString("code", o.optString("answer"))} ${o.optLong("ms").takeIf { it > 0 }?.let { "${it}ms" } ?: ""}\n")
     }
     append("\n" + tr("应用日志（最后 150 行）", "app log (last 150 lines)") + ":\n")
     append(AppLogger.tail(150))

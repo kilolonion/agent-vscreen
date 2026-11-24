@@ -644,12 +644,13 @@ class V200Beta7Test {
             onDeny = {},
         )
         assertFalse(pairReq.allowHold)
-        assertEquals(listOf("look", "operate"), pairReq.selectableScopes)
+        // 2.0.0-beta9 (changed on purpose): pairing offers levels (no 全权 over public), default 省心 instead of 只看 (P10).
+        assertEquals(com.kilon.agentvscreen.api.Tokens.PUBLIC_LEVELS, pairReq.selectableScopes)
         assertFalse(StrongConfirm.approve(ctx, pairReq.id, StrongConfirm.BY_HOLD, "operate"))
         assertNull(grantedScope)
         assertTrue(StrongConfirm.approve(ctx, pairReq.id, StrongConfirm.BY_BIOMETRIC, "system"))
-        // "system" clamped back to default "look"
-        assertEquals("look", grantedScope)
+        // "system" is not a public level: falls back to the default (省心)
+        assertEquals(com.kilon.agentvscreen.api.Tokens.FREE, grantedScope)
 
         // Risk.clientOf uses Call.Source.PUBLIC
         val pubCall = Call("s", "t1", "公网·X", setOf("look"), peer = "pub_123", source = Call.Source.PUBLIC)

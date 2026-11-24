@@ -102,7 +102,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         val sid = request.sessionId?.takeIf { it.isNotBlank() } ?: DEFAULT_SESSION
         if (argv.firstOrNull() != "release") com.kilon.agentvscreen.api.Turns.bumpTurn(sid)
         if (argv.firstOrNull() !in setOf(null, "help", "--help", "-h"))
-            com.kilon.agentvscreen.host.quiet("audit") { Audit.command(call?.tokenName ?: "main", call?.peer, sid, argv, r.codeOrDefault, r.exitCode, android.os.SystemClock.elapsedRealtime() - t0, call?.requestId, call?.source?.key) }
+            com.kilon.agentvscreen.host.quiet("audit") { Audit.command(call?.tokenName ?: "main", call?.peer, sid, argv, r.codeOrDefault, r.exitCode, android.os.SystemClock.elapsedRealtime() - t0, call?.requestId, call?.source?.key, call?.srcAddr) }
         if (argv.firstOrNull() !in setOf(null, "help", "--help", "-h"))
             com.kilon.agentvscreen.host.quiet("tasklog") { com.kilon.agentvscreen.core.TaskLog.onCommand(sid, call?.tokenName ?: "main", argv, r.codeOrDefault, r.exitCode, android.os.SystemClock.elapsedRealtime() - t0, r.output, r) }
         return r
@@ -163,12 +163,43 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         })
     }
 
-    /** The caller's token must cover what the command does (look ⊂ operate ⊂ system). */
+    /**
+     * The caller may do what the command does (look ⊂ operate ⊂ system). 2.0.0-beta8 (feedback 2): for a local or
+     * tailnet agent the rows "operate apps" / "system actions" of its own table decide: allowed runs; "ask me" is one
+     * tap on the phone (for this once, this run or today); "not allowed" asks the user once to allow that row
+     * (fingerprint) and runs if they do. A public client is bound by its OAuth grant: beyond it, SCOPE_DENIED.
+     */
     private fun allowed(spec: CommandSpec.Cmd, need: CommandSpec.Scope) {
         val call = Call.current() ?: return
-        if (need.key in call.scopes) return
-        throw ActionError("SCOPE_DENIED", tr("这个令牌（${call.tokenName}）的权限不含“${need.key}”，这条 ${spec.name} 没有执行。权限由用户在 Agent-VScreen › 设置 › 令牌 里定，不要换别的办法绕过；需要的话请用户调整",
-            "This token (${call.tokenName}) does not include \"${need.key}\", so this ${spec.name} did not run. The user sets token permissions in Agent-VScreen › Settings › Tokens; don't work around it, ask the user to change it if needed"))
+        if (need.key == "look") return
+        val tok = com.kilon.agentvscreen.api.Tokens.byId(call.tokenId)
+        if (call.source == Call.Source.PUBLIC || tok == null || tok.publicOnly) {
+            if (need.key in call.scopes && (tok == null || tok.act(need.key) != com.kilon.agentvscreen.api.Policy.Act.ASK)) return
+            if (need.key in call.scopes && tok != null) return askRow(call, spec, need.key)
+            if (need.key == "system") throw ActionError("SCOPE_DENIED", tr("公网 MCP 不开放系统操作（${spec.name}），这是固定的边界，不是设置问题；不要换别的办法绕过。确实需要时，请用户在这台手机上或经 Tailscale 接入一个 agent 来做",
+                "System actions (${spec.name}) are never available over public MCP; this is a fixed boundary, not a setting. Don't work around it. If it is really needed, the user can connect an agent on this phone or over Tailscale to do it"))
+            throw ActionError("SCOPE_DENIED", tr("这个公网客户端（${call.tokenName}）只获准查看，这条 ${spec.name} 没有执行。要操作，请用户在 Agent-VScreen › 接入 › 这个 agent 里把档位改成能操作的（或重新配对时选择）",
+                "This public client (${call.tokenName}) may only look, so this ${spec.name} did not run. To operate, the user can raise its level in Agent-VScreen › Connect › this agent (or pick one when pairing again)"))
+        }
+        when (tok.act(need.key)) {
+            com.kilon.agentvscreen.api.Policy.Act.ALLOW -> return
+            com.kilon.agentvscreen.api.Policy.Act.ASK -> askRow(call, spec, need.key)
+            com.kilon.agentvscreen.api.Policy.Act.DENY -> {
+                val risks = buildList {
+                    if (!com.kilon.agentvscreen.host.StrongConfirm.hasAgentApproval(call.tokenId, com.kilon.agentvscreen.host.Risk.clientOf(call))) add(com.kilon.agentvscreen.host.Risk.NEW_CLIENT)
+                    add(com.kilon.agentvscreen.host.Risk.LEVEL_UP)
+                }
+                com.kilon.agentvscreen.host.StrongConfirm.requireForRisks(context, call, risks, spec.name, targetLevel = "row:${need.key}")
+            }
+        }
+    }
+
+    /** A row set to "ask me": one tap on the phone, which can cover this run or today. */
+    private fun askRow(call: Call, spec: CommandSpec.Cmd, key: String) {
+        val row = com.kilon.agentvscreen.api.Policy.row(key)?.title ?: key
+        com.kilon.agentvscreen.host.StrongConfirm.requireForConsent(context, call, "row:$key:${spec.name}", tr("$row：${spec.name}", "$row: ${spec.name}"),
+            tr("${call.tokenName} 要执行 ${spec.name}", "${call.tokenName} wants to run ${spec.name}"), key, "*",
+            com.kilon.agentvscreen.host.Consent.WAIT_MS, com.kilon.agentvscreen.host.Consent.VALID_MS)
     }
 
     /** Run [block] in the screen queue when the command works on the screen. */

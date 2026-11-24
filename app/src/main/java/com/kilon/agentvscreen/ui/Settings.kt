@@ -92,14 +92,11 @@ fun SettingsTab(bottom: Dp) {
     val ts by com.kilon.agentvscreen.host.Tailnet.status.collectAsState()
     val tokens by Tokens.list.collectAsState()
     val rules by com.kilon.agentvscreen.core.VScreenStore.rules.collectAsState()
-    var autonomy by remember { mutableStateOf(ApiConfig.autonomy) }
-    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     var eventDialog by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<Updates.Outcome?>(null) }
 
     MiuixPage(tr("设置", "Settings"), back = false, bottom = bottom) {
         val pubOn by com.kilon.agentvscreen.host.PublicAccess.enabledFlow.collectAsState()
-        val secLevel by com.kilon.agentvscreen.host.Risk.securityLevelFlow.collectAsState()
 
         // Who can reach the phone: the phone in the middle, each way in as a line, lit when it works.
         SmallTitle(tr("谁能连进来", "Who can connect"))
@@ -130,27 +127,12 @@ fun SettingsTab(bottom: Dp) {
             }
         }
 
-        // How much an agent may do alone: the two levels side by side, the chosen one lit; app rules under them.
+        // 2.0.0-beta8 (feedback 2): how much an agent may do is set per agent (接入 › the agent); here only what is about
+        // apps, and the table of levels to read.
         SmallTitle(tr("agent 能做多少", "How much an agent may do"))
-        Card(Modifier.padding(horizontal = 12.dp).fillMaxWidth(), insideMargin = PaddingValues(12.dp)) {
-            // 1.4.0-beta4: both cards as tall as the taller one (a two-line summary made them uneven).
-            Row(Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                listOf(
-                    Triple("auto", tr("放手跑", "Hands-off"), tr("只有付钱那一步问你", "Only paying asks you")),
-                    Triple("careful", tr("谨慎", "Careful"), tr("购买、删除、卸载也先问", "Buying, deleting, uninstalling ask too")),
-                ).forEach { (key, title, sub) ->
-                    LevelCard(title, sub, autonomy == key, Modifier.weight(1f).fillMaxHeight()) {
-                        if (autonomy != key) { autonomy = key; ApiConfig.autonomy = key; Audit.security("autonomy", key); haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove) }
-                    }
-                }
-            }
-            ArrowPreference(
-                title = tr("安全", "Security"),
-                endActions = {
-                    Value(if (secLevel == com.kilon.agentvscreen.host.Risk.SecurityLevel.STRICT) tr("严格", "Strict") else tr("标准", "Standard"))
-                },
-                onClick = { nav.go(Route.Security) },
-            )
+        Card(Modifier.padding(horizontal = 12.dp).fillMaxWidth(), insideMargin = PaddingValues(0.dp)) {
+            ArrowPreference(title = tr("各档怎么处理", "How each level handles things"), summary = tr("只看、稳妥、省心、全权；每个 agent 在自己的页面里选", "Look only, Steady, Easy, Full; each agent picks on its own page"),
+                onClick = { nav.go(Route.Security) })
             ArrowPreference(title = tr("应用规则", "App rules"), summary = tr("禁止、只读或每次询问", "Blocked, read-only or ask every time"),
                 endActions = { Value(if (rules.isEmpty()) tr("无", "None") else tr("${rules.size} 条", "${rules.size}")) }, onClick = { nav.go(Route.Rules) })
         }
@@ -322,33 +304,82 @@ fun RulesPage() {
     }
 }
 
-/** The main token (show, copy, renew) and one token per agent. */
+/**
+ * The main token (show, copy, renew) and one token per agent. 2.0.0-beta9 (feedback 5, 6): a lazy list (hundreds of
+ * tokens cost what a dozen did), and one action that removes every token no request ever used.
+ */
 @Composable
 fun TokensPage() {
     val host = LocalHost.current
+    val nav = LocalNav.current
+    val actx = LocalContext.current.applicationContext
     var token by remember { mutableStateOf(ApiConfig.token) }
     var show by remember { mutableStateOf(false) }
     var askRenew by remember { mutableStateOf(false) }
-    MiuixPage(tr("令牌", "Tokens")) {
-        Group(tr("主令牌", "Main token")) {
-            BasicComponent(
-                title = if (show) token else "•".repeat(12) + token.takeLast(4),
-                summary = tr("只给你信任的 agent", "Only for agents you trust"),
-                endActions = {
-                    IconButton(onClick = { show = !show }) { Icon(if (show) MiuixIcons.Hide else MiuixIcons.Show, tr("显示令牌", "Show token")) }
-                    IconButton(onClick = { host.copy(tr("令牌", "Token"), token) }) { Icon(MiuixIcons.Copy, tr("复制令牌", "Copy token")) }
-                    IconButton(onClick = { askRenew = true }) { Icon(MiuixIcons.Refresh, tr("换一个令牌", "New token")) }
-                },
-            )
+    var adding by remember { mutableStateOf(false) }
+    var askUnused by remember { mutableStateOf<List<Tokens.Token>?>(null) }
+    var askRemove by remember { mutableStateOf<Tokens.Token?>(null) }
+    val list by Tokens.list.collectAsState()
+    val agents by com.kilon.agentvscreen.api.AgentLedger.agents.collectAsState()
+    val others = remember(list) { list.filter { it.id != Tokens.MAIN }.sortedByDescending { maxOf(it.lastUsedAt, it.createdAt) } }
+    val unused = remember(list, agents) { Tokens.neverUsed { id -> agents[id]?.used == true } }
+    val fmt = remember { java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.ROOT) }
+    MiuixLazyPage(tr("令牌", "Tokens"), actions = {
+        LinkButton(onClick = { adding = true }, modifier = Modifier.padding(end = 12.dp)) { Text(tr("新建", "New")) }
+    }) {
+        item(key = "main") {
+            Group(tr("主令牌", "Main token")) {
+                BasicComponent(
+                    title = if (show) token else "•".repeat(12) + token.takeLast(4),
+                    summary = tr("只给你信任的 agent", "Only for agents you trust"),
+                    endActions = {
+                        IconButton(onClick = { show = !show }) { Icon(if (show) MiuixIcons.Hide else MiuixIcons.Show, tr("显示令牌", "Show token")) }
+                        IconButton(onClick = { host.copy(tr("令牌", "Token"), token) }) { Icon(MiuixIcons.Copy, tr("复制令牌", "Copy token")) }
+                        IconButton(onClick = { askRenew = true }) { Icon(MiuixIcons.Refresh, tr("换一个令牌", "New token")) }
+                    },
+                )
+            }
         }
-        SmallTitle(tr("每个 agent 一个令牌", "One token per agent"))
-        Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            TokensPanel(ApiConfig.baseUrl) { l, t -> host.copy(l, t) }
+        if (unused.isNotEmpty()) item(key = "unused") {
+            Group {
+                BasicComponent(title = tr("删除从没用过的 ${unused.size} 个令牌", "Remove ${unused.size} never-used tokens"),
+                    summary = tr("没有任何请求用过它们；主令牌和公网客户端不受影响", "No request ever used them; the main token and public clients are kept"),
+                    onClick = { askUnused = unused })
+            }
         }
-        SmallTitle(tr("已确认的接入", "Confirmed access"))
-        Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            ApprovalsPanel()
+        cardItems(tr("每个 agent 一个令牌 · ${others.size}", "One token per agent · ${others.size}"), others, key = { it.id }) { t ->
+            TokenRow(t, fmt, open = { nav.go(Route.Agent(t.id)) }, remove = { askRemove = t })
         }
+    }
+    if (adding) NewTokenDialog(ApiConfig.baseUrl, { l, t -> host.copy(l, t) }) { adding = false }
+    askUnused?.let { drop ->
+        GlassDialog(
+            onDismissRequest = { askUnused = null },
+            title = { DialogTitle(tr("删除 ${drop.size} 个没用过的令牌？", "Remove ${drop.size} never-used tokens?")) },
+            text = { Text(tr("它们从没被任何请求用过。删掉后这些令牌立即作废。", "No request ever used them. They stop working at once.")) },
+            confirmButton = { LinkButton(onClick = {
+                val ids = drop.map { it.id }.toSet()
+                Thread { com.kilon.agentvscreen.api.Agents.forgetMany(ids) }.start()
+                Audit.security("token_cleanup", "removed ${ids.size} never-used tokens by hand")
+                host.say(tr("已删除 ${ids.size} 个", "Removed ${ids.size}"))
+                askUnused = null
+            }) { Text(tr("删除", "Remove"), color = Palette.stopped) } },
+            dismissButton = { LinkButton(onClick = { askUnused = null }) { Text(tr("取消", "Cancel")) } },
+        )
+    }
+    askRemove?.let { t ->
+        GlassDialog(
+            onDismissRequest = { askRemove = null },
+            title = { DialogTitle(tr("删除「${t.name}」？", "Remove \"${t.name}\"?")) },
+            text = { Text(tr("它的令牌作废，连不上了；做过的任务还留在记录里。", "Its token stops working; its past tasks stay in the records.")) },
+            confirmButton = { LinkButton(onClick = {
+                val id = t.id
+                Thread { com.kilon.agentvscreen.api.Agents.forget(actx, id) }.start()
+                Audit.security("revoke", t.name)
+                askRemove = null
+            }) { Text(tr("删除", "Remove"), color = Palette.stopped) } },
+            dismissButton = { LinkButton(onClick = { askRemove = null }) { Text(tr("取消", "Cancel")) } },
+        )
     }
     if (askRenew) GlassDialog(
         onDismissRequest = { askRenew = false },
@@ -368,7 +399,7 @@ fun HelpPage() {
             tr("agent 在哪", "Where the agent runs") to H.where,
             tr("接入方式", "How it connects") to H.how,
             tr("令牌", "Tokens") to (H.token + "\n\n" + H.tokens),
-            tr("自主程度", "How freely agents work") to H.autonomy,
+            tr("什么时候问你", "When you are asked") to H.autonomy,
             tr("应用规则", "App rules") to H.rules,
             tr("悬浮窗", "Floating window") to H.window,
             tr("空闲省电", "Idle power saving") to H.idle,
@@ -399,12 +430,12 @@ internal object H {
         "Shell: agents with a terminal. Send them the message: it installs the vscreen command and has the agent save \"I can operate apps on the phone in the background\" in its long-term memory, so new conversations use it too. With only the install command, most agents forget it.\n\nMCP: agents with MCP. The message has the MCP config (streamable HTTP, one tool per command, screenshots attached) and the ability note.\n\nHTTP: agent apps that write their own calls. Replies are JSON (ok, code, next, text, images, steps, screen, notes); full reference at GET /v2/help.\n\nYou can also paste the ability note into the agent's custom instructions or memory setting.")
     val token get() = tr("令牌只给你信任的 agent：拿到它就能在副屏上操作你的应用。服务只接受本机（和打开远程时你 Tailscale 网络里的设备），网页调用一律拒绝。换新令牌后旧的立即失效，各 agent 要重新接入。",
         "Give the token only to agents you trust: with it they can operate your apps on the screen. Only this phone (and, with remote access on, devices in your Tailscale network) can connect; calls from web pages are always refused. A new token stops the old one at once; every agent has to connect again.")
-    val autonomy get() = tr("放手跑：agent 自己做完整件事，只有真正付钱的那一步（支付、付款、提交订单、转账、充值）会在手机上问你。\n\n谨慎：除了付钱，去购买的步骤、删除和卸载这类不可撤销的按钮、强制结束应用、把你正在用的应用接到后台，也都先问你。\n\n两档都会：每一步记进操作日志；你设为“每次询问”的应用一定先问；悬浮窗上随时可以停止或接管。没答复的确认 60 秒后这一步不做，agent 会来找你。",
-        "Hands-off: the agent does the whole job; only the step that actually spends money (pay, place order, transfer, top up) asks you on the phone.\n\nCareful: besides paying, steps toward a purchase, irreversible buttons such as delete or uninstall, force-stopping an app and taking the app you are using to the background also ask you first.\n\nEither way: every step is logged; apps set to \"ask every time\" always ask; you can stop or take over from the floating window at any time. A confirmation left unanswered for 60 s skips that step and the agent comes to you.")
-    val rules get() = tr("禁止操作：AI 不能在后台打开、读屏或操作这个应用。\n只读：AI 可以打开、看和滚动，但不能点击、输入或滑动。\n每次询问：AI 要点击或输入前，手机上先弹确认，你允许后 5 分钟内不再问。\n\n只在后台副屏里生效，不影响你自己用。",
-        "Blocked: the AI cannot open, read or operate the app in the background.\nRead-only: the AI can open, look and scroll, but not tap, type or swipe.\nAsk every time: before the AI taps or types, the phone asks you; once allowed it does not ask again for 5 minutes.\n\nApplies only to the background screen, not to your own use.")
-    val tokens get() = tr("给每个 agent 单独发一个令牌：可以只给“只看”或“可操作”的权限，单独撤销，日志里也分得清是谁做的。不同令牌的 agent 互相抢不了对方的会话。\n\n免确认：这段时间里这个令牌连付款也不再问你（仍会记进日志）。只在你盯着它付款时开。",
-        "Give each agent its own token: it can be limited to \"look only\" or \"operate\", revoked alone, and the log shows who did what. Agents with different tokens cannot take each other's sessions.\n\nNo confirmations: during this period this token is not asked even about payments (still logged). Turn it on only while you watch it pay.")
+    val autonomy get() = tr("付钱、接入新 agent、放宽一个 agent 能做的事：用指纹（没设锁屏时按住 3 秒）。\n\n其它要问的（删了回不来的、要小心的、你设了“每次询问”的应用）：手机主屏上点一下“允许”。可以选“只这一次”“这一轮任务内”（agent 安静超过“一轮的长度”就结束）或“今天”，范围内同一个 agent、同一类步骤、同一个应用不再问；付钱只能一次一问。\n\n不管哪一档：每一步都记进操作日志；悬浮窗上随时可以停止或接管；没答复的确认 60 秒后这一步不做，agent 会来找你。",
+        "Paying, a new agent, widening what an agent may do: fingerprint (a 3-second hold without a screen lock).\n\nEverything else that asks (what cannot be undone, steps that need care, apps you set to ask every time): one tap on Allow on the phone's main screen. You can pick Just this once, This run (ends when the agent has been quiet for a turn length) or Today; within it the same agent, kind of step and app are not asked again. Paying is always asked step by step.\n\nAt any level: every step is logged; you can stop or take over from the floating window at any time; a confirmation left unanswered for 60 s skips that step and the agent comes to you.")
+    val rules get() = tr("禁止操作：AI 不能在后台打开、读屏或操作这个应用。\n只读：AI 可以打开、看和滚动，但不能点击、输入或滑动。\n每次询问：AI 要点击或输入前，手机上先弹确认，可以选这一次、这一轮或今天内不再问。\n\n只在后台副屏里生效，不影响你自己用。",
+        "Blocked: the AI cannot open, read or operate the app in the background.\nRead-only: the AI can open, look and scroll, but not tap, type or swipe.\nAsk every time: before the AI taps or types, the phone asks you; you can allow it once, for this run or for today.\n\nApplies only to the background screen, not to your own use.")
+    val tokens get() = tr("每个 agent 一个令牌：各有自己的档位，可以单独删掉，日志里也分得清是谁做的。不同令牌的 agent 互相抢不了对方的会话。\n\n“接下来 30 分钟付钱也不问”在 agent 页里：这段时间里它连付款也不再问你（仍会记进日志）。只在你盯着它付款时用。",
+        "One token per agent: each has its own level, can be removed alone, and the log shows who did what. Agents with different tokens cannot take each other's sessions.\n\n\"Don't ask about payments for 30 minutes\" is on the agent's page: meanwhile it is not asked even about payments (still logged). Use it only while you watch it pay.")
     val window get() = tr("有副屏时在所有应用上方显示。拖动移动，双指缩放，推到屏幕边上收成胶囊，长按画面 0.5 秒接管。agent 在等你回答时，胶囊会变成紫色的问号。",
         "Shown above all apps while there is a screen. Drag to move, pinch to resize, push to an edge to fold it into a tab, hold the picture 0.5 s to take over. While an agent waits for your answer, the tab turns into a violet question mark.")
     val idle get() = tr("一轮结束后暂停副屏渲染，页面保留，下一条命令自动恢复。个别应用恢复时会重新加载，遇到可以关掉。", "Pauses rendering after a turn ends; the page is kept and the next command resumes it. A few apps reload on resume: turn this off if you see that.")
@@ -422,86 +453,35 @@ internal object H {
     val diag get() = tr("出问题时把诊断信息发给开发者：版本、配置状态和最近日志（不含令牌、不含你输入的字）。", "When something goes wrong, send this to the developer: version, setup state and recent log (no token, nothing you typed).")
 }
 
-/** 2.0.0-beta8 (B2): Settings › Security — Standard (default) vs Strict confirmation level. */
+/**
+ * 2.0.0-beta8 (feedback 2, rainbow 00:52): the levels side by side, one row per class of action, as a table the user
+ * reads once. Each agent picks a level (or its own table) on its own page; nothing here is a setting.
+ */
 @Composable
 fun SecurityPage() {
-    val ctx = LocalContext.current
-    val actx = ctx.applicationContext
-    val host = LocalHost.current
-    val level by com.kilon.agentvscreen.host.Risk.securityLevelFlow.collectAsState()
-    var help by remember { mutableStateOf(false) }
-
-    MiuixPage(
-        title = tr("安全", "Security"),
-        subtitle = tr("控制 agent 权限的有效期与重新确认频率", "Control how long agent grants stay valid"),
-        actions = {
-            LinkButton(onClick = { help = true }) { Text("?") }
-        },
-    ) {
-        Group(tr("安全级别", "Security level")) {
-            top.yukonga.miuix.kmp.preference.RadioButtonPreference(
-                title = tr("标准（默认）", "Standard (default)"),
-                summary = tr("接入时授予的权限一直有效，直到你撤销", "Granted scopes stay valid until you revoke them"),
-                selected = level == com.kilon.agentvscreen.host.Risk.SecurityLevel.STANDARD,
-                onClick = {
-                    if (level == com.kilon.agentvscreen.host.Risk.SecurityLevel.STRICT) {
-                        // Loosening from Strict -> Standard requires biometric/strong confirmation via TRUST_SET (B2).
-                        val mainTok = Tokens.byId(Tokens.MAIN)
-                            ?: Tokens.Token(Tokens.MAIN, tr("安全级别", "Security level"), "", "system", 0L)
-                        val req = com.kilon.agentvscreen.host.StrongConfirm.createUiMultiRiskRequest(
-                            ctx = actx,
-                            risks = listOf(com.kilon.agentvscreen.host.Risk.TRUST_SET),
-                            token = mainTok,
-                            commandName = tr("将安全级别从「严格」切到「标准」", "Switch security level to Standard"),
-                            detail = tr(
-                                "切换后，接入时授予的权限不再按 8 小时 / 24 小时过期；付款、发送、删除、安装、频率异常和开启公网仍需确认。",
-                                "Granted scopes will no longer expire after 8 h / 24 h. Payments, sends, deletes, installs, rate spikes, and public access still require confirmation.",
-                            ),
-                            onApprove = {
-                                com.kilon.agentvscreen.host.Risk.setSecurityLevel(actx, com.kilon.agentvscreen.host.Risk.SecurityLevel.STANDARD)
-                                host.say(tr("已切换到标准安全级别", "Switched to Standard security level"))
-                            },
-                        )
-                        StrongConfirmActivity.open(actx, req.id)
+    val c = MiuixTheme.colorScheme
+    val levels = Tokens.LEVELS.filter { it != com.kilon.agentvscreen.api.Policy.CUSTOM }
+    MiuixPage(title = tr("各档怎么处理", "How each level handles things")) {
+        Card(Modifier.padding(horizontal = 12.dp, vertical = 8.dp).fillMaxWidth(), insideMargin = PaddingValues(12.dp)) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+                Spacer(Modifier.weight(1.4f))
+                levels.forEach { lv -> Text(com.kilon.agentvscreen.api.Policy.levelTitle(lv), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center) }
+            }
+            com.kilon.agentvscreen.api.Policy.ROWS.forEach { row ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(row.title, fontSize = 13.sp, modifier = Modifier.weight(1.4f))
+                    levels.forEach { lv ->
+                        val a = com.kilon.agentvscreen.api.Policy.PRESETS.getValue(lv).getValue(row.key)
+                        val tint = when (a) { com.kilon.agentvscreen.api.Policy.Act.ALLOW -> Palette.takeover; com.kilon.agentvscreen.api.Policy.Act.ASK -> c.primary; else -> c.onSurfaceVariantSummary }
+                        Text(a.title, fontSize = 12.sp, color = tint, modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                     }
-                },
-            )
-            top.yukonga.miuix.kmp.preference.RadioButtonPreference(
-                title = tr("严格", "Strict"),
-                summary = tr("系统操作每 24 小时、会话每 8 小时重新确认", "Re-confirm system scope every 24 h and sessions every 8 h"),
-                selected = level == com.kilon.agentvscreen.host.Risk.SecurityLevel.STRICT,
-                onClick = {
-                    if (level != com.kilon.agentvscreen.host.Risk.SecurityLevel.STRICT) {
-                        com.kilon.agentvscreen.host.Risk.setSecurityLevel(actx, com.kilon.agentvscreen.host.Risk.SecurityLevel.STRICT)
-                        host.say(tr("已切换到严格安全级别", "Switched to Strict security level"))
-                    }
-                },
-            )
+                }
+            }
         }
-        Footnote(
-            tr(
-                "两档都会保留：高风险操作逐次确认（付款、发送、删除、卸载、安装）、异常频率确认、以及开启公网接入时的生物识别确认。",
-                "Both levels always keep per-action high-risk confirmation (payments, sends, deletes, installs), abnormal rate confirmation, and biometric confirmation for public access.",
-            ),
-        )
-    }
-
-    if (help) {
-        GlassDialog(
-            onDismissRequest = { help = false },
-            title = { DialogTitle(tr("安全级别说明", "About security levels")) },
-            text = {
-                Text(
-                    tr(
-                        "• 标准（默认）：接入新 agent 时由你在手机主屏一次授权，之后该 agent 在已授权限内不再反复弹窗；随时可在 agent 详情页降级或撤销。\n\n• 严格：沿用定时过期规则，系统级操作 24 小时过期，连续使用超过 8 小时重新确认。\n\n无论哪一档，授权都只能在手机主屏由你本人确认，副屏无法触及。",
-                        "• Standard (default): you authorize an agent's scope once on the main screen during onboarding; it won't re-prompt on timers. You can downgrade or revoke anytime on the agent's page.\n\n• Strict: system scope expires after 24 hours and sessions re-confirm every 8 hours.\n\nIn both levels, confirmations only happen on the main screen and cannot be reached from the virtual screen.",
-                    ),
-                    fontSize = 13.5.sp,
-                    lineHeight = 20.sp,
-                )
-            },
-            confirmButton = { LinkButton(onClick = { help = false }) { Text(tr("完成", "Done")) } },
-        )
+        Footnote(tr("每个 agent 在 接入 › 这个 agent 里选一档，也可以逐项改或用“自定义”。放宽要指纹，收紧马上生效。", "Each agent picks a level under Connect › the agent, and can change single rows or use Custom. Widening takes a fingerprint; narrowing applies at once."))
+        Group(tr("问你的时候", "When you are asked"), padded = true) {
+            Text(H.autonomy, fontSize = 14.sp, lineHeight = 22.sp)
+        }
     }
 }
 

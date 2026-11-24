@@ -50,6 +50,22 @@ object StrongConfirm {
     const val BY_BIOMETRIC = "biometric"
     const val BY_HOLD = "hold"
     const val BY_MIGRATED = "migrated"
+    /** 2.0.0-beta8 (feedback 3): one real tap on "Allow" on the main screen (light confirmations only). */
+    const val BY_TAP = "tap"
+
+    /** How long an allow covers the same kind of step of the same agent in the same app (feedback 3). */
+    enum class Range(val key: String, val zh: String, val en: String) {
+        ONCE("once", "只这一次", "Just this once"),
+        ROUND("round", "这一轮任务内", "This run"),
+        TODAY("today", "今天", "Today");
+        val title: String get() = tr(zh, en)
+        companion object { fun of(k: String?): Range = entries.firstOrNull { it.key == k } ?: ONCE }
+    }
+
+    /** A run ends when the agent has been quiet for a turn length (Settings › 一轮的长度); a "this run" allow is extended each time it is used. */
+    @Volatile internal var roundIdleMs: () -> Long = { runCatching { com.kilon.agentvscreen.api.Turns.quietMs }.getOrDefault(10 * 60_000L).coerceAtLeast(60_000L) }
+    const val GRANT_PREFIX = "GRANT:"
+    fun grantKey(kind: String, pkg: String): String = "$GRANT_PREFIX$kind:$pkg"
 
     data class Approval(
         val risk: String,
@@ -108,6 +124,14 @@ object StrongConfirm {
         val onDeny: (() -> Unit)? = null,
         /** 2.0.0-beta8 (B2): all unapproved risk dimensions batched into this single confirmation. */
         val risks: List<Risk> = listOf(risk),
+        /** 2.0.0-beta8 (feedback 3): fingerprint or one real tap. */
+        val strength: Risk.Strength = Risk.Strength.BIOMETRIC,
+        /** The ranges the user may pick when allowing (first = default); only [Range.ONCE] = no choice shown. */
+        val ranges: List<Range> = listOf(Range.ONCE),
+        /** The grant a range other than ONCE is stored under ([grantKey]). */
+        val grantKey: String? = null,
+        /** [Risk.LEVEL_UP]: the level the agent asks for. */
+        val targetLevel: String? = null,
     ) {
         @Volatile var answer: Boolean? = null
         @Volatile var answeredBy: String? = null
@@ -152,6 +176,8 @@ object StrongConfirm {
                     for (i in 0 until arr.length()) {
                         val o = arr.optJSONObject(i) ?: continue
                         val a = Approval.fromJson(o) ?: continue
+                        // 2.0.0-beta8 (feedback 2): per-scope approvals and the 8-hour re-confirmation are gone; the level is the authority.
+                        if (Risk.of(a.risk) == null && !a.risk.startsWith(GRANT_PREFIX)) continue
                         approvalList += a
                         bumpLastConfirmLocked(a.token, a.at)
                     }
@@ -184,10 +210,6 @@ object StrongConfirm {
                     putApprovalLocked(Approval(Risk.NEW_CLIENT.name, t.id, Risk.CLIENT_LOCAL, nowMs, 0L, BY_MIGRATED))
                     added++
                 }
-                if ("operate" in t.scopes && !hasApprovalLocked(Risk.SCOPE_OPERATE, t.id, Risk.CLIENT_LOCAL, nowMs)) {
-                    putApprovalLocked(Approval(Risk.SCOPE_OPERATE.name, t.id, Risk.CLIENT_LOCAL, nowMs, 0L, BY_MIGRATED))
-                    added++
-                }
             }
             if (added > 0) {
                 saveLocked()
@@ -201,12 +223,7 @@ object StrongConfirm {
     internal fun seedLocalForCi(tokenId: String, scopes: Set<String>, nowMs: Long = clock()) {
         synchronized(lock) {
             putApprovalLocked(Approval(Risk.NEW_CLIENT.name, tokenId, Risk.CLIENT_LOCAL, nowMs, 0L, BY_MIGRATED))
-            if ("operate" in scopes) {
-                putApprovalLocked(Approval(Risk.SCOPE_OPERATE.name, tokenId, Risk.CLIENT_LOCAL, nowMs, 0L, BY_MIGRATED))
-            }
-            if ("system" in scopes) {
-                putApprovalLocked(Approval(Risk.SCOPE_SYSTEM.name, tokenId, Risk.CLIENT_LOCAL, nowMs, nowMs + Risk.SCOPE_SYSTEM_MS, BY_MIGRATED))
-            }
+            if (scopes.isNotEmpty()) Tokens.setLevel(tokenId, Tokens.defaultLevelFor(if ("system" in scopes) "system" else if ("operate" in scopes) "operate" else "look"))
             saveLocked()
             publishApprovalsLocked()
         }
@@ -219,9 +236,8 @@ object StrongConfirm {
         tokenId: String,
         client: String,
         nowMs: Long = clock(),
-        level: Risk.SecurityLevel = Risk.securityLevel,
     ): Boolean = synchronized(lock) {
-        hasApprovalLocked(risk, tokenId, client, nowMs, level)
+        hasApprovalLocked(risk, tokenId, client, nowMs)
     }
 
     private fun hasApprovalLocked(
@@ -229,66 +245,57 @@ object StrongConfirm {
         tokenId: String,
         client: String,
         nowMs: Long,
-        level: Risk.SecurityLevel = Risk.securityLevel,
-    ): Boolean {
-        return approvalList.any { a ->
-            if (a.risk != risk.name || a.token != tokenId) return@any false
-            if (risk == Risk.NEW_CLIENT && a.client != client && a.client != Risk.CLIENT_ANY) return@any false
-            when {
-                risk == Risk.SCOPE_SYSTEM && level == Risk.SecurityLevel.STANDARD -> true
-                risk == Risk.SCOPE_SYSTEM && level == Risk.SecurityLevel.STRICT ->
-                    a.activeAt(nowMs) && (nowMs - a.at <= Risk.SCOPE_SYSTEM_MS)
-                else -> a.activeAt(nowMs)
-            }
-        }
+    ): Boolean = approvalList.any { a ->
+        a.risk == risk.name && a.token == tokenId && a.activeAt(nowMs) &&
+            (risk != Risk.NEW_CLIENT || a.client == client || a.client == Risk.CLIENT_ANY)
     }
 
     /**
-     * 2.0.0-beta8 (B2): record pre-authorized approvals for a newly created or upgraded agent
-     * after a single on-phone biometric/PIN confirmation (NEW_CLIENT + chosen scope dimensions).
+     * 2.0.0-beta8 (feedback 4): the user confirmed this agent once. Per agent, not per device: a local or tailnet agent
+     * confirmed from one device is not asked again from another. A public client stays bound to its own OAuth client.
      */
-    internal fun grantForScope(
-        tokenId: String,
-        scope: String,
-        client: String = Risk.CLIENT_ANY,
-        by: String = BY_BIOMETRIC,
-        nowMs: Long = clock(),
-    ) {
+    fun hasAgentApproval(tokenId: String, client: String, nowMs: Long = clock()): Boolean = synchronized(lock) {
+        val pub = Tokens.byId(tokenId)?.publicOnly == true || client.startsWith("public:")
+        approvalList.any { a ->
+            a.risk == Risk.NEW_CLIENT.name && a.token == tokenId && a.activeAt(nowMs) &&
+                (!pub || a.client == client || a.client == Risk.CLIENT_ANY)
+        }
+    }
+
+    /** 2.0.0-beta8 (feedback 2): the user confirmed a new agent (with its level) in the app. */
+    internal fun grantAgent(tokenId: String, by: String = BY_BIOMETRIC, nowMs: Long = clock()) {
         synchronized(lock) {
-            putApprovalLocked(Approval(Risk.NEW_CLIENT.name, tokenId, client, nowMs, 0L, by))
-            if (scope == "operate" || scope == "system") {
-                putApprovalLocked(Approval(Risk.SCOPE_OPERATE.name, tokenId, client, nowMs, 0L, by))
-            }
-            if (scope == "system") {
-                val sysTtl = Risk.SCOPE_SYSTEM.ttlMsFor(Risk.securityLevel)
-                val until = if (sysTtl == 0L) 0L else nowMs + sysTtl
-                putApprovalLocked(Approval(Risk.SCOPE_SYSTEM.name, tokenId, client, nowMs, until, by))
-            }
+            putApprovalLocked(Approval(Risk.NEW_CLIENT.name, tokenId, Risk.CLIENT_ANY, nowMs, 0L, by))
             saveLocked()
             publishApprovalsLocked()
         }
     }
 
-    /** 2.0.0-beta8 (B2): immediately revoke scope approvals above [newScope] when downgrading an agent. */
-    internal fun revokeScopesAbove(tokenId: String, newScope: String) {
-        val drop = when (newScope) {
-            "look" -> setOf(Risk.SCOPE_OPERATE.name, Risk.SCOPE_SYSTEM.name)
-            "operate" -> setOf(Risk.SCOPE_SYSTEM.name)
-            else -> emptySet()
-        }
-        if (drop.isEmpty()) return
-        val removed = synchronized(lock) {
-            val ok = approvalList.removeAll { it.token == tokenId && it.risk in drop }
-            if (ok) {
-                saveLocked()
-                publishApprovalsLocked()
-            }
-            ok
-        }
-        if (removed) {
-            Audit.security("approval_revoked", "token=$tokenId downgrade=$newScope")
-        }
+    /**
+     * 2.0.0-beta8 (feedback 3): an allow the user gave for a range (this run / today). A "this run" allow ends after
+     * a turn length without use and is extended each time it covers a step.
+     */
+    fun hasGrant(tokenId: String, key: String, nowMs: Long = clock()): Boolean = synchronized(lock) {
+        val i = approvalList.indexOfFirst { it.risk == key && it.token == tokenId && it.activeAt(nowMs) }
+        if (i < 0) return@synchronized false
+        val g = approvalList[i]
+        if (g.by.endsWith(":" + Range.ROUND.key)) approvalList[i] = g.copy(until = nowMs + roundIdleMs())
+        true
     }
+
+    internal fun putGrantLocked(tokenId: String, key: String, range: Range, by: String, nowMs: Long) {
+        val until = when (range) {
+            Range.ONCE -> return
+            Range.ROUND -> nowMs + roundIdleMs()
+            Range.TODAY -> java.time.LocalDate.now().plusDays(1).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+        }
+        approvalList.removeAll { it.risk == key && it.token == tokenId }
+        approvalList += Approval(key, tokenId, Risk.CLIENT_ANY, nowMs, until, "$by:${range.key}")
+    }
+
+    /** Ranged allows still in force, for the app's list (each can be ended there). */
+    fun activeGrants(nowMs: Long = clock()): List<Approval> =
+        approvals.value.filter { it.risk.startsWith(GRANT_PREFIX) && it.activeAt(nowMs) }
 
     /** Latest timestamp of any strong confirmation (or beta6 migration) for [tokenId], or 0 if none. */
     fun latestConfirmAt(tokenId: String): Long = synchronized(lock) {
@@ -310,6 +317,19 @@ object StrongConfirm {
         }
         if (removed) {
             Audit.security("approval_revoked", "risk=${approval.risk} token=${approval.token} client=${approval.client}")
+        }
+    }
+
+    /** 2.0.0-beta8 (feedback 5): many tokens, one write. */
+    fun revokeAllForTokens(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        synchronized(lock) {
+            val ok = approvalList.removeAll { it.token in ids }
+            ids.forEach { lastConfirmByToken.remove(it) }
+            if (ok) {
+                saveLocked()
+                publishApprovalsLocked()
+            }
         }
     }
 
@@ -465,7 +485,8 @@ object StrongConfirm {
         onApproveWithScope: (String) -> Unit,
         onDeny: () -> Unit,
     ): Request {
-        val safeScopes = selectableScopes.filter { it in Tokens.PUBLIC_SCOPES }.distinct().ifEmpty { listOf("look") }
+        // 2.0.0-beta8 (feedback 2): the pairing card offers levels; operate in the OAuth grant opens careful / free.
+        val safeScopes = if ("operate" in selectableScopes) Tokens.PUBLIC_LEVELS else listOf(Tokens.LOOK)
         val key = "PUBLIC_PAIRING:$pairingId"
         val now = clock()
         val req = synchronized(lock) {
@@ -489,7 +510,9 @@ object StrongConfirm {
                 publicClientName = clientName,
                 redirectHost = redirectHost,
                 selectableScopes = safeScopes,
-                defaultScope = "look",
+                // rainbow (P10): a default of "look" was approved without a glance and every later act failed;
+                // default to the most the client asked for that the user would usually give (Easy), shown plainly.
+                defaultScope = if (Tokens.FREE in safeScopes) Tokens.FREE else Tokens.LOOK,
                 onApproveWithScope = onApproveWithScope,
                 onDeny = onDeny,
             ).also {
@@ -512,9 +535,6 @@ object StrongConfirm {
         val now = clock()
         synchronized(lock) {
             putApprovalLocked(Approval(Risk.NEW_CLIENT.name, tokenId, client, now, 0L, by))
-            if (grantedScope == "operate") {
-                putApprovalLocked(Approval(Risk.SCOPE_OPERATE.name, tokenId, client, now, 0L, by))
-            }
             saveLocked()
             publishApprovalsLocked()
         }
@@ -532,6 +552,7 @@ object StrongConfirm {
         onDeny: (() -> Unit)? = null,
     ): Request {
         val list = risks.distinct().ifEmpty { listOf(Risk.NEW_CLIENT) }
+        // Things the user starts in the app (a new agent, a higher level, payments for a while) always take a fingerprint.
         val primary = list.first()
         val key = "${list.joinToString("+") { it.name }}:${token.id}"
         val now = clock()
@@ -582,12 +603,14 @@ object StrongConfirm {
      * Reuses any pending request for the same key (no duplicate notification), waits up to [WAIT_MS],
      * and throws `USER_DENIED` or `NEEDS_CONFIRM` (with structured `confirm` listing `risk` + `risks`).
      */
-    internal fun requireForRisks(ctx: Context, call: Call, risks: List<Risk>, commandName: String) {
+    internal fun requireForRisks(ctx: Context, call: Call, risks: List<Risk>, commandName: String, targetLevel: String? = null) {
         val list = risks.distinct().ifEmpty { return }
+        // Feedback 3: only a high action rate alone is a light (tap) confirmation; a new agent or a higher level takes a fingerprint.
+        val light = list.all { it == Risk.RATE }
         val primary = list.first()
         val client = Risk.clientOf(call)
         val riskTag = list.joinToString("+") { it.name }
-        val key = if (Risk.NEW_CLIENT in list) "$riskTag:${call.tokenId}:$client" else "$riskTag:${call.tokenId}"
+        val key = (if (Risk.NEW_CLIENT in list) "$riskTag:${call.tokenId}:$client" else "$riskTag:${call.tokenId}") + (targetLevel?.let { ":$it" } ?: "")
         val tokenScope = Tokens.byId(call.tokenId)?.scope ?: scopeSummary(call.scopes)
         val now = clock()
         val (req, created) = getOrCreateRequest(
@@ -604,6 +627,12 @@ object StrongConfirm {
             reusable = false,
             allowHold = call.source != Call.Source.PUBLIC,
             nowMs = now,
+            strength = if (light) Risk.Strength.TAP else Risk.Strength.BIOMETRIC,
+            // A high rate asked together with a new agent: the one fingerprint also covers the rate for this run,
+            // so the command does not stop again right after for a second (tap) confirmation.
+            ranges = if (light) listOf(Range.ROUND, Range.TODAY) else if (Risk.RATE in list) listOf(Range.ROUND) else listOf(Range.ONCE),
+            grantKey = if (Risk.RATE in list) grantKey("rate", "*") else null,
+            targetLevel = targetLevel,
         )
         if (created) notify(ctx, req)
         awaitRequest(req, call, waitMsOverride ?: WAIT_MS)
@@ -659,16 +688,24 @@ object StrongConfirm {
         consentKey: String,
         title: String,
         detail: String,
-        reusable: Boolean,
+        kind: String,
+        pkg: String,
         waitMs: Long,
         validMs: Long,
     ) {
+        val reusable = false
+        val gKey = grantKey(kind, pkg)
         val tokenId = call?.tokenId ?: Tokens.MAIN
         val tokenName = call?.tokenName ?: Tokens.MAIN
         val tokenScope = Tokens.byId(tokenId)?.scope ?: scopeSummary(call?.scopes ?: setOf("look", "operate", "system"))
         val client = Risk.clientOf(call)
         val key = "HIGH_RISK:$tokenId:$consentKey"
         val now = clock()
+        // Feedback 3: an allow the user gave for this run / today covers the same kind of step in the same app.
+        if (kind != Consent.MONEY && hasGrant(tokenId, gKey, now)) {
+            Audit.consent(tokenName, call?.session ?: "-", "$title — $detail", "covered")
+            return
+        }
         // Check reusable / unused recent approval first.
         synchronized(lock) {
             pruneRequestsLocked(now)
@@ -692,6 +729,9 @@ object StrongConfirm {
             reusable = reusable,
             allowHold = call?.source != Call.Source.PUBLIC,
             nowMs = now,
+            strength = if (kind == Consent.MONEY) Risk.Strength.BIOMETRIC else Risk.Strength.TAP,
+            ranges = Consent.rangesFor(kind),
+            grantKey = gKey,
         )
         if (created) notify(ctx, req)
         awaitRequest(req, call, waitMsOverride ?: waitMs)
@@ -746,6 +786,10 @@ object StrongConfirm {
         allowHold: Boolean,
         nowMs: Long,
         risks: List<Risk> = listOf(risk),
+        strength: Risk.Strength = Risk.Strength.BIOMETRIC,
+        ranges: List<Range> = listOf(Range.ONCE),
+        grantKey: String? = null,
+        targetLevel: String? = null,
     ): Pair<Request, Boolean> = synchronized(lock) {
         pruneRequestsLocked(nowMs)
         val existing = requests.lastOrNull { it.key == key && it.liveAt(nowMs) }
@@ -765,6 +809,10 @@ object StrongConfirm {
             reusable = reusable,
             allowHold = allowHold,
             risks = risks.distinct().ifEmpty { listOf(risk) },
+            strength = strength,
+            ranges = ranges.ifEmpty { listOf(Range.ONCE) },
+            grantKey = grantKey,
+            targetLevel = targetLevel,
         )
         requests += req
         publishPendingLocked(nowMs)
@@ -787,13 +835,14 @@ object StrongConfirm {
     /**
      * Called ONLY by [com.kilon.agentvscreen.ui.StrongConfirmActivity] after L4 biometric/PIN or 6.2 hold+L6 completes.
      */
-    internal fun approve(ctx: Context, id: String, by: String, chosenScope: String? = null): Boolean {
-        require(by == BY_BIOMETRIC || by == BY_HOLD) { "invalid strong confirm method: $by" }
+    internal fun approve(ctx: Context, id: String, by: String, chosenScope: String? = null, range: Range = Range.ONCE): Boolean {
+        require(by == BY_BIOMETRIC || by == BY_HOLD || by == BY_TAP) { "invalid strong confirm method: $by" }
         val now = clock()
         var holdRefusedRisk: String? = null
+        var levelChange: Pair<String, String>? = null
         val req = synchronized(lock) {
             val r = requests.firstOrNull { it.id == id && it.answer == null } ?: return false
-            if (by == BY_HOLD && !r.allowHold) {
+            if ((by == BY_HOLD && !r.allowHold) || (by == BY_TAP && r.strength != Risk.Strength.TAP)) {
                 holdRefusedRisk = r.risk.name
                 return@synchronized null
             }
@@ -806,12 +855,17 @@ object StrongConfirm {
             if (r.onApproveWithScope == null) {
                 var saved = false
                 for (rk in r.risks) {
-                    if (rk == Risk.HIGH_RISK || rk == Risk.TRUST_SET || rk == Risk.PUBLIC_ENABLE) continue
-                    val ttl = rk.ttlMsFor(Risk.securityLevel)
-                    val until = if (ttl == 0L) 0L else now + ttl
-                    putApprovalLocked(Approval(rk.name, r.tokenId, r.client, now, until, by))
-                    saved = true
+                    when (rk) {
+                        Risk.NEW_CLIENT -> {
+                            val client = if (r.client.startsWith("public:")) r.client else Risk.CLIENT_ANY
+                            putApprovalLocked(Approval(rk.name, r.tokenId, client, now, 0L, by)); saved = true
+                        }
+                        Risk.LEVEL_UP -> r.targetLevel?.let { levelChange = r.tokenId to it }
+                        else -> {}
+                    }
                 }
+                val chosen = range.takeIf { it in r.ranges } ?: r.ranges.first()
+                if (r.grantKey != null && chosen != Range.ONCE) { putGrantLocked(r.tokenId, r.grantKey, chosen, by, now); saved = true }
                 if (saved) {
                     saveLocked()
                     publishApprovalsLocked()
@@ -826,16 +880,23 @@ object StrongConfirm {
             return false
         }
         if (req == null) return false
+        levelChange?.let { (tid, lv) ->
+            // "row:<key>": the agent asked for one row it was not allowed; the user allowed that row.
+            if (lv.startsWith("row:")) Tokens.setAct(tid, lv.removePrefix("row:"), com.kilon.agentvscreen.api.Policy.Act.ALLOW)
+            else Tokens.setLevel(tid, lv)
+            Audit.security("level_up", "token=${req.tokenName} $lv")
+        }
         val riskLabel = req.risks.joinToString("+") { it.name }
         Audit.security(
             "strong_confirm_approved",
             "id=${req.id} risk=$riskLabel token=${req.tokenName} client=${req.client} by=$by",
         )
         if (req.risk == Risk.HIGH_RISK) {
-            Audit.consent(req.tokenName, "-", "${req.commandName} — ${req.detail}", "allowed ($by)")
+            val chosen = range.takeIf { it in req.ranges } ?: req.ranges.first()
+            Audit.consent(req.tokenName, "-", "${req.commandName} — ${req.detail}", "allowed ($by, ${chosen.key})")
         }
         if (req.onApproveWithScope != null) {
-            val allowed = req.selectableScopes.filter { it in Tokens.PUBLIC_SCOPES }.ifEmpty { listOf("look") }
+            val allowed = req.selectableScopes.filter { it in Tokens.PUBLIC_LEVELS }.ifEmpty { listOf(Tokens.LOOK) }
             val granted = chosenScope?.takeIf { it in allowed } ?: req.defaultScope.takeIf { it in allowed } ?: "look"
             runCatching { req.onApproveWithScope.invoke(granted) }
                 .onFailure { AppLogger.warning("StrongConfirm", "onApproveWithScope failed: ${it.message}") }

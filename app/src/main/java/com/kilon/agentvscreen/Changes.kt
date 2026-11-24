@@ -38,6 +38,36 @@ object Changes {
     /** Releases ordered newest first. Add a new [Release] entry whenever versionCode bumps. */
     val releases: List<Release> = listOf(
         Release(
+            versionCode = 66,
+            versionName = "2.0.0-beta9",
+            items = listOf(
+                Item(Kind.NEW, Audience.USER, "每个 agent 一张权限表",
+                    "档位改为 只看 / 稳妥 / 省心 / 全权 / 自定义；每一类操作都能单独设为 允许、问我 或 不允许，改过的行有标记，可一键恢复。",
+                    "One permission table per agent",
+                    "Levels are now Look only / Steady / Easy / Full / Custom; each kind of action can be set to Allowed, Ask me or Not allowed, changed rows are marked and can be restored.",
+                    Route.Connect),
+                Item(Kind.IMPROVED, Audience.USER, "确认更轻",
+                    "放宽权限和付钱用指纹，其它确认轻点“允许”即可，并可选“这一轮任务内”或“今天”不再问。",
+                    "Lighter confirmations",
+                    "A fingerprint only to widen what an agent may do or to pay; everything else is one tap on Allow, optionally for this run or today.",
+                    Route.Security),
+                Item(Kind.IMPROVED, Audience.USER, "接入页不再卡",
+                    "修复接入新 agent 时不停生成令牌的问题，并自动清理之前多出来的；令牌和记录列表改为按需加载。",
+                    "Connect page no longer lags",
+                    "Fixed new-agent setup creating tokens in a loop and removed the extra ones; token and record lists load on demand.",
+                    Route.Tokens),
+                Item(Kind.IMPROVED, Audience.BOTH, "公网接入更顺",
+                    "云端第 4 步也给出“给 agent 的话”；授权码 10 分钟内有效；配对默认档位不再是只看；锁定提醒不重复；诊断里能看到来源地址。",
+                    "Smoother public access",
+                    "Cloud step 4 gives a message for the agent too; auth codes last 10 minutes; pairing no longer defaults to look-only; lockout alerts don't repeat; diag shows the source address.",
+                    Route.PublicAccess),
+                Item(Kind.IMPROVED, Audience.AGENT, "被拒时说清原因",
+                    "某类操作被设为“不允许”时，回复写明是哪一类、去哪里改，不再提示公网接入去调系统权限。",
+                    "Clear refusals",
+                    "When a kind of action is not allowed, the reply names it and where the user changes it; public clients are no longer told to adjust system scope."),
+            ),
+        ),
+        Release(
             versionCode = 65,
             versionName = "2.0.0-beta8",
             items = listOf(
