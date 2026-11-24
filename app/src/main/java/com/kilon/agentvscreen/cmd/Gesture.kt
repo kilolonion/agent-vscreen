@@ -18,6 +18,10 @@ import com.kilon.agentvscreen.core.VScreenRecorder
 import com.kilon.agentvscreen.core.VScreenShell
 import com.kilon.agentvscreen.tr
 import org.json.JSONObject
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -35,7 +39,9 @@ internal object Gesture {
     const val SEEK_STEP_PX = 12
     const val SEEK_MAX_STEPS = 400
     const val SEEK_FRAME_DELAY_MS = 32L
-    const val SEEK_FRAME_WAIT_MS = 400L
+    const val SEEK_FRAME_WAIT_MS = 260L
+    const val SEEK_READ_TIMEOUT_MS = 1_500L
+    const val SEEK_MAX_CONSEC_TIMEOUTS = 3
     const val SEEK_END_HOLD_MS = 120L
     const val DRAG_DOWN_HOLD_MS = 150L
     const val DRAG_MOVE_TICK_MS = 16L
@@ -65,6 +71,7 @@ internal object Gesture {
     const val AFTER_STAYED = "stayed"
     const val AFTER_SNAPPED_BACK = "snapped_back"
     const val AFTER_ELSEWHERE = "elsewhere"
+    const val AFTER_DISAPPEARED = "disappeared"
     const val AFTER_UNKNOWN = "unknown"
 
     /** R(p): [size]x[size] square centered on ([cx], [cy]), clamped to [frameW]x[frameH]. */
@@ -206,6 +213,25 @@ internal object Gesture {
         return refineHit(patch1x, frame, hit)
     }
 
+    /**
+     * 2.0.0-beta8 (C6): search the entire [frame] for [patchHalf] in overlapping tiles sized so
+     * [VScreenGame.track] always uses exact step=1 at 0.5x scale (never skipping odd coordinates).
+     */
+    private fun findPatchAnywhere(patchHalf: VScreenGame.Patch, frame: Bitmap): Pair<Rect, Double>? {
+        val radius = 150 // 360x360 tile -> 180x180 = 32,400 <= 40,000 at 0.5x -> guaranteed step=1
+        val stride = 240 // >= 60px overlap between adjacent tiles
+        val xs = if (frame.width <= 360) listOf(frame.width / 2) else generateSequence(180) { it + stride }.takeWhile { it - 180 < frame.width }.toList()
+        val ys = if (frame.height <= 360) listOf(frame.height / 2) else generateSequence(180) { it + stride }.takeWhile { it - 180 < frame.height }.toList()
+        for (cy in ys) {
+            for (cx in xs) {
+                val shifted = shiftPatch(patchHalf, cx.coerceIn(0, frame.width - 1), cy.coerceIn(0, frame.height - 1), frame.width, frame.height)
+                val hit = VScreenGame.track(shifted, frame, radius = radius)
+                if (hit != null) return hit
+            }
+        }
+        return null
+    }
+
     /** Convert display pixel coordinate [pt] into recording frame coordinate space ([frameW]x[frameH]). */
     fun toFrameCoord(pt: Pair<Int, Int>, dispW: Int, dispH: Int, frameW: Int, frameH: Int): Pair<Int, Int> {
         val sx = frameW.toDouble() / maxOf(1, dispW)
@@ -323,7 +349,14 @@ internal object Gesture {
             when {
                 pickedUp == true && !startChanged && wholeUnchanged -> AFTER_SNAPPED_BACK
                 startChanged && endChanged -> AFTER_STAYED
-                startChanged && !endChanged && !wholeUnchanged -> AFTER_ELSEWHERE
+                startChanged && !endChanged && wholeUnchanged -> AFTER_DISAPPEARED
+                startChanged && !endChanged && !wholeUnchanged -> {
+                    // 2.0.0-beta8 (C6): a wide tab/card extends past startRect so wholeUnchanged can be false
+                    // even when the item was swiped away. Only classify as ELSEWHERE if the dragged patch still
+                    // appears somewhere on settleFrame; otherwise it disappeared (swiped away / deleted).
+                    val foundElsewhere = patchHalf != null && findPatchAnywhere(patchHalf, settleFrame) != null
+                    if (foundElsewhere || patchHalf == null) AFTER_ELSEWHERE else AFTER_DISAPPEARED
+                }
                 else -> AFTER_UNKNOWN
             }
         }
@@ -511,6 +544,7 @@ internal data class GestureRecord(
             Gesture.AFTER_STAYED -> tr("松手后留在落点", "stayed at release")
             Gesture.AFTER_SNAPPED_BACK -> tr("松手后弹回起点", "snapped back to start")
             Gesture.AFTER_ELSEWHERE -> tr("松手后移到了别处", "moved elsewhere after release")
+            Gesture.AFTER_DISAPPEARED -> tr("松手后不见了（可能被划掉或删除）", "disappeared after release (may have been swiped away or deleted)")
             else -> if (omitUnknownWhenNotPicked && pickedUp == null) null else tr("松手后位置不明", "position unknown after release")
         }
         if (afterText != null) parts += afterText
@@ -534,7 +568,7 @@ internal data class GestureRecord(
         }
 }
 
-/** 2.0.0-beta4 (4.3) & 2.0.0-beta5 (5.7): result of one closed-loop `hold` / `seek` gesture. */
+/** 2.0.0-beta4 (4.3), beta5 (5.7) & beta8 (C4+E): result of one closed-loop `hold` / `seek` gesture. */
 internal class GestureOut(
     val met: Boolean,
     val releasedAt: Pair<Int, Int>,
@@ -547,15 +581,332 @@ internal class GestureOut(
     val imgAgeMs: Long? = null,
     val actionFact: String = "",
     val points: List<IntArray> = emptyList(),
+    val missReason: String? = null,
+    val notRead: Boolean = false,
+    val alreadyAtStart: Boolean = false,
 )
 
 /**
- * 2.0.0-beta4 (4.3 & 4.7): execute a closed-loop `press … hold`, `drag … hold`, or `drag … seek` gesture.
+ * 2.0.0-beta8 (C4 + E): pure closed-loop search engine for `drag … seek until …`.
+ *
+ * - Pre-checks the start state before touching the screen (`alreadyAtStart`).
+ * - Parses numeric values (`170%`, decimals, `mm:ss` / `hh:mm:ss` durations) to know direction and overshoot:
+ *   advances at current step, reverses & halves step (down to `1px`) on overshoot, and stops cleanly with the
+ *   closest seen value when `1px` resolution still brackets the target without hitting it.
+ * - For non-numeric text targets, adapts step size downward whenever consecutive readings change.
+ * - Enforces per-read timeout accounting: timed-out steps do not corrupt search state, and consecutive timeouts
+ *   stop cleanly with `notRead = true`.
+ */
+internal object SeekSearch {
+    private val TIME_RE = Regex("""(?:(\d+):)?(\d{1,2}):(\d{2})(?:\.(\d+))?""")
+    private val NUM_RE = Regex("""(-?\d+(?:\.\d+)?)""")
+
+    private fun normalizeDigits(raw: String): String {
+        val sb = StringBuilder(raw.length)
+        for (ch in raw) {
+            sb.append(
+                when (ch) {
+                    in '０'..'９' -> ('0'.code + (ch.code - '０'.code)).toChar()
+                    '％' -> '%'
+                    '：' -> ':'
+                    '．' -> '.'
+                    '－', '−' -> '-'
+                    else -> ch
+                },
+            )
+        }
+        return sb.toString()
+    }
+
+    /** Parse a numeric value from slider/media readout text (`170%`, `70`, `1.5x`, `1:30`, `01:02:03`), or null. */
+    fun parseNumber(raw: String?): Double? {
+        if (raw.isNullOrBlank()) return null
+        val norm = normalizeDigits(raw).trim()
+        TIME_RE.find(norm)?.let { m ->
+            val h = m.groupValues[1].toLongOrNull() ?: 0L
+            val min = m.groupValues[2].toLongOrNull() ?: return null
+            val sec = m.groupValues[3].toLongOrNull() ?: return null
+            val frac = m.groupValues[4].takeIf { it.isNotEmpty() }?.let { "0.$it".toDoubleOrNull() } ?: 0.0
+            return h * 3600.0 + min * 60.0 + sec + frac
+        }
+        val nm = NUM_RE.find(norm) ?: return null
+        return nm.groupValues[1].toDoubleOrNull()
+    }
+
+    /** Extract an exact numeric target from [conds] when it is a single non-wildcard numeric `text:` condition. */
+    fun extractTargetNumber(conds: List<Cond>): Double? {
+        if (conds.size != 1) return null
+        val c = conds[0]
+        if (c.kind != CondKind.TEXT) return null
+        val t = c.text ?: return null
+        if ('*' in t) return null
+        return parseNumber(t)
+    }
+
+    data class SeekReading(
+        val hit: String?,
+        val metKind: CondKind? = null,
+        val text: String? = null,
+        val imgAgeMs: Long? = null,
+        val timedOut: Boolean = false,
+    )
+
+    data class SeekResult(
+        val met: Boolean,
+        val alreadyAtStart: Boolean = false,
+        val metFact: String? = null,
+        val metKind: CondKind? = null,
+        val imgAgeMs: Long? = null,
+        val finalPos: Double,
+        val finalPt: Pair<Int, Int>,
+        val bestText: String? = null,
+        val bestPt: Pair<Int, Int>? = null,
+        val notRead: Boolean = false,
+        val missReason: String? = null,
+        val stepsTaken: Int = 0,
+        val reversals: Int = 0,
+    )
+
+    fun run(
+        p0: Pair<Int, Int>,
+        p1: Pair<Int, Int>,
+        targetNum: Double?,
+        maxMs: Long,
+        maxSteps: Int = Gesture.SEEK_MAX_STEPS,
+        maxConsecTimeouts: Int = Gesture.SEEK_MAX_CONSEC_TIMEOUTS,
+        clockMs: () -> Long,
+        checkInterrupt: () -> Unit,
+        readStart: () -> SeekReading,
+        onDown: () -> Unit,
+        readAfterDown: () -> SeekReading,
+        moveAndRead: (pt: Pair<Int, Int>, stepIndex: Int) -> SeekReading,
+    ): SeekResult {
+        checkInterrupt()
+        val startRead = readStart()
+        if (startRead.hit != null) {
+            return SeekResult(
+                met = true,
+                alreadyAtStart = true,
+                metFact = startRead.hit,
+                metKind = startRead.metKind,
+                imgAgeMs = startRead.imgAgeMs,
+                finalPos = 0.0,
+                finalPt = p0,
+                bestText = startRead.text,
+                bestPt = p0,
+            )
+        }
+
+        val dx = (p1.first - p0.first).toDouble()
+        val dy = (p1.second - p0.second).toDouble()
+        val totalDist = hypot(dx, dy)
+        fun ptAt(pos: Double): Pair<Int, Int> {
+            if (totalDist <= 0.0) return p0
+            val f = (pos / totalDist).coerceIn(0.0, 1.0)
+            return (p0.first + dx * f).roundToInt() to (p0.second + dy * f).roundToInt()
+        }
+
+        onDown()
+        val t0 = clockMs()
+        val r0 = readAfterDown()
+        if (r0.hit != null) {
+            return SeekResult(
+                met = true,
+                metFact = r0.hit,
+                metKind = r0.metKind,
+                imgAgeMs = r0.imgAgeMs,
+                finalPos = 0.0,
+                finalPt = p0,
+                bestText = r0.text,
+                bestPt = p0,
+            )
+        }
+
+        var pos = 0.0
+        var curPt = p0
+        var dir = 1
+        val initialStep = if (targetNum != null) {
+            (totalDist / 20.0).coerceIn(Gesture.SEEK_STEP_PX.toDouble(), 44.0)
+        } else {
+            Gesture.SEEK_STEP_PX.toDouble()
+        }
+        var step = initialStep
+        var prevVal: Double? = parseNumber(r0.text)
+        var prevPos = 0.0
+        var prevText: String? = r0.text?.trim()?.takeIf { it.isNotEmpty() }
+        var slopeSign: Int? = null
+        var bestDist = if (targetNum != null && prevVal != null) abs(prevVal - targetNum) else Double.POSITIVE_INFINITY
+        var bestText: String? = r0.text?.trim()?.takeIf { it.isNotEmpty() }
+        var bestPt: Pair<Int, Int>? = if (prevVal != null) p0 else null
+        var consecTimeouts = if (r0.timedOut) 1 else 0
+        var stepsTaken = 0
+        var reversals = 0
+        var onePxOvershoots = 0
+        var nonNumChangeStreak = 0
+        var nonNumSameStreak = 0
+
+        while (stepsTaken < maxSteps) {
+            checkInterrupt()
+            if (clockMs() - t0 >= maxMs) break
+            if (consecTimeouts >= maxConsecTimeouts) {
+                return SeekResult(
+                    met = false,
+                    finalPos = pos,
+                    finalPt = curPt,
+                    bestText = bestText,
+                    bestPt = bestPt,
+                    notRead = true,
+                    missReason = tr("读数跟不上（连续 $consecTimeouts 次读屏超时）", "screen reading could not keep up ($consecTimeouts consecutive read timeouts)"),
+                    stepsTaken = stepsTaken,
+                    reversals = reversals,
+                )
+            }
+
+            var nextPos = (pos + dir * step).coerceIn(0.0, totalDist)
+            if (ptAt(nextPos) == curPt) {
+                nextPos = (pos + dir * 1.0).coerceIn(0.0, totalDist)
+                if (ptAt(nextPos) == curPt) {
+                    val pv = prevVal
+                    val ss = slopeSign
+                    if (targetNum != null && pv != null && ss != null) {
+                        val desiredDir = if ((targetNum - pv) * ss > 0.0) 1 else -1
+                        if (desiredDir != dir) {
+                            dir = desiredDir
+                            step = maxOf(1.0, step / 2.0)
+                            reversals++
+                            continue
+                        }
+                    }
+                    break
+                }
+            }
+
+            val nextPt = ptAt(nextPos)
+            stepsTaken++
+            val reading = moveAndRead(nextPt, stepsTaken)
+            pos = nextPos
+            curPt = nextPt
+
+            if (reading.timedOut) {
+                consecTimeouts++
+                continue
+            }
+            consecTimeouts = 0
+
+            if (reading.hit != null) {
+                return SeekResult(
+                    met = true,
+                    metFact = reading.hit,
+                    metKind = reading.metKind,
+                    imgAgeMs = reading.imgAgeMs,
+                    finalPos = pos,
+                    finalPt = curPt,
+                    bestText = reading.text ?: bestText,
+                    bestPt = curPt,
+                    stepsTaken = stepsTaken,
+                    reversals = reversals,
+                )
+            }
+
+            val curText = reading.text?.trim()?.takeIf { it.isNotEmpty() }
+            if (targetNum != null) {
+                val num = parseNumber(curText)
+                if (num != null) {
+                    val dist = abs(num - targetNum)
+                    if (dist < bestDist) {
+                        bestDist = dist
+                        bestText = curText
+                        bestPt = curPt
+                    }
+                    val pv = prevVal
+                    if (pv != null && num != pv && abs(pos - prevPos) >= 1.0) {
+                        slopeSign = if ((num - pv) * (pos - prevPos) > 0.0) 1 else -1
+                    }
+                    if (pv != null && (pv - targetNum) * (num - targetNum) < 0.0) {
+                        if (step <= 1.0) {
+                            onePxOvershoots++
+                            if (onePxOvershoots >= 2) break
+                            dir = -dir
+                            reversals++
+                        } else {
+                            dir = -dir
+                            step = maxOf(1.0, step / 2.0)
+                            reversals++
+                        }
+                    } else {
+                        val s = slopeSign
+                        if (s != null && num != targetNum) {
+                            val desiredDir = if ((targetNum - num) * s > 0.0) 1 else -1
+                            if (desiredDir != dir) {
+                                dir = desiredDir
+                                if (reversals > 0) step = maxOf(1.0, step / 2.0)
+                                reversals++
+                            }
+                        }
+                    }
+                    prevVal = num
+                    prevPos = pos
+                }
+            } else if (curText != null) {
+                if (prevText != null) {
+                    if (curText != prevText) {
+                        nonNumChangeStreak++
+                        nonNumSameStreak = 0
+                        if (nonNumChangeStreak >= 2) {
+                            step = maxOf(1.0, step / 2.0)
+                            nonNumChangeStreak = 0
+                        }
+                    } else {
+                        nonNumSameStreak++
+                        nonNumChangeStreak = 0
+                        if (nonNumSameStreak >= 3 && step < initialStep) {
+                            step = minOf(initialStep, step * 1.5)
+                            nonNumSameStreak = 0
+                        }
+                    }
+                }
+                prevText = curText
+            }
+        }
+
+        val miss = when {
+            consecTimeouts >= maxConsecTimeouts -> tr(
+                "读数跟不上（连续 $consecTimeouts 次读屏超时）",
+                "screen reading could not keep up ($consecTimeouts consecutive read timeouts)",
+            )
+            bestText != null && bestPt != null -> tr(
+                "最接近的是 $bestText，在 (${bestPt.first},${bestPt.second})",
+                "closest was $bestText at (${bestPt.first},${bestPt.second})",
+            )
+            consecTimeouts > 0 -> tr("读数跟不上", "screen reading could not keep up")
+            else -> null
+        }
+        return SeekResult(
+            met = false,
+            finalPos = pos,
+            finalPt = curPt,
+            bestText = bestText,
+            bestPt = bestPt,
+            notRead = bestText == null && consecTimeouts > 0,
+            missReason = miss,
+            stepsTaken = stepsTaken,
+            reversals = reversals,
+        )
+    }
+}
+
+private val SEEK_READ_POOL = Executors.newCachedThreadPool { r ->
+    Thread(r, "vscreen-seek-read").apply { isDaemon = true }
+}
+
+/**
+ * 2.0.0-beta4 (4.3 & 4.7) + 2.0.0-beta8 (C4 + E): execute a closed-loop `press … hold`, `drag … hold`, or `drag … seek` gesture.
  *
  * - Runs existing `payGuard` (press) or `bounds` (drag) before finger down.
  * - Boosts display frame rate and pauses background full-screen OCR (`VScreenPerception.setOcrPaused`), always
  *   restoring both OCR and `finger("cancel")` in `finally`.
- * - Evaluates conditions exclusively through [Probe] (`cropOnly = true` so `text:`/`gone:` use `readCrop` only).
+ * - For `seek`: pre-checks start before touching the screen, runs [SeekSearch] with strict post-move frames and a
+ *   1.5 s per-read timeout cap.
  */
 internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, step: Step, ctx: ActCtx): GestureOut {
     val hu = ctx.human
@@ -602,6 +953,120 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
         return hit
     }
 
+    /** 2.0.0-beta8 (C4+E): read one seek observation strictly from [frame] + refreshed A11y within [Gesture.SEEK_READ_TIMEOUT_MS]. */
+    fun readSeekStep(frame: Bitmap?, targetNum: Double?): SeekSearch.SeekReading {
+        val p0 = SystemClock.elapsedRealtime()
+        val fut = SEEK_READ_POOL.submit<SeekSearch.SeekReading>(com.kilon.agentvscreen.I18n.carry {
+            var observedText: String? = null
+            for (c in conds) {
+                if (c.kind == CondKind.TEXT || c.kind == CondKind.GONE) {
+                    val area = c.area
+                    val pat = TextPat(c.text!!)
+                    fun inArea(r: Rect) = area == null || area.contains(r.centerX(), r.centerY())
+                    val a11yTexts = runCatching {
+                        val snap = com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId)
+                        if (!snap.readable) emptyList()
+                        else snap.nodes.asSequence()
+                            .filter { it.visible && inArea(d.toFrame(it.box)) }
+                            .mapNotNull { node ->
+                                val fresh = runCatching { node.info.refresh() }.getOrDefault(false)
+                                if (fresh && !node.info.isVisibleToUser) null
+                                else com.kilon.agentvscreen.core.A11yTree.wordsOf(node.info) ?: node.words
+                            }
+                            .toList()
+                    }.getOrDefault(emptyList())
+                    val a11yNumeric = if (targetNum != null) a11yTexts.firstOrNull { SeekSearch.parseNumber(it) != null } else a11yTexts.firstOrNull()
+                    if (c.kind == CondKind.TEXT) {
+                        val a11yHit = a11yTexts.firstOrNull { pat.hit(it) }
+                        if (a11yHit != null) {
+                            return@carry SeekSearch.SeekReading(
+                                hit = tr("${c.raw}：看到“${a11yHit.take(40)}”", "${c.raw}: saw \"${a11yHit.take(40)}\""),
+                                metKind = CondKind.TEXT,
+                                text = a11yHit.take(40),
+                            )
+                        }
+                        if (a11yNumeric != null) {
+                            observedText = a11yNumeric.take(40)
+                            continue
+                        }
+                    } else if (a11yTexts.any { pat.hit(it) }) {
+                        observedText = a11yTexts.firstOrNull { pat.hit(it) }?.take(40)
+                        continue
+                    }
+                    // Fall back to crop OCR on this exact post-move frame when A11y has no matching/numeric text.
+                    val items = if (frame != null && !frame.isRecycled && area != null) {
+                        runCatching { com.kilon.agentvscreen.core.VScreenOcr.readCrop(frame, area) }.getOrDefault(emptyList())
+                    } else emptyList()
+                    val joined = VScreenPerception.joinSplit(items)
+                    val allTexts = items.map { it.text } + joined
+                    val ocrSample = (if (targetNum != null) allTexts.firstOrNull { SeekSearch.parseNumber(it) != null } else null)
+                        ?: allTexts.firstOrNull()
+                    if (ocrSample != null) observedText = ocrSample.take(40)
+                    if (c.kind == CondKind.TEXT) {
+                        val hitTxt = allTexts.firstOrNull { pat.hit(it) }?.take(40)
+                        if (hitTxt != null) {
+                            return@carry SeekSearch.SeekReading(
+                                hit = tr("${c.raw}：看到“$hitTxt”", "${c.raw}: saw \"$hitTxt\""),
+                                metKind = CondKind.TEXT,
+                                text = hitTxt,
+                            )
+                        }
+                    } else if (c.kind == CondKind.GONE && area != null && frame != null && !frame.isRecycled) {
+                        if (allTexts.none { pat.hit(it) }) {
+                            return@carry SeekSearch.SeekReading(
+                                hit = tr("${c.raw}：画面上没有“${c.text}”了", "${c.raw}: \"${c.text}\" is gone from the screen"),
+                                metKind = CondKind.GONE,
+                                text = observedText,
+                            )
+                        }
+                    }
+                } else {
+                    val hit = probe.poll()
+                    if (hit != null) {
+                        return@carry SeekSearch.SeekReading(
+                            hit = hit,
+                            metKind = probe.lastMetKind,
+                            text = observedText,
+                            imgAgeMs = probe.lastHitImgAgeMs,
+                        )
+                    }
+                }
+            }
+            SeekSearch.SeekReading(hit = null, text = observedText)
+        })
+        return try {
+            val res = fut.get(Gesture.SEEK_READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            pollDurations += (SystemClock.elapsedRealtime() - p0).coerceAtLeast(0L)
+            res
+        } catch (_: TimeoutException) {
+            pollDurations += (SystemClock.elapsedRealtime() - p0).coerceAtLeast(0L)
+            SeekSearch.SeekReading(hit = null, timedOut = true)
+        } catch (_: Throwable) {
+            pollDurations += (SystemClock.elapsedRealtime() - p0).coerceAtLeast(0L)
+            SeekSearch.SeekReading(hit = null)
+        }
+    }
+
+    /** Wait strictly for a frame captured after [afterMoveStart] / [afterMoveDone], returning `(frame, fresh)`. */
+    fun awaitPostMoveFrame(verBefore: Long, afterMoveStart: Long, afterMoveDone: Long): Pair<Bitmap?, Boolean> {
+        d.requestFreshFrame()
+        val deadline = afterMoveDone + Gesture.SEEK_FRAME_WAIT_MS
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val now = SystemClock.elapsedRealtime()
+            val capAt = d.latestCaptureAtMs
+            if (capAt > afterMoveDone) {
+                return d.latestFrame() to true
+            }
+            if (now >= afterMoveDone + Gesture.SEEK_FRAME_DELAY_MS && d.version > verBefore && capAt >= afterMoveStart) {
+                return d.latestFrame() to true
+            }
+            val left = (deadline - now).coerceIn(1L, Gesture.SEEK_FRAME_POLL_SLICE_MS)
+            d.awaitNewFrame(d.version, left, urgent = true)
+        }
+        val capAt = d.latestCaptureAtMs
+        return d.latestFrame() to (capAt > afterMoveDone || (d.version > verBefore && capAt >= afterMoveStart))
+    }
+
     var curPt = startPt
     var midPt = if (path.size >= 2) Gesture.pointAtHalfPath(path) else startPt
     var metFact: String? = null
@@ -615,6 +1080,11 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
     var upAt = downAt
     var upElapsed = tStart
     var hitElapsed = -1L
+    var fingerDown = false
+    var seekAlreadyAtStart = false
+    var seekStartLabel: String? = null
+    var seekMissReason: String? = null
+    var seekNotRead = false
 
     try {
         Gesture.checkLoopInterrupts(d, call)
@@ -626,13 +1096,14 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
         }
         preDownAt = System.currentTimeMillis()
         tStart = SystemClock.elapsedRealtime()
-        Gesture.checkLoopInterrupts(d, call)
-        val down = VScreenShell.finger(d.displayId, "down", 0, startPt.first, startPt.second).first
-        if (!down.ok) throw ActionError(down.code, down.message)
-        downAt = System.currentTimeMillis()
-        midAt = downAt
 
         if (step.loop == Loop.HOLD) {
+            Gesture.checkLoopInterrupts(d, call)
+            val down = VScreenShell.finger(d.displayId, "down", 0, startPt.first, startPt.second).first
+            if (!down.ok) throw ActionError(down.code, down.message)
+            fingerDown = true
+            downAt = System.currentTimeMillis()
+            midAt = downAt
             if (isDrag) {
                 Gesture.sleepChecked(d, call, Gesture.DRAG_DOWN_HOLD_MS)
                 val lens = path.zipWithNext { a, b -> hypot((b.first - a.first).toDouble(), (b.second - a.second).toDouble()) }
@@ -700,71 +1171,88 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
             }
             preUpAt = System.currentTimeMillis()
             VScreenShell.finger(d.displayId, "up", 0, curPt.first, curPt.second)
+            fingerDown = false
             upAt = System.currentTimeMillis()
             upElapsed = SystemClock.elapsedRealtime()
         } else {
-            // Loop.SEEK (2-point straight line, 12px steps)
-            Gesture.sleepChecked(d, call, Gesture.DRAG_DOWN_HOLD_MS)
-            val p0 = path[0]
-            val p1 = path[1]
-            val dx = (p1.first - p0.first).toDouble()
-            val dy = (p1.second - p0.second).toDouble()
-            val totalDist = hypot(dx, dy)
-            val stepCount = minOf(Gesture.SEEK_MAX_STEPS, ceil(totalDist / Gesture.SEEK_STEP_PX).toInt().coerceAtLeast(1))
-            val seekStart = SystemClock.elapsedRealtime()
-            val trail = ArrayList<Triple<Long, Int, Int>>(stepCount)
-            for (s in 1..stepCount) {
-                Gesture.checkLoopInterrupts(d, call)
-                if (SystemClock.elapsedRealtime() - seekStart >= maxMs) break
-                val traveled = s * Gesture.SEEK_STEP_PX.toDouble()
-                val (nx, ny) = if (totalDist <= 0.0) {
-                    p1
-                } else if (traveled >= totalDist) {
-                    p1
-                } else {
-                    val f = traveled / totalDist
-                    (p0.first + dx * f).roundToInt() to (p0.second + dy * f).roundToInt()
-                }
-                curPt = nx to ny
-                val verBefore = d.version
-                val moveElapsed = SystemClock.elapsedRealtime()
-                val mv = VScreenShell.finger(d.displayId, "move", 0, nx, ny).first
-                if (!mv.ok) throw ActionError(mv.code, mv.message)
-                trail += Triple(System.currentTimeMillis(), nx, ny)
-                d.requestFreshFrame()
-                val minWaitUntil = moveElapsed + Gesture.SEEK_FRAME_DELAY_MS
-                val frameDeadline = moveElapsed + Gesture.SEEK_FRAME_WAIT_MS
-                while (SystemClock.elapsedRealtime() < frameDeadline) {
+            // Loop.SEEK (2.0.0-beta8 C4+E: start pre-check + closed-loop search + strict post-move frames + 1.5s read cap).
+            val targetNum = SeekSearch.extractTargetNumber(conds)
+            val trail = ArrayList<Triple<Long, Int, Int>>()
+            val seekRes = SeekSearch.run(
+                p0 = path[0],
+                p1 = path[1],
+                targetNum = targetNum,
+                maxMs = maxMs,
+                clockMs = { SystemClock.elapsedRealtime() },
+                checkInterrupt = { Gesture.checkLoopInterrupts(d, call) },
+                readStart = {
                     val now = SystemClock.elapsedRealtime()
-                    if (d.latestCaptureAtMs > minWaitUntil) break
-                    if (now >= minWaitUntil && d.version > verBefore) break
-                    val left = (frameDeadline - now).coerceIn(1L, Gesture.SEEK_FRAME_POLL_SLICE_MS)
-                    d.awaitNewFrame(d.version, left, urgent = true)
+                    d.awaitFrameAfter(now - 50L, 120L)
+                    readSeekStep(d.latestFrame(), targetNum)
+                },
+                onDown = {
+                    Gesture.checkLoopInterrupts(d, call)
+                    val down = VScreenShell.finger(d.displayId, "down", 0, startPt.first, startPt.second).first
+                    if (!down.ok) throw ActionError(down.code, down.message)
+                    fingerDown = true
+                    downAt = System.currentTimeMillis()
+                    midAt = downAt
+                    Gesture.sleepChecked(d, call, Gesture.DRAG_DOWN_HOLD_MS)
+                },
+                readAfterDown = {
+                    val afterDown = SystemClock.elapsedRealtime()
+                    d.awaitFrameAfter(afterDown - Gesture.DRAG_DOWN_HOLD_MS, Gesture.SEEK_FRAME_WAIT_MS)
+                    readSeekStep(d.latestFrame(), targetNum)
+                },
+                moveAndRead = { pt, _ ->
+                    curPt = pt
+                    val verBefore = d.version
+                    val moveStart = SystemClock.elapsedRealtime()
+                    val mv = VScreenShell.finger(d.displayId, "move", 0, pt.first, pt.second).first
+                    if (!mv.ok) throw ActionError(mv.code, mv.message)
+                    val moveDone = SystemClock.elapsedRealtime()
+                    trail += Triple(System.currentTimeMillis(), pt.first, pt.second)
+                    val (freshFrame, fresh) = awaitPostMoveFrame(verBefore, moveStart, moveDone)
+                    Gesture.checkLoopInterrupts(d, call)
+                    d.latestWithVersion()?.let { (bmp, ver) -> VScreenRecorder.offer(d, bmp, ver, pkg) }
+                    val res = readSeekStep(freshFrame, targetNum)
+                    // C4: never claim a hit from a stale pre-move frame on an unrefreshed screen.
+                    if (!fresh && res.hit != null && d.latestCaptureAtMs < moveStart) {
+                        res.copy(hit = null)
+                    } else res
+                },
+            )
+            curPt = seekRes.finalPt
+            if (seekRes.alreadyAtStart) {
+                seekAlreadyAtStart = true
+                seekStartLabel = seekRes.bestText ?: seekRes.metFact
+                metFact = seekRes.metFact
+                metKind = seekRes.metKind
+                hitImgAgeMs = seekRes.imgAgeMs
+                upElapsed = SystemClock.elapsedRealtime()
+            } else {
+                if (trail.isNotEmpty()) {
+                    val mid = trail[trail.size / 2]
+                    midAt = mid.first
+                    midPt = mid.second to mid.third
                 }
-                Gesture.checkLoopInterrupts(d, call)
-                d.latestWithVersion()?.let { (bmp, ver) -> VScreenRecorder.offer(d, bmp, ver, pkg) }
-                val hit = timedPoll()
-                if (hit != null) {
+                if (seekRes.met) {
                     hitElapsed = SystemClock.elapsedRealtime()
-                    metFact = hit
-                    metKind = probe.lastMetKind
-                    hitImgAgeMs = probe.lastHitImgAgeMs
-                    break
+                    metFact = seekRes.metFact
+                    metKind = seekRes.metKind
+                    hitImgAgeMs = seekRes.imgAgeMs
+                    Gesture.sleepChecked(d, call, Gesture.SEEK_END_HOLD_MS)
+                } else {
+                    seekMissReason = seekRes.missReason
+                    seekNotRead = seekRes.notRead
                 }
+                d.latestWithVersion()?.let { (bmp, ver) -> VScreenRecorder.offerFresh(d, bmp, ver, pkg) }
+                preUpAt = System.currentTimeMillis()
+                VScreenShell.finger(d.displayId, "up", 0, curPt.first, curPt.second)
+                fingerDown = false
+                upAt = System.currentTimeMillis()
+                upElapsed = SystemClock.elapsedRealtime()
             }
-            if (trail.isNotEmpty()) {
-                val mid = trail[trail.size / 2]
-                midAt = mid.first
-                midPt = mid.second to mid.third
-            }
-            if (metFact != null) {
-                Gesture.sleepChecked(d, call, Gesture.SEEK_END_HOLD_MS)
-            }
-            d.latestWithVersion()?.let { (bmp, ver) -> VScreenRecorder.offerFresh(d, bmp, ver, pkg) }
-            preUpAt = System.currentTimeMillis()
-            VScreenShell.finger(d.displayId, "up", 0, curPt.first, curPt.second)
-            upAt = System.currentTimeMillis()
-            upElapsed = SystemClock.elapsedRealtime()
         }
     } finally {
         if (colorOnlyPress) {
@@ -773,13 +1261,33 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
             val diag = probe.colorDiag(hitElapsed, upElapsed, tStart)
             com.kilon.agentvscreen.host.AppLogger.info("Gesture", "colorHold $diag")
         }
-        com.kilon.agentvscreen.host.quiet("closedLoop-cancel") { VScreenShell.finger(d.displayId, "cancel", 0, -1, -1) }
+        if (fingerDown) {
+            com.kilon.agentvscreen.host.quiet("closedLoop-cancel") { VScreenShell.finger(d.displayId, "cancel", 0, -1, -1) }
+        }
         probe.close()
         VScreenPerception.setOcrPaused(d.displayId, false)
     }
 
     val totalMs = (upElapsed - tStart).coerceAtLeast(0L)
     val stats = Gesture.pollStats(pollDurations)
+    if (seekAlreadyAtStart) {
+        val valLabel = seekStartLabel ?: tr("目标值", "the target")
+        return GestureOut(
+            met = true,
+            releasedAt = startPt,
+            ms = totalMs,
+            record = null,
+            metFact = metFact,
+            metKind = metKind,
+            pollMsP50 = stats?.first,
+            pollMsMax = stats?.second,
+            imgAgeMs = hitImgAgeMs,
+            actionFact = tr("开始时已经是 $valLabel，没有拖", "already $valLabel at start, did not drag"),
+            points = emptyList(),
+            alreadyAtStart = true,
+        )
+    }
+
     val record = if (isDrag) {
         Gesture.evaluateDragRecord(
             d = d,
@@ -828,5 +1336,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
         imgAgeMs = hitImgAgeMs,
         actionFact = actionFact,
         points = recPts,
+        missReason = seekMissReason,
+        notRead = seekNotRead,
     )
 }

@@ -62,7 +62,7 @@ internal fun VScreenOffloadHandler.spotsCmd(sid: String?, args: OffloadArgs): Na
 internal fun VScreenOffloadHandler.zoomCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {
     val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
     val r0 = args.positional.firstOrNull()?.let { parseRect(it, tr("区域", "region")) }
-        ?: if (args.get("scale") != null) Rect(0, 0, Int.MAX_VALUE / 2, Int.MAX_VALUE / 2) else throw ActionError("INVALID_ARGS", "zoom x1,y1,x2,y2 [--scale 2]")
+        ?: if (args.get("scale") != null) Rect(0, 0, Int.MAX_VALUE / 2, Int.MAX_VALUE / 2) else throw ActionError("INVALID_ARGS", "look x1,y1,x2,y2 [--scale 2]")
     return BackgroundOperation.agentAction(s, null, isRead = true, describe = tr("放大看", "zoom in")) { d ->
         val frame = freshFrameOf(d)
         val r = Rect(r0.left.coerceIn(0, frame.width - 1), r0.top.coerceIn(0, frame.height - 1), r0.right.coerceIn(1, frame.width), r0.bottom.coerceIn(1, frame.height))
@@ -77,8 +77,8 @@ internal fun VScreenOffloadHandler.zoomCmd(sid: String?, args: OffloadArgs): Nat
         val whole = args.positional.isEmpty()
         // 1.4.0-beta6 (test: zoom --scale 1.5 on the whole screen always came out ×1 "would pass 2048 px"): the whole
         // screen at full detail is all there is; enlarging it adds no detail. Said so, with the way to get more.
-        if (whole && asked != null && asked > 1.0) adjusted(tr("整屏已按最清楚的给（放大整屏不会多出细节）；要看更细就框一块：zoom x1,y1,x2,y2 --scale $asked",
-            "the whole screen is given at full detail (enlarging it adds nothing); for more, frame a part: zoom x1,y1,x2,y2 --scale $asked"))
+        if (whole && asked != null && asked > 1.0) adjusted(tr("整屏已按最清楚的给（放大整屏不会多出细节）；要看更细就框一块：look x1,y1,x2,y2 --scale $asked",
+            "the whole screen is given at full detail (enlarging it adds nothing); for more, frame a part: look x1,y1,x2,y2 --scale $asked"))
         else if (asked != null && kotlin.math.abs(asked - k) > 0.05) adjusted(tr("--scale $asked 按 ${"%.1f".format(k)} 执行：这块区域再放大图会超过 $side 像素，框小一点能放得更大",
             "--scale $asked used as ${"%.1f".format(k)}: a larger picture of this region would pass $side px; a smaller region zooms further"))
         val w = (r.width() * k).roundToInt(); val h = (r.height() * k).roundToInt()

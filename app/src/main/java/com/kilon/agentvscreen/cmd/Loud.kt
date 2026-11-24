@@ -21,12 +21,13 @@ internal data class LoudInput(
     val elementCount: Int = 1,
     val lastExpectOnlyVisual: Boolean = false,
     val hasPageTextDiff: Boolean = false,
+    val hasToast: Boolean = false,
     val forced: Boolean = false,
 )
 
 /** Pure function: returns empty list iff the reply may be short (quiet). */
 internal fun loudReasons(input: LoudInput): List<String> {
-    val out = ArrayList<String>(9)
+    val out = ArrayList<String>(10)
     if (input.outcome != "done" || input.hasBlockingNote) out += Loud.FAILED
     if (input.hasNoExpect) out += Loud.NO_EXPECT
     if (input.hasNotMet) out += Loud.NOT_MET
@@ -34,6 +35,7 @@ internal fun loudReasons(input: LoudInput): List<String> {
     if (input.afterChanged) out += Loud.AFTER
     if (input.startPkg != null && input.endPkg != null && input.startPkg != input.endPkg && !input.hasAppUntil) out += Loud.APP_SWITCH
     if (input.snappedBack) out += Loud.SNAP_BACK
+    if (input.hasToast) out += Loud.TOAST
     if (input.elementCount == 0 || (input.lastExpectOnlyVisual && !input.hasPageTextDiff)) out += Loud.NO_TEXT
     if (input.forced) out += Loud.FORCED
     return out
@@ -53,6 +55,7 @@ internal object Loud {
     const val AFTER = "AFTER"
     const val APP_SWITCH = "APP_SWITCH"
     const val SNAP_BACK = "SNAP_BACK"
+    const val TOAST = "TOAST"
     const val NO_TEXT = "NO_TEXT"
     const val FORCED = "FORCED"
 

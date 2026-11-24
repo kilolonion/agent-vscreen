@@ -76,7 +76,7 @@ internal fun VScreenOffloadHandler.lookCmd(sid: String?, args: OffloadArgs, `as`
         region != null && stretch -> throw ActionError("INVALID_ARGS", tr("一次只看一样：区域（x1,y1,x2,y2）或一段时间（--last 等），不能同时", "One thing at a time: a region (x1,y1,x2,y2) or a stretch (--last etc.), not both"))
         // 1.4.0-beta5: a scale alone means the whole screen at that scale (beta4 refused `zoom --scale 1.5`).
         region != null || args.get("scale") != null -> zoomCmd(sid, args)
-        `as` == "zoom" -> throw ActionError("INVALID_ARGS", "zoom x1,y1,x2,y2 [--detail high]")
+        `as` == "zoom" -> throw ActionError("INVALID_ARGS", "look x1,y1,x2,y2 [--detail high]")
         stretch -> framesCmd(sid, args)
         else -> lookNow(sid, args)
     }

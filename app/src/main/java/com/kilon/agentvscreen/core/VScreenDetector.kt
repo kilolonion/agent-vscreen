@@ -39,6 +39,10 @@ object VScreenDetector {
     private const val K_CRASHED = "crashed"
     private const val K_LICENSE = "license_ok"
     private const val K_DECLINED = "license_skipped"
+    private const val K_VERIFIED_TAG = "verified_tag"
+    private const val K_VERIFIED_COUNT = "verified_count"
+    /** 2.0.0-beta8 (D): write synchronous crash-guard sentinel only for the first 3 runs of a model+versionCode. */
+    internal const val VERIFY_RUNS = 3
     /** At most this many hits are kept per frame (the list is for tapping, not for counting). */
     const val MAX_HITS = 60
 
@@ -50,6 +54,7 @@ object VScreenDetector {
     @Volatile private var loadError: String? = null
     @Volatile var lastMs = 0L; private set
     @Volatile private var checked = false
+    @Volatile private var verifiedCacheTag: String? = null
     /** The last frame looked at, per display: a snapshot of an unchanged frame does not run the model again. */
     private val last = HashMap<Int, Pair<Long, List<Hit>?>>()
 
@@ -62,6 +67,32 @@ object VScreenDetector {
     }
 
     private fun prefs(ctx: Context) = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    internal fun verifyTag(sha256: String, versionCode: Int = com.kilon.agentvscreen.BuildConfig.VERSION_CODE): String =
+        "$sha256@$versionCode"
+
+    internal fun isVerified(ctx: Context, sha256: String, versionCode: Int = com.kilon.agentvscreen.BuildConfig.VERSION_CODE): Boolean {
+        val want = verifyTag(sha256, versionCode)
+        if (verifiedCacheTag == want) return true
+        val p = prefs(ctx)
+        val ok = p.getString(K_VERIFIED_TAG, null) == want && p.getInt(K_VERIFIED_COUNT, 0) >= VERIFY_RUNS
+        if (ok) verifiedCacheTag = want
+        return ok
+    }
+
+    internal fun noteVerifiedRun(ctx: Context, sha256: String, versionCode: Int = com.kilon.agentvscreen.BuildConfig.VERSION_CODE): Int {
+        val want = verifyTag(sha256, versionCode)
+        val p = prefs(ctx)
+        val prevTag = p.getString(K_VERIFIED_TAG, null)
+        val next = (if (prevTag == want) p.getInt(K_VERIFIED_COUNT, 0) else 0) + 1
+        p.edit()
+            .putBoolean(K_RUNNING, false)
+            .putString(K_VERIFIED_TAG, want)
+            .putInt(K_VERIFIED_COUNT, next.coerceAtMost(VERIFY_RUNS))
+            .apply()
+        if (next >= VERIFY_RUNS) verifiedCacheTag = want
+        return next
+    }
 
     /** The user has seen the model's license notice (AGPL-3.0, separate from the app) and turned the feature on. */
     fun licenseAccepted(ctx: Context): Boolean = prefs(ctx).getBoolean(K_LICENSE, false)
@@ -101,7 +132,13 @@ object VScreenDetector {
     fun reset(ctx: Context) {
         close()
         loadError = null
-        prefs(ctx).edit().remove(K_CRASHED).putBoolean(K_RUNNING, false).apply()
+        verifiedCacheTag = null
+        prefs(ctx).edit()
+            .remove(K_CRASHED)
+            .remove(K_VERIFIED_TAG)
+            .remove(K_VERIFIED_COUNT)
+            .putBoolean(K_RUNNING, false)
+            .apply()
     }
 
     @Synchronized
@@ -117,11 +154,10 @@ object VScreenDetector {
         engine?.let { if (it.model.sha256 == m.sha256) return it; close() }
         if (loadError != null) return null
         return try {
-            val env = OrtEnvironment.getEnvironment()
-            val s = OrtSession.SessionOptions().apply {
-                setIntraOpNumThreads(max(1, min(4, Runtime.getRuntime().availableProcessors() / 2)))
-                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-            }.use { env.createSession(DetectorModels.ensureFile(ctx, m).absolutePath, it) }
+            val appCtx = ctx.applicationContext
+            val env = OnnxRuntime.environment(appCtx)
+            val s = OnnxRuntime.sessionOptions(appCtx, OrtSession.SessionOptions.OptLevel.ALL_OPT)
+                .use { env.createSession(DetectorModels.ensureFile(appCtx, m).absolutePath, it) }
             Engine(env, s, m).also { engine = it }
         } catch (t: Throwable) {
             loadError = "${t.javaClass.simpleName}: ${t.message?.take(160)}"
@@ -142,7 +178,9 @@ object VScreenDetector {
         val m = e.model
         val p = prefs(ctx)
         val t0 = SystemClock.elapsedRealtime()
-        p.edit().putBoolean(K_RUNNING, true).commit()
+        val needSentinel = !isVerified(ctx, m.sha256)
+        if (needSentinel) p.edit().putBoolean(K_RUNNING, true).commit()
+        var succeeded = false
         try {
             val lb = DetectorMath.letterbox(frame.width, frame.height, m.inW, m.inH)
             val scaled = Bitmap.createScaledBitmap(frame, lb.w, lb.h, true)
@@ -155,22 +193,29 @@ object VScreenDetector {
                 val c = px[y * lb.w + x]; val i = y * m.inW + x
                 buf[i] = ((c shr 16) and 255) / 255f; buf[plane + i] = ((c shr 8) and 255) / 255f; buf[2 * plane + i] = (c and 255) / 255f
             }
-            val out = OnnxTensor.createTensor(e.env, FloatBuffer.wrap(buf), longArrayOf(1, 3, m.inH.toLong(), m.inW.toLong())).use { input ->
-                e.session.run(mapOf(e.session.inputNames.first() to input)).use { r ->
-                    val t = r[0] as OnnxTensor
-                    val shape = t.info.shape
-                    val fb = t.floatBuffer
-                    val arr = FloatArray(fb.remaining()); fb.get(arr)
-                    DetectorMath.decode(arr, shape[1].toInt(), shape[2].toInt(), m.threshold, lb.scale, frame.width, frame.height)
+            val detShape = longArrayOf(1, 3, m.inH.toLong(), m.inW.toLong())
+            val out = OnnxTensor.createTensor(e.env, FloatBuffer.wrap(buf), detShape).use { input ->
+                OnnxRuntime.runInference(ctx, "detector:${m.id}", detShape) {
+                    e.session.run(mapOf(e.session.inputNames.first() to input)).use { r ->
+                        val t = r[0] as OnnxTensor
+                        val shape = t.info.shape
+                        val fb = t.floatBuffer
+                        val arr = FloatArray(fb.remaining()); fb.get(arr)
+                        DetectorMath.decode(arr, shape[1].toInt(), shape[2].toInt(), m.threshold, lb.scale, frame.width, frame.height)
+                    }
                 }
             }
             lastMs = SystemClock.elapsedRealtime() - t0
+            succeeded = true
             return out.take(MAX_HITS)
         } catch (t: Throwable) {
             AppLogger.warning(TAG, "detect failed: ${t.javaClass.simpleName}: ${t.message?.take(160)}")
             return null
         } finally {
-            p.edit().putBoolean(K_RUNNING, false).apply()
+            if (needSentinel) {
+                if (succeeded) noteVerifiedRun(ctx, m.sha256)
+                else p.edit().putBoolean(K_RUNNING, false).apply()
+            }
         }
     }
 

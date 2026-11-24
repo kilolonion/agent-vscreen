@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 2.0.0-beta8 (G.3): FullscreenActivity owns a separate taskAffinity; clear window animations so closing back to the floating window plays no launcher task-close animation. -->
+    <style name="Theme.AgentVScreen.Fullscreen" parent="@android:style/Theme.Material.NoActionBar.TranslucentDecor">
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>

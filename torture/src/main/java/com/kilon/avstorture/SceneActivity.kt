@@ -106,7 +106,7 @@ class SceneActivity : Activity() {
         } else {
             prefs.getInt(PresetReceiver.EXTRA_SEED, PresetReceiver.DEFAULT_SEED)
         }
-        if (currentScene != "S04" && currentScene != "S11") {
+        if (currentScene != "S04" && currentScene != "S11" && currentScene != "S16") {
             AvstLog.emit(
                 scene = currentScene,
                 ev = "enter",
@@ -118,6 +118,21 @@ class SceneActivity : Activity() {
             intent.getBooleanExtra(PresetReceiver.EXTRA_KEEP_CYCLING, false)
         } else {
             prefs.getBoolean(PresetReceiver.EXTRA_KEEP_CYCLING, false)
+        }
+        val initOverride = if (intent?.hasExtra(PresetReceiver.EXTRA_INIT_VALUE) == true) {
+            intent.getIntExtra(PresetReceiver.EXTRA_INIT_VALUE, -1)
+        } else {
+            prefs.getInt(PresetReceiver.EXTRA_INIT_VALUE, -1)
+        }
+        val targetOverride = if (intent?.hasExtra(PresetReceiver.EXTRA_TARGET_VALUE) == true) {
+            intent.getIntExtra(PresetReceiver.EXTRA_TARGET_VALUE, -1)
+        } else {
+            prefs.getInt(PresetReceiver.EXTRA_TARGET_VALUE, -1)
+        }
+        val ocrOnly = if (intent?.hasExtra(PresetReceiver.EXTRA_OCR_ONLY) == true) {
+            intent.getBooleanExtra(PresetReceiver.EXTRA_OCR_ONLY, false)
+        } else {
+            prefs.getBoolean(PresetReceiver.EXTRA_OCR_ONLY, false)
         }
         val rng = SceneRng(currentSeed)
         when (currentScene) {
@@ -134,6 +149,9 @@ class SceneActivity : Activity() {
             "S11" -> buildS11Charge(rng)
             "S12" -> buildS12Noise(rng)
             "S13" -> buildS13Find()
+            "S14" -> buildS14FreezeTimer()
+            "S15" -> buildS15SystemToast()
+            "S16" -> buildS16PreciseSlider(rng, initOverride, targetOverride, ocrOnly)
             else -> buildS01List()
         }
     }
@@ -844,6 +862,169 @@ class SceneActivity : Activity() {
         root.addView(detailBox, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     }
 
+    // ── S14: ticking stopwatch + video-style clock + :worker process for --hold freeze check ──
+    private fun buildS14FreezeTimer() {
+        val dm = resources.displayMetrics
+        val h = dm.heightPixels
+        val layer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setBackgroundColor(Color.WHITE)
+            setPadding(dp(24f), (h * 0.14f).roundToInt(), dp(24f), dp(24f))
+        }
+        val title = label("冻结计时测试", sp = 22f, bold = true).apply { gravity = Gravity.CENTER }
+        val tickView = label("TICK 00000", sp = 34f, bold = true, color = Color.rgb(37, 99, 235)).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(24f), 0, dp(8f))
+        }
+        val clockView = label("00:00.0", sp = 28f, bold = true).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(20f))
+        }
+        val workerIntent = Intent(this, WorkerService::class.java)
+        runCatching { startService(workerIntent) }
+        cleanupTasks += { runCatching { stopService(workerIntent) } }
+
+        var ticks = 0
+        val startElapsed = SystemClock.elapsedRealtime()
+        val ticker = object : Runnable {
+            override fun run() {
+                ticks++
+                val secTenths = ticks / 2 // 50ms per tick -> 2 ticks = 0.1s of active CPU ticking
+                val mins = secTenths / 600
+                val secs = (secTenths / 10) % 60
+                val tenths = secTenths % 10
+                tickView.text = "TICK %05d".format(ticks)
+                clockView.text = "%02d:%02d.%d".format(mins, secs, tenths)
+                if (ticks % 5 == 1) {
+                    AvstLog.emit(
+                        scene = "S14",
+                        ev = "tick",
+                        ok = true,
+                        data = JSONObject()
+                            .put("ticks", ticks)
+                            .put("elapsed_ms", SystemClock.elapsedRealtime() - startElapsed)
+                            .put("pid", android.os.Process.myPid()),
+                    )
+                }
+                handler.postDelayed(this, 50L)
+            }
+        }
+        handler.post(ticker)
+        layer.addView(title)
+        layer.addView(tickView)
+        layer.addView(clockView)
+        root.addView(layer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    }
+
+    // ── S15: real Android system Toast for C5 accessibility event verification ──
+    private fun buildS15SystemToast() {
+        val dm = resources.displayMetrics
+        val h = dm.heightPixels
+        val layer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setBackgroundColor(Color.WHITE)
+            setPadding(dp(24f), (h * 0.18f).roundToInt(), dp(24f), dp(24f))
+        }
+        val title = label("系统 Toast 测试页", sp = 22f, bold = true).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(24f))
+        }
+        val status = label("点击按钮弹出系统文字 Toast", sp = 16f).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(32f))
+        }
+        var count = 0
+        val btn = pillButton("弹系统 Toast").apply {
+            setOnClickListener {
+                count++
+                val msg = "AVS_SYSTEM_TOAST_$count"
+                android.widget.Toast.makeText(this@SceneActivity, msg, android.widget.Toast.LENGTH_SHORT).show()
+                status.text = "已触发：$msg"
+                AvstLog.emit("S15", "toast_shown", ok = true, data = JSONObject().put("text", msg).put("count", count))
+            }
+        }
+        layer.addView(title)
+        layer.addView(status)
+        layer.addView(btn, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(layer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+    }
+
+    // ── S16: precise 0–300 step-1 slider (Chrome-zoom style) for beta8 E seek search ──
+    private fun buildS16PreciseSlider(rng: SceneRng, initOverride: Int, targetOverride: Int, ocrOnly: Boolean) {
+        val dm = resources.displayMetrics
+        val w = dm.widthPixels
+        val h = dm.heightPixels
+        val targetValue = if (targetOverride in 0..S16_MAX) targetOverride else S16_DEFAULT_TARGET
+        val initValue = if (initOverride in 0..S16_MAX) initOverride else run {
+            var v = rng.nextRange(10, S16_MAX - 10)
+            if (v == targetValue) v = (v + 37) % (S16_MAX + 1)
+            v
+        }
+        val layer = FrameLayout(this).apply { setBackgroundColor(Color.WHITE) }
+
+        val hint = label("精确滑块 0–300%：目标 ${targetValue}%", sp = 18f).apply { gravity = Gravity.CENTER }
+        layer.addView(hint, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = (h * 0.18f).roundToInt()
+        })
+
+        // Value sits cleanly inside [400,600,700,700] on 1080x2400 (matching S10 geometry).
+        val valueLabel = label("${initValue}%", sp = 30f, bold = true).apply {
+            gravity = Gravity.CENTER
+            if (ocrOnly) importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
+        layer.addView(valueLabel, FrameLayout.LayoutParams((w * 0.30f).roundToInt(), (h * 0.05f).roundToInt()).apply {
+            leftMargin = (w * 0.35f).roundToInt()
+            topMargin = (h * (600f / 2400f)).roundToInt()
+        })
+
+        val x1 = (w * (100f / 1080f)).roundToInt()
+        val x2 = (w * (980f / 1080f)).roundToInt()
+        val trackY = (h * (800f / 2400f)).roundToInt()
+        val initX = x1 + ((x2 - x1) * (initValue.toFloat() / S16_MAX)).roundToInt()
+
+        var goalDone = false
+        val slider = SliderBarView(this, initValue, maxValue = S16_MAX, onMove = { v ->
+            valueLabel.text = "${v}%"
+        }, onRelease = { v ->
+            valueLabel.text = "${v}%"
+            val ok = v == targetValue
+            AvstLog.emit(
+                "S16",
+                "value",
+                ok = ok,
+                data = JSONObject().put("value", v).put("target", targetValue).put("init", initValue),
+            )
+            if (ok && !goalDone) {
+                goalDone = true
+                AvstLog.emit(
+                    "S16",
+                    "goal",
+                    ok = true,
+                    data = JSONObject().put("value", v).put("target", targetValue).put("init", initValue),
+                )
+            }
+        })
+        layer.addView(slider, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        root.addView(layer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+
+        AvstLog.emit(
+            scene = "S16",
+            ev = "enter",
+            ok = true,
+            data = JSONObject()
+                .put("seed", currentSeed)
+                .put("init", initValue)
+                .put("target", targetValue)
+                .put("ocr_only", ocrOnly)
+                .put("x1", x1)
+                .put("x2", x2)
+                .put("y", trackY)
+                .put("init_x", initX),
+        )
+    }
+
     companion object {
         const val BASE_TEXT_SP = 18f
         const val BUTTON_TEXT_SP = 18f
@@ -870,6 +1051,8 @@ class SceneActivity : Activity() {
         const val S12_PERIOD_MS = 2000L
         const val S13_ITEM_COUNT = 200
         const val S13_TARGET_INDEX = 147
+        const val S16_MAX = 300
+        const val S16_DEFAULT_TARGET = 170
     }
 }
 
@@ -1250,10 +1433,11 @@ private class MovingShapesView(
 private class SliderBarView(
     context: Context,
     initValue: Int,
+    private val maxValue: Int = 100,
     private val onMove: (Int) -> Unit,
     private val onRelease: (Int) -> Unit,
 ) : View(context) {
-    private var value = initValue.coerceIn(0, 100)
+    private var value = initValue.coerceIn(0, maxValue)
     private var dragging = false
     private val trackPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { strokeCap = Paint.Cap.ROUND }
     private val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
@@ -1268,7 +1452,7 @@ private class SliderBarView(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val (x1, x2, y) = trackBounds()
-        val tx = x1 + (x2 - x1) * (value / 100f)
+        val tx = x1 + (x2 - x1) * (value / maxValue.toFloat())
         trackPaint.strokeWidth = 16f
         trackPaint.color = Color.rgb(209, 213, 219)
         canvas.drawLine(x1, y, x2, y, trackPaint)
@@ -1281,7 +1465,7 @@ private class SliderBarView(
     private fun updateFromX(x: Float) {
         val (x1, x2, _) = trackBounds()
         val ratio = ((x - x1) / (x2 - x1).coerceAtLeast(1f)).coerceIn(0f, 1f)
-        value = (ratio * 100f).roundToInt().coerceIn(0, 100)
+        value = (ratio * maxValue.toFloat()).roundToInt().coerceIn(0, maxValue)
         invalidate()
     }
 

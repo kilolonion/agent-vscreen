@@ -142,9 +142,21 @@ def main():
     if tailnet_secret:
         secrets_to_check.append(("TSB_SECRET", tailnet_secret))
 
-    # 1) Missing / wrong X-AVS-Public -> 403
+    # J.1 regression (J-API34-REPRO): re-delivering HostService.onStartCommand (as BootReceiver does
+    # on late ACTION_BOOT_COMPLETED) runs PublicAccess.sync() and MUST keep 127.0.0.1:18785 serving.
+    shell("am", "start-foreground-service", "-n", f"{APP}/.host.HostService")
+    time.sleep(1.5)
+    st_boot, _, _ = http_req(PUB_LOCAL_PORT, "GET", "/.well-known/oauth-protected-resource", pub_hdr)
+    check("host_service_restart_keeps_18785", st_boot == 200, f"status={st_boot}")
+
+    # 1) Missing / wrong X-AVS-Public -> 403 (even if attacker spoofs X-AVS-Public-Src)
     st, _, _ = http_req(PUB_LOCAL_PORT, "GET", "/.well-known/oauth-protected-resource", {"Host": f"127.0.0.1:{PUB_LOCAL_PORT}"})
     check("missing_secret_403", st == 403, f"status={st}")
+    st, _, _ = http_req(PUB_LOCAL_PORT, "GET", "/.well-known/oauth-protected-resource", {
+        "Host": f"127.0.0.1:{PUB_LOCAL_PORT}",
+        "X-AVS-Public-Src": "203.0.113.99",
+    })
+    check("spoof_public_src_no_secret_403", st == 403, f"status={st}")
     st, _, _ = http_req(PUB_LOCAL_PORT, "GET", "/.well-known/oauth-protected-resource", {"X-AVS-Public": "wrong", "Host": f"127.0.0.1:{PUB_LOCAL_PORT}"})
     check("wrong_secret_403", st == 403, f"status={st}")
 
@@ -353,6 +365,45 @@ def main():
     mcp_hdr_2 = dict(pub_hdr, **{"Authorization": f"Bearer {access_2}", "Content-Type": "application/json"})
     st_list_2, _, _ = http_req(PUB_LOCAL_PORT, "POST", "/mcp", mcp_hdr_2, json.dumps({"jsonrpc": "2.0", "id": 6, "method": "tools/list"}))
     check("refreshed_access_token_works", st_list_2 == 200, f"status={st_list_2}")
+
+    # 11b) Section I: per-source lockout isolation (IPv4 /32, IPv6 /64) & X-Forwarded-For ignored
+    send_public_hook("clear_lockout")
+    src_a_429 = False
+    for attempt in range(9):
+        bad_hdr = dict(pub_hdr, **{
+            "X-AVS-Public-Src": "198.51.100.10",
+            "X-Forwarded-For": f"10.0.0.{attempt + 1}",
+            "Authorization": f"Bearer unknown_attacker_token_{attempt}",
+            "Content-Type": "application/json",
+        })
+        st_att, _, _ = http_req(PUB_LOCAL_PORT, "POST", "/mcp", bad_hdr, json.dumps({"jsonrpc": "2.0", "id": 100 + attempt, "method": "tools/list"}))
+        if st_att == 429:
+            src_a_429 = True
+            break
+    check("src_a_locked_out_ignores_xff", src_a_429, "198.51.100.10 hit 429 despite rotating X-Forwarded-For")
+
+    # Source B (different IPv4) MUST remain completely unaffected with valid token AND unauth probe
+    src_b_ok_hdr = dict(mcp_hdr_2, **{"X-AVS-Public-Src": "198.51.100.20"})
+    st_b_ok, _, _ = http_req(PUB_LOCAL_PORT, "POST", "/mcp", src_b_ok_hdr, json.dumps({"jsonrpc": "2.0", "id": 120, "method": "tools/list"}))
+    st_b_unauth, _, _ = http_req(PUB_LOCAL_PORT, "POST", "/mcp", dict(pub_hdr, **{"X-AVS-Public-Src": "198.51.100.20", "Content-Type": "application/json"}), '{"jsonrpc":"2.0","id":121,"method":"initialize"}')
+    check("per_source_lockout_isolated_ipv4", st_b_ok == 200 and st_b_unauth == 401, f"srcB valid={st_b_ok} unauth={st_b_unauth}")
+
+    # IPv6 /64 bucketing: lock 2001:db8:aaaa:1111::1 -> ::99 in same /64 gets 429; 2222::1 in other /64 gets 200
+    v6_locked = False
+    for attempt in range(9):
+        bad_v6 = dict(pub_hdr, **{
+            "X-AVS-Public-Src": "2001:db8:aaaa:1111::1",
+            "Authorization": f"Bearer unknown_v6_token_{attempt}",
+            "Content-Type": "application/json",
+        })
+        st_v6, _, _ = http_req(PUB_LOCAL_PORT, "POST", "/mcp", bad_v6, json.dumps({"jsonrpc": "2.0", "id": 130 + attempt, "method": "tools/list"}))
+        if st_v6 == 429:
+            v6_locked = True
+            break
+    st_v6_same64, _, _ = http_req(PUB_LOCAL_PORT, "POST", "/mcp", dict(mcp_hdr_2, **{"X-AVS-Public-Src": "2001:db8:aaaa:1111::99"}), json.dumps({"jsonrpc": "2.0", "id": 140, "method": "tools/list"}))
+    st_v6_other64, _, _ = http_req(PUB_LOCAL_PORT, "POST", "/mcp", dict(mcp_hdr_2, **{"X-AVS-Public-Src": "2001:db8:aaaa:2222::1"}), json.dumps({"jsonrpc": "2.0", "id": 141, "method": "tools/list"}))
+    check("per_source_lockout_ipv6_64", v6_locked and st_v6_same64 == 429 and st_v6_other64 == 200, f"locked={v6_locked} same64={st_v6_same64} other64={st_v6_other64}")
+    send_public_hook("clear_lockout")
 
     # Reuse retired refresh_1 -> revokes ALL tokens of this client (access_2 AND refresh_2 stop working!)
     st_reuse, _, body_reuse = http_req(PUB_LOCAL_PORT, "POST", "/oauth/token", dict(pub_hdr, **{"Content-Type": "application/x-www-form-urlencoded"}), urllib.parse.urlencode({

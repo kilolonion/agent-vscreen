@@ -26,19 +26,34 @@ enum class Risk(
     TRUST_SET("开启免确认", "Enable no-confirm mode"),
     PUBLIC_ENABLE("开启公网接入", "Enable public access");
 
-    /** Approval lifetime in ms; 0 = valid until the user revokes it. */
-    val ttlMs: Long
-        get() = when (this) {
-            NEW_CLIENT, SCOPE_OPERATE, TRUST_SET, PUBLIC_ENABLE -> 0L
-            SCOPE_SYSTEM -> SCOPE_SYSTEM_MS
-            HIGH_RISK -> Consent.VALID_MS
-            RATE -> RATE_APPROVAL_MS
-            SESSION_AGE -> SESSION_AGE_MS
-        }
+    /** Approval lifetime in ms under [STRICT] or [STANDARD] security level; 0 = valid until user revokes. */
+    fun ttlMsFor(level: SecurityLevel = securityLevel): Long = when (this) {
+        NEW_CLIENT, SCOPE_OPERATE, TRUST_SET, PUBLIC_ENABLE -> 0L
+        SCOPE_SYSTEM -> if (level == SecurityLevel.STRICT) SCOPE_SYSTEM_MS else 0L
+        HIGH_RISK -> Consent.VALID_MS
+        RATE -> RATE_APPROVAL_MS
+        SESSION_AGE -> SESSION_AGE_MS
+    }
+
+    /** Approval lifetime in ms under the current [securityLevel]; 0 = valid until the user revokes it. */
+    val ttlMs: Long get() = ttlMsFor(securityLevel)
 
     val title: String get() = tr(zh, en)
 
+    enum class SecurityLevel(val key: String) {
+        STANDARD("standard"),
+        STRICT("strict");
+
+        companion object {
+            fun of(raw: String?): SecurityLevel =
+                entries.firstOrNull { it.key.equals(raw?.trim(), ignoreCase = true) } ?: STANDARD
+        }
+    }
+
     companion object {
+        private const val PREFS_NAME = "agent_vscreen_security"
+        private const val KEY_LEVEL = "security_level"
+
         const val RATE_MAX_PER_MIN = 120
         const val RATE_WINDOW_MS = 60_000L
         const val RATE_APPROVAL_MS = 60 * 60_000L
@@ -46,6 +61,31 @@ enum class Risk(
         const val SESSION_AGE_MS = 8 * 60 * 60_000L
 
         const val CLIENT_LOCAL = "local"
+        /** Wildcard client recorded when the user pre-authorizes a newly created agent in the app UI (B2). */
+        const val CLIENT_ANY = "*"
+
+        @Volatile private var prefs: android.content.SharedPreferences? = null
+        private val _securityLevelFlow = kotlinx.coroutines.flow.MutableStateFlow(SecurityLevel.STANDARD)
+        val securityLevelFlow: kotlinx.coroutines.flow.StateFlow<SecurityLevel> = _securityLevelFlow
+
+        var securityLevel: SecurityLevel
+            get() = _securityLevelFlow.value
+            set(value) {
+                _securityLevelFlow.value = value
+                prefs?.edit()?.putString(KEY_LEVEL, value.key)?.apply()
+            }
+
+        fun setSecurityLevel(ctx: Context, level: SecurityLevel) {
+            if (prefs == null) init(ctx)
+            securityLevel = level
+            Audit.security("security_level", level.key)
+        }
+
+        fun init(ctx: Context) {
+            val p = ctx.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs = p
+            _securityLevelFlow.value = SecurityLevel.of(p.getString(KEY_LEVEL, null))
+        }
 
         /** Test seam for deterministic time in unit tests. */
         @Volatile internal var clock: () -> Long = { System.currentTimeMillis() }
@@ -92,51 +132,78 @@ enum class Risk(
         }
 
         /**
-         * Pure evaluation: returns the first triggered [Risk] dimension for this command, or `null` when allowed.
-         * `status` and `help` are never blocked by any dimension (6.4).
+         * 2.0.0-beta8 (B2): pure evaluation returning ALL unapproved [Risk] dimensions for this command,
+         * or an empty list when allowed. `status` and `help` are never blocked by any dimension.
+         *
+         * Under [SecurityLevel.STANDARD] (default): granted `NEW_CLIENT` / `SCOPE_OPERATE` / `SCOPE_SYSTEM`
+         * approvals stay valid until revoked, and `SESSION_AGE` does not trigger. `HIGH_RISK`, `RATE`, and
+         * `PUBLIC_ENABLE` always remain enforced under both levels.
          */
+        internal fun evaluateAll(
+            call: Call,
+            spec: CommandSpec.Cmd,
+            args: OffloadArgs,
+            nowMs: Long = clock(),
+            level: SecurityLevel = securityLevel,
+        ): List<Risk> {
+            if (spec.name == "status" || spec.name == "help") return emptyList()
+            val out = ArrayList<Risk>(4)
+            val client = clientOf(call)
+            val hasNewClient = StrongConfirm.hasApproval(NEW_CLIENT, call.tokenId, client, nowMs, level)
+            if (!hasNewClient) out += NEW_CLIENT
+            val need = spec.scopeFor(args)
+            if (need == CommandSpec.Scope.OPERATE || need == CommandSpec.Scope.SYSTEM) {
+                if (!StrongConfirm.hasApproval(SCOPE_OPERATE, call.tokenId, client, nowMs, level)) {
+                    out += SCOPE_OPERATE
+                }
+            }
+            if (need == CommandSpec.Scope.SYSTEM) {
+                if (!StrongConfirm.hasApproval(SCOPE_SYSTEM, call.tokenId, client, nowMs, level)) {
+                    out += SCOPE_SYSTEM
+                }
+            }
+            if (level == SecurityLevel.STRICT && hasNewClient && (need == CommandSpec.Scope.OPERATE || need == CommandSpec.Scope.SYSTEM)) {
+                val lastConfirm = StrongConfirm.latestConfirmAt(call.tokenId)
+                if (lastConfirm <= 0L || nowMs - lastConfirm > SESSION_AGE_MS) {
+                    out += SESSION_AGE
+                }
+            }
+            if (inputActionCount(call.tokenId, nowMs) > RATE_MAX_PER_MIN) {
+                if (!StrongConfirm.hasApproval(RATE, call.tokenId, client, nowMs, level)) {
+                    out += RATE
+                }
+            }
+            return out
+        }
+
+        /** First triggered [Risk] dimension for this command, or `null` when allowed. */
         internal fun evaluate(
             call: Call,
             spec: CommandSpec.Cmd,
             args: OffloadArgs,
             nowMs: Long = clock(),
-        ): Risk? {
-            if (spec.name == "status" || spec.name == "help") return null
-            val client = clientOf(call)
-            if (!StrongConfirm.hasApproval(NEW_CLIENT, call.tokenId, client, nowMs)) return NEW_CLIENT
-            val need = spec.scopeFor(args)
-            if (need == CommandSpec.Scope.OPERATE || need == CommandSpec.Scope.SYSTEM) {
-                if (!StrongConfirm.hasApproval(SCOPE_OPERATE, call.tokenId, client, nowMs)) return SCOPE_OPERATE
-            }
-            if (need == CommandSpec.Scope.SYSTEM) {
-                if (!StrongConfirm.hasApproval(SCOPE_SYSTEM, call.tokenId, client, nowMs)) return SCOPE_SYSTEM
-            }
-            if (need == CommandSpec.Scope.OPERATE || need == CommandSpec.Scope.SYSTEM) {
-                val lastConfirm = StrongConfirm.latestConfirmAt(call.tokenId)
-                if (lastConfirm <= 0L || nowMs - lastConfirm > SESSION_AGE_MS) return SESSION_AGE
-            }
-            if (inputActionCount(call.tokenId, nowMs) > RATE_MAX_PER_MIN) {
-                if (!StrongConfirm.hasApproval(RATE, call.tokenId, client, nowMs)) return RATE
-            }
-            return null
-        }
+        ): Risk? = evaluateAll(call, spec, args, nowMs).firstOrNull()
 
         /**
          * Gate called by `VScreenOffloadHandler` after scope check and before command execution.
-         * Throws `NEEDS_CONFIRM` / `USER_DENIED` when a risk dimension is not approved.
+         * Collects ALL unapproved dimensions and requests them in a single on-phone strong confirmation (B2).
+         * Throws `NEEDS_CONFIRM` / `USER_DENIED` when unapproved.
          */
         internal fun check(ctx: Context, call: Call?, spec: CommandSpec.Cmd, args: OffloadArgs) {
             if (call == null) return
             while (true) {
-                val risk = evaluate(call, spec, args) ?: return
-                StrongConfirm.requireForRisk(ctx, call, risk, spec.name)
+                val missing = evaluateAll(call, spec, args)
+                if (missing.isEmpty()) return
+                StrongConfirm.requireForRisks(ctx, call, missing, spec.name)
             }
         }
 
-        /** Test helper: reset in-memory rate counters and clock. */
-        internal fun resetForTests() {
+        /** Test helper: reset in-memory rate counters, clock, and security level. */
+        internal fun resetForTests(level: SecurityLevel = SecurityLevel.STANDARD) {
             synchronized(rateLock) { rateBuckets.clear() }
             clock = { System.currentTimeMillis() }
+            _securityLevelFlow.value = level
+            prefs?.edit()?.putString(KEY_LEVEL, level.key)?.apply()
         }
     }
 }

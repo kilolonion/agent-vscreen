@@ -201,7 +201,9 @@ class PublicServer(
         // 7.8 #3: GET / DELETE on /mcp return 405 + Allow: POST BEFORE auth, sharing Mcp.preAuthCheck with ApiServer.
         Mcp.preAuthCheck(r)?.let { return it }
 
-        apiServer.failLimiter.checkLocked(PUBLIC_FAIL_KEY, remote = true)?.let { return it }
+        val srcBucket = PublicOAuth.sourceBucket(r.headers["x-avs-public-src"])
+        val srcFailKey = "public-src:$srcBucket"
+        apiServer.failLimiter.checkLocked(srcFailKey, remote = true)?.let { return it }
 
         val prmUrl = "${base.trimEnd('/')}/.well-known/oauth-protected-resource"
         val wwwAuth = mapOf("WWW-Authenticate" to """Bearer resource_metadata="$prmUrl"""")
@@ -216,16 +218,28 @@ class PublicServer(
         } else {
             null
         }
-        val access = PublicOAuth.validateAccessToken(bearer, PublicOAuth.mcpResource(base))
-            ?: return apiServer.failLimiter.recordFailure(
-                who = PUBLIC_FAIL_KEY,
-                remote = true,
-                path = r.path,
-                code = "BAD_TOKEN",
-                msg = tr("公网访问令牌无效、已过期或目标地址不匹配", "Public access token is invalid, expired, or bound to another resource"),
-                status = 401,
-                headers = wwwAuth,
-            )
+        val access = when (val chk = PublicOAuth.inspectAccessToken(bearer, PublicOAuth.mcpResource(base))) {
+            is PublicOAuth.AccessCheck.Valid -> {
+                val clientFailKey = "public-client:${chk.auth.clientId}"
+                apiServer.failLimiter.checkLocked(clientFailKey, remote = true)?.let { return it }
+                chk.auth
+            }
+            is PublicOAuth.AccessCheck.Invalid -> {
+                // Section I: unknown Bearer counts ONLY against source bucket (never global lockout);
+                // known client's invalid/expired/wrong-resource token counts by client_id.
+                val failKey = chk.knownClientId?.let { "public-client:$it" } ?: srcFailKey
+                apiServer.failLimiter.checkLocked(failKey, remote = true)?.let { return it }
+                return apiServer.failLimiter.recordFailure(
+                    who = failKey,
+                    remote = true,
+                    path = r.path,
+                    code = "BAD_TOKEN",
+                    msg = tr("公网访问令牌无效、已过期或目标地址不匹配", "Public access token is invalid, expired, or bound to another resource"),
+                    status = 401,
+                    headers = wwwAuth,
+                )
+            }
+        }
 
         r.publicClientId = access.clientId
         r.auth = ApiServer.Auth(access.token, signed = false, nonce = null)
@@ -238,6 +252,5 @@ class PublicServer(
     companion object {
         const val DEFAULT_PORT = 18785
         private const val PORT_SPAN = 5
-        private const val PUBLIC_FAIL_KEY = "public"
     }
 }

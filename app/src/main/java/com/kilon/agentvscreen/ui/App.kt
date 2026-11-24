@@ -3,9 +3,13 @@ package com.kilon.agentvscreen.ui
 import androidx.compose.material.icons.outlined.AddLink
 import top.yukonga.miuix.kmp.basic.Icon
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.Box
@@ -52,6 +56,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.kilon.agentvscreen.core.BackgroundOperation
 import com.kilon.agentvscreen.host.Prefs
 import com.kilon.agentvscreen.host.Setup
@@ -116,6 +121,8 @@ sealed interface Route : NavKey {
     @Serializable data class Agent(val id: String) : Route
     @Serializable data object Remote : Route
     @Serializable data object PublicAccess : Route
+    @Serializable data object Security : Route
+    @Serializable data object FloatingWindow : Route
     @Serializable data object Tokens : Route
     @Serializable data object Rules : Route
     @Serializable data object Schedules : Route
@@ -125,6 +132,14 @@ sealed interface Route : NavKey {
     @Serializable data object Diag : Route
     @Serializable data object Help : Route
     @Serializable data class Task(val id: Long) : Route
+}
+
+/** Shared trigger allowing Settings › About › What's new to open the same changelog sheet hosted in [AppRoot]. */
+internal object ChangesSheetHost {
+    val replay = kotlinx.coroutines.flow.MutableStateFlow<List<com.kilon.agentvscreen.Changes.Release>?>(null)
+    fun show(releases: List<com.kilon.agentvscreen.Changes.Release>) {
+        if (releases.isNotEmpty()) replay.value = releases
+    }
 }
 
 /** What a page may ask of the activity. */
@@ -193,7 +208,11 @@ fun AppRoot(host: AppHost, firstPage: Route?, snack: SnackbarHostState, firstTab
         pager.animateScrollToPage(i)
     } }
     val nav = remember(stack) { Nav(stack) { i -> toTab(i) } }
-    LaunchedEffect(firstPage) { if (firstPage != null && firstPage != Route.Main) nav.go(firstPage) }
+    var firstPageApplied by remember { mutableStateOf(firstPage == null || firstPage == Route.Main) }
+    LaunchedEffect(firstPage) {
+        if (firstPage != null && firstPage != Route.Main) nav.go(firstPage)
+        firstPageApplied = true
+    }
     // 1.4.0-beta11: a notification tapped while the app is open goes to its page (tab, then the page if it has one).
     val asked by MainActivity.pageRequests.collectAsState()
     LaunchedEffect(asked) {
@@ -216,6 +235,8 @@ fun AppRoot(host: AppHost, firstPage: Route?, snack: SnackbarHostState, firstTab
                 entry<Route.Connect>(swipeDismiss = swipe) { ConnectPage() }
                 entry<Route.Remote>(swipeDismiss = swipe) { RemotePage() }
                 entry<Route.PublicAccess>(swipeDismiss = swipe) { PublicAccessPage() }
+                entry<Route.Security>(swipeDismiss = swipe) { SecurityPage() }
+                entry<Route.FloatingWindow>(swipeDismiss = swipe) { FloatingWindowPage() }
                 entry<Route.NewAgent>(swipeDismiss = swipe) { NewAgentPage() }
                 entry<Route.Agent>(swipeDismiss = swipe) { r -> AgentPage(r.id) }
                 entry<Route.Tokens>(swipeDismiss = swipe) { TokensPage() }
@@ -230,6 +251,143 @@ fun AppRoot(host: AppHost, firstPage: Route?, snack: SnackbarHostState, firstTab
             }
             SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 84.dp))
         }
+        // 2.0.0-beta8 (H): post-upgrade changelog bottom sheet on entering home (and replay from Settings › About › What's new).
+        var autoChanges by remember { mutableStateOf<List<com.kilon.agentvscreen.Changes.Release>?>(null) }
+        var checkedAutoChanges by remember { mutableStateOf(false) }
+        val replayChanges by ChangesSheetHost.replay.collectAsState()
+        val topRoute = stack.lastOrNull()
+        LaunchedEffect(firstPageApplied, topRoute) {
+            if (!checkedAutoChanges && firstPageApplied && topRoute == Route.Main) {
+                checkedAutoChanges = true
+                val shown = withContext(Dispatchers.IO) { com.kilon.agentvscreen.Changes.consumeLaunchAutoShow(ctx) }
+                if (shown.isNotEmpty()) autoChanges = shown
+            }
+        }
+        val activeChanges = replayChanges ?: autoChanges
+        val isAuto = replayChanges == null && autoChanges != null
+        ChangesBottomSheet(
+            releases = activeChanges,
+            onDismiss = {
+                if (isAuto) com.kilon.agentvscreen.Changes.markSeen(ctx)
+                autoChanges = null
+                ChangesSheetHost.replay.value = null
+            },
+            onNavigate = { route ->
+                if (isAuto) com.kilon.agentvscreen.Changes.markSeen(ctx)
+                autoChanges = null
+                ChangesSheetHost.replay.value = null
+                nav.go(route)
+            },
+        )
+        }
+    }
+}
+
+@Composable
+private fun ChangesBottomSheet(
+    releases: List<com.kilon.agentvscreen.Changes.Release>?,
+    onDismiss: () -> Unit,
+    onNavigate: (Route) -> Unit,
+) {
+    val shown = releases.orEmpty()
+    val title = shown.firstOrNull()?.versionName ?: ""
+    top.yukonga.miuix.kmp.overlay.OverlayBottomSheet(
+        show = shown.isNotEmpty(),
+        title = title,
+        onDismissRequest = onDismiss,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(bottom = 24.dp),
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                shown.forEach { rel ->
+                    if (shown.size > 1) {
+                        Text(
+                            rel.versionName,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MiuixTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    val newItems = rel.items.filter { it.kind == com.kilon.agentvscreen.Changes.Kind.NEW }
+                    val improvedItems = rel.items.filter { it.kind == com.kilon.agentvscreen.Changes.Kind.IMPROVED }
+                    if (newItems.isNotEmpty()) {
+                        Text(
+                            tr("新功能", "New"),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MiuixTheme.colorScheme.primary,
+                        )
+                        newItems.forEach { item ->
+                            ChangeItemRow(item, onNavigate)
+                        }
+                    }
+                    if (improvedItems.isNotEmpty()) {
+                        Text(
+                            tr("改进", "Improved"),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.padding(top = if (newItems.isNotEmpty()) 4.dp else 0.dp),
+                        )
+                        improvedItems.forEach { item ->
+                            ChangeItemRow(item, onNavigate)
+                        }
+                    }
+                }
+            }
+            PrimaryButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                color = MiuixTheme.colorScheme.primary,
+            ) {
+                Text(tr("知道了", "Got it"), color = MiuixTheme.colorScheme.onPrimary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChangeItemRow(
+    item: com.kilon.agentvscreen.Changes.Item,
+    onNavigate: (Route) -> Unit,
+) {
+    val route = item.route
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+            .then(if (route != null) Modifier.clickable { onNavigate(route) } else Modifier)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(item.title, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(
+                item.detail,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+        if (route != null) {
+            Icon(
+                androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MiuixTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
 }
@@ -277,13 +435,15 @@ private fun MainTabs(pager: androidx.compose.foundation.pager.PagerState) {
         var keep by remember { mutableIntStateOf(1) }
         val moving = remember(pager) { { pager.isScrollInProgress } }
         LaunchedEffect(Unit) { delay(700); keep = 3 }
+        // 2.0.0-beta8 (K.4): guarantee every tab clears the FloatingNavigationBar height uniformly.
+        val navInset = androidx.compose.foundation.layout.WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val bottom = maxOf(pad.calculateBottomPadding() + 16.dp, navInset + 96.dp)
         Box(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
             CompositionLocalProvider(LocalPagerMoving provides moving) {
             HorizontalPager(
                 state = pager, beyondViewportPageCount = keep, verticalAlignment = Alignment.Top,
                 flingBehavior = PagerDefaults.flingBehavior(state = pager),
             ) { page ->
-                val bottom = pad.calculateBottomPadding()
                 when (page) {
                     0 -> OverviewTab(bottom)
                     TAB_CONNECT -> ConnectPage(tab = true, bottom = bottom)
@@ -305,7 +465,7 @@ fun Dot(c: Color, size: Dp = 8.dp) = Box(Modifier.size(size).clip(CircleShape).b
 /**
  * One page: a glass top bar with a large title that folds as the page scrolls under it, the content in a scrolling
  * column. [back] shows the back arrow (every page but the four tabs). [bottom] keeps the last group clear of the
- * floating bar on a tab.
+ * floating bar on a tab. [resetScrollKey] expands the large header and scrolls back to top when page state flips (F.4).
  */
 @Composable
 fun MiuixPage(
@@ -317,6 +477,7 @@ fun MiuixPage(
     lead: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     marqueeTitle: Boolean = false,
+    resetScrollKey: Any? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val nav = LocalNav.current
@@ -324,6 +485,12 @@ fun MiuixPage(
     val backdrop: LayerBackdrop? = if (Glass.blurOk) rememberLayerBackdrop { drawRect(surface); drawContent() } else null
     val bar = MiuixScrollBehavior()
     val scroll = rememberScrollState()
+    if (resetScrollKey != null) {
+        LaunchedEffect(resetScrollKey) {
+            scroll.scrollTo(0)
+            bar.state.heightOffset = 0f
+        }
+    }
     val moving = LocalPagerMoving.current
     // 1.4.0-beta13: blur only what is there to blur: content scrolled under the bar, and not while the tabs slide.
     val blurNow by remember(backdrop) { androidx.compose.runtime.derivedStateOf { backdrop != null && scroll.value > 0 && !moving() } }

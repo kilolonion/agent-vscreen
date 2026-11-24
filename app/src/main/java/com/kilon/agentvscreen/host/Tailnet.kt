@@ -84,6 +84,54 @@ object Tailnet {
             .put("funnel", funnel ?: JSONObject.NULL).put("funnel_reason", funnelReason ?: JSONObject.NULL)
     }
 
+    /** 2.0.0-beta8 (B1): one prerequisite check item returned by `tsbridge`'s `funnel-check` command. */
+    data class FunnelFeature(
+        val ok: Boolean = false,
+        val text: String? = null,
+        val url: String? = null,
+        val shouldWait: Boolean = false,
+        val error: String? = null,
+    )
+
+    /** 2.0.0-beta8 (B1): structured result of `tsbridge`'s `funnel-check` control command. */
+    data class FunnelCheck(
+        val seq: String = "",
+        val official: Boolean = true,
+        val loggedIn: Boolean = false,
+        val dnsName: String? = null,
+        val https: FunnelFeature = FunnelFeature(),
+        val funnel: FunnelFeature = FunnelFeature(),
+        val port443: FunnelFeature = FunnelFeature(),
+        val error: String? = null,
+        val checkedAt: Long = 0L,
+    ) {
+        val shouldWait: Boolean get() = (!https.ok && https.shouldWait) || (!funnel.ok && funnel.shouldWait)
+    }
+
+    internal fun parseFunnelCheck(o: JSONObject, nowMs: Long = System.currentTimeMillis()): FunnelCheck {
+        fun feat(key: String): FunnelFeature {
+            val f = o.optJSONObject(key) ?: return FunnelFeature()
+            return FunnelFeature(
+                ok = f.optBoolean("ok", false),
+                text = f.optString("text").takeIf { it.isNotBlank() },
+                url = f.optString("url").takeIf { it.isNotBlank() },
+                shouldWait = f.optBoolean("should_wait", false),
+                error = f.optString("error").takeIf { it.isNotBlank() },
+            )
+        }
+        return FunnelCheck(
+            seq = o.optString("seq", ""),
+            official = o.optBoolean("official", true),
+            loggedIn = o.optBoolean("logged_in", false),
+            dnsName = o.optString("dns_name").takeIf { it.isNotBlank() },
+            https = feat("https"),
+            funnel = feat("funnel"),
+            port443 = feat("port443"),
+            error = o.optString("error").takeIf { it.isNotBlank() },
+            checkedAt = nowMs,
+        )
+    }
+
     /**
      * 1.3 beta4: what the user (and an agent) should understand about the built-in node, in one word. "Not logged in"
      * used to show whenever the node was not running, e.g. with the service off, though the login was kept; now the
@@ -203,6 +251,34 @@ object Tailnet {
     private val _status = MutableStateFlow(Status())
     val status: StateFlow<Status> = _status.asStateFlow()
 
+    private val _funnelCheck = MutableStateFlow<FunnelCheck?>(null)
+    val funnelCheck: StateFlow<FunnelCheck?> = _funnelCheck.asStateFlow()
+    private val _funnelChecking = MutableStateFlow(false)
+    val funnelChecking: StateFlow<Boolean> = _funnelChecking.asStateFlow()
+    private val funnelCheckSeq = java.util.concurrent.atomic.AtomicInteger(0)
+
+    internal fun setFunnelCheckForTests(fc: FunnelCheck?, checking: Boolean = false) {
+        _funnelCheck.value = fc
+        _funnelChecking.value = checking
+    }
+
+    /** 2.0.0-beta8 (B1): ask running `tsbridge` to check HTTPS / Funnel ACL / port 443 via LocalAPI + QueryFeature. */
+    fun requestFunnelCheck(): Boolean {
+        val w = stdin ?: return false
+        val seq = funnelCheckSeq.incrementAndGet()
+        _funnelChecking.value = true
+        return runCatching {
+            synchronized(w) {
+                w.write("funnel-check $seq\n")
+                w.flush()
+            }
+            true
+        }.getOrElse {
+            _funnelChecking.value = false
+            false
+        }
+    }
+
     @Volatile private var proc: Process? = null
     @Volatile private var stdin: OutputStreamWriter? = null
     @Volatile private var wanted = false
@@ -251,6 +327,8 @@ object Tailnet {
         proc?.let { p -> Thread { if (!runCatching { p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault(false)) runCatching { p.destroyForcibly() } }.apply { isDaemon = true }.start() }
         supervisor?.interrupt(); supervisor = null
         _status.value = Status()
+        _funnelCheck.value = null
+        _funnelChecking.value = false
         waitingSince = 0L
     }
 
@@ -260,6 +338,8 @@ object Tailnet {
             if (PublicAccess.enabled) PublicAccess.disable(it.applicationContext, "tailnet_logout")
             forget(it)
         }
+        _funnelCheck.value = null
+        _funnelChecking.value = false
         runCatching { stdin?.apply { write("logout\n"); flush() } }
     }
 
@@ -371,6 +451,11 @@ object Tailnet {
         p.inputStream.bufferedReader().forEachLine { line ->
             val o = runCatching { JSONObject(line) }.getOrNull() ?: return@forEachLine
             if (g != gen) return@forEachLine // a bridge on its way out says nothing about the current one
+            if (o.optString("type") == "funnel_check") {
+                _funnelCheck.value = parseFunnelCheck(o)
+                _funnelChecking.value = false
+                return@forEachLine
+            }
             val st = Status(
                 running = true,
                 state = o.optString("state", "Unknown"),
@@ -395,6 +480,8 @@ object Tailnet {
                 funnel = o.optString("funnel").takeIf { it.isNotBlank() },
                 funnelReason = o.optString("reason").takeIf { it.isNotBlank() },
             )
+            var funnelChangedTo: String? = null
+            var funnelChanged = false
             synchronized(this) {
                 if (g != gen) return@forEachLine
                 if (st.linkUp) waitingSince = 0L else if (waitingSince == 0L) waitingSince = android.os.SystemClock.elapsedRealtime()
@@ -404,8 +491,13 @@ object Tailnet {
                 if (st.loggedIn) remember(ctx, st)
                 if (st.state != _status.value.state) AppLogger.info(TAG, "state ${st.state}${st.ip?.let { " $it" } ?: ""}${st.error?.let { " ($it)" } ?: ""}")
                 if (st.loggedIn && ApiConfig.tailnetAuthKey != null) ApiConfig.tailnetAuthKey = null
+                if (st.funnel != _status.value.funnel) {
+                    funnelChanged = true
+                    funnelChangedTo = st.funnel
+                }
                 _status.value = st
             }
+            if (funnelChanged) PublicAccess.onFunnelStateChanged(ctx, funnelChangedTo)
         }
         val code = runCatching { p.waitFor() }.getOrDefault(-1)
         AppLogger.info(TAG, "bridge exited with code $code" + (if (g != gen) " (replaced)" else if (!wanted) " (stopped)" else ""))

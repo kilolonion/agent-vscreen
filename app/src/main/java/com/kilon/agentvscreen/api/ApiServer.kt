@@ -670,6 +670,18 @@ class ApiServer(private val ctx: Context) {
         // saved its note (the app shows it to the user).
         when (argv.firstOrNull()) {
             null, "guide" -> {
+                val topicArg = argv.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
+                if (topicArg != null) {
+                    Turns.bumpTurn(session)
+                    val body = AgentGuide.topic(topicArg)
+                    if (body != null) return NativeOffloadResult(0, body + "\n")
+                    val avail = AgentGuide.TOPICS.joinToString(", ")
+                    return NativeOffloadResult(
+                        2,
+                        tr("未知主题“$topicArg”。可用主题：$avail\n", "Unknown topic \"$topicArg\". Available topics: $avail\n"),
+                        "INVALID_ARGS",
+                    )
+                }
                 // 1.3 beta4: the guide says which version it is for, and whether this agent's note is older.
                 val tid = com.kilon.agentvscreen.cmd.Call.current()?.tokenId ?: "main"
                 val ack = AgentLedger.ackVersion(tid)

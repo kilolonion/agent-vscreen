@@ -51,6 +51,8 @@ object BackgroundOperation {
     private const val K_RECORDING = "recording_enabled"
     private const val K_WIN_SCALE = "window_scale"
     private const val K_SCREEN_SIZE = "screen_size"
+    private const val K_MINI_CONTROLS = "overlay_mini_controls"
+    private const val K_MINI_TAP_EXPAND = "overlay_mini_tap_expand"
 
     /** How long a screen survives with no task using it. */
     const val IDLE_TTL_MS = 10 * 60_000L
@@ -62,6 +64,10 @@ object BackgroundOperation {
     data class State(
         val enabled: Boolean = false,
         val showPreview: Boolean = true,
+        /** 2.0.0-beta8 (K.5): when true, the top-right mini window also renders title/fullscreen/close/stop buttons. */
+        val miniShowControls: Boolean = false,
+        /** 2.0.0-beta8 (K.5): when true (default), tapping the mini window expands it to center preview. */
+        val miniTapToExpand: Boolean = true,
         /** 精确 OCR: read / tap --text use PP-OCRv6 (on-device); ML Kit stays for fast paths. */
         val accurateOcr: Boolean = true,
         /** 后台录屏 (v42): keep a recording track of the background screen for `rewind` (deleted on release). */
@@ -403,6 +409,8 @@ object BackgroundOperation {
             it.copy(
                 enabled = prefs.getBoolean(K_ENABLED, false),
                 showPreview = prefs.getBoolean(K_PREVIEW, true),
+                miniShowControls = prefs.getBoolean(K_MINI_CONTROLS, false),
+                miniTapToExpand = prefs.getBoolean(K_MINI_TAP_EXPAND, true),
                 accurateOcr = prefs.getBoolean(K_ACCURATE_OCR, true),
                 recording = prefs.getBoolean(K_RECORDING, true),
             )
@@ -444,6 +452,16 @@ object BackgroundOperation {
     fun setShowPreview(on: Boolean) {
         prefs.edit().putBoolean(K_PREVIEW, on).apply()
         _state.update { it.copy(showPreview = on) }
+    }
+
+    fun setMiniShowControls(on: Boolean) {
+        prefs.edit().putBoolean(K_MINI_CONTROLS, on).apply()
+        _state.update { it.copy(miniShowControls = on) }
+    }
+
+    fun setMiniTapToExpand(on: Boolean) {
+        prefs.edit().putBoolean(K_MINI_TAP_EXPAND, on).apply()
+        _state.update { it.copy(miniTapToExpand = on) }
     }
 
     /** Re-read Shizuku, accessibility and main-screen metrics. Cheap; call from UI. */

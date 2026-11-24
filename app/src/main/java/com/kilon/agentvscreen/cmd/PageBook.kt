@@ -196,12 +196,21 @@ internal object PageBook {
         return ElementDiff(added, removed, modified, unchanged)
     }
 
-    /** 3.4 title rule: topmost element (smallest y) whose text is 2..16 chars and not all digits; else short activity name. */
+    /**
+     * 3.4 + 2.0.0-beta8 (L.3) title rule: exclude clickable icon buttons (ImageButton / contentDescription-only
+     * buttons such as "Navigate up"), prefer Toolbar title nodes then `heading=true` nodes, then topmost text
+     * element (2..16 chars, not all digits); else short activity name.
+     */
     fun pickTitle(els: List<El>, activity: String?): String {
-        val chosen = els.asSequence()
-            .filter { !it.placeholder }
+        val candidates = els.asSequence()
+            .filter { !it.placeholder && !it.iconButton }
             .map { it to it.text.trim() }
             .filter { (_, t) -> t.length in TITLE_MIN_LEN..TITLE_MAX_LEN && !t.all { c -> c.isDigit() } }
+            .toList()
+        val prioritized = candidates.filter { it.first.toolbarTitle }
+            .ifEmpty { candidates.filter { it.first.heading } }
+            .ifEmpty { candidates }
+        val chosen = prioritized
             .sortedWith(compareBy({ it.first.box.top }, { it.first.box.left }))
             .firstOrNull()?.second
         if (chosen != null) return chosen

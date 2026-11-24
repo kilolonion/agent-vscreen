@@ -105,6 +105,8 @@ class V200Beta6Test {
 
     @Test
     fun scopeOperateSystemSessionAgeAndRateTriggerAndExpire() {
+        // 2.0.0-beta8 (B2 / Ruling 5): default level is STANDARD; explicitly exercise STRICT 8h/24h expiry rules here.
+        Risk.setSecurityLevel(ctx, Risk.SecurityLevel.STRICT)
         val t0 = nowMs.get()
         val call = Call("s1", tokenId = "tok2", tokenName = "agent-b", scopes = setOf("look", "operate", "system"), peer = null)
         val tok = Tokens.Token("tok2", "agent-b", "k", "system", t0)

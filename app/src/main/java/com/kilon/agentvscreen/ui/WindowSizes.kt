@@ -7,8 +7,40 @@ import kotlin.math.min
  * of the background screen). [a] is the background screen's aspect (width / height); [sw] × [sh] the phone screen.
  */
 internal object WindowSizes {
+    /** 2.0.0-beta8 (G.1): unified overlay placement area in full-display coordinates (cutout & system bars excluded). */
+    data class Placeable(val left: Int, val top: Int, val right: Int, val bottom: Int) {
+        val width: Int get() = (right - left).coerceAtLeast(1)
+        val height: Int get() = (bottom - top).coerceAtLeast(1)
+    }
+
+    /** Compute [Placeable] from full display bounds minus display cutout and system bar insets. Pure. */
+    fun computePlaceable(
+        fullW: Int,
+        fullH: Int,
+        insetLeft: Int,
+        insetTop: Int,
+        insetRight: Int,
+        insetBottom: Int,
+        minTop: Int = 0,
+        minBottom: Int = 0,
+    ): Placeable {
+        val w = fullW.coerceAtLeast(1)
+        val h = fullH.coerceAtLeast(1)
+        val l = insetLeft.coerceIn(0, w / 3)
+        val r = (w - insetRight.coerceIn(0, w / 3)).coerceAtLeast(l + 1)
+        val t = maxOf(insetTop, minTop).coerceIn(0, h / 3)
+        val b = (h - maxOf(insetBottom, minBottom).coerceIn(0, h / 3)).coerceAtLeast(t + 1)
+        return Placeable(l, t, r, b)
+    }
+
     /** The finger is in the top right corner zone ([zone] px square): let go there and the window becomes the small one. */
     fun inMiniCorner(x: Float, y: Float, sw: Float, zone: Float): Boolean = x >= sw - zone && y <= zone
+
+    /** 2.0.0-beta8 (G.1/G.2): corner zone relative to the current orientation's [Placeable] area. */
+    fun inMiniCorner(x: Float, y: Float, area: Placeable, zone: Float): Boolean {
+        val effectiveZone = min(zone, area.height * 0.25f)
+        return x >= area.right - effectiveZone && y <= area.top + effectiveZone
+    }
 
     /** The small window parked in the corner: about a quarter of the short side (portrait), never taller than 40 %. */
     fun miniWidth(a: Float, sw: Float, sh: Float, minW: Float): Float {

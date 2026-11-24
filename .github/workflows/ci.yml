@@ -57,6 +57,11 @@ jobs:
       - name: tsbridge unit tests
         run: (cd tsbridge && go test -v ./...)
 
+      - name: Verify android/arm64 tsbridge includes LocalAPI cert route and feature/acme
+        run: |
+          (cd tsbridge && GOOS=android GOARCH=arm64 go list -f '{{.GoFiles}}' . | grep -q 'localapi_cert_android.go')
+          (cd tsbridge && GOOS=android GOARCH=arm64 go list -deps . | grep -qx 'tailscale.com/feature/acme')
+
       - name: OCR assets read on the app's onnxruntime
         run: |
           ORT=$(grep -o 'onnxruntime-android:[0-9.]*' app/build.gradle.kts | cut -d: -f2)

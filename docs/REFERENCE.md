@@ -30,10 +30,10 @@
       wait <条件> [or <条件>] [最长时长] | wait 2s | use 段名
       目标 = x y | #N（上次【现在】列表里的编号）| 画面上的字（先找完全一样的，再找包含的；只写一个数＝点画面上的这个数字）
       字里可写 *（任意字，整段字要对上：*蓝牙* 含蓝牙，共*条 以共开头以条结尾），text:/gone: 条件也一样；字@N = 从上往下第 N 处（@-1 最后一处）；字 +dx,+dy = 字旁边那一点（图标、开关）；坐标可写屏幕比例 50% 80%（换屏幕尺寸也点同一处）
-      流程：try 一步 | try { 几步 }（没找到、没达到预期就跳过接着做）| if <条件> [最长] { … } [else { … } | else 一步]（看现在的画面，默认等 1.5s）| repeat 3 { … } | repeat [最多次数] { … } until <条件>（每轮后看，默认最多 10 次）。括号里可以换行、可以嵌套
+      流程：try 一步 | try { 几步 }（没找到、没达到预期就跳过接着做）| if <条件> [最长] { … } [else { … } | else 一步]（看现在的画面，默认等 1.5s）| repeat 3 { … } | repeat [最多次数，最多 50] { … } until <条件>（每轮后看，默认最多 10 次，上限 50 次）。括号里可以换行、可以嵌套
       键名：back enter tab del space esc search menu up down left right paste copy cut page_up page_down，或数字 keycode（没有 home：副屏没有桌面）
-每个动作后可加 until <条件> [or <条件>] [最长时长，默认 5s]；没写就等画面稳定（最多 3 秒；画面只剩循环小动画也算稳定）；这次等待结束后（稳定了或到时间）画面和动作前一样时，再看最多 1.5 秒（type、编辑键和 --fast 的中间步骤不看），时刻从动作完成算起：变了就等它稳定，说“画面在动作 X 后才变化，Y 时稳定”（或“等到 Y 还在变”）；其间满足 --stop 条件就停在这一步，后面不做，不给 NO_CHANGE；仍没变才说“画面没有变化”（NO_CHANGE，只表示这段时间里没检测到变化）。
-条件：text:字（* 可以一个字也不配，9* 也匹配 9%）| gone:字 | change[:x1,y1,x2,y2] | still[:区域]（完全不动）| stable（稳定，容许循环小动画）| color:x,y=#RRGGBB[~容差] | app:包名或界面名
+每个动作后可加 until <条件> [or <条件>] [最长时长，默认 5s]（until text: 的字要是动作后才会新出现的字，动作前已在画面上的字不算）；没写就等画面稳定（最多 3 秒；画面只剩循环小动画也算稳定）；这次等待结束后（稳定了或到时间）画面和动作前一样时，再看最多 1.5 秒（type、编辑键和 --fast 的中间步骤不看），时刻从动作完成算起：变了就等它稳定，说“画面在动作 X 后才变化，Y 时稳定”（或“等到 Y 还在变”）；其间满足 --stop 条件就停在这一步，后面不做，不给 NO_CHANGE；仍没变才说“画面没有变化”（NO_CHANGE，只表示这段时间里没检测到变化）。
+条件：text:字（动作后新出现的字；* 可以一个字也不配，9* 也匹配 9%）| gone:字 | change[:x1,y1,x2,y2] | still[:区域]（完全不动）| stable（稳定，容许循环小动画）| color:x,y=#RRGGBB[~容差] | app:包名或界面名
 一步没达到预期，这段就停在这一步，后面的不做，结果是失败（退出码 1，outcome=missed/refused）：
       until 到时间没等到；字画面上找不到；同样的字有好几处（AMBIGUOUS，会列出每一处的坐标，改用坐标）；#N 的元素已经不在原位（STALE_ELEMENT）；
       type 没有获得焦点的输入框、或输入后框里没有你的字。type 前先点输入框，【现在】里它标“可输入 有焦点”。
@@ -50,9 +50,9 @@
 
 - `--stop <条件>` 整段一直盯着，满足就停下，后面的步骤不做
 - `--on <条件 => 一步>` 短程规则（仅本次 act 生效，可写 1–3 条，不跨轮）：条件成立时执行一步（只允许 tap / key back / scroll / wait 时长，可选 x1–x3，默认 x1；条件不能是 stable / still；text: / gone: 连续 2 次独立读屏才触发，间隔 500ms；规则不能触发付款或“每次询问”应用）
-- `--hold` 回复发出后暂停副屏前台应用，下一条命令前自动恢复（最长 120 秒，仅 Android 14+；一直要就 note hold on）。限制：暂停只对按帧计时的应用有效；按真实时钟计时的应用恢复后会直接跳过这段时间；暂停期间应用的网络连接可能超时
+- `--hold` 回复发出前暂停副屏前台应用并核实，下一条命令前自动恢复（最长 120 秒，仅 Android 14+；一直要就 note hold on）。注意：Android 15 起，暂停正在频繁刷新的应用时，系统可能直接结束它；暂停只对按帧计时的应用有效，按真实时钟计时的应用恢复后会直接跳过这段时间；暂停期间网络连接可能超时
 - `--watch <时长>` 步骤做完再看这么久（会动的画面）
-- `--fast` 动作之间不等画面稳定（游戏、连续点击）；最后一步仍会等
+- `--fast` 只跳过动作之间的画面稳定等待（游戏、连续点击）；最后一步以及 repeat 内每轮的 until / 稳定等待仍会执行
 - `--bare` 这一段不做这个应用记下的前置/收尾步骤
 - `--human` 仿人节奏：每个动作前随机停 0.2–2.6 秒，点击在元素内略偏、按住和滑动的时长与位置有波动，打字分 1–3 个字一段（对节奏敏感的应用用；条件判断不变）。一直要就 note human on
 - `--keep <notify|wake>` 本轮结束后继续盯 --stop 的条件，看到就通知用户（notify）或发一条事件给调用方（wake，用 events 取），然后结束；重启后还在
@@ -71,7 +71,7 @@ before / after：每段 act 开始前先做 before 的步骤，做完、观察�
 save：不执行，直接存下或改写一个段（示教存的段也一样），步骤写法和 act 相同，可以用 try / if / repeat、* 和 @N；note 列出的就是段的完整步骤。
 human on：这个应用以后每段 act 都用仿人节奏（同 act --human）；off 关掉。
 reply quiet|full：按当前 agent 保存默认回复模式（默认 quiet：符合预期时给短回复，full：每次都给完整回复），不需要先打开应用。
-hold on|off：按当前 agent 保存默认是否开启 act --hold（默认 off，仅 Android 14+ 生效），不需要先打开应用。
+hold on|off：按当前 agent 保存默认是否开启 act --hold（默认 off，仅 Android 14+ 生效；Android 15 起，暂停正在频繁刷新的应用时，系统可能直接结束它），不需要先打开应用。
 
 权限范围: `operate` · 在副屏队列里执行
 
@@ -114,6 +114,7 @@ hold on|off：按当前 agent 保存默认是否开启 act --hold（默认 off�
 ### `keep | off <名字|all>`
 
 列出 / 停止本轮之后的盯守（用 act --stop … --keep 开始）。
+另见 act --hold（两轮之间暂停应用）：Android 15 起，暂停正在频繁刷新的应用时，系统可能直接结束它。
 
 权限范围: `operate`
 
@@ -276,6 +277,7 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `OK` | `none` | 按预期完成。 |
 | `CHECKPOINT` | `look` | 段跑到 check 检查点停下了，等你看一眼画面：没问题就按回执里的命令接着跑（use 段名 … from N），不对就先改好再接着跑。 |
 | `STEP_MISSED` | `look` | 一步做了，但没等到它期待的结果（until 超时、wait 超时、输入没进去）。这段停在那一步，后面的没做。看截图再决定。 |
+| `NOT_READ` | `look` | 等待期间读屏没跟上（文字识别忙或失败），没有读到动作后的画面；不能据此判断画面上有没有目标字，看截图或稍后再试。 |
 | `NOT_FOUND` | `look` | 画面上没有你写的字、编号或段名。返回里列了相近的字和输入框的坐标。 |
 | `AMBIGUOUS` | `fix_command` | 你写的字在画面上有好几处，没点。返回里列了每一处的坐标：改用坐标或 #N。 |
 | `STALE_ELEMENT` | `look` | #N 指的元素已经不在上次列表里的位置（页面变了）。没点。重新看一眼再用新的编号。 |
@@ -286,11 +288,13 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `GESTURE_NEEDS_AREA` | `fix_command` | 闭环手势里的 text: / gone: 条件必须带区域（in x1,y1,x2,y2），整段没有执行。 |
 | `BAD_RULE` | `fix_command` | 短程规则（--on）写法不对，整条 act 没有执行。写法：--on "<条件> => <tap\|key back\|scroll\|wait 时长>[ x1..x3]"，最多 3 条，条件不能是 stable / still。 |
 | `RULE_OFF` | `none` | 本轮的一条 --on 规则已停用（次数用完、前台切走、目标找不到/有歧义或执行后画面无变化），本轮内不再检查。 |
-| `HOLD_UNSUPPORTED` | `none` | 当前系统或设备不支持 --hold（仅 Android 14 / API 34 及以上，或系统拒绝 am freeze），本次未暂停应用，其它照常。 |
+| `HOLD_UNSUPPORTED` | `none` | 当前系统或设备不支持 --hold（仅 Android 14 / API 34 及以上，或系统不支持 am freeze），本次未暂停应用，其它照常。 |
+| `HOLD_REFUSED` | `none` | 本次拒绝或未能暂停该应用（系统/常驻/输入法/系统媒体进程、冻结未通过核实，或暂停时应用被系统结束）。其它操作照常完成。 |
 | `UNKNOWN_OPTION` | `fix_command` | 这个命令没有这个参数，命令没有执行。 |
 | `UNKNOWN_COMMAND` | `fix_command` | 没有这个命令。点击、输入、滑动、等待都写成 act 的步骤。 |
 | `FOCUS_ELSEWHERE` | `look` | 有焦点的输入框不是你刚点的地方，没有输入。 |
 | `TYPE_FAILED` | `look` | 文字没能送进去。 |
+| `SNAP_BACK` | `look` | 拖动后松手弹回了起点（可能未拖过触发阈值或不支持拖放）。 |
 | `NO_CHANGE` | `look` | 这一步做了，但之后画面没有可见的变化（可能没点中，或这里本来就不会变）。 |
 | `UNPROVEN` | `look` | 这一步做在画面上一直自己在动的地方，之后的变化可能只是动画，不能说明它生效了。看图核对。 |
 | `SCREEN_RESUMED` | `look` | 副屏刚从省电暂停中恢复；暂停期间应用不在前台，可能自己暂停或弹出菜单。以这次回复的画面为准。 |
@@ -396,10 +400,10 @@ steps:
       wait <condition> [or <condition>] [max duration] | wait 2s | use <segment>
       target = x y | #N (number in the last [Now] list) | text on the screen (exact match first, then contains; a single number = tap that number on the screen)
       words may hold * (any characters; the whole text must match: *Wi-Fi* holds Wi-Fi), in text:/gone: conditions too; words@N = the N-th place from the top (@-1 the last); words +dx,+dy = the point that far beside them (an icon, a switch); coordinates may be shares of the screen, 50% 80% (same place on any screen size)
-      flow: try <step> | try { steps } (not found or not as expected: skip and go on) | if <condition> [max] { … } [else { … } | else <step>] (the screen as it is, waits up to 1.5 s by default) | repeat 3 { … } | repeat [at most] { … } until <condition> (checked after each round, at most 10 by default). Braces may span lines and nest
+      flow: try <step> | try { steps } (not found or not as expected: skip and go on) | if <condition> [max] { … } [else { … } | else <step>] (the screen as it is, waits up to 1.5 s by default) | repeat 3 { … } | repeat [at most, max 50] { … } until <condition> (checked after each round, default 10, max 50). Braces may span lines and nest
       keys: back enter tab del space esc search menu up down left right paste copy cut page_up page_down, or a numeric keycode (no home: the screen has no launcher)
-After each action you may add until <condition> [or <condition>] [max duration, default 5s]; without it the picture is awaited to settle (up to 3 s; a picture left with only a small looping animation counts as settled); if after that wait (settled or timed out) it matches the picture before the action, it looks up to 1.5 s longer (not for type, edit keys or the in-between steps of --fast), timing from when the action finished: a change then is waited out and said as "the screen changed late, X after the action, and settled at Y" (or "was still changing when time was up at Y"); a --stop condition met meanwhile stops the stretch there, skips the rest and gives no NO_CHANGE; only a picture still unchanged is "the screen did not change" (NO_CHANGE: no change was seen in that time).
-conditions: text:<word> (* may match zero chars: 9* also matches 9%) | gone:<word> | change[:x1,y1,x2,y2] | still[:region] (no motion at all) | stable (settled, small looping animation allowed) | color:x,y=#RRGGBB[~tolerance] | app:<package or screen name>
+After each action you may add until <condition> [or <condition>] [max duration, default 5s] (until text: must match text that newly appears after the action; text already on screen beforehand does not count); without it the picture is awaited to settle (up to 3 s; a picture left with only a small looping animation counts as settled); if after that wait (settled or timed out) it matches the picture before the action, it looks up to 1.5 s longer (not for type, edit keys or the in-between steps of --fast), timing from when the action finished: a change then is waited out and said as "the screen changed late, X after the action, and settled at Y" (or "was still changing when time was up at Y"); a --stop condition met meanwhile stops the stretch there, skips the rest and gives no NO_CHANGE; only a picture still unchanged is "the screen did not change" (NO_CHANGE: no change was seen in that time).
+conditions: text:<word> (newly appearing after action; * may match zero chars: 9* also matches 9%) | gone:<word> | change[:x1,y1,x2,y2] | still[:region] (no motion at all) | stable (settled, small looping animation allowed) | color:x,y=#RRGGBB[~tolerance] | app:<package or screen name>
 A step that does not reach what it expects stops the stretch there, skips the rest, and the result is a failure (exit code 1, outcome=missed/refused):
       until timed out; text not found on the screen; the same text in several places (AMBIGUOUS, every place is listed with its point: use coordinates); the element of #N is no longer where it was (STALE_ELEMENT);
       type found no focused input box, or your text is not in the box afterwards. Tap the input box before type; in [Now] it is marked "input focused".
@@ -416,9 +420,9 @@ e.g. act "tap Search; type headphones; key enter until text:All"
 
 - `--stop <condition>` watched for the whole stretch; when met it stops and skips the rest
 - `--on <cond => step>` short-range rule for this act only (1–3 rules, never persisted): when cond holds, run one step (tap / key back / scroll / wait duration only; optional x1–x3, default x1; cond cannot be stable / still; text: / gone: requires 2 consecutive independent readings with 500ms cooldown; rules never auto-confirm payments or ask-every-time apps)
-- `--hold` pause the virtual screen's foreground app after the reply is sent and resume before the next command (max 120s, Android 14+ only; set default with note hold on). Limits: pausing only stops frame-timed apps; wall-clock apps skip ahead on resume; active network connections may time out while paused
+- `--hold` pause and verify the virtual screen's foreground app before sending the reply, resuming before the next command (max 120s, Android 14+ only; set default with note hold on). Note: starting on Android 15, pausing an actively refreshing app may cause the system to kill it; pausing only stops frame-timed apps (wall-clock apps skip ahead on resume) and active network connections may time out
 - `--watch <duration>` keep looking this long after the steps (moving pictures)
-- `--fast` do not wait for the picture to settle between actions (games, rapid taps); the last step still waits
+- `--fast` skip settle waits only between actions (games, rapid taps); the last step and each repeat iteration's until / settle wait still run
 - `--bare` this stretch skips the before/after steps kept for this app
 - `--human` human pacing: a random 0.2–2.6 s pause before each action, taps slightly off-centre inside the element, varied hold and swipe lengths, typing 1–3 characters at a time (for apps sensitive to machine timing; conditions are unchanged). To keep it on: note human on
 - `--keep <notify|wake>` after this turn keep watching the --stop condition; when seen, notify the user (notify) or send the caller an event (wake, fetched with events), then end; survives a restart
@@ -437,7 +441,7 @@ e.g. for a picture that moves by itself (a game, a player) keep before = the ste
 save: store or rewrite a segment without running it (taught lessons too); the steps are written as for act, with try / if / repeat, * and @N; note lists each segment's full steps.
 human on: every act on this app uses human pacing from now on (as act --human); off turns it off.
 reply quiet|full: save this agent's default reply mode (default quiet: short reply when expected; full: always return full four blocks); works without an open app.
-hold on|off: save whether this agent enables act --hold by default (default off, Android 14+ only); works without an open app.
+hold on|off: save whether this agent enables act --hold by default (default off, Android 14+ only; starting on Android 15, pausing an actively refreshing app may cause the system to kill it); works without an open app.
 
 scope: `operate` · runs in the screen queue
 
@@ -480,6 +484,7 @@ scope: `operate` · runs in the screen queue
 ### `keep | off <name|all>`
 
 list / stop watches that run after this turn (started with act --stop … --keep).
+See also act --hold (pause between turns): starting on Android 15, pausing an actively refreshing app may cause the system to kill it.
 
 scope: `operate`
 
@@ -642,6 +647,7 @@ scope: `look`
 | `OK` | `none` | Done as expected. |
 | `CHECKPOINT` | `look` | The run stopped at a check step for you to look at the screen: if it is right, go on with the command in the reply (use <name> … from N); if not, put it right first, then go on. |
 | `STEP_MISSED` | `look` | A step was done but what it expected never came (until / wait timed out, typed text did not land). The stretch stopped there and skipped the rest. Look at the screenshot before deciding. |
+| `NOT_READ` | `look` | Screen reading could not keep up during the wait (OCR busy or failed), so no post-action reading was captured; do not assume the text is absent — inspect the screenshot or retry shortly. |
 | `NOT_FOUND` | `look` | The text, number or segment you named is not there. The reply lists similar text and input boxes with their points. |
 | `AMBIGUOUS` | `fix_command` | The text you named is on the screen several times; nothing was tapped. The reply lists every place with its point: use coordinates or #N. |
 | `STALE_ELEMENT` | `look` | The element #N pointed to is no longer where the last list had it (the page changed). Nothing was tapped. Look again and use the new numbers. |
@@ -652,11 +658,13 @@ scope: `look`
 | `GESTURE_NEEDS_AREA` | `fix_command` | text: / gone: conditions inside a closed-loop gesture must include a region (in x1,y1,x2,y2); nothing in the stretch ran. |
 | `BAD_RULE` | `fix_command` | Bad short-range rule (--on); nothing in this act ran. Syntax: --on "<cond> => <tap\|key back\|scroll\|wait duration>[ x1..x3]", at most 3 rules, condition cannot be stable / still. |
 | `RULE_OFF` | `none` | A short-range --on rule was disabled for the rest of this act (limit reached, app switched, target missing/ambiguous, or no visual change after running). |
-| `HOLD_UNSUPPORTED` | `none` | This device or Android version does not support --hold (Android 14 / API 34+ required, or am freeze failed); the app was not paused and the command ran normally. |
+| `HOLD_UNSUPPORTED` | `none` | This device or Android version does not support --hold (Android 14 / API 34+ required, or the system does not support am freeze); the app was not paused and the command ran normally. |
+| `HOLD_REFUSED` | `none` | Refused or failed to pause this app (system/persistent/IME/system media process, freeze could not be verified, or the system killed the app while pausing). The action itself completed normally. |
 | `UNKNOWN_OPTION` | `fix_command` | The command has no such option; it did not run. |
 | `UNKNOWN_COMMAND` | `fix_command` | No such command. Tapping, typing, swiping and waiting are all act steps. |
 | `FOCUS_ELSEWHERE` | `look` | The focused input box is not where you just tapped; nothing was typed. |
 | `TYPE_FAILED` | `look` | The text could not be sent. |
+| `SNAP_BACK` | `look` | The dragged item snapped back to its starting position after release (may not have passed the trigger threshold or drop is not accepted). |
 | `NO_CHANGE` | `look` | The step was done but the picture did not visibly change afterwards (the tap may have missed, or nothing changes here). |
 | `UNPROVEN` | `look` | The step acted where the screen keeps moving by itself; the change afterwards may be only the animation and does not show the step worked. Check the picture. |
 | `SCREEN_RESUMED` | `look` | The screen just resumed from its power-save pause; while paused the app was not in front and may have paused itself or shown a menu. Go by this reply's picture. |

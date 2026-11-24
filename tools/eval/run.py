@@ -1578,6 +1578,222 @@ def render_times_markdown(app_version, grouped_rows):
     return "\n".join(lines) + "\n"
 
 
+def run_beta8_checks(token, out_dir, app_version):
+    """2.0.0-beta8 regression checks:
+      - S16 precise seek: 10 distinct (init, target) pairs on 0..300 step-1 slider, require >= 9/10 exact hits;
+      - C4 start-already-at-target check: 0 touches and '没有拖' when start already matches `until`;
+      - S14 freeze timer (`--hold` on API 34+): verified before reply, 0 ticks during hold, ticks resume on `look`;
+      - S15 system Toast (C5): triggers Loud.TOAST full reply containing exact toast text.
+    """
+    sdk = int(adb_shell("getprop", "ro.build.version.sdk") or "0")
+    out = {
+        "app_version": app_version,
+        "sdk": sdk,
+        "generated_at": int(time.time()),
+        "s16_seek": {"runs": [], "summary": {}},
+        "c4_start_match": {},
+        "s14_hold": {},
+        "s15_toast": {},
+    }
+
+    # ── S16: 10 distinct start/target pairs (increasing & decreasing) + C4 start pre-check ──
+    s16_pairs = [
+        (15, 170),
+        (260, 170),
+        (50, 223),
+        (285, 88),
+        (10, 145),
+        (290, 42),
+        (80, 275),
+        (210, 119),
+        (120, 201),
+        (195, 63),
+    ]
+    session = "beta8_s16"
+    try:
+        disp_id = _launch_scene_session(token, "S16", 800, session, extras={"init_value": 15, "target_value": 170})
+        for idx, (init_v, target_v) in enumerate(s16_pairs, 1):
+            _start_scene_on_display(
+                disp_id, "S16", 800 + idx,
+                extras={"init_value": init_v, "target_value": target_v},
+            )
+            enter = _wait_enter_event("S16")
+            edata = (enter or {}).get("data") or {}
+            x1 = int(edata.get("x1", 100))
+            x2 = int(edata.get("x2", 980))
+            y = int(edata.get("y", 800))
+            init_x = int(edata.get("init_x", x1))
+            end_x = x2 if target_v > init_v else x1
+            step = f"drag {init_x} {y} {end_x} {y} seek until text:{target_v}% in 360,560,740,740 20s"
+            reply = call_api(token, ["act", step], session=session, timeout=90)
+            time.sleep(0.15)
+            evs = read_avst_events("S16")
+            val_evs = [e for e in evs if e.get("ev") == "value"]
+            got_v = (val_evs[-1].get("data") or {}).get("value") if val_evs else None
+            exact_ok = (got_v == target_v) and bool(reply.get("ok"))
+            g = _extract_gesture(reply)
+            rec = {
+                "trial": idx,
+                "init": init_v,
+                "target": target_v,
+                "got": got_v,
+                "ok": exact_ok,
+                "code": reply.get("code"),
+                "poll_ms_p50": g.get("poll_ms_p50"),
+                "poll_ms_max": g.get("poll_ms_max"),
+            }
+            out["s16_seek"]["runs"].append(rec)
+            print(
+                f"[BETA8-S16 {idx}/10] {init_v}%->{target_v}% got={got_v}% ok={exact_ok} "
+                f"poll={rec['poll_ms_p50']}/{rec['poll_ms_max']} code={rec['code']}",
+                flush=True,
+            )
+
+        # C4: start already matches `17*` (at 174%) -> must NOT drag (0 touches) and report already satisfied.
+        _start_scene_on_display(disp_id, "S16", 899, extras={"init_value": 174, "target_value": 174})
+        enter = _wait_enter_event("S16")
+        edata = (enter or {}).get("data") or {}
+        x1 = int(edata.get("x1", 100))
+        y = int(edata.get("y", 800))
+        init_x = int(edata.get("init_x", 610))
+        c4_rep = call_api(
+            token,
+            ["act", f"drag {init_x} {y} {x1} {y} seek until text:17* in 360,560,740,740 10s"],
+            session=session,
+            timeout=60,
+        )
+        time.sleep(0.15)
+        c4_evs = read_avst_events("S16")
+        c4_touches = sum(1 for e in c4_evs if e.get("ev") == "touch")
+        c4_text = str(c4_rep.get("text") or "")
+        c4_ok = bool(c4_rep.get("ok")) and c4_touches == 0 and ("没有拖" in c4_text or "did not drag" in c4_text)
+        out["c4_start_match"] = {
+            "ok": c4_ok,
+            "touches": c4_touches,
+            "code": c4_rep.get("code"),
+            "preview": c4_text[:240],
+        }
+        print(f"[BETA8-C4] touches={c4_touches} ok={c4_ok}", flush=True)
+    finally:
+        try:
+            call_api(token, ["release"], session=session, timeout=30)
+        except Exception:
+            pass
+        adb_shell("am", "force-stop", TORTURE_PKG)
+
+    s16_passed = sum(1 for r in out["s16_seek"]["runs"] if r["ok"])
+    out["s16_seek"]["summary"] = {
+        "total": len(s16_pairs),
+        "passed": s16_passed,
+        "rate": round(s16_passed / len(s16_pairs), 4),
+        "ok": s16_passed >= 9,
+    }
+
+    # ── S14: freeze timer (`--hold`, API 34+) ──
+    if sdk >= 34:
+        session = "beta8_s14"
+        try:
+            disp_id = _launch_scene_session(token, "S14", 914, session)
+            _start_scene_on_display(disp_id, "S14", 914)
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < 4.0:
+                if any(e.get("ev") == "tick" for e in read_avst_events("S14")):
+                    break
+                time.sleep(0.2)
+            h_rep = call_api(token, ["act", "--hold"], session=session, timeout=60)
+            hold_obj = h_rep.get("hold") if isinstance(h_rep.get("hold"), dict) else {}
+            verified = bool(hold_obj.get("verified") is True)
+            adb_shell("logcat", "-c")
+            time.sleep(3.5)
+            ticks_during = sum(1 for e in read_avst_events("S14") if e.get("ev") == "tick")
+            adb_shell("logcat", "-c")
+            u_rep = call_api(token, ["look"], session=session, timeout=60)
+            ticks_after = 0
+            t1 = time.monotonic()
+            while time.monotonic() - t1 < 4.0:
+                ticks_after = sum(1 for e in read_avst_events("S14") if e.get("ev") == "tick")
+                if ticks_after >= 1:
+                    break
+                time.sleep(0.2)
+            resumed_ms = u_rep.get("resumed_after_ms")
+            s14_ok = bool(h_rep.get("ok")) and verified and ticks_during == 0 and ticks_after >= 1 and isinstance(resumed_ms, int) and resumed_ms > 0
+            out["s14_hold"] = {
+                "ok": s14_ok,
+                "verified": verified,
+                "ticks_during_hold": ticks_during,
+                "ticks_after_resume": ticks_after,
+                "resumed_after_ms": resumed_ms,
+                "hold": hold_obj,
+            }
+            print(
+                f"[BETA8-S14] verified={verified} ticks_during={ticks_during} ticks_after={ticks_after} "
+                f"resumed_ms={resumed_ms} ok={s14_ok}",
+                flush=True,
+            )
+        finally:
+            try:
+                call_api(token, ["release"], session=session, timeout=30)
+            except Exception:
+                pass
+            try:
+                adb_shell("am", "unfreeze", "--sticky", TORTURE_PKG)
+                adb_shell("am", "unfreeze", TORTURE_PKG)
+            except Exception:
+                pass
+            adb_shell("am", "force-stop", TORTURE_PKG)
+    else:
+        out["s14_hold"] = {"ok": True, "skipped": f"sdk={sdk}<34"}
+
+    # ── S15: real system Toast triggers Loud.TOAST full reply with verbatim text ──
+    session = "beta8_s15"
+    try:
+        disp_id = _launch_scene_session(token, "S15", 915, session)
+        _start_scene_on_display(disp_id, "S15", 915)
+        t_rep = call_api(token, ["act", 'tap "弹系统 Toast" until text:已触发 5s; wait 0.6s'], session=session, timeout=60)
+        loud = list(t_rep.get("loud") or []) if isinstance(t_rep.get("loud"), list) else []
+        txt = str(t_rep.get("text") or "")
+        has_toast_line = ("toast：AVS_SYSTEM_TOAST_1" in txt) or ("toast: AVS_SYSTEM_TOAST_1" in txt)
+        s15_ok = bool(t_rep.get("ok")) and ("TOAST" in loud) and ("NO_EXPECT" not in loud) and has_toast_line
+        out["s15_toast"] = {
+            "ok": s15_ok,
+            "loud": loud,
+            "has_toast_text": has_toast_line,
+            "preview": txt[:320],
+        }
+        print(f"[BETA8-S15] loud={loud} has_toast_line={has_toast_line} ok={s15_ok}", flush=True)
+    finally:
+        try:
+            call_api(token, ["release"], session=session, timeout=30)
+        except Exception:
+            pass
+        adb_shell("am", "force-stop", TORTURE_PKG)
+
+    out["all_ok"] = (
+        bool(out["s16_seek"]["summary"]["ok"])
+        and bool(out["c4_start_match"].get("ok"))
+        and bool(out["s14_hold"].get("ok"))
+        and bool(out["s15_toast"].get("ok"))
+    )
+
+    md_lines = [
+        f"# 2.0.0-beta8 专项回归（{app_version}，API {sdk}）",
+        "",
+        "| 项目 | 结果 | 详情 |",
+        "| --- | --- | --- |",
+        f"| S16 精确滑块 seek (0–300 步进 1) | {'通过' if out['s16_seek']['summary']['ok'] else '失败'} | {s16_passed}/10 精确命中（要求 ≥ 9/10） |",
+        f"| C4 起点已满足不拖 | {'通过' if out['c4_start_match']['ok'] else '失败'} | touches={out['c4_start_match'].get('touches')} |",
+        f"| S14 `--hold` 冻结计时核实 | {'通过' if out['s14_hold']['ok'] else '失败'} | verified={out['s14_hold'].get('verified')}, ticks_during={out['s14_hold'].get('ticks_during_hold')}, ticks_after={out['s14_hold'].get('ticks_after_resume')} |",
+        f"| S15 系统 Toast (`Loud.TOAST`) | {'通过' if out['s15_toast']['ok'] else '失败'} | loud={out['s15_toast'].get('loud')}, text={out['s15_toast'].get('has_toast_text')} |",
+        "",
+    ]
+    md = "\n".join(md_lines)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "beta8-checks.json").write_text(json.dumps(out, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    (out_dir / "beta8-checks.md").write_text(md, encoding="utf-8")
+    print("\n" + md, flush=True)
+    return out
+
+
 def main():
     repo_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description="Run Agent-VScreen evaluation suite.")
@@ -1599,6 +1815,11 @@ def main():
     parser.add_argument("--s02-runs", type=int, default=20, help="S02 rule runs for --s5-stats")
     parser.add_argument("--s09-runs", type=int, default=20, help="S09 keep_cycling rule runs for --s5-stats")
     parser.add_argument("--hold-rounds", type=int, default=2, help="S09 --hold consecutive rounds for --s5-stats")
+    parser.add_argument(
+        "--beta8-checks",
+        action="store_true",
+        help="Also run beta8 S16 exact-seek (10 trials), C4 start-match, S14 freeze timer, and S15 system toast checks",
+    )
     parser.add_argument(
         "--repeat-check",
         action="store_true",
@@ -1770,6 +1991,8 @@ def main():
         }
     beta3_cmp = compute_beta3_comparison(rows, baseline)
 
+    beta8_res = run_beta8_checks(token, out_dir, app_version) if args.beta8_checks else None
+
     result_obj = {
         "app_version": app_version,
         "generated_at": int(time.time()),
@@ -1781,6 +2004,8 @@ def main():
         "beta3_comparison": beta3_cmp,
         "gate": gate_status,
     }
+    if beta8_res is not None:
+        result_obj["beta8_checks"] = beta8_res
     if repeat_rows is not None:
         result_obj["repeat_check"] = {
             "total": len(repeat_rows),
@@ -1804,6 +2029,7 @@ def main():
         base_copy.pop("repeat_check", None)
         base_copy.pop("gate", None)
         base_copy.pop("beta3_comparison", None)
+        base_copy.pop("beta8_checks", None)
         baseline_path.write_text(json.dumps(base_copy, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     failed_gate = False
@@ -1818,6 +2044,9 @@ def main():
         if mismatched:
             print(f"FAIL: repeat-check AVST sequence mismatch in: {', '.join(mismatched)}", file=sys.stderr)
             failed_gate = True
+    if beta8_res is not None and not beta8_res.get("all_ok"):
+        print(f"FAIL: beta8-checks failed: {json.dumps(beta8_res, ensure_ascii=False)}", file=sys.stderr)
+        failed_gate = True
     if failed_gate:
         sys.exit(1)
 

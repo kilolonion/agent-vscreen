@@ -32,10 +32,14 @@ internal fun diagText(context: android.content.Context): String = buildString {
         "native_allocated_kib=${android.os.Debug.getNativeHeapAllocatedSize() / 1024}")
     appendLine(com.kilon.agentvscreen.host.Privileged.diagnostics(context))
     appendLine("gate: ${com.kilon.agentvscreen.host.Liveness.gateJson()?.toString() ?: "off"}")
+    appendLine("hold: ${ActHold.diagSummary()}")
     appendLine("detector: ${com.kilon.agentvscreen.core.VScreenDetector.status(context)}")
+    appendLine("onnx: ${com.kilon.agentvscreen.core.OnnxRuntime.summary(context)}")
     // 1.4.0-beta2: a real reading on this phone, not the state of a flag.
     append("\n" + tr("文字识别自检（本机真实识别一张已知图片）", "text recognition self-test (a real reading of a known picture on this phone)") + ":\n")
     append(runCatching { com.kilon.agentvscreen.core.VScreenOcr.selfTest(context) }.getOrElse { "self-test crashed: ${it.javaClass.simpleName}: ${it.message}" }.prependIndent("  ") + "\n")
+    append("\n" + tr("最近 ONNX 推理（最多 50 条）", "recent ONNX inferences (up to 50)") + ":\n")
+    append(com.kilon.agentvscreen.core.OnnxRuntime.formatRecent(com.kilon.agentvscreen.core.OnnxRuntime.MAX_RECORDS) + "\n")
     val sw = Swallowed.snapshot()
     append("\n" + tr("被吞掉的异常（按位置计数）", "swallowed exceptions (count per site)") + ": " + (if (sw.isEmpty()) tr("无", "none") else "") + "\n")
     sw.sortedByDescending { it.second.count }.take(30).forEach { (tag, e) -> append("  $tag ×${e.count}  ${fmt.format(Date(e.at))}  ${e.last.take(160)}\n") }
