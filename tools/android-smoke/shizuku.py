@@ -101,6 +101,10 @@ def grant():
             print("Shizuku dialog still showing after the tap (swallowed tap); tapping again", flush=True)
             press_text(MANAGER, ["Allow all the time", "始终允许"])
             continue
+        # Say what the app itself saw: a "permission result ... grant=false" line means the tap denied, none at all
+        # means the callback never arrived.
+        seen = shell("logcat", "-d", "-s", "ShizukuBackend:*", "ShizukuManager:*").splitlines()[-12:]
+        print("app's Shizuku log:\n" + "\n".join(seen), flush=True)
         raise RuntimeError("Shizuku dialog is gone but the app still reports %s: the grant was not noticed"
                            % state_now())
     raise RuntimeError("Expected READY after 3 taps on Shizuku's dialog, saw " + str(state_now()))
