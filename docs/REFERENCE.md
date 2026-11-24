@@ -294,7 +294,8 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `NO_CHANGE` | `look` | 这一步做了，但之后画面没有可见的变化（可能没点中，或这里本来就不会变）。 |
 | `UNPROVEN` | `look` | 这一步做在画面上一直自己在动的地方，之后的变化可能只是动画，不能说明它生效了。看图核对。 |
 | `SCREEN_RESUMED` | `look` | 副屏刚从省电暂停中恢复；暂停期间应用不在前台，可能自己暂停或弹出菜单。以这次回复的画面为准。 |
-| `CONFIRM_PENDING` | `ask_user` | 这一步要用户在手机上确认（付费/不可撤销/用户设为每次询问的应用/会影响主屏的操作），用户还没答复，没做。请用户在手机通知里点“允许”，然后把这一段重发一遍。 |
+| `NEEDS_CONFIRM` | `ask_user` | 需要用户在手机上的 Agent-VScreen 里强确认（风控维度）。已发通知。请用户打开强确认页完成验证后，把这条命令原样重发。这一步没有做。 |
+| `CONFIRM_PENDING` | `ask_user` | 这一步要用户在手机上的 Agent-VScreen 强确认页里确认（付费/不可撤销/用户设为每次询问的应用/会影响主屏的操作），用户还没答复，没做。请用户点通知打开强确认页确认，然后把这一段重发一遍。 |
 | `USER_DENIED` | `ask_user` | 用户在手机上拒绝了这一步。不要重试，问用户想怎么办。 |
 | `CONFIRM_REQUIRED` | `ask_user` | 同 CONFIRM_PENDING（旧名字）。 |
 | `APP_BLOCKED` | `ask_user` | 用户禁止后台操作这个应用。不要绕过，也不要从别的入口进同一个应用。 |
@@ -310,7 +311,7 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `HOST_RESTARTED` | `look` | Agent-VScreen 进程重启过，上一轮的任务被打断。这次的返回就是现在的画面，不要假设之前的步骤都做完了。 |
 | `MAIN_SCREEN_CHANGED` | `ask_user` | 副屏这边的应用或任务跑到了主屏，打扰了用户正在用的主屏。停下告诉用户；handoff in 把它拿回副屏。用户自己在主屏切换应用不会报这条。 |
 | `SCOPE_DENIED` | `ask_user` | 这个令牌没有做这件事的权限（用户在 App 里给令牌定的范围）。 |
-| `PROTECTED_APP` | `none` | 这是 Agent-VScreen 自己、桌面或系统界面，不能结束。 |
+| `PROTECTED_APP` | `none` | 这是 Agent-VScreen 自己、桌面或系统界面，不能在副屏打开、移屏、停放或结束。 |
 | `NO_SCREEN` | `fix_command` | 现在没有副屏：先 launch 一个应用。 |
 | `NO_APP` | `fix_command` | 没有这个应用，或副屏上没有应用。apps <关键词> 查包名。 |
 | `NO_FRAME` | `retry_later` | 副屏还没有画面，稍后再试。 |
@@ -659,7 +660,8 @@ scope: `look`
 | `NO_CHANGE` | `look` | The step was done but the picture did not visibly change afterwards (the tap may have missed, or nothing changes here). |
 | `UNPROVEN` | `look` | The step acted where the screen keeps moving by itself; the change afterwards may be only the animation and does not show the step worked. Check the picture. |
 | `SCREEN_RESUMED` | `look` | The screen just resumed from its power-save pause; while paused the app was not in front and may have paused itself or shown a menu. Go by this reply's picture. |
-| `CONFIRM_PENDING` | `ask_user` | This step needs the user's confirmation on the phone (payment / irreversible / an app set to ask every time / something that affects the main screen); the user has not answered and it was not done. Ask the user to tap Allow in the phone's notification, then send this stretch again. |
+| `NEEDS_CONFIRM` | `ask_user` | The user must confirm this in Agent-VScreen on the phone (risk control). A notification was sent. Ask the user to complete strong confirmation, then resend the exact same command. This step was not done. |
+| `CONFIRM_PENDING` | `ask_user` | This step needs the user's strong confirmation in Agent-VScreen on the phone (payment / irreversible / an app set to ask every time / something that affects the main screen); the user has not answered and it was not done. Ask the user to tap the notification to open strong confirmation, then send this stretch again. |
 | `USER_DENIED` | `ask_user` | The user denied this step on the phone. Don't retry; ask the user what they want. |
 | `CONFIRM_REQUIRED` | `ask_user` | Same as CONFIRM_PENDING (old name). |
 | `APP_BLOCKED` | `ask_user` | The user blocked background operation of this app. Don't get around it or enter the same app another way. |
@@ -675,7 +677,7 @@ scope: `look`
 | `HOST_RESTARTED` | `look` | The Agent-VScreen process restarted and the last task was cut off. This reply is the screen now; don't assume earlier steps completed. |
 | `MAIN_SCREEN_CHANGED` | `ask_user` | An app or task of ours came to the main screen and disturbed what the user is using. Stop and tell the user; take it back with handoff in. The user switching apps on the main screen is not reported. |
 | `SCOPE_DENIED` | `ask_user` | This token is not allowed to do this (the scope the user gave the token in the app). |
-| `PROTECTED_APP` | `none` | This is Agent-VScreen itself, the launcher or system UI; it cannot be stopped. |
+| `PROTECTED_APP` | `none` | This is Agent-VScreen itself, the launcher or system UI; it cannot be opened, moved, parked or stopped on the background screen. |
 | `NO_SCREEN` | `fix_command` | There is no screen now: launch an app first. |
 | `NO_APP` | `fix_command` | No such app, or no app on the screen. apps <keyword> finds packages. |
 | `NO_FRAME` | `retry_later` | The screen has no picture yet; try again shortly. |

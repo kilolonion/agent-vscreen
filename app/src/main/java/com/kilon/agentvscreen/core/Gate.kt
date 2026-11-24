@@ -40,6 +40,7 @@ internal class Gate(
     private val holdFile: java.io.File = java.io.File(HOLD_FILE),
     private val readWchan: ((Collection<String>) -> List<Pair<String, String>>?)? = null,
     private val cleanupOnInit: Boolean = false,
+    private val resolveLaunchers: (() -> Set<String>)? = null,
 ) {
     constructor(service: VScreenDisplayService) : this(service, SystemClockImpl, ProcessShell, cleanupOnInit = true)
 
@@ -193,14 +194,26 @@ internal class Gate(
         snap.forEach { s -> runCatching { s.close() } }
     }
 
-    /** 2.0.0-beta5 (5.1): freeze [processes] via `am freeze --sticky`, record to [holdFile], auto-unhold after [maxMs]. */
+    /**
+     * 2.0.0-beta5 (5.1) + 2.0.0-beta6 (5.9 / 6.9): freeze [processes] via `am freeze --sticky`, record to [holdFile],
+     * auto-unhold after [maxMs]. Gate itself (privileged side) refuses system_server, com.android.systemui, current
+     * launcher(s), Shizuku, our own package, and any non-package-shaped process name without relying on App filtering.
+     */
     fun hold(processes: List<String>, maxMs: Long = HOLD_MAX_MS): Int {
-        val clean = processes.asSequence()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() && it.none { c -> c.isWhitespace() || c.code < 32 } }
-            .distinct()
-            .take(HOLD_MAX_PROCS)
-            .toList()
+        val own = pkg.ifBlank { com.kilon.agentvscreen.BuildConfig.APPLICATION_ID }
+        val launchers = runCatching { (resolveLaunchers ?: ::defaultResolveLaunchers)() }.getOrDefault(emptySet())
+        val clean = ArrayList<String>()
+        val seen = HashSet<String>()
+        for (raw in processes) {
+            val proc = raw.trim()
+            if (proc.isEmpty() || !seen.add(proc)) continue
+            if (!isHoldableProcess(proc, own, launchers)) {
+                logWarn("hold: refused protected or invalid process '$proc'")
+                continue
+            }
+            clean += proc
+            if (clean.size >= HOLD_MAX_PROCS) break
+        }
         if (clean.isEmpty()) return 0
         val effMaxMs = maxMs.coerceIn(1_000L, HOLD_MAX_MS)
         val frozenCount: Int
@@ -301,6 +314,37 @@ internal class Gate(
         reader.join(500)
         if (!done || p.exitValue() != 0) return null
         return parseWchanOutput(buf.toString())
+    }
+
+    @Volatile private var cachedLaunchersAtMs: Long = 0L
+    @Volatile private var cachedLaunchers: Set<String> = emptySet()
+
+    private fun defaultResolveLaunchers(): Set<String> {
+        val now = clock.nowMs()
+        if (cachedLaunchers.isNotEmpty() && now - cachedLaunchersAtMs < LAUNCHER_CACHE_MS) {
+            return cachedLaunchers
+        }
+        val p = ProcessBuilder(
+            "cmd", "package", "query-activities", "--brief",
+            "-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME",
+        ).redirectErrorStream(true).start()
+        val buf = StringBuilder()
+        val reader = Thread {
+            runCatching {
+                p.inputStream.bufferedReader().useLines { lines ->
+                    lines.forEach { buf.append(it).append('\n') }
+                }
+            }
+        }.apply { isDaemon = true; name = "vscreen-gate-home"; start() }
+        val done = runCatching { p.waitFor(SHELL_TIMEOUT_MS, TimeUnit.MILLISECONDS) }.getOrDefault(false)
+        if (!done) runCatching { p.destroyForcibly() }
+        reader.join(500)
+        val parsed = if (done && p.exitValue() == 0) parseLauncherOutput(buf.toString()) else emptySet()
+        if (parsed.isNotEmpty()) {
+            cachedLaunchers = parsed
+            cachedLaunchersAtMs = now
+        }
+        return parsed.ifEmpty { cachedLaunchers }
     }
 
     private fun writeHoldFile(procs: List<String>) {
@@ -754,6 +798,48 @@ internal class Gate(
         const val HOLD_FILE = "/data/local/tmp/avs-holds.txt"
         const val HOLD_MAX_PROCS = 8
         const val FREEZER_WCHAN = "do_freezer_trap"
+        const val LAUNCHER_CACHE_MS = 60_000L
+
+        /** 2.0.0-beta6 (5.9 / 6.9): privileged-side hold denylist independent of App-side filtering. */
+        private val HOLD_DENY_PACKAGES: Set<String> = setOf(
+            "system_server",
+            "android",
+            "com.android.systemui",
+            "moe.shizuku.privileged.api",
+            com.kilon.agentvscreen.BuildConfig.APPLICATION_ID,
+        )
+
+        /** Valid Android app process name: `pkg.name` (at least one dot) with optional `:subproc`. */
+        private val APP_PROC_PATTERN = Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+(:[a-zA-Z0-9_.-]+)?$")
+
+        /**
+         * 2.0.0-beta6 (5.9 / 6.9): whether [proc] may be frozen by Gate.HOLD.
+         * Rejects `system_server`, `com.android.systemui`, current [launchers], Shizuku, our own package ([ownPkg])
+         * including sub-processes (`pkg:sub`), and any process name not shaped like an Android application package.
+         */
+        internal fun isHoldableProcess(proc: String, ownPkg: String, launchers: Set<String>): Boolean {
+            if (!APP_PROC_PATTERN.matches(proc)) return false
+            val base = proc.substringBefore(':')
+            if (base in HOLD_DENY_PACKAGES) return false
+            if (ownPkg.isNotBlank() && base == ownPkg) return false
+            if (base in launchers) return false
+            return true
+        }
+
+        /** Parse `cmd package query-activities --brief -a MAIN -c HOME` output into launcher package names. */
+        internal fun parseLauncherOutput(output: String): Set<String> {
+            val out = LinkedHashSet<String>()
+            for (raw in output.lineSequence()) {
+                val t = raw.trim()
+                if (t.isEmpty() || t.contains(' ')) continue
+                val slash = t.indexOf('/')
+                if (slash > 0) {
+                    val pkg = t.substring(0, slash)
+                    if ('.' in pkg) out += pkg
+                }
+            }
+            return out
+        }
 
         /** Parse `ps -A -o WCHAN:32,NAME` output into `(wchan, processName)` pairs (pure). */
         internal fun parseWchanOutput(output: String): List<Pair<String, String>> {

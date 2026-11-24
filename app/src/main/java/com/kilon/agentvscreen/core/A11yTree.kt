@@ -87,6 +87,7 @@ object A11yTree {
         /** 1.4.0-beta14: ask the largest visible scrollable area to go one page further (the list's own scroll). */
         fun scrollForward(): Boolean {
             val best = nodes.filter { it.scrollable && it.visible }.maxByOrNull { it.box.width().toLong() * it.box.height() } ?: return false
+            if (!com.kilon.agentvscreen.host.VScreenAccessibilityService.verifyNodeForAction(best.info, "ACTION_SCROLL_FORWARD")) return false
             return runCatching { best.info.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) }.getOrDefault(false)
         }
 

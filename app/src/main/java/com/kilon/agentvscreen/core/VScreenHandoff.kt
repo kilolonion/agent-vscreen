@@ -75,6 +75,9 @@ internal object VScreenHandoff {
 
     /** Move task [taskId] (of [pkg]) to [toDisplay] and check that it is really there. */
     fun move(taskId: Int, pkg: String, toDisplay: Int): Moved {
+        if (toDisplay != android.view.Display.DEFAULT_DISPLAY && pkg == com.kilon.agentvscreen.BuildConfig.APPLICATION_ID) {
+            return Moved(false, "", "PROTECTED_APP")
+        }
         val notes = ArrayList<String>()
         val r = VScreenShell.run(arrayOf("am", "display", "move-stack", taskId.toString(), toDisplay.toString()), 10_000L)
         val out = r.combined.trim()

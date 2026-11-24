@@ -439,6 +439,7 @@ private fun NeedsGroup() {
     val ctx = LocalContext.current
     val host = LocalHost.current
     val asks = pendingAsks()
+    val strongPending by com.kilon.agentvscreen.host.StrongConfirm.pending.collectAsState()
     val lessonNow by com.kilon.agentvscreen.cmd.Teach.lesson.collectAsState()
     val review = (lessonNow as? com.kilon.agentvscreen.cmd.Lesson.Review)?.result
     var sureDiscard by remember(review) { mutableStateOf(false) }
@@ -449,11 +450,20 @@ private fun NeedsGroup() {
     var tick by remember { mutableIntStateOf(0) }
     LaunchedEffect(refused.isNotEmpty()) { while (refused.isNotEmpty()) { delay(5_000); tick++ } }
     val queue = remember(refused, s.ownerSessionId, tick) { com.kilon.agentvscreen.host.Needs.waitingNow(owner = s.ownerSessionId) }
-    val n = asks.size + (if (review != null) 1 else 0) + given.size + queue.size
+    val n = strongPending.size + asks.size + (if (review != null) 1 else 0) + given.size + queue.size
     AnimatedVisibility(n > 0, enter = slideInVertically(tween(380)) { -it / 3 } + fadeIn(tween(300)) + expandVertically(tween(380)),
         exit = fadeOut(tween(220)) + shrinkVertically(tween(320))) {
         Column {
             SmallTitle(tr("等你处理 · $n", "Waiting for you · $n"))
+            // 2.0.0-beta6 (6.1): strong confirmation never approves inline — tapping only opens StrongConfirmActivity.
+            strongPending.firstOrNull()?.let { sc ->
+                NeedCard(
+                    tr("需要强确认：${sc.risk.title}", "Strong confirmation: ${sc.risk.title}"),
+                    tr("令牌「${sc.tokenName}」· ${com.kilon.agentvscreen.host.StrongConfirm.clientLabel(sc.client)} · ${sc.commandName}", "Token \"${sc.tokenName}\" · ${com.kilon.agentvscreen.host.StrongConfirm.clientLabel(sc.client)} · ${sc.commandName}"),
+                    tr("去确认", "Review"),
+                    { StrongConfirmActivity.open(ctx, sc.id) },
+                )
+            }
             // Questions: the newest one as a full card; it leaves to the right when answered.
             AnimatedVisibility(asks.isNotEmpty(), enter = fadeIn(tween(300)) + expandVertically(tween(380)),
                 exit = slideOutHorizontally(tween(280)) { it } + fadeOut(tween(220)) + shrinkVertically(tween(320, delayMillis = 160))) {

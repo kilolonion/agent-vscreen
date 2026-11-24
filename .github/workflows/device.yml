@@ -280,3 +280,50 @@ jobs:
             gate.log
             logcat.txt
           retention-days: 7
+  confirm-attack:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 30
+            profile: pixel_2
+          - api: 34
+            profile: pixel_6
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: candidate
+          path: test-apks
+      - name: Fetch Shizuku
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find test-apks -type f -exec mv {} test-apks/ \; 2>/dev/null || true
+          gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --output test-apks/shizuku.apk
+          ls -la test-apks
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          profile: ${{ matrix.profile }}
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          disable-animations: true
+          script: mkdir -p confirm-out && { python3 tools/android-smoke/confirm_attack.py test-apks/app-debug.apk --out confirm-out > confirm-out/confirm-attack.log 2>&1; rc=$?; adb logcat -d > confirm-out/logcat.txt; cat confirm-out/confirm-attack.log; grep -q '^SUMMARY all passed' confirm-out/confirm-attack.log || exit 1; exit "$rc"; }
+      - if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: confirm-attack-api${{ matrix.api }}
+          path: confirm-out/*
+          if-no-files-found: warn
+          retention-days: 7
+

@@ -29,6 +29,34 @@ class VScreenAccessibilityService : AccessibilityService() {
         fun contentChangedAt(displayId: Int): Long = maxOf(contentAt[displayId] ?: 0L, pageChangedAt(displayId), if (displayOf == null) contentAt[-1] ?: 0L else 0L)
         /** Whether events carry their display here (else changes on any display count). */
         val knowsDisplay: Boolean get() = displayOf != null
+
+        /**
+         * 2.0.0-beta6 (6.9 / 6.10 #3): pure gate checking whether an accessibility action may target a node.
+         * Must sit on a non-default (virtual) display and must never belong to our own package.
+         */
+        internal fun canPerformActionOn(displayId: Int?, nodePkg: String?, rootPkg: String?, ownPkg: String): Boolean {
+            if (displayId == null || displayId <= android.view.Display.DEFAULT_DISPLAY) return false
+            if (ownPkg.isNotBlank() && (nodePkg == ownPkg || rootPkg == ownPkg)) return false
+            return true
+        }
+
+        /**
+         * 2.0.0-beta6 (6.9 / 6.10 #3): pre-action check shared by [setNodeText] and [com.kilon.agentvscreen.core.A11yTree.Snapshot.scrollForward].
+         * Refuses display 0, unknown display, and our own package; writes [Audit.security] on refusal.
+         */
+        internal fun verifyNodeForAction(node: AccessibilityNodeInfo, actionName: String): Boolean {
+            val own = instance?.applicationContext?.packageName ?: com.kilon.agentvscreen.BuildConfig.APPLICATION_ID
+            val w = runCatching { node.window }.getOrNull()
+            val dId = runCatching { w?.displayId }.getOrNull()
+            val nPkg = runCatching { node.packageName?.toString() }.getOrNull()
+            val rPkg = runCatching { w?.root?.packageName?.toString() }.getOrNull()
+            if (!canPerformActionOn(dId, nPkg, rPkg, own)) {
+                Audit.security("a11y_action_blocked", "$actionName display=${dId ?: -1} pkg=${nPkg ?: rPkg ?: "unknown"}")
+                AppLogger.warning("A11y", "blocked $actionName on display=${dId ?: -1} pkg=${nPkg ?: rPkg ?: "unknown"}")
+                return false
+            }
+            return true
+        }
     }
 
     override fun onServiceConnected() { instance = this; AppLogger.info("A11y", "connected"); com.kilon.agentvscreen.ui.Overlay.rehost() }
@@ -45,19 +73,30 @@ class VScreenAccessibilityService : AccessibilityService() {
     }
     override fun onInterrupt() {}
 
+    /**
+     * 2.0.0-beta6 (6.10 #3): single entry point for reading accessibility nodes.
+     * Refuses display 0 (`DEFAULT_DISPLAY`) and filters out any window belonging to our own package.
+     */
     fun rootNodesForDisplay(displayId: Int): List<AccessibilityNodeInfo> {
+        if (displayId <= android.view.Display.DEFAULT_DISPLAY) return emptyList()
+        val own = runCatching { applicationContext.packageName }.getOrDefault(com.kilon.agentvscreen.BuildConfig.APPLICATION_ID)
         val out = ArrayList<AccessibilityNodeInfo>()
         try {
             val windows = windowsOnAllDisplays.get(displayId) ?: return emptyList()
             for (w in windows) {
                 if (w.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) continue
-                w.root?.let { out.add(it) }
+                val wd = runCatching { w.displayId }.getOrDefault(displayId)
+                if (wd <= android.view.Display.DEFAULT_DISPLAY || wd != displayId) continue
+                val root = w.root ?: continue
+                if (own.isNotBlank() && root.packageName?.toString() == own) continue
+                out.add(root)
             }
         } catch (_: Throwable) {}
         return out
     }
 
     fun setNodeText(node: AccessibilityNodeInfo, text: String): Boolean {
+        if (!verifyNodeForAction(node, "ACTION_SET_TEXT")) return false
         val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
         return node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
     }

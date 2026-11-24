@@ -964,6 +964,7 @@ internal fun VScreenOffloadHandler.runSegment(
         // 2.0.0-beta4 (4.3 & 4.7): closed-loop press/drag hold/seek checks its own condition while holding; no post-action until wait.
         if (step.loop != Loop.NONE) {
             appRule(d, step)
+            com.kilon.agentvscreen.host.Risk.recordInputAction(Call.current()?.tokenId)
             val out = BackgroundOperation.agentAction(sid, null, isRead = false, describe = com.kilon.agentvscreen.host.Audit.redact(listOf(step.raw)).take(40)) { dd ->
                 closedLoop(sid, dd, step, ctxAct)
             }
@@ -1449,6 +1450,9 @@ private fun VScreenOffloadHandler.doAction(
     fromRule: Boolean = false,
 ): Done {
     appRule(d, step, fromRule = fromRule)
+    if (fromRule || step.kind in setOf(StepKind.TAP, StepKind.PRESS, StepKind.SWIPE, StepKind.DRAG, StepKind.SCROLL, StepKind.TYPE, StepKind.KEY)) {
+        com.kilon.agentvscreen.host.Risk.recordInputAction(Call.current()?.tokenId)
+    }
     ctx.point = null
     var miss: String? = null
     var missCode: String? = null
@@ -1844,11 +1848,8 @@ internal fun VScreenOffloadHandler.launchCmd(sid: String?, args: OffloadArgs): N
     val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
     val q = args.positional.joinToString(" ").trim().ifEmpty { throw ActionError("INVALID_ARGS", tr("launch <应用名或包名>", "launch <app name or package>")) }
     val pkg = VScreenKnowledge.resolveApp(q) ?: throw ActionError("APP_NOT_FOUND", tr("没找到“$q”：apps $q 看看已安装的应用和包名", "\"$q\" not found: apps $q lists installed apps and packages"))
-    // 1.4.0-beta10 (test: launch Agent-VScreen gave LAUNCH_NOT_ON_TOP five times): this app's pages always open on the
-    // phone's own screen (they are for the person holding it; ui/MainDisplay moves them there), so it cannot run on
-    // the background screen. Said plainly instead of a launch that cannot land.
-    if (pkg == context.packageName) throw ActionError("APP_NOT_SUPPORTED", tr("Agent-VScreen 自己的页面只开在手机主屏上，不能在副屏打开。要看它的状态用 vscreen status；要用户在 App 里做什么就 ask 用户",
-        "Agent-VScreen's own pages open only on the phone's main screen, never on the background screen. For its state use vscreen status; to have the user do something in it, ask the user"))
+    // 2.0.0-beta6 (6.1 L3 / 6.10 #3): single gate refusing our own package on the background screen -> PROTECTED_APP.
+    requireNotOwnPackage(pkg)
     val keep = args.hasFlag("keep")
     if (keep && (args.hasFlag("landscape") || args.hasFlag("portrait") || args.hasFlag("restart"))) throw ActionError("INVALID_ARGS",
         tr("--keep 保持副屏现在的方向和尺寸，不能同时用 --landscape / --portrait / --restart", "--keep keeps the screen's orientation and size as it is; it can't be combined with --landscape / --portrait / --restart"))

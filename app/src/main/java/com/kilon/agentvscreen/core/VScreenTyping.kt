@@ -61,11 +61,13 @@ object VScreenTyping {
      * (some toolkits report focus late or never).
      */
     private fun focusedEditable(displayId: Int, at: Pair<Int, Int>? = null): AccessibilityNodeInfo? {
-        val roots = BackgroundOperation.nodeRoots(displayId)
-        roots.firstNotNullOfOrNull { runCatching { it.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) }.getOrNull() }
-            ?.takeIf { it.isEditable }?.let { return it }
-        val edits = A11yTree.snapshot(displayId).editables()
+        // 2.0.0-beta6 (6.10 #3): never call global `findFocus(FOCUS_INPUT)` — on Android it can escape to display 0
+        // and return the user's main-screen input box. Search only inside the display-scoped, own-package-filtered tree.
+        if (displayId <= android.view.Display.DEFAULT_DISPLAY) return null
+        val snap = A11yTree.snapshot(displayId)
+        val edits = snap.editables()
         edits.firstOrNull { it.focused }?.let { return it.info }
+        snap.nodes.firstOrNull { it.editable && it.focused }?.let { return it.info }
         // 1.4.0-beta13: [at] is a frame point; the bounds are input space (see VScreenDisplay.toFrame).
         val d = BackgroundOperation.displayById(displayId)
         if (at != null) return edits.filter { (d?.toFrame(it.box) ?: it.box).contains(at.first, at.second) }.minByOrNull { it.box.width().toLong() * it.box.height() }?.info

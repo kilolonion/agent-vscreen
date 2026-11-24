@@ -21,6 +21,8 @@ class VScreenApp : Application() {
         ApiConfig.init(this)
         com.kilon.agentvscreen.api.Tokens.init(this)
         Audit.init(this)
+        StrongConfirm.init(this)
+        StrongConfirm.migrateIfNeeded(this, com.kilon.agentvscreen.api.Tokens.list.value)
         com.kilon.agentvscreen.core.TaskLog.init(this)
         com.kilon.agentvscreen.api.EventHub.init(this)
         com.kilon.agentvscreen.api.AgentLedger.init(this)

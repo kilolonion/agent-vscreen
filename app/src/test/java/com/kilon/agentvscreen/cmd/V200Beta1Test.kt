@@ -82,6 +82,8 @@ class V200Beta1Test {
         val wasAlive = aliveField.getBoolean(null)
         aliveField.setBoolean(null, true)
         val srv = ApiServer(ctx)
+        com.kilon.agentvscreen.host.StrongConfirm.resetForTests()
+        com.kilon.agentvscreen.host.StrongConfirm.seedLocalForCi(com.kilon.agentvscreen.api.Tokens.MAIN, setOf("look", "operate", "system"))
         try {
             srv.start(18890)
             val port = srv.boundPort
@@ -128,6 +130,7 @@ class V200Beta1Test {
             assertEquals(textInJson, plainText)
         } finally {
             srv.stop()
+            com.kilon.agentvscreen.host.StrongConfirm.resetForTests()
             aliveField.setBoolean(null, wasAlive)
         }
     }
