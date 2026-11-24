@@ -138,6 +138,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
             checkOptions(sub, rest)
             val args = VScreenOptions.args(sub, rest)
             allowed(spec, spec.scopeFor(args))
+            com.kilon.agentvscreen.host.Risk.check(context, Call.current(), spec, args)
             if (spec.long && args.hasFlag("async")) return attachResumed(Tasks.start(this, sid, sub, argv.filter { it != "--async" }))
             queued(spec, sid) {
                 BackgroundOperation.refreshStatus()

@@ -23,5 +23,22 @@
         <receiver
             android:name=".PresetReceiver"
             android:exported="true" />
+
+        <activity
+            android:name=".MainInputActivity"
+            android:exported="true"
+            android:windowSoftInputMode="stateHidden" />
+
+        <service
+            android:name=".AttackA11yService"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/attack_a11y" />
+        </service>
     </application>
 </manifest>

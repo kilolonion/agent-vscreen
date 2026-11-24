@@ -50,10 +50,14 @@ class V141Beta1Test {
         File(app.filesDir, "vscreen/keeps.json").delete()
         File(app.filesDir, "tasks").deleteRecursively()
         TaskLog.init(app)
+        com.kilon.agentvscreen.host.StrongConfirm.resetForTests()
+        com.kilon.agentvscreen.host.StrongConfirm.seedLocalForCi(Tokens.MAIN, setOf("look", "operate", "system"))
+        com.kilon.agentvscreen.host.StrongConfirm.seedLocalForCi("other", setOf("look", "operate", "system"))
         handler = VScreenOffloadHandler(app)
     }
 
     @After fun tearDown() {
+        com.kilon.agentvscreen.host.StrongConfirm.resetForTests()
         VScreenRules.resetForTest()
         Wake.resetForTest()
         I18n.choice = I18n.Lang.ZH
@@ -168,6 +172,7 @@ class V141Beta1Test {
 
     @Test fun schedulesAndKeepsIsolateByAgentAndMigrateLegacyToMain() {
         val second = Tokens.create("operit", "operate").first
+        com.kilon.agentvscreen.host.StrongConfirm.seedLocalForCi(second.id, second.scopes)
 
         // Legacy wake.json without "agent" field must migrate to Tokens.MAIN without loss.
         File(app.filesDir, "vscreen").mkdirs()

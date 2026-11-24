@@ -399,9 +399,14 @@ class VScreenDisplayService : Binder {
                 }
                 REMOVE_TASK -> {
                     val taskId = data.readInt(); val expected = data.readInt()
-                    // Never remove a task the system places on another display (the user's main screen).
+                    // 2.0.0-beta6 (6.10 #3): never remove a task on the user's main screen (display 0).
                     val on = runCatching { rootTasks().firstOrNull { taskId in it.children.map { c -> c.first } }?.displayId }.getOrNull()
-                    val okRemove = on != null && on == expected && removeTask(taskId)
+                    val okRemove = expected > android.view.Display.DEFAULT_DISPLAY &&
+                        on != null && on > android.view.Display.DEFAULT_DISPLAY &&
+                        on == expected && removeTask(taskId)
+                    if (!okRemove && expected <= android.view.Display.DEFAULT_DISPLAY) {
+                        System.err.println("vscreen-service: REMOVE_TASK refused for display $expected (task=$taskId)")
+                    }
                     out.writeInt(0); out.writeInt(if (okRemove) 1 else 0)
                 }
                 LIST_TASKS -> {
@@ -426,8 +431,12 @@ class VScreenDisplayService : Binder {
                 FOCUS_TASK -> {
                     val taskId = data.readInt()
                     val expected = if (data.dataAvail() >= 4) data.readInt() else null
-                    val r = runCatching {
-                        if (expected != null) check(rootTasks().any { r -> r.displayId == expected && r.children.any { it.first == taskId } })
+                    // 2.0.0-beta6 (6.10 #3): refuse display 0 and refuse when expected display is omitted.
+                    val r = if (expected == null || expected <= android.view.Display.DEFAULT_DISPLAY) {
+                        System.err.println("vscreen-service: FOCUS_TASK refused for display $expected (task=$taskId)")
+                        false
+                    } else runCatching {
+                        check(rootTasks().any { rt -> rt.displayId == expected && rt.children.any { it.first == taskId } })
                         val a = atmService()
                         a.javaClass.getMethod("setFocusedTask", Int::class.javaPrimitiveType).invoke(a, taskId); true
                     }.getOrDefault(false)
@@ -437,10 +446,24 @@ class VScreenDisplayService : Binder {
                     val taskId = data.readInt(); val target = data.readInt()
                     val source = if (data.dataAvail() >= 4) data.readInt() else null
                     val r = runCatching {
+                        // 2.0.0-beta6 (6.1 L3 / 6.10 #3): regardless of whether source is specified, refuse moving
+                        // our own package's task onto any non-default display.
+                        val allRoots = rootTasks()
+                        val matching = allRoots.filter { rt -> rt.children.any { it.first == taskId } }
+                        val pkgs = buildList {
+                            matching.forEach { rt ->
+                                rt.top?.substringBefore('/')?.let { add(it) }
+                                rt.children.forEach { c -> c.second?.substringBefore('/')?.let { add(it) } }
+                            }
+                        }
+                        if (shouldRefuseMoveTask(target, pkgs, com.kilon.agentvscreen.BuildConfig.APPLICATION_ID)) {
+                            System.err.println("vscreen-service: MOVE_TASK refused protected own package (task=$taskId -> display $target)")
+                            throw SecurityException("PROTECTED_APP: own package cannot move to display $target")
+                        }
                         if (source == null) moveTask(taskId, target)
                         else synchronized(displays) {
                             check(parking == (source to target) || parking == (target to source)) { "parking display pair no longer exists" }
-                            val root = rootTasks().firstOrNull { r -> r.displayId == source && r.children.any { it.first == taskId } }
+                            val root = matching.firstOrNull { rt -> rt.displayId == source }
                             check(root != null && root.children.size == 1) { "task moved away or shares a root with other tasks" }
                             moveTask(taskId, target)
                         }
@@ -748,6 +771,7 @@ class VScreenDisplayService : Binder {
      */
     private fun injectDrag(displayId: Int, x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int, holdMs: Int, epoch: Long): Boolean = synchronized(fence.lock(displayId)) {
         if (!fence.admits(displayId, epoch)) return@synchronized false
+        if (!mayInject(displayId)) return@synchronized false
         val downTime = SystemClock.uptimeMillis()
         var ok = true
         // 1.4.2-beta6: fenced out mid-gesture (takeover, Stop): no more events, and the finger is cancelled, not lifted.
@@ -1103,6 +1127,11 @@ class VScreenDisplayService : Binder {
             created -> true
             else -> owner == appPkg
         }
+        /** 2.0.0-beta6 (6.1 L3 / 6.10 #3): service-side gate refusing own-package tasks from moving to non-0 displays. */
+        internal fun shouldRefuseMoveTask(targetDisplayId: Int, taskPackages: Collection<String>, ownPkg: String): Boolean =
+            targetDisplayId != android.view.Display.DEFAULT_DISPLAY &&
+                ownPkg.isNotBlank() &&
+                taskPackages.any { it == ownPkg }
         /** The newest call code; onTransact serves CREATE..LAST_CALL. A new code moves this. */
         const val LAST_CALL = GATE
         /** Apps the service silenced, so a service that was killed gives them back on its next start. Shell-owned. */
@@ -1118,7 +1147,7 @@ class VScreenDisplayService : Binder {
         /** A display nobody touched for this long (app gone) is released. */
         const val ORPHAN_MS = 20 * 60_000L
         /** Bump when the protocol changes, so Shizuku restarts an old service process. */
-        const val PROTOCOL = 17
+        const val PROTOCOL = 18
         /** Shizuku's reserved "destroy user service" transaction. */
         const val DESTROY_CODE = 16777115
         private const val SHELL_PKG = "com.android.shell"

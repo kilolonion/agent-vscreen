@@ -85,6 +85,7 @@ object VScreenAwake {
         val st = stateOf(d) ?: return null
         if (st == Display.STATE_ON) return null
         if (!canWakeAlone(d)) return tr("副屏处于休眠（状态 ${stateName(st)}），这台手机上它和主屏一起休眠，单独唤醒会点亮主屏，所以没唤醒：画面可能不动", "The screen is asleep (state ${stateName(st)}); on this phone it sleeps with the main screen and waking it alone would light the main screen, so it was not woken: the picture may not move")
+        require(d.displayId != Display.DEFAULT_DISPLAY) { "VScreenAwake must never run input on display 0" }
         val ok = runCatching { VScreenShell.run(arrayOf("input", "-d", d.displayId.toString(), "keyevent", "KEYCODE_WAKEUP"), 4_000L).exitCode == 0 }.getOrDefault(false)
         val t0 = SystemClock.elapsedRealtime()
         while (ok && SystemClock.elapsedRealtime() - t0 < 2_000L && stateOf(d) != Display.STATE_ON) Thread.sleep(100)

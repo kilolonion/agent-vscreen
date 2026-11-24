@@ -312,6 +312,10 @@ fun TokensPage() {
         Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TokensPanel(ApiConfig.baseUrl) { l, t -> host.copy(l, t) }
         }
+        SmallTitle(tr("已确认的接入", "Confirmed access"))
+        Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ApprovalsPanel()
+        }
     }
     if (askRenew) GlassDialog(
         onDismissRequest = { askRenew = false },

@@ -60,7 +60,18 @@ fun TokensPanel(base: String, copy: (String, String) -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (t.id != Tokens.MAIN) LinkButton(onClick = { Tokens.setScope(t.id, Tokens.SCOPES[(Tokens.SCOPES.indexOf(t.scope) + 1) % Tokens.SCOPES.size]) }) { Text(tr("改权限", "Change")) }
                 if (t.trusted) LinkButton(onClick = { Tokens.trust(t.id, 0) }) { Text(tr("结束免确认", "End no-confirm")) }
-                else LinkButton(onClick = { Tokens.trust(t.id, 30); Audit.security("trust", "${t.name} 30min") }) { Text(tr("免确认 30 分钟", "No confirm 30 min")) }
+                else LinkButton(onClick = {
+                    val req = com.kilon.agentvscreen.host.StrongConfirm.createUiRequest(
+                        actx,
+                        com.kilon.agentvscreen.host.Risk.TRUST_SET,
+                        t,
+                        tr("免确认 30 分钟", "No confirm 30 min"),
+                    ) {
+                        Tokens.trust(t.id, 30)
+                        Audit.security("trust", "${t.name} 30min")
+                    }
+                    StrongConfirmActivity.open(actx, req.id)
+                }) { Text(tr("免确认 30 分钟", "No confirm 30 min")) }
                 if (t.id != Tokens.MAIN) LinkButton(onClick = { val id = t.id; Thread { com.kilon.agentvscreen.api.Agents.forget(actx, id) }.start(); Audit.security("revoke", t.name) }) { Text(tr("撤销", "Revoke"), color = MiuixTheme.colorScheme.error) }
             }
         }
@@ -98,6 +109,65 @@ fun TokensPanel(base: String, copy: (String, String) -> Unit) {
                 }
             },
             confirmButton = { LinkButton(onClick = { made = null }) { Text(tr("我已复制", "I copied it")) } })
+    }
+}
+
+/** 2.0.0-beta6 (6.6): confirmed access records grouped by token; revoking requires no strong confirmation. */
+@Composable
+fun ApprovalsPanel() {
+    val approvals by com.kilon.agentvscreen.host.StrongConfirm.approvals.collectAsState()
+    val tokens by Tokens.list.collectAsState()
+    val fmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.ROOT) }
+    val tokenNames = remember(tokens) {
+        tokens.associate { it.id to (if (it.id == Tokens.MAIN) tr("主令牌", "Main token") else it.name) }
+    }
+    if (approvals.isEmpty()) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+                .padding(12.dp),
+        ) {
+            Small(tr("还没有已确认的接入记录。", "No confirmed access records yet."))
+        }
+        return
+    }
+    val grouped = remember(approvals) { approvals.groupBy { it.token } }
+    grouped.forEach { (tid, items) ->
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(tokenNames[tid] ?: tid, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+            items.forEach { a ->
+                val riskTitle = com.kilon.agentvscreen.host.Risk.of(a.risk)?.title ?: a.risk
+                val byLabel = when (a.by) {
+                    com.kilon.agentvscreen.host.StrongConfirm.BY_BIOMETRIC -> tr("生物识别/密码", "biometric/PIN")
+                    com.kilon.agentvscreen.host.StrongConfirm.BY_HOLD -> tr("长按", "hold")
+                    com.kilon.agentvscreen.host.StrongConfirm.BY_MIGRATED -> tr("升级迁移", "migrated")
+                    else -> a.by
+                }
+                val untilLabel = if (a.until == 0L) tr("直到撤销", "until revoked") else tr("有效期至 ", "until ") + fmt.format(Date(a.until))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("$riskTitle · ${com.kilon.agentvscreen.host.StrongConfirm.clientLabel(a.client)}", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Small("$byLabel · $untilLabel")
+                    }
+                    LinkButton(onClick = { com.kilon.agentvscreen.host.StrongConfirm.revoke(a) }) {
+                        Text(tr("撤销", "Revoke"), color = MiuixTheme.colorScheme.error)
+                    }
+                }
+            }
+        }
     }
 }
 

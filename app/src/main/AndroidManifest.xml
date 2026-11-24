@@ -19,6 +19,8 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
+    <!-- 2.0.0-beta6 (6.1 L4): framework BiometricPrompt (BIOMETRIC_STRONG | DEVICE_CREDENTIAL) on StrongConfirmActivity. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
     <queries>
         <intent>
@@ -77,6 +79,15 @@
             android:excludeFromRecents="true"
             android:noHistory="true"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <!-- 2.0.0-beta6 (6.1 L1): strong confirmation page — main display only, never exported, own task, excluded from recents. -->
+        <activity
+            android:name=".ui.StrongConfirmActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.kilon.agentvscreen.strongconfirm"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
 
         <!-- 2.0.0-beta2: exported with DUMP because uid 2000 (Shizuku, or root's su 2000 mode) requires exported="true"
              to call `am start-foreground-service` (uid 0 bypasses exported checks). Ordinary third-party apps cannot

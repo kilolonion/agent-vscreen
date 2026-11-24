@@ -433,7 +433,7 @@ class V200Beta2Test {
 
     @Test
     fun serviceGateBinderTransactionLifecycleAndProtocolVersion() {
-        assertEquals(17, VScreenDisplayService.PROTOCOL)
+        assertEquals(18, VScreenDisplayService.PROTOCOL)
         assertEquals(VScreenDisplayService.GATE, VScreenDisplayService.LAST_CALL)
         val svc = VScreenDisplayService()
         val wantPort = freePort()
