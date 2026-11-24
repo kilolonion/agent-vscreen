@@ -117,9 +117,16 @@ class AttackA11yService : AccessibilityService() {
             if (intent.action != ACTION_ATTACK_CLICK) return
             val targetPkg = intent.getStringExtra("pkg") ?: "com.kilon.agentvscreen"
             val targetDesc = intent.getStringExtra("desc") ?: "strong_confirm_button"
-            val node = findTarget(targetPkg, targetDesc)
+            var node: AccessibilityNodeInfo? = null
+            val seen = ArrayList<String>()
+            for (attempt in 0 until 10) {
+                seen.clear()
+                node = findTarget(targetPkg, targetDesc, seen)
+                if (node != null) break
+                runCatching { Thread.sleep(200) }
+            }
             if (node == null) {
-                emitAtk("a11y_click_result", JSONObject().put("found", false))
+                emitAtk("a11y_click_result", JSONObject().put("found", false).put("seen", seen.take(20).joinToString("; ")))
                 return
             }
             val b = Rect()
@@ -137,28 +144,55 @@ class AttackA11yService : AccessibilityService() {
         }
     }
 
-    private fun findTarget(pkg: String, desc: String): AccessibilityNodeInfo? {
+    private fun findTarget(pkg: String, desc: String, seen: MutableList<String>): AccessibilityNodeInfo? {
         val roots = ArrayList<AccessibilityNodeInfo>()
         runCatching {
-            val d0 = windowsOnAllDisplays.get(0)
-            if (d0 != null) {
-                for (w in d0) w.root?.let { roots += it }
+            val all = windowsOnAllDisplays
+            for (idx in 0 until all.size()) {
+                val disp = all.keyAt(idx)
+                val ws = all.valueAt(idx) ?: continue
+                for (w in ws) {
+                    val r = w.root
+                    seen += "d$disp:${r?.packageName ?: "null"}"
+                    if (disp == 0 && r != null) roots += r
+                }
             }
         }
-        runCatching { rootInActiveWindow?.let { roots += it } }
+        runCatching {
+            for (w in windows) {
+                w.root?.let { r ->
+                    seen += "w:${r.packageName}"
+                    roots += r
+                }
+            }
+        }
+        runCatching {
+            rootInActiveWindow?.let { r ->
+                seen += "act:${r.packageName}"
+                roots += r
+            }
+        }
         for (r in roots) {
-            findRec(r, pkg, desc)?.let { return it }
+            findRec(r, pkg, desc, seen)?.let { return it }
         }
         return null
     }
 
-    private fun findRec(n: AccessibilityNodeInfo?, pkg: String, desc: String): AccessibilityNodeInfo? {
+    private fun findRec(n: AccessibilityNodeInfo?, pkg: String, desc: String, seen: MutableList<String>): AccessibilityNodeInfo? {
         if (n == null) return null
         val p = n.packageName?.toString()
         val d = n.contentDescription?.toString()
-        if (p == pkg && d == desc) return n
+        val vid = n.viewIdResourceName
+        val txt = n.text?.toString()
+        if (p == pkg) {
+            if (d == desc || vid?.endsWith(":id/$desc") == true) return n
+            if (txt != null && (txt.contains("Hold 3s") || txt.contains("按住确认") || txt == "Confirm" || txt == "确认")) return n
+            if (!d.isNullOrBlank() || !txt.isNullOrBlank()) {
+                if (seen.size < 25) seen += "n(d=${d ?: ""},t=${txt ?: ""},c=${n.className})"
+            }
+        }
         for (i in 0 until n.childCount) {
-            findRec(runCatching { n.getChild(i) }.getOrNull(), pkg, desc)?.let { return it }
+            findRec(runCatching { n.getChild(i) }.getOrNull(), pkg, desc, seen)?.let { return it }
         }
         return null
     }

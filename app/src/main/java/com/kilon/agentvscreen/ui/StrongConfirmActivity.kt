@@ -80,8 +80,20 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  *   and ignores accessibility `ACTION_CLICK` / `ACTION_LONG_CLICK` with an audit log entry.
  */
 class StrongConfirmActivity : ComponentActivity() {
+    internal data class LiveButton(
+        val requestId: String,
+        val biometricMode: Boolean,
+        val left: Int,
+        val top: Int,
+        val right: Int,
+        val bottom: Int,
+    )
+
     companion object {
         const val EXTRA_ID = "confirm_id"
+
+        /** Live screen bounds of the confirm button while [StrongConfirmActivity] is attached (debug hook only). */
+        @Volatile internal var liveButtonState: LiveButton? = null
 
         fun open(ctx: Context, confirmId: String) {
             val intent = Intent(ctx, StrongConfirmActivity::class.java)
@@ -487,6 +499,26 @@ internal class StrongConfirmButtonView(
         enabledAction = enabled
         contentDescription = labelText()
         invalidate()
+        post { publishBounds() }
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        publishBounds()
+    }
+
+    private fun publishBounds() {
+        if (!isAttachedToWindow || width <= 0 || height <= 0) return
+        val loc = IntArray(2)
+        getLocationOnScreen(loc)
+        StrongConfirmActivity.liveButtonState = StrongConfirmActivity.LiveButton(
+            requestId = requestId,
+            biometricMode = biometricMode,
+            left = loc[0],
+            top = loc[1],
+            right = loc[0] + width,
+            bottom = loc[1] + height,
+        )
     }
 
     private fun labelText(): String = when {
@@ -504,6 +536,7 @@ internal class StrongConfirmButtonView(
         info.className = "android.widget.Button"
         info.text = labelText()
         info.contentDescription = "strong_confirm_button"
+        info.viewIdResourceName = "${context.packageName}:id/strong_confirm_button"
         info.isClickable = true
         info.isLongClickable = false
     }
@@ -611,6 +644,7 @@ internal class StrongConfirmButtonView(
 
     override fun onDetachedFromWindow() {
         cancelHold()
+        StrongConfirmActivity.liveButtonState = null
         super.onDetachedFromWindow()
     }
 

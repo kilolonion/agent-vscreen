@@ -91,6 +91,19 @@ class CiHook : BroadcastReceiver() {
                             res.put("connected", svc != null)
                                 .put("d0_roots", svc?.rootNodesForDisplay(0)?.size ?: -1)
                         }
+                        what == "confirm_btn_bounds" -> {
+                            val b = com.kilon.agentvscreen.ui.StrongConfirmActivity.liveButtonState
+                            if (b != null) {
+                                res.put("present", true)
+                                    .put("id", b.requestId)
+                                    .put("biometric", b.biometricMode)
+                                    .put("cx", (b.left + b.right) / 2)
+                                    .put("cy", (b.top + b.bottom) / 2)
+                                    .put("bounds", "${b.left},${b.top},${b.right},${b.bottom}")
+                            } else {
+                                res.put("present", false)
+                            }
+                        }
                         what.startsWith("open_confirm:") -> {
                             val cid = what.removePrefix("open_confirm:").trim()
                             com.kilon.agentvscreen.ui.StrongConfirmActivity.open(app, cid)
@@ -104,11 +117,50 @@ class CiHook : BroadcastReceiver() {
                                 .putExtra(com.kilon.agentvscreen.ui.StrongConfirmActivity.EXTRA_ID, cid)
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             val opts = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(vd).toBundle()
-                            val launched = runCatching { app.startActivity(i, opts); true }.getOrElse {
-                                res.put("err", it.message ?: it.javaClass.simpleName)
+                            var usedVd = vd
+                            val launched = try {
+                                app.startActivity(i, opts)
+                                true
+                            } catch (se: SecurityException) {
+                                // API 30: shell-owned non-public virtual display rejects app startActivity; spin up a
+                                // 1-second app-owned VirtualDisplay so L1 (`displayId != DEFAULT_DISPLAY -> finish()`)
+                                // is still exercised directly on API 30 without relaxing exported="false".
+                                var reader: android.media.ImageReader? = null
+                                var tempVd: android.hardware.display.VirtualDisplay? = null
+                                try {
+                                    val dm = app.getSystemService(android.hardware.display.DisplayManager::class.java)
+                                    reader = android.media.ImageReader.newInstance(480, 800, android.graphics.PixelFormat.RGBA_8888, 2)
+                                    tempVd = dm?.createVirtualDisplay(
+                                        "ci-l1-test",
+                                        480,
+                                        800,
+                                        160,
+                                        reader.surface,
+                                        android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY,
+                                    )
+                                    val tvd = tempVd?.display?.displayId ?: -1
+                                    if (tvd > 0) {
+                                        usedVd = tvd
+                                        val opts2 = android.app.ActivityOptions.makeBasic().setLaunchDisplayId(tvd).toBundle()
+                                        app.startActivity(i, opts2)
+                                        Thread.sleep(900L)
+                                        true
+                                    } else {
+                                        res.put("err", se.message ?: "SecurityException")
+                                        false
+                                    }
+                                } catch (t2: Throwable) {
+                                    res.put("err", t2.message ?: t2.javaClass.simpleName)
+                                    false
+                                } finally {
+                                    runCatching { tempVd?.release() }
+                                    runCatching { reader?.close() }
+                                }
+                            } catch (t: Throwable) {
+                                res.put("err", t.message ?: t.javaClass.simpleName)
                                 false
                             }
-                            res.put("launched", launched).put("id", cid).put("vd", vd)
+                            res.put("launched", launched).put("id", cid).put("vd", usedVd)
                         }
                     }
                     File(app.filesDir, "ci-attack.txt").writeText(res.toString() + "\n")

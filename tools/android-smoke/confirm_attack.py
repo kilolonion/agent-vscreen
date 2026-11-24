@@ -324,26 +324,31 @@ def activity_on_display(disp_id, frag):
     if marker not in out:
         return False
     block = out.split(marker, 1)[-1].split("Display #", 1)[0]
-    return frag in block
+    for line in block.splitlines():
+        if frag not in line:
+            continue
+        if any(k in line for k in ("mResumedActivity", "topResumedActivity", "ResumedActivity:", "state=RESUMED")):
+            return True
+    return False
 
 
-def find_confirm_button_center(tries=12):
+def find_confirm_button_center(want_id=None, want_bio=None, tries=20):
     for _ in range(tries):
-        _, d = shell("uiautomator", "dump", "/data/local/tmp/sc.xml", check_rc=False)
-        if "dumped" in d.lower():
-            _, xml_txt = shell("cat", "/data/local/tmp/sc.xml", check_rc=False)
+        raw = ci_hook("attack", "confirm_btn_bounds", "files/ci-attack.txt", wait_secs=5)
+        if raw.startswith("{"):
             try:
-                root = ET.fromstring(xml_txt)
+                obj = json.loads(raw)
             except Exception:
-                time.sleep(0.5)
-                continue
-            for node in root.iter("node"):
-                a = node.attrib
-                if a.get("package") == APP and (a.get("content-desc") == "strong_confirm_button" or "确认" in a.get("text", "") or "Confirm" in a.get("text", "") or "Hold 3s" in a.get("text", "")):
-                    if a.get("content-desc") == "strong_confirm_button":
-                        x1, y1, x2, y2 = map(int, re.findall(r"\d+", a["bounds"]))
-                        return (x1 + x2) // 2, (y1 + y2) // 2, a["bounds"]
-        time.sleep(0.5)
+                obj = {}
+            if obj.get("present") is True:
+                if want_id is not None and obj.get("id") != want_id:
+                    time.sleep(0.25)
+                    continue
+                if want_bio is not None and obj.get("biometric") is not want_bio:
+                    time.sleep(0.25)
+                    continue
+                return int(obj["cx"]), int(obj["cy"]), str(obj.get("bounds", ""))
+        time.sleep(0.25)
     return None
 
 
@@ -592,7 +597,7 @@ def run_suite(sdk: int, out_dir: Path):
 
     # ── 5) Main-screen focused EditText vs `act "type ..."` on virtual display (6.10 #3) ─
     t_mi = latest_atk_t()
-    shell("am", "start", "-W", "-n", MAIN_INPUT_ACT, check_rc=False)
+    shell("am", "start", "-W", "--display", "0", "-f", "0x10000000", "-n", MAIN_INPUT_ACT, check_rc=False)
     ready_mi = wait_atk_event("main_input_ready", t_mi, timeout=8.0)
     time.sleep(0.4)
     api_run(["act", "type leaked_secret_text"], timeout=45)
@@ -602,7 +607,11 @@ def run_suite(sdk: int, out_dir: Path):
     leaked_txt = st_mi["data"].get("text") if st_mi else "MISSING"
     check(
         "[a11y/typing] act type never writes into focused main-screen EditText",
-        ready_mi is not None and st_mi is not None and leaked_txt == "",
+        ready_mi is not None
+        and ready_mi["data"].get("displayId") == 0
+        and st_mi is not None
+        and st_mi["data"].get("displayId") == 0
+        and leaked_txt == "",
         f"ready={ready_mi} state={st_mi}",
     )
 
@@ -610,8 +619,7 @@ def run_suite(sdk: int, out_dir: Path):
     shell("input", "keyevent", "KEYCODE_WAKEUP", check_rc=False)
     shell("wm", "dismiss-keyguard", check_rc=False)
     ci_hook("attack", f"open_confirm:{cid1}", "files/ci-attack.txt")
-    time.sleep(1.2)
-    btn_pos = find_confirm_button_center()
+    btn_pos = find_confirm_button_center(want_id=cid1, want_bio=False)
     check("located StrongConfirmActivity confirm button on display 0", btn_pos is not None, str(btn_pos))
 
     # 6a) act "type ...; scroll down" while StrongConfirmActivity is in front on d0.
@@ -636,7 +644,7 @@ def run_suite(sdk: int, out_dir: Path):
         time.sleep(0.8)
         t_ck = latest_atk_t()
         shell("am", "broadcast", "-a", "com.kilon.avstorture.ATTACK_A11Y_CLICK", "-p", TORTURE, check_rc=False)
-        res_ck = wait_atk_event("a11y_click_result", t_ck, timeout=8.0)
+        res_ck = wait_atk_event("a11y_click_result", t_ck, timeout=10.0)
         audits_a11y = [a for a in read_audit_lines() if a.get("what") == "strong_confirm_a11y_ignored"]
         check(
             "[a11y/6.9] external a11y CLICK/LONG_CLICK on confirm button rejected with audit",
@@ -657,8 +665,8 @@ def run_suite(sdk: int, out_dir: Path):
     if btn_pos is not None:
         bx, by, _ = btn_pos
         ci_hook("attack", f"open_confirm:{cid1}", "files/ci-attack.txt")
-        time.sleep(0.8)
-        shell("input", "swipe", str(bx), str(by), str(bx), str(by), "3500", check_rc=False)
+        time.sleep(0.6)
+        shell("input", "-d", "0", "swipe", str(bx), str(by), str(bx), str(by), "3500", check_rc=False)
         time.sleep(0.6)
         audits_l6 = [a for a in read_audit_lines() if a.get("what") == "strong_confirm_l6_ignored"]
         check(
@@ -696,11 +704,11 @@ def run_suite(sdk: int, out_dir: Path):
         pin_approved_rec = None
         try:
             ci_hook("attack", f"open_confirm:{cid2}", "files/ci-attack.txt")
-            time.sleep(1.2)
-            pbtn = find_confirm_button_center() or btn_pos
+            pbtn = find_confirm_button_center(want_id=cid2, want_bio=True) or btn_pos
+            print(f"PIN confirm button: {pbtn}", flush=True)
             if pbtn is not None:
-                shell("input", "tap", str(pbtn[0]), str(pbtn[1]), check_rc=False)
-                time.sleep(1.8)
+                shell("input", "-d", "0", "tap", str(pbtn[0]), str(pbtn[1]), check_rc=False)
+                time.sleep(2.0)
                 shell("input", "text", pin, check_rc=False)
                 time.sleep(0.35)
                 shell("input", "keyevent", "KEYCODE_ENTER", check_rc=False)
@@ -752,22 +760,23 @@ def run_suite(sdk: int, out_dir: Path):
     shell("input", "keyevent", "KEYCODE_WAKEUP", check_rc=False)
     shell("wm", "dismiss-keyguard", check_rc=False)
     ci_hook("attack", f"open_confirm:{cid1}", "files/ci-attack.txt")
-    time.sleep(1.2)
-    hbtn = find_confirm_button_center() or btn_pos
+    hbtn = find_confirm_button_center(want_id=cid1, want_bio=False) or btn_pos
     w0, h0 = display0_size()
 
     run("adb", "root", check_rc=False)
     run("adb", "wait-for-device", check_rc=False)
     time.sleep(2.0)
     IS_ROOT_ADB = True
-    if GATE_PORT > 0:
-        run("adb", "forward", f"tcp:{LOCAL_PORT}", f"tcp:{GATE_PORT}", check_rc=False)
+    parts_after = read_app_file("files/ci.txt").split()
+    fwd_port = int(parts_after[1]) if len(parts_after) == 2 and parts_after[1].isdigit() and int(parts_after[1]) > 0 else (GATE_PORT or 18765)
+    run("adb", "forward", f"tcp:{LOCAL_PORT}", f"tcp:{fwd_port}", check_rc=False)
 
     dev = parse_evdev_touch()
     hold_rec = None
     if dev is not None and hbtn is not None:
         ci_hook("attack", f"open_confirm:{cid1}", "files/ci-attack.txt")
-        time.sleep(1.0)
+        hbtn = find_confirm_button_center(want_id=cid1, want_bio=False) or hbtn
+        time.sleep(0.5)
         r_down, r_up, mapped = sendevent_hold_px(dev, hbtn[0], hbtn[1], w0, h0, hold_sec=3.6, tid=601)
         print(f"sendevent 3.6s hold on {dev['path']} ({dev['name']}) px=({hbtn[0]},{hbtn[1]})/{w0}x{h0} ev={mapped}: down={r_down} up={r_up}", flush=True)
         deadline = time.monotonic() + 5.0
