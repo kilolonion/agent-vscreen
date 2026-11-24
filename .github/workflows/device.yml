@@ -184,7 +184,15 @@ jobs:
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: python3 tools/android-smoke/shizuku.py ${{ matrix.path }}
+          # On failure keep the whole logcat: the API 30 "dialog gone but still NEED_PERMISSION" case needs the
+          # app's ShizukuBackend "permission result" lines to tell a missed callback from a denied grant.
+          script: python3 tools/android-smoke/shizuku.py ${{ matrix.path }} || { adb logcat -d > logcat.txt; exit 1; }
+      - if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: shizuku-${{ matrix.path }}-logs
+          path: logcat.txt
+          retention-days: 7
   eval:
     needs: build
     runs-on: ubuntu-latest
