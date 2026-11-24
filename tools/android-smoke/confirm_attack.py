@@ -585,15 +585,16 @@ def run_suite(sdk: int, out_dir: Path):
         rc_ext != 0 or "Permission Denial" in out_ext or "SecurityException" in out_ext,
         f"rc={rc_ext} out={out_ext[:120]!r}",
     )
-    ci_hook("attack", f"open_confirm_vd:{cid1}:{vd}", "files/ci-attack.txt")
-    time.sleep(1.2)
-    still_on_vd = activity_on_display(vd, "StrongConfirmActivity")
-    audits_l1 = [a for a in read_audit_lines() if a.get("what") == "strong_confirm_wrong_display"]
-    check(
-        "[L1] StrongConfirmActivity on virtual display finishes immediately and writes strong_confirm_wrong_display",
-        (not still_on_vd) and len(audits_l1) >= 1 and read_approvals() == approvals_snap,
-        f"still_on_vd={still_on_vd} audits={len(audits_l1)}",
-    )
+    if sdk >= 34:
+        ci_hook("attack", f"open_confirm_vd:{cid1}:{vd}", "files/ci-attack.txt")
+        time.sleep(1.2)
+        still_on_vd = activity_on_display(vd, "StrongConfirmActivity")
+        audits_l1 = [a for a in read_audit_lines() if a.get("what") == "strong_confirm_wrong_display"]
+        check(
+            "[L1] StrongConfirmActivity on virtual display finishes immediately and writes strong_confirm_wrong_display",
+            (not still_on_vd) and len(audits_l1) >= 1 and read_approvals() == approvals_snap,
+            f"still_on_vd={still_on_vd} audits={len(audits_l1)}",
+        )
 
     # ── 5) Main-screen focused EditText vs `act "type ..."` on virtual display (6.10 #3) ─
     t_mi = latest_atk_t()
@@ -771,9 +772,40 @@ def run_suite(sdk: int, out_dir: Path):
     fwd_port = int(parts_after[1]) if len(parts_after) == 2 and parts_after[1].isdigit() and int(parts_after[1]) > 0 else (GATE_PORT or 18765)
     run("adb", "forward", f"tcp:{LOCAL_PORT}", f"tcp:{fwd_port}", check_rc=False)
 
+    if sdk < 34:
+        # API 30: ATM denies non-privileged uid 10168 from calling startActivity with launchDisplayId on
+        # secondary displays. Now that adb is root (uid 0 bypasses exported=false and isCallerAllowedOnDisplay),
+        # close any open singleTask instance on d0, spin up a VirtualDisplay via CiHook, and launch
+        # StrongConfirmActivity onto it directly so L1 (`displayId != 0 -> audit + finish()`) is exercised.
+        ci_hook("attack", "finish_confirm", "files/ci-attack.txt")
+        time.sleep(0.5)
+        approvals_l1_snap = read_approvals()
+        vd_raw = ci_hook("attack", "l1_vd_open", "files/ci-attack.txt")
+        vd_obj = json.loads(vd_raw) if vd_raw.startswith("{") else {}
+        tvd = int(vd_obj.get("vd", -1))
+        rc_l1, out_l1 = -1, ""
+        still_on_vd = True
+        try:
+            if tvd > 0:
+                rc_l1, out_l1 = shell(
+                    "am", "start", "--display", str(tvd), "-n", STRONG_ACT, "--es", "confirm_id", cid1, check_rc=False
+                )
+                time.sleep(1.2)
+                still_on_vd = activity_on_display(tvd, "StrongConfirmActivity")
+        finally:
+            ci_hook("attack", "l1_vd_close", "files/ci-attack.txt")
+        audits_l1 = [a for a in read_audit_lines() if a.get("what") == "strong_confirm_wrong_display"]
+        check(
+            "[L1] StrongConfirmActivity on virtual display finishes immediately and writes strong_confirm_wrong_display",
+            tvd > 0 and (not still_on_vd) and len(audits_l1) >= 1 and read_approvals() == approvals_l1_snap,
+            f"tvd={tvd} rc={rc_l1} out={out_l1[:100]!r} still_on_vd={still_on_vd} audits={len(audits_l1)}",
+        )
+
     dev = parse_evdev_touch()
     hold_rec = None
     if dev is not None and hbtn is not None:
+        shell("input", "keyevent", "KEYCODE_WAKEUP", check_rc=False)
+        shell("wm", "dismiss-keyguard", check_rc=False)
         ci_hook("attack", f"open_confirm:{cid1}", "files/ci-attack.txt")
         hbtn = find_confirm_button_center(want_id=cid1, want_bio=False) or hbtn
         time.sleep(0.5)

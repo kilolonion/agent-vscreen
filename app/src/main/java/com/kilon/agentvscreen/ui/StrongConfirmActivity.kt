@@ -3,10 +3,13 @@ package com.kilon.agentvscreen.ui
 import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Canvas
 import android.graphics.Color as AColor
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.hardware.biometrics.BiometricManager
 import android.hardware.biometrics.BiometricPrompt
 import android.os.Bundle
@@ -16,13 +19,16 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.TypedValue
 import android.view.Display
+import android.view.Gravity
 import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,10 +36,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -51,10 +55,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.kilon.agentvscreen.host.Audit
 import com.kilon.agentvscreen.host.StrongConfirm
 import com.kilon.agentvscreen.tr
@@ -94,6 +100,15 @@ class StrongConfirmActivity : ComponentActivity() {
 
         /** Live screen bounds of the confirm button while [StrongConfirmActivity] is attached (debug hook only). */
         @Volatile internal var liveButtonState: LiveButton? = null
+        @Volatile private var liveActivityRef: java.lang.ref.WeakReference<StrongConfirmActivity>? = null
+
+        internal fun finishLiveForCi() {
+            liveActivityRef?.get()?.let { act ->
+                act.runOnUiThread {
+                    if (!act.isFinishing && !act.isDestroyed) act.finish()
+                }
+            }
+        }
 
         fun open(ctx: Context, confirmId: String) {
             val intent = Intent(ctx, StrongConfirmActivity::class.java)
@@ -107,10 +122,28 @@ class StrongConfirmActivity : ComponentActivity() {
     private var secureState = mutableStateOf(false)
     private var statusMessageState = mutableStateOf<String?>(null)
     private var bioCancel: CancellationSignal? = null
+    private var actionBar: LinearLayout? = null
+    private var denyBtn: TextView? = null
+    private var confirmBtn: StrongConfirmButtonView? = null
+
+    private fun currentDisplayId(): Int =
+        runCatching { display?.displayId }.getOrNull()
+            ?: @Suppress("DEPRECATION") runCatching { windowManager?.defaultDisplay?.displayId }.getOrNull()
+            ?: Display.DEFAULT_DISPLAY
+
+    private fun rejectIfWrongDisplay(srcIntent: Intent?): Boolean {
+        val dispId = currentDisplayId()
+        if (dispId != Display.DEFAULT_DISPLAY) {
+            Audit.security("strong_confirm_wrong_display", "displayId=$dispId id=${srcIntent?.getStringExtra(EXTRA_ID) ?: "-"}")
+            finish()
+            return true
+        }
+        return false
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // L1: MUST be first — if launched on any non-default display, audit and finish immediately (never MainDisplay.moved).
-        val dispId = runCatching { display?.displayId }.getOrNull() ?: Display.DEFAULT_DISPLAY
+        val dispId = currentDisplayId()
         if (dispId != Display.DEFAULT_DISPLAY) {
             super.onCreate(savedInstanceState)
             Audit.security("strong_confirm_wrong_display", "displayId=$dispId id=${intent?.getStringExtra(EXTRA_ID) ?: "-"}")
@@ -119,29 +152,124 @@ class StrongConfirmActivity : ComponentActivity() {
         }
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        liveActivityRef = java.lang.ref.WeakReference(this)
         // L5: prevent screenshots and screen recordings from reading the confirmation screen.
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
 
         requestIdState.value = resolveId(intent)
         secureState.value = isDeviceSecure()
-        setContent {
-            AvsTheme {
-                StrongConfirmScreen()
+
+        val root = FrameLayout(this)
+        val compose = ComposeView(this).apply {
+            setContent {
+                AvsTheme {
+                    StrongConfirmScreen()
+                }
             }
         }
+        root.addView(compose, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+
+        // Native bottom action bar (sibling of ComposeView, directly under DecorView) so Android 14+ accessibility
+        // always exposes StrongConfirmButtonView directly to performAccessibilityAction (6.9).
+        val density = resources.displayMetrics.density
+        val padH = (20f * density).toInt()
+        val padBBase = (24f * density).toInt()
+        val btnH = (54f * density).toInt()
+        val gap = (12f * density).toInt()
+        val dark = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(padH, (8f * density).toInt(), padH, padBBase)
+        }
+        val denyBg = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = btnH / 2f
+            setColor(if (dark) AColor.argb(210, 46, 46, 56) else AColor.argb(235, 240, 241, 248))
+            setStroke((1f * density).toInt(), if (dark) AColor.argb(45, 255, 255, 255) else AColor.argb(30, 0, 0, 0))
+        }
+        val deny = TextView(this).apply {
+            text = tr("拒绝", "Deny")
+            gravity = Gravity.CENTER
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(if (dark) AColor.WHITE else AColor.rgb(28, 28, 36))
+            background = denyBg
+            setOnClickListener {
+                val activeId = resolveActiveRequest()?.id
+                if (activeId != null) StrongConfirm.deny(applicationContext, activeId)
+                finish()
+            }
+        }
+        val confirm = StrongConfirmButtonView(
+            context = this,
+            requestId = requestIdState.value.orEmpty(),
+            biometricMode = secureState.value,
+            enabledAction = true,
+            onTriggerBiometric = { activeId ->
+                StrongConfirm.byId(activeId)?.let { launchBiometric(it) }
+            },
+            onHoldCompleted = { activeId ->
+                StrongConfirm.approve(applicationContext, activeId, StrongConfirm.BY_HOLD)
+                if (!isFinishing && !isDestroyed) finish()
+            },
+        )
+        bar.addView(deny, LinearLayout.LayoutParams(0, btnH, 1f).apply { marginEnd = gap })
+        bar.addView(confirm, LinearLayout.LayoutParams(0, btnH, 1.35f))
+        // Observe insets on root (returning them unconsumed) so ComposeView never starves the native bar.
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val nav = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
+            bar.setPadding(padH, (8f * density).toInt(), padH, padBBase + nav.bottom)
+            insets
+        }
+        root.addView(
+            bar,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM,
+            ),
+        )
+        actionBar = bar
+        denyBtn = deny
+        confirmBtn = confirm
+        setContentView(root)
+        syncNativeBar()
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (rejectIfWrongDisplay(intent)) return
         setIntent(intent)
         statusMessageState.value = null
         requestIdState.value = resolveId(intent)
         secureState.value = isDeviceSecure()
+        syncNativeBar()
     }
 
     override fun onResume() {
         super.onResume()
+        if (rejectIfWrongDisplay(intent)) return
         secureState.value = isDeviceSecure()
+        syncNativeBar()
+    }
+
+    private fun resolveActiveRequest(): StrongConfirm.Request? =
+        StrongConfirm.byId(requestIdState.value) ?: StrongConfirm.latestPending()
+
+    private fun syncNativeBar() {
+        val req = resolveActiveRequest()
+        val bar = actionBar ?: return
+        if (req == null || !req.live) {
+            bar.visibility = View.GONE
+            liveButtonState = null
+            return
+        }
+        val secure = secureState.value
+        bar.visibility = View.VISIBLE
+        denyBtn?.text = tr("拒绝", "Deny")
+        confirmBtn?.bind(req.id, secure, secure || req.allowHold)
     }
 
     override fun onStart() {
@@ -155,6 +283,7 @@ class StrongConfirmActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        if (liveActivityRef?.get() === this) liveActivityRef = null
         runCatching { bioCancel?.cancel() }
         super.onDestroy()
     }
@@ -319,52 +448,6 @@ class StrongConfirmActivity : ComponentActivity() {
                                 )
                             }
                         }
-                    }
-
-                    // Bottom action bar: Deny (plain click) + Confirm (L4 BiometricPrompt or 6.2 hold+L6).
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        SoftButton(
-                            onClick = {
-                                StrongConfirm.deny(applicationContext, req.id)
-                                finish()
-                            },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(54.dp),
-                        ) {
-                            Text(tr("拒绝", "Deny"), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        }
-
-                        val canConfirm = secure || req.allowHold
-                        AndroidView(
-                            modifier = Modifier
-                                .weight(1.35f)
-                                .height(54.dp),
-                            factory = { ctx ->
-                                StrongConfirmButtonView(
-                                    context = ctx,
-                                    requestId = req.id,
-                                    biometricMode = secure,
-                                    enabledAction = canConfirm,
-                                    onTriggerBiometric = { activeId ->
-                                        StrongConfirm.byId(activeId)?.let { launchBiometric(it) }
-                                    },
-                                    onHoldCompleted = { activeId ->
-                                        StrongConfirm.approve(applicationContext, activeId, StrongConfirm.BY_HOLD)
-                                        if (!isFinishing && !isDestroyed) finish()
-                                    },
-                                )
-                            },
-                            update = { v ->
-                                v.bind(req.id, secure, canConfirm)
-                            },
-                        )
                     }
                 }
             }
