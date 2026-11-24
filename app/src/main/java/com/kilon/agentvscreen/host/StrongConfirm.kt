@@ -45,6 +45,7 @@ object StrongConfirm {
     private const val PREFS_NAME = "agent_vscreen_strong_confirm"
     private const val PREF_MIGRATED_BETA6 = "migrated_beta6"
     private const val APPROVALS_REL = "vscreen/approvals.json"
+    private const val PUBLIC_PAIRING_NOTE_ID = 7025
 
     const val BY_BIOMETRIC = "biometric"
     const val BY_HOLD = "hold"
@@ -105,6 +106,8 @@ object StrongConfirm {
         val defaultScope: String = "look",
         val onApproveWithScope: ((String) -> Unit)? = null,
         val onDeny: (() -> Unit)? = null,
+        /** 2.0.0-beta8 (B2): all unapproved risk dimensions batched into this single confirmation. */
+        val risks: List<Risk> = listOf(risk),
     ) {
         @Volatile var answer: Boolean? = null
         @Volatile var answeredBy: String? = null
@@ -115,6 +118,7 @@ object StrongConfirm {
         val live: Boolean get() = liveAt(clock())
     }
 
+    @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
     private val lock = Object()
     private val rng = SecureRandom()
     private val requests = ArrayList<Request>()
@@ -210,16 +214,79 @@ object StrongConfirm {
 
     // ── Approval queries & mutations ────────────────────────────────────────
 
-    fun hasApproval(risk: Risk, tokenId: String, client: String, nowMs: Long = clock()): Boolean = synchronized(lock) {
-        hasApprovalLocked(risk, tokenId, client, nowMs)
+    fun hasApproval(
+        risk: Risk,
+        tokenId: String,
+        client: String,
+        nowMs: Long = clock(),
+        level: Risk.SecurityLevel = Risk.securityLevel,
+    ): Boolean = synchronized(lock) {
+        hasApprovalLocked(risk, tokenId, client, nowMs, level)
     }
 
-    private fun hasApprovalLocked(risk: Risk, tokenId: String, client: String, nowMs: Long): Boolean {
+    private fun hasApprovalLocked(
+        risk: Risk,
+        tokenId: String,
+        client: String,
+        nowMs: Long,
+        level: Risk.SecurityLevel = Risk.securityLevel,
+    ): Boolean {
         return approvalList.any { a ->
-            a.risk == risk.name &&
-                a.token == tokenId &&
-                (risk != Risk.NEW_CLIENT || a.client == client) &&
-                a.activeAt(nowMs)
+            if (a.risk != risk.name || a.token != tokenId) return@any false
+            if (risk == Risk.NEW_CLIENT && a.client != client && a.client != Risk.CLIENT_ANY) return@any false
+            when {
+                risk == Risk.SCOPE_SYSTEM && level == Risk.SecurityLevel.STANDARD -> true
+                risk == Risk.SCOPE_SYSTEM && level == Risk.SecurityLevel.STRICT ->
+                    a.activeAt(nowMs) && (nowMs - a.at <= Risk.SCOPE_SYSTEM_MS)
+                else -> a.activeAt(nowMs)
+            }
+        }
+    }
+
+    /**
+     * 2.0.0-beta8 (B2): record pre-authorized approvals for a newly created or upgraded agent
+     * after a single on-phone biometric/PIN confirmation (NEW_CLIENT + chosen scope dimensions).
+     */
+    internal fun grantForScope(
+        tokenId: String,
+        scope: String,
+        client: String = Risk.CLIENT_ANY,
+        by: String = BY_BIOMETRIC,
+        nowMs: Long = clock(),
+    ) {
+        synchronized(lock) {
+            putApprovalLocked(Approval(Risk.NEW_CLIENT.name, tokenId, client, nowMs, 0L, by))
+            if (scope == "operate" || scope == "system") {
+                putApprovalLocked(Approval(Risk.SCOPE_OPERATE.name, tokenId, client, nowMs, 0L, by))
+            }
+            if (scope == "system") {
+                val sysTtl = Risk.SCOPE_SYSTEM.ttlMsFor(Risk.securityLevel)
+                val until = if (sysTtl == 0L) 0L else nowMs + sysTtl
+                putApprovalLocked(Approval(Risk.SCOPE_SYSTEM.name, tokenId, client, nowMs, until, by))
+            }
+            saveLocked()
+            publishApprovalsLocked()
+        }
+    }
+
+    /** 2.0.0-beta8 (B2): immediately revoke scope approvals above [newScope] when downgrading an agent. */
+    internal fun revokeScopesAbove(tokenId: String, newScope: String) {
+        val drop = when (newScope) {
+            "look" -> setOf(Risk.SCOPE_OPERATE.name, Risk.SCOPE_SYSTEM.name)
+            "operate" -> setOf(Risk.SCOPE_SYSTEM.name)
+            else -> emptySet()
+        }
+        if (drop.isEmpty()) return
+        val removed = synchronized(lock) {
+            val ok = approvalList.removeAll { it.token == tokenId && it.risk in drop }
+            if (ok) {
+                saveLocked()
+                publishApprovalsLocked()
+            }
+            ok
+        }
+        if (removed) {
+            Audit.security("approval_revoked", "token=$tokenId downgrade=$newScope")
         }
     }
 
@@ -453,29 +520,79 @@ object StrongConfirm {
         }
     }
 
+    /** 2.0.0-beta8 (B2): UI-initiated multi-dimension confirmation (e.g. NewAgentPage or AgentPage scope upgrade). */
+    fun createUiMultiRiskRequest(
+        ctx: Context,
+        risks: List<Risk>,
+        token: Tokens.Token,
+        commandName: String,
+        detail: String = "",
+        allowHold: Boolean = true,
+        onApprove: () -> Unit,
+        onDeny: (() -> Unit)? = null,
+    ): Request {
+        val list = risks.distinct().ifEmpty { listOf(Risk.NEW_CLIENT) }
+        val primary = list.first()
+        val key = "${list.joinToString("+") { it.name }}:${token.id}"
+        val now = clock()
+        return synchronized(lock) {
+            pruneRequestsLocked(now)
+            requests.removeAll { it.key == key && it.answer == null }
+            Request(
+                id = newId(),
+                risk = primary,
+                key = key,
+                tokenId = token.id,
+                tokenName = token.name,
+                tokenScope = token.scope,
+                client = Risk.CLIENT_ANY,
+                commandName = commandName,
+                detail = detail,
+                at = now,
+                validMs = VALID_MS,
+                reusable = false,
+                allowHold = allowHold,
+                onApprove = onApprove,
+                onDeny = onDeny,
+                risks = list,
+            ).also {
+                requests += it
+                publishPendingLocked(now)
+            }
+        }
+    }
+
     /** Remove a public pairing request (e.g. when settled or cancelled externally). */
     internal fun clearPublicPairing(ctx: Context?, pairingId: String) {
         val key = "PUBLIC_PAIRING:$pairingId"
-        val removed = synchronized(lock) {
-            val ids = requests.filter { it.key == key }.map { it.id }
+        synchronized(lock) {
             requests.removeAll { it.key == key }
             publishPendingLocked(clock())
-            ids
         }
-        if (ctx != null) removed.forEach { cancelNotification(ctx, it) }
+        if (ctx != null) refreshPublicPairingNotification(ctx)
+    }
+
+    /** Block a command for a single [risk]; delegates to [requireForRisks]. */
+    internal fun requireForRisk(ctx: Context, call: Call, risk: Risk, commandName: String) {
+        requireForRisks(ctx, call, listOf(risk), commandName)
     }
 
     /**
-     * Block a command for [risk] (6.3 / 6.4): reuses any pending request for the same key (no duplicate notification),
-     * waits up to [WAIT_MS], throws `USER_DENIED` or `NEEDS_CONFIRM` (with structured `confirm` object).
+     * 2.0.0-beta8 (B2): block a command for ALL unapproved [risks] in one confirmation.
+     * Reuses any pending request for the same key (no duplicate notification), waits up to [WAIT_MS],
+     * and throws `USER_DENIED` or `NEEDS_CONFIRM` (with structured `confirm` listing `risk` + `risks`).
      */
-    internal fun requireForRisk(ctx: Context, call: Call, risk: Risk, commandName: String) {
+    internal fun requireForRisks(ctx: Context, call: Call, risks: List<Risk>, commandName: String) {
+        val list = risks.distinct().ifEmpty { return }
+        val primary = list.first()
         val client = Risk.clientOf(call)
-        val key = if (risk == Risk.NEW_CLIENT) "${risk.name}:${call.tokenId}:$client" else "${risk.name}:${call.tokenId}"
+        val riskTag = list.joinToString("+") { it.name }
+        val key = if (Risk.NEW_CLIENT in list) "$riskTag:${call.tokenId}:$client" else "$riskTag:${call.tokenId}"
         val tokenScope = Tokens.byId(call.tokenId)?.scope ?: scopeSummary(call.scopes)
         val now = clock()
         val (req, created) = getOrCreateRequest(
-            risk = risk,
+            risk = primary,
+            risks = list,
             key = key,
             tokenId = call.tokenId,
             tokenName = call.tokenName,
@@ -490,6 +607,8 @@ object StrongConfirm {
         )
         if (created) notify(ctx, req)
         awaitRequest(req, call, waitMsOverride ?: WAIT_MS)
+        val zhNames = list.joinToString("、") { it.zh }
+        val enNames = list.joinToString(", ") { it.en }
         when (req.answer) {
             true -> {
                 synchronized(lock) { req.used = true; publishPendingLocked(clock()) }
@@ -500,26 +619,28 @@ object StrongConfirm {
                 throw ActionError(
                     "USER_DENIED",
                     tr(
-                        "用户在手机上拒绝了确认（${risk.zh}）。这一步没有做。不要换一种方式再试，告诉用户你停在了这里",
-                        "The user denied confirmation on the phone (${risk.en}). This step was not done. Don't try another way; tell the user where you stopped",
+                        "用户在手机上拒绝了确认（$zhNames）。这一步没有做。不要换一种方式再试，告诉用户你停在了这里",
+                        "The user denied confirmation on the phone ($enNames). This step was not done. Don't try another way; tell the user where you stopped",
                     ),
                 )
             }
             null -> {
-                Audit.security("strong_confirm_timeout", "id=${req.id} risk=${risk.name} token=${req.tokenName} client=${req.client}")
+                Audit.security("strong_confirm_timeout", "id=${req.id} risk=$riskTag token=${req.tokenName} client=${req.client}")
                 val leftSec = ((req.at + req.validMs - clock()) / 1000L).coerceAtLeast(1L)
+                val risksArr = JSONArray().apply { list.forEach { put(it.name) } }
                 val data = JSONObject().put(
                     "confirm",
                     JSONObject()
-                        .put("risk", risk.name)
+                        .put("risk", primary.name)
+                        .put("risks", risksArr)
                         .put("id", req.id)
                         .put("expires_in_s", leftSec),
                 )
                 throw ActionError(
                     "NEEDS_CONFIRM",
                     tr(
-                        "需要用户在手机上的 Agent-VScreen 里确认（${risk.zh}）。已发通知。确认后把这条命令原样重发。这一步没有做。",
-                        "The user must confirm this in Agent-VScreen on the phone (${risk.en}). A notification was sent. Once confirmed, resend the exact same command. This step was not done.",
+                        "需要用户在手机上的 Agent-VScreen 里确认（$zhNames）。已发通知。确认后把这条命令原样重发。这一步没有做。",
+                        "The user must confirm this in Agent-VScreen on the phone ($enNames). A notification was sent. Once confirmed, resend the exact same command. This step was not done.",
                     ),
                     data = data,
                 )
@@ -624,6 +745,7 @@ object StrongConfirm {
         reusable: Boolean,
         allowHold: Boolean,
         nowMs: Long,
+        risks: List<Risk> = listOf(risk),
     ): Pair<Request, Boolean> = synchronized(lock) {
         pruneRequestsLocked(nowMs)
         val existing = requests.lastOrNull { it.key == key && it.liveAt(nowMs) }
@@ -642,6 +764,7 @@ object StrongConfirm {
             validMs = validMs,
             reusable = reusable,
             allowHold = allowHold,
+            risks = risks.distinct().ifEmpty { listOf(risk) },
         )
         requests += req
         publishPendingLocked(nowMs)
@@ -680,11 +803,19 @@ object StrongConfirm {
             if (!r.tokenId.startsWith("pending:")) {
                 bumpLastConfirmLocked(r.tokenId, now)
             }
-            if (r.risk != Risk.HIGH_RISK && r.risk != Risk.TRUST_SET && r.risk != Risk.PUBLIC_ENABLE && r.onApproveWithScope == null) {
-                val until = if (r.risk.ttlMs == 0L) 0L else now + r.risk.ttlMs
-                putApprovalLocked(Approval(r.risk.name, r.tokenId, r.client, now, until, by))
-                saveLocked()
-                publishApprovalsLocked()
+            if (r.onApproveWithScope == null) {
+                var saved = false
+                for (rk in r.risks) {
+                    if (rk == Risk.HIGH_RISK || rk == Risk.TRUST_SET || rk == Risk.PUBLIC_ENABLE) continue
+                    val ttl = rk.ttlMsFor(Risk.securityLevel)
+                    val until = if (ttl == 0L) 0L else now + ttl
+                    putApprovalLocked(Approval(rk.name, r.tokenId, r.client, now, until, by))
+                    saved = true
+                }
+                if (saved) {
+                    saveLocked()
+                    publishApprovalsLocked()
+                }
             }
             publishPendingLocked(now)
             lock.notifyAll()
@@ -695,9 +826,10 @@ object StrongConfirm {
             return false
         }
         if (req == null) return false
+        val riskLabel = req.risks.joinToString("+") { it.name }
         Audit.security(
             "strong_confirm_approved",
-            "id=${req.id} risk=${req.risk.name} token=${req.tokenName} client=${req.client} by=$by",
+            "id=${req.id} risk=$riskLabel token=${req.tokenName} client=${req.client} by=$by",
         )
         if (req.risk == Risk.HIGH_RISK) {
             Audit.consent(req.tokenName, "-", "${req.commandName} — ${req.detail}", "allowed ($by)")
@@ -710,7 +842,7 @@ object StrongConfirm {
         } else {
             runCatching { req.onApprove?.invoke() }.onFailure { AppLogger.warning("StrongConfirm", "onApprove failed: ${it.message}") }
         }
-        cancelNotification(ctx, req.id)
+        if (req.pairingCode != null) refreshPublicPairingNotification(ctx) else cancelNotification(ctx, req.id)
         return true
     }
 
@@ -726,15 +858,16 @@ object StrongConfirm {
             lock.notifyAll()
             r
         }
+        val riskLabel = req.risks.joinToString("+") { it.name }
         Audit.security(
             "strong_confirm_denied",
-            "id=${req.id} risk=${req.risk.name} token=${req.tokenName} client=${req.client}",
+            "id=${req.id} risk=$riskLabel token=${req.tokenName} client=${req.client}",
         )
         if (req.risk == Risk.HIGH_RISK) {
             Audit.consent(req.tokenName, "-", "${req.commandName} — ${req.detail}", "denied")
         }
         runCatching { req.onDeny?.invoke() }.onFailure { AppLogger.warning("StrongConfirm", "onDeny failed: ${it.message}") }
-        cancelNotification(ctx, req.id)
+        if (req.pairingCode != null) refreshPublicPairingNotification(ctx) else cancelNotification(ctx, req.id)
         return true
     }
 
@@ -765,10 +898,88 @@ object StrongConfirm {
     private fun noteId(id: String): Int = 7900 + ((id.hashCode() and 0x7fffffff) % 400)
 
     /**
+     * 2.0.0-beta8 (Section I): pure coalesced pairing notification content.
+     * Returns `(title, body, targetReqId)` for live public pairing requests, or `null` when none are pending.
+     */
+    internal fun publicPairingNotificationSpec(nowMs: Long = clock()): Triple<String, String, String>? {
+        val live = synchronized(lock) {
+            pruneRequestsLocked(nowMs)
+            requests.filter { it.pairingCode != null && it.liveAt(nowMs) }.sortedBy { it.at }
+        }
+        if (live.isEmpty()) return null
+        val first = live.first()
+        if (live.size == 1) {
+            val title = tr("需要确认：${first.risk.title}", "Confirm: ${first.risk.title}")
+            val body = tr(
+                "配对码 ${first.pairingCode} · ${first.publicClientName ?: first.tokenName}（${first.redirectHost ?: "-"}）。点此核对并确认。",
+                "Pairing code ${first.pairingCode} · ${first.publicClientName ?: first.tokenName} (${first.redirectHost ?: "-"}). Tap to verify and confirm.",
+            )
+            return Triple(title, body, first.id)
+        }
+        val names = live.joinToString("、") { it.publicClientName ?: it.tokenName }
+        val title = tr("有 ${live.size} 个配对请求", "${live.size} pairing requests pending")
+        val body = tr(
+            "$names 正在等待配对确认。点此逐个核对。",
+            "$names waiting for pairing confirmation. Tap to review.",
+        )
+        return Triple(title, body, first.id)
+    }
+
+    private fun refreshPublicPairingNotification(ctx: Context) {
+        if (!postNotification) return
+        quiet("strong-confirm-pairing-notify") {
+            val nm = ctx.getSystemService(NotificationManager::class.java) ?: return@quiet
+            val spec = publicPairingNotificationSpec()
+            if (spec == null) {
+                nm.cancel(PUBLIC_PAIRING_NOTE_ID)
+                return@quiet
+            }
+            if (nm.getNotificationChannel(CHANNEL) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL,
+                        tr("需要强确认的安全操作", "Security confirmations"),
+                        NotificationManager.IMPORTANCE_HIGH,
+                    ),
+                )
+            }
+            val (title, body, targetId) = spec
+            val openIntent = Intent(ctx, com.kilon.agentvscreen.ui.StrongConfirmActivity::class.java)
+                .putExtra(com.kilon.agentvscreen.ui.StrongConfirmActivity.EXTRA_ID, targetId)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            val pi = PendingIntent.getActivity(
+                ctx,
+                PUBLIC_PAIRING_NOTE_ID,
+                openIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+                com.kilon.agentvscreen.ui.MainDisplay.options(),
+            )
+            val n = NotificationCompat.Builder(ctx, CHANNEL)
+                .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setAutoCancel(false)
+                .setOnlyAlertOnce(true)
+                .setTimeoutAfter(VALID_MS)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setContentIntent(pi)
+                .build()
+            nm.notify(PUBLIC_PAIRING_NOTE_ID, n)
+        }
+    }
+
+    /**
      * 6.1: notification has NO "Allow" action button — tapping it only opens [StrongConfirmActivity] on display 0.
+     * Public pairing requests are coalesced into one notification ([PUBLIC_PAIRING_NOTE_ID], beta8 Section I).
      */
     private fun notify(ctx: Context, req: Request) {
         if (!postNotification) return
+        if (req.pairingCode != null) {
+            refreshPublicPairingNotification(ctx)
+            return
+        }
         quiet("strong-confirm-notify") {
             val nm = ctx.getSystemService(NotificationManager::class.java) ?: return@quiet
             if (nm.getNotificationChannel(CHANNEL) == null) {
@@ -791,24 +1002,18 @@ object StrongConfirm {
                 com.kilon.agentvscreen.ui.MainDisplay.options(),
             )
             val clientText = clientLabel(req.client)
-            val body = if (req.pairingCode != null) {
-                tr(
-                    "配对码 ${req.pairingCode} · ${req.publicClientName ?: req.tokenName}（${req.redirectHost ?: "-"}）。点此核对并确认。",
-                    "Pairing code ${req.pairingCode} · ${req.publicClientName ?: req.tokenName} (${req.redirectHost ?: "-"}). Tap to verify and confirm.",
-                )
-            } else {
-                tr(
-                    "令牌「${req.tokenName}」· $clientText · ${req.commandName}。点此打开强确认页。",
-                    "Token \"${req.tokenName}\" · $clientText · ${req.commandName}. Tap to open strong confirmation.",
-                )
-            }
+            val riskTitles = req.risks.joinToString(tr(" + ", " + ")) { it.title }
+            val body = tr(
+                "令牌「${req.tokenName}」· $clientText · ${req.commandName}。点此打开强确认页。",
+                "Token \"${req.tokenName}\" · $clientText · ${req.commandName}. Tap to open strong confirmation.",
+            )
             val n = NotificationCompat.Builder(ctx, CHANNEL)
                 .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setAutoCancel(false)
                 .setTimeoutAfter(req.validMs)
-                .setContentTitle(tr("需要确认：${req.risk.title}", "Confirm: ${req.risk.title}"))
+                .setContentTitle(tr("需要确认：$riskTitles", "Confirm: $riskTitles"))
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                 .setContentIntent(pi)

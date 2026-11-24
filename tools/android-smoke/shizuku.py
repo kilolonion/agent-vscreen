@@ -119,32 +119,16 @@ shell(binary)
 shell("input", "keyevent", "KEYCODE_HOME")
 shell("logcat", "-c")
 if MODE == "upgrade":
-    # Cover the reported 1.3 -> 1.4 recovery using their original signed releases.
-    install("1.3.0.apk")
-    launch()
-    install("1.4.0.apk")
-    grant()
-    # Candidate uses a CI signer. To model a genuine in-place update from 1.4 to
-    # the candidate, repeat the historical path with a disposable shared signer.
-    run("adb", "uninstall", APP)
-    signer = sorted((Path(os.environ["ANDROID_HOME"]) / "build-tools").glob("*/apksigner"))[-1]
-    key = Path(os.environ["RUNNER_TEMP"]) / "smoke-signing.jks"
-    run("keytool", "-genkeypair", "-keystore", str(key), "-storepass", "temporary", "-keypass", "temporary",
-        "-alias", "smoke", "-dname", "CN=Disposable", "-keyalg", "RSA", "-validity", "3")
-    for name in ["1.3.0", "1.4.0", "app-release"]:
-        run(str(signer), "sign", "--ks", str(key), "--ks-pass", "pass:temporary", "--key-pass", "pass:temporary",
-            "--out", str(APKS / (name + "-ci.apk")), str(APKS / (name + ".apk")))
-    install("1.3.0-ci.apk")
-    launch()
-    install("1.4.0-ci.apk")
-    shell("logcat", "-c")
+    # 2.0.0-beta8 (J.2): verify in-place upgrade on x86_64 emulator using two debug APKs with the same debug
+    # keystore and increasing versionCode (both carrying native x86_64 libs, avoiding arm64 translator crashes).
+    install("app-debug-prev.apk")
     grant()
     shell("logcat", "-c")
-    install("app-release-ci.apk")
+    install("app-debug.apk")
     launch()
     check_state("READY")
 else:
-    install("baseline.apk" if MODE == "published-beta" else "app-release.apk")
+    install("baseline.apk" if MODE == "published-beta" else "app-debug.apk")
     grant()
 shell("am", "force-stop", APP)
 shell("logcat", "-c")

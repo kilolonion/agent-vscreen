@@ -81,9 +81,7 @@ fun GlassDialog(
             CompositionLocalProvider(LocalContentColor provides c.onSurface) {
                 title?.let { t -> CompositionLocalProvider(LocalContentColor provides c.onSurface) { t() } }
                 text?.let { t -> Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) { t() } }
-                Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp, androidx.compose.ui.Alignment.End)) {
-                    dismissButton?.invoke(); confirmButton()
-                }
+                DialogActionBar(dismissButton = dismissButton, confirmButton = confirmButton)
             }
         }
     }
@@ -94,6 +92,49 @@ fun GlassDialog(
         show = true, modifier = modifier, backgroundColor = tint.copy(alpha = 0.94f),
         onDismissRequest = onDismissRequest, insideMargin = DpSize(0.dp, 0.dp), cornerRadius = 28.dp, content = body,
     )
+}
+
+/** Places dialog buttons side-by-side when they fit on one line, or stacks them vertically without wrapping long labels (beta8 K.1). */
+@Composable
+private fun DialogActionBar(
+    dismissButton: (@Composable () -> Unit)?,
+    confirmButton: @Composable () -> Unit,
+) {
+    androidx.compose.ui.layout.Layout(
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        content = {
+            dismissButton?.invoke()
+            confirmButton()
+        },
+    ) { measurables, constraints ->
+        val gap = 8.dp.roundToPx()
+        val maxW = constraints.maxWidth
+        val loose = constraints.copy(minWidth = 0, minHeight = 0)
+        val placeables = measurables.map { it.measure(loose) }
+        val totalW = placeables.sumOf { it.width } + gap * (placeables.size - 1).coerceAtLeast(0)
+        if (placeables.size <= 1 || totalW <= maxW) {
+            val h = placeables.maxOfOrNull { it.height } ?: 0
+            layout(maxW, h) {
+                var x = maxW
+                for (p in placeables.asReversed()) {
+                    x -= p.width
+                    p.placeRelative(x, (h - p.height) / 2)
+                    x -= gap
+                }
+            }
+        } else {
+            // Stack vertically (confirm on top, dismiss below) so long button text never wraps into 2 lines.
+            val ordered = placeables.asReversed()
+            val h = ordered.sumOf { it.height } + gap * (ordered.size - 1).coerceAtLeast(0)
+            layout(maxW, h) {
+                var y = 0
+                for (p in ordered) {
+                    p.placeRelative((maxW - p.width).coerceAtLeast(0), y)
+                    y += p.height + gap
+                }
+            }
+        }
+    }
 }
 
 /** A dialog title in the app's style. */

@@ -151,16 +151,19 @@ fun TaskRow(t: TaskLog.Task, onClick: () -> Unit) {
         AppBadge(icon)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(taskTitle(t, app), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false, modifier = Modifier.scrollIfLong())
+            // 2.0.0-beta8 (K.2): fixed single-line ellipsis instead of marquee so rows stay left-aligned and never clip a character in half.
+            Text(taskTitle(t, app), fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row {
                 Text(word, fontSize = 12.5.sp, color = if (good) Palette.takeover else Palette.stopped)
                 Text(" · " + steps(t.commands) + " · " + took(t) + " · " + hhmm(t.start) + " · " + com.kilon.agentvscreen.api.Agents.nameOfSession(t.session), fontSize = 12.5.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        Spacer(Modifier.width(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            t.frames.takeLast(3).forEach { TaskFrame(it, Modifier.width(16.dp).height(32.dp), 4.dp) }
+        if (t.frames.isNotEmpty()) {
+            Spacer(Modifier.width(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                t.frames.takeLast(3).forEach { TaskFrame(it, Modifier.width(16.dp).height(32.dp), 4.dp) }
+            }
         }
     }
 }

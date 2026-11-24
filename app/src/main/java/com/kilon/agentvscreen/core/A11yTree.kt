@@ -33,6 +33,11 @@ object A11yTree {
         val password get() = info.isPassword
         val viewId: String? get() = info.viewIdResourceName
         val className: String? get() = info.className?.toString()
+        val heading: Boolean get() = info.isHeading
+        val hasText: Boolean = !info.text.isNullOrBlank()
+        val hasContentDesc: Boolean = !info.contentDescription.isNullOrBlank()
+        /** 2.0.0-beta8 (L.3): clickable icon button (ImageButton, or clickable node with contentDescription but no text). */
+        val isIconButton: Boolean get() = clickable && ((className?.endsWith("ImageButton") == true) || (!hasText && hasContentDesc))
         fun all(): Sequence<Node> = sequence { yield(this@Node); children.forEach { yieldAll(it.all()) } }
     }
 

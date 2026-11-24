@@ -13,6 +13,14 @@ import android.view.accessibility.AccessibilityWindowInfo
  * any other accessibility service (an agent's own one included). Optional: without it the tool still works on OCR.
  */
 class VScreenAccessibilityService : AccessibilityService() {
+    /** 2.0.0-beta8 (C5): system Toast event captured via TYPE_NOTIFICATION_STATE_CHANGED. */
+    data class ToastEvent(
+        val epochMs: Long,
+        val monoMs: Long,
+        val packageName: String,
+        val text: String,
+    )
+
     companion object {
         @Volatile private var instance: VScreenAccessibilityService? = null
         fun getInstance(): VScreenAccessibilityService? = instance
@@ -29,6 +37,35 @@ class VScreenAccessibilityService : AccessibilityService() {
         fun contentChangedAt(displayId: Int): Long = maxOf(contentAt[displayId] ?: 0L, pageChangedAt(displayId), if (displayOf == null) contentAt[-1] ?: 0L else 0L)
         /** Whether events carry their display here (else changes on any display count). */
         val knowsDisplay: Boolean get() = displayOf != null
+
+        private const val MAX_TOAST_EVENTS = 30
+        private const val TOAST_DEDUP_MS = 500L
+        private val toastLock = Any()
+        private val toastRing = ArrayDeque<ToastEvent>(MAX_TOAST_EVENTS)
+
+        internal fun recordToast(pkg: String, text: String, epochMs: Long = System.currentTimeMillis(), monoMs: Long = android.os.SystemClock.elapsedRealtime()) {
+            val cleanPkg = pkg.trim()
+            val cleanText = text.trim()
+            if (cleanPkg.isEmpty() || cleanText.isEmpty()) return
+            synchronized(toastLock) {
+                val dup = toastRing.lastOrNull()?.let { last ->
+                    last.packageName == cleanPkg && last.text == cleanText && kotlin.math.abs(epochMs - last.epochMs) <= TOAST_DEDUP_MS
+                } == true
+                if (dup) return
+                if (toastRing.size >= MAX_TOAST_EVENTS) toastRing.removeFirst()
+                toastRing.addLast(ToastEvent(epochMs, monoMs, cleanPkg, cleanText))
+            }
+        }
+
+        /** Return recorded system Toasts matching [pkg] whose timestamp lies in [[fromEpochMs], [toEpochMs]]. */
+        fun recentToasts(pkg: String, fromEpochMs: Long, toEpochMs: Long): List<ToastEvent> {
+            if (pkg.isBlank()) return emptyList()
+            return synchronized(toastLock) {
+                toastRing.filter { it.packageName == pkg && it.epochMs in fromEpochMs..toEpochMs }
+            }
+        }
+
+        internal fun clearToastsForTests() = synchronized(toastLock) { toastRing.clear() }
 
         /**
          * 2.0.0-beta6 (6.9 / 6.10 #3): pure gate checking whether an accessibility action may target a node.
@@ -69,6 +106,17 @@ class VScreenAccessibilityService : AccessibilityService() {
         when (e.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> stateAt[id] = now
             AccessibilityEvent.TYPE_WINDOWS_CHANGED, AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> contentAt[id] = now
+            AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED -> {
+                val cls = e.className?.toString().orEmpty()
+                if (cls == "android.widget.Toast") {
+                    val pkg = e.packageName?.toString().orEmpty()
+                    val joined = e.text.mapNotNull { it?.toString()?.trim()?.takeIf { s -> s.isNotEmpty() } }.joinToString(" ")
+                    if (pkg.isNotEmpty() && joined.isNotEmpty()) {
+                        recordToast(pkg, joined, System.currentTimeMillis(), now)
+                        AppLogger.info("A11yToast", "pkg=$pkg text=${joined.take(120)}")
+                    }
+                }
+            }
         }
     }
     override fun onInterrupt() {}

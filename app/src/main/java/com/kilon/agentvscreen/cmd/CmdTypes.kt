@@ -84,7 +84,7 @@ class Notes {
     val isEmpty: Boolean get() = list.isEmpty()
     /** The code that decides the reply's outcome: the first coded note that is not mere information. */
     fun firstBlocking(): String? = list.firstOrNull { it.code != null && Codes.of(it.code)?.next != Codes.Next.NONE && it.code !in INFO }?.code
-    companion object { val INFO = setOf("NO_CHANGE", "MAIN_SCREEN_CHANGED", "KEEP_LIMIT", "OCR_DOWN", "HOLD_UNSUPPORTED", "RULE_OFF") }
+    companion object { val INFO = setOf("NO_CHANGE", "SNAP_BACK", "MAIN_SCREEN_CHANGED", "KEEP_LIMIT", "OCR_DOWN", "HOLD_UNSUPPORTED", "HOLD_REFUSED", "RULE_OFF") }
 }
 
 /**
@@ -107,6 +107,8 @@ class StepOut(val n: String, val step: String, var status: String, var text: Str
     internal var metCondKind: CondKind? = null
     /** 2.0.0-beta3 (3.13): true for agent-owned action steps and enclosing `repeat … until` completion entries. */
     var isActionOrRepeatUntil: Boolean = false
+    /** 2.0.0-beta8 (C4): true when a `seek` step satisfied its `until` at start without touching the screen. */
+    var alreadyAtStart: Boolean = false
     /** 2.0.0-beta4 (4.4): drag pickup/follow/after-release record. */
     internal var gesture: GestureRecord? = null
     /** 2.0.0-beta4 (4.7): condition poll duration p50 / max (ms) for closed-loop gestures. */

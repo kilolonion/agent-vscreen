@@ -516,13 +516,14 @@ class V200Beta3Test {
     @Test
     fun wordEventsSuppressesSingleFlashAndEmitsBottomToast() {
         val screenH = 2400
-        val bottomBox = Rect(360, 1940, 720, 2040) // centerY=1990 >= 0.65*2400=1560 (bottom 35%)
+        val bottomBox = Rect(360, 1940, 720, 2040)
         val topBox = Rect(360, 200, 720, 280)
         val toMs = 5_000L
 
         val readings = listOf(
             VScreenPerception.Reading(1_000L, listOf("保存"), mapOf("保存" to Rect(400, 1000, 680, 1100)), hits = 2, lastAtMs = 1_500L),
-            // Single-flash words at t=3600ms: "闪现" in top (suppressed), "已保存" in bottom <=4s (toast!)
+            // 2.0.0-beta8 (C5 / Ruling 4): single-flash words are suppressed everywhere; OCR toast guessing was removed
+            // in favour of real TYPE_NOTIFICATION_STATE_CHANGED Toast events (tested in V200Beta8Test).
             VScreenPerception.Reading(
                 3_600L,
                 listOf("保存", "闪现", "已保存"),
@@ -535,7 +536,7 @@ class V200Beta3Test {
         val ev = wordFactsFromReadings(readings, screenH, toMs)
         val joined = ev.allLines.joinToString("\n")
         assertFalse("single-flash top word must be suppressed: $joined", joined.contains("闪现"))
-        assertTrue("bottom <=4s flash must be emitted as toast: $joined", ev.staticLines.any { it == "toast：已保存（-1.4s）" })
+        assertFalse("OCR must not guess bottom single-flash as toast: $joined", ev.staticLines.any { it.startsWith("toast：") })
 
         // Single-flash word at the very end (only 1 reading, not 2 consecutive) must not be reported as appeared
         val singleEnd = listOf(
@@ -551,13 +552,13 @@ class V200Beta3Test {
         )
         assertTrue(wordFactsFromReadings(stableEnd, screenH, 2_500L).staticLines.any { it.contains("出现了") && it.contains("稳定新字") })
 
-        // Slow-OCR gap (next reading 5s later) still reports <=4s toast, while word observed >4s is not toast
+        // Bottom words never produce OCR-guessed toast lines; multi-hit vanished words go to betweenLines.
         val slowGap = listOf(
             VScreenPerception.Reading(1_000L, listOf("保存"), hits = 2, lastAtMs = 1_200L),
             VScreenPerception.Reading(2_000L, listOf("保存", "已保存"), mapOf("已保存" to bottomBox), hits = 1, lastAtMs = 2_000L),
             VScreenPerception.Reading(7_000L, listOf("保存"), hits = 2, lastAtMs = 7_500L),
         )
-        assertTrue(wordFactsFromReadings(slowGap, screenH, 7_500L).staticLines.any { it.startsWith("toast：已保存") })
+        assertFalse(wordFactsFromReadings(slowGap, screenH, 7_500L).staticLines.any { it.startsWith("toast：") })
 
         val longBottom = listOf(
             VScreenPerception.Reading(1_000L, listOf("保存"), hits = 2, lastAtMs = 1_200L),

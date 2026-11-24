@@ -100,6 +100,11 @@ internal class Probe(
     private var exclude: Rect? = null
     private val top0: String? = if (afterAction) runCatching { VScreenShell.topActivity(d.displayId) }.getOrNull() else null
     private var topAt = 0L
+    /** 2.0.0-beta8 (C3): whether at least one post-action OCR/crop reading or readable A11y text snapshot ran. */
+    private var hadPostActionOcr = false
+    private var hadPostActionA11y = false
+    /** 2.0.0-beta8 (C3): text condition keys seen on screen after the action but rejected solely because pre-existing. */
+    private val sawPreExisting = HashSet<String>()
     /** Where each text condition's words were before the action. */
     private val prior: Map<String, List<Rect>> = if (!afterAction || !wantsText) emptyMap() else conds.filter { it.kind == CondKind.TEXT }.associate { c ->
         val pat = TextPat(c.text!!)
@@ -202,34 +207,48 @@ internal class Probe(
         fun ok(r: Rect): Boolean = inArea(r) && counts(r, before, exclude, pageAt > 0)
         val a11ySnap = runCatching { com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId) }.getOrNull()
         if (a11ySnap != null && a11ySnap.readable) {
+            if (a11ySnap.texts(1)?.isNotEmpty() == true) hadPostActionA11y = true
+            val a11yMatches = if ((!afterAction || actionAt == 0L) && area == null) null
+                else a11ySnap.find(pat::hit, recheck = recheck)
             val a11yHit = when {
                 (!afterAction || actionAt == 0L) && area == null ->
                     a11ySnap.shows(pat::hit, recheck)?.takeIf { it.isNotEmpty() }
                 !afterAction || actionAt == 0L ->
-                    a11ySnap.find(pat::hit, recheck = recheck)?.firstOrNull { inArea(d.toFrame(it.second)) }?.first
+                    a11yMatches?.firstOrNull { inArea(d.toFrame(it.second)) }?.first
                 else ->
-                    a11ySnap.find(pat::hit, recheck = recheck)?.firstOrNull { ok(d.toFrame(it.second)) }?.first
+                    a11yMatches?.firstOrNull { ok(d.toFrame(it.second)) }?.first
             }
             if (a11yHit != null) {
                 lastObsId = ++a11yObsSeq
                 return a11yHit
             }
+            if (afterAction && actionAt > 0L && before.isNotEmpty() && a11yMatches != null &&
+                a11yMatches.any { inArea(d.toFrame(it.second)) && !counts(d.toFrame(it.second), before, exclude, pageAt > 0) }) {
+                sawPreExisting += pat.key
+            }
         }
         if (cropOnly && area != null) {
             val items = readCropCached(full ?: d.latestFrame(), area) ?: return null
+            hadPostActionOcr = true
             items.firstOrNull { pat.hit(it.text) }?.let { return it.text.take(40) }
             return VScreenPerception.joinSplit(items).firstOrNull { pat.hit(it) }?.take(40)
         }
         val ocr = VScreenPerception.readingWithVersion(d.displayId, readFrom(), 0)
         if (ocr != null) {
+            hadPostActionOcr = true
             val r = ocr.result
-            val hit = (if (finalLook) r.items else VScreenPerception.still(r.items, mask))
+            val items = if (finalLook) r.items else VScreenPerception.still(r.items, mask)
+            val hit = items
                 .firstOrNull { pat.hit(it.text) && inArea(Rect(it.box)) && (!afterAction || actionAt == 0L || ok(Rect(it.box))) }
                 ?.text?.take(40)
             if (hit != null) {
                 lastObsId = -(ocr.version + 1L)
                 lastObsEpochMs = ocr.epochMs.takeIf { it > 0L }
                 return hit
+            }
+            if (afterAction && actionAt > 0L && before.isNotEmpty() &&
+                items.any { pat.hit(it.text) && inArea(Rect(it.box)) && !counts(Rect(it.box), before, exclude, pageAt > 0) }) {
+                sawPreExisting += pat.key
             }
         }
         when {
@@ -260,6 +279,7 @@ internal class Probe(
         fun inArea(r: Rect) = area == null || area.contains(r.centerX(), r.centerY())
         val a11ySnap = runCatching { com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId) }.getOrNull()
         if (a11ySnap != null && a11ySnap.readable) {
+            if (a11ySnap.texts(1)?.isNotEmpty() == true) hadPostActionA11y = true
             val present = if (area == null) {
                 !a11ySnap.shows(pat::hit, recheck).isNullOrEmpty()
             } else {
@@ -273,6 +293,7 @@ internal class Probe(
         }
         if (cropOnly && area != null) {
             val items = readCropCached(full ?: d.latestFrame(), area) ?: return false
+            hadPostActionOcr = true
             return items.none { pat.hit(it.text) } && VScreenPerception.joinSplit(items).none { pat.hit(it) }
         }
         val ocr = VScreenPerception.readingWithVersion(d.displayId, readFrom(), 0)
@@ -281,9 +302,53 @@ internal class Probe(
             lastObsEpochMs = null
             return false
         }
+        hadPostActionOcr = true
         lastObsId = -(ocr.version + 1L)
         lastObsEpochMs = ocr.epochMs.takeIf { it > 0L }
         return VScreenPerception.still(ocr.result.items, mask).none { pat.hit(it.text) && inArea(Rect(it.box)) }
+    }
+
+    /** 2.0.0-beta8 (C3): whether [q] currently appears on screen (ignoring [counts] pre-existing exclusion) AND existed before the action. */
+    private fun isPreExistingNow(c: Cond): Boolean {
+        if (!afterAction || actionAt == 0L || c.kind != CondKind.TEXT) return false
+        val q = c.text ?: return false
+        val pat = TextPat(q)
+        val before = prior[pat.key].orEmpty()
+        if (before.isEmpty()) return false
+        if (pat.key in sawPreExisting) return true
+        fun inArea(r: Rect) = c.area == null || c.area.contains(r.centerX(), r.centerY())
+        val a11y = runCatching { com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId) }.getOrNull()
+        if (a11y != null && a11y.readable) {
+            val hit = a11y.find(pat::hit, recheck = true)?.any { inArea(d.toFrame(it.second)) } == true
+            if (hit) return true
+        }
+        val latest = VScreenPerception.reading(d.displayId, 0L, 0)?.items.orEmpty()
+        return latest.any { pat.hit(it.text) && inArea(Rect(it.box)) }
+    }
+
+    /** 2.0.0-beta8 (C3): classify why a TEXT/GONE condition timed out. */
+    private fun textTimeoutKindFor(c: Cond): TextTimeoutKind {
+        if (!cropOnly && !hadPostActionOcr && VScreenPerception.readingWithVersion(d.displayId, readFrom(), 0) != null) {
+            hadPostActionOcr = true
+        }
+        val preExisting = c.kind == CondKind.TEXT && isPreExistingNow(c)
+        val ocrBusy = com.kilon.agentvscreen.core.VScreenPaddleOcr.busy()
+        return classifyTextTimeout(
+            preExisting = preExisting,
+            hadPostActionOcr = hadPostActionOcr,
+            hadPostActionA11y = hadPostActionA11y,
+            ocrBusy = ocrBusy,
+            waitingForChange = waitingForChange,
+        )
+    }
+
+    /** 2.0.0-beta8 (C3): `NOT_READ` when every text/gone condition failed due to missing post-action reading, else `STEP_MISSED`. */
+    fun timeoutCode(): String {
+        val textConds = conds.filter { it.kind == CondKind.TEXT || it.kind == CondKind.GONE }
+        if (textConds.isNotEmpty() && textConds.all { textTimeoutKindFor(it) == TextTimeoutKind.NOT_READ }) {
+            return "NOT_READ"
+        }
+        return "STEP_MISSED"
     }
 
     /**
@@ -324,17 +389,26 @@ internal class Probe(
     /** For a wait that timed out: what each condition sees now (a fact the caller can compare with what it asked). */
     fun now(): String = (if (waitingForChange) tr("动作之后画面没有变化，应用没有反应；", "nothing on the screen changed after the action, the app did not react; ") else "") + conds.withIndex().joinToString(tr("；", "; ")) { (i, c) ->
         when (c.kind) {
-            // 1.4.0-beta5: with an area, say whether the words are elsewhere on the screen (beta4 said "not on the
-            // screen" for words that were there, only outside the area).
-            CondKind.TEXT -> if (c.area != null) {
-                if (cropOnly) tr("${where(c)}里没有“${c.text}”", "\"${c.text}\" is not in ${where(c)}")
-                else {
-                    val elsewhere = runCatching { seen(c.text!!) }.getOrNull() != null
-                    if (elsewhere) tr("${where(c)}里没有“${c.text}”（画面上有，在区域外）", "\"${c.text}\" is not in ${where(c)} (it is on the screen, outside the region)")
-                    else tr("${where(c)}里没有“${c.text}”，画面上也没有", "\"${c.text}\" is not in ${where(c)}, nor anywhere on the screen")
-                }
-            } else tr("画面上没有“${c.text}”", "\"${c.text}\" is not on the screen")
-            CondKind.GONE -> tr("“${c.text}”还在", "\"${c.text}\" is still there")
+            // 1.4.0-beta5 + 2.0.0-beta8 (C3): distinguish absent / pre-existing / not-read (OCR busy).
+            CondKind.TEXT -> {
+                val kind = textTimeoutKindFor(c)
+                if (kind != TextTimeoutKind.ABSENT) {
+                    formatTextTimeout(c.text!!, kind, com.kilon.agentvscreen.core.VScreenPaddleOcr.busy())
+                } else if (c.area != null) {
+                    if (cropOnly) tr("${where(c)}里没有“${c.text}”", "\"${c.text}\" is not in ${where(c)}")
+                    else {
+                        val elsewhere = runCatching { seen(c.text!!) }.getOrNull() != null
+                        if (elsewhere) tr("${where(c)}里没有“${c.text}”（画面上有，在区域外）", "\"${c.text}\" is not in ${where(c)} (it is on the screen, outside the region)")
+                        else tr("${where(c)}里没有“${c.text}”，画面上也没有", "\"${c.text}\" is not in ${where(c)}, nor anywhere on the screen")
+                    }
+                } else formatTextTimeout(c.text!!, TextTimeoutKind.ABSENT, false)
+            }
+            CondKind.GONE -> {
+                val kind = textTimeoutKindFor(c)
+                if (kind == TextTimeoutKind.NOT_READ) {
+                    formatTextTimeout(c.text!!, TextTimeoutKind.NOT_READ, com.kilon.agentvscreen.core.VScreenPaddleOcr.busy())
+                } else tr("“${c.text}”还在", "\"${c.text}\" is still there")
+            }
             CondKind.CHANGE -> tr("${where(c)}没有明显变化", "no clear change in ${where(c)}")
             CondKind.STILL -> tr("${where(c)}一直在变", "${where(c)} keeps changing")
             CondKind.STABLE -> tr("${where(c)}还在变（不是匀速的小动画）", "${where(c)} is still changing (not a steady small animation)")
@@ -444,6 +518,36 @@ internal class Probe(
         private set
 
     private var a11yObsSeq = 0L
+}
+
+/** 2.0.0-beta8 (C3): three mutually exclusive explanations when a text wait times out. */
+internal enum class TextTimeoutKind { ABSENT, PRE_EXISTING, NOT_READ }
+
+/** 2.0.0-beta8 (C3), pure: classify why a `text:` / `gone:` wait timed out. */
+internal fun classifyTextTimeout(
+    preExisting: Boolean,
+    hadPostActionOcr: Boolean,
+    hadPostActionA11y: Boolean,
+    ocrBusy: Boolean,
+    waitingForChange: Boolean,
+): TextTimeoutKind = when {
+    preExisting -> TextTimeoutKind.PRE_EXISTING
+    !waitingForChange && !hadPostActionOcr && (ocrBusy || !hadPostActionA11y) -> TextTimeoutKind.NOT_READ
+    else -> TextTimeoutKind.ABSENT
+}
+
+/** 2.0.0-beta8 (C3), pure: user/agent-facing explanation for each [TextTimeoutKind]. */
+internal fun formatTextTimeout(text: String, kind: TextTimeoutKind, ocrBusy: Boolean): String = when (kind) {
+    TextTimeoutKind.ABSENT -> tr("画面上没有“$text”", "\"$text\" is not on the screen")
+    TextTimeoutKind.PRE_EXISTING -> tr(
+        "“$text”一直在画面上（动作前就有），不能说明这一步起了作用；换一个只在目标页出现的字，或用 until change",
+        "\"$text\" was already on the screen before the action, so it cannot show this step worked; use text that only appears on the target page, or use until change",
+    )
+    TextTimeoutKind.NOT_READ -> if (ocrBusy) {
+        tr("读屏没跟上（OCR 忙），没读到动作后的画面", "screen reading did not keep up (OCR busy); no post-action reading was obtained")
+    } else {
+        tr("读屏没跟上，没读到动作后的画面", "screen reading did not keep up; no post-action reading was obtained")
+    }
 }
 
 /**
@@ -949,7 +1053,7 @@ internal fun VScreenOffloadHandler.runSegment(
                     w.met != null -> so.text = tr("$label 等到了 ${w.met}（${s1(w.ms)}）", "$label got ${w.met} (${s1(w.ms)})")
                     else -> {
                         val seenNow = p.now()
-                        so.status = "missed"; so.code = "STEP_MISSED"
+                        so.status = "missed"; so.code = p.timeoutCode()
                         so.text = tr("$label 等 $want：${s1(w.ms)} 到时间，没等到（$seenNow）", "$label wait $want: time up at ${s1(w.ms)}, never came ($seenNow)")
                         missed = tr("第 $label 步 ${step.raw} 没等到（$seenNow）。", "Step $label ${step.raw} never came ($seenNow). ") + screenNow()
                     }
@@ -975,6 +1079,7 @@ internal fun VScreenOffloadHandler.runSegment(
             val want = step.until!!.joinToString(" or ") { it.raw }
             val so = StepOut(label, step.raw, if (out.met) "done" else "missed", "").also {
                 it.fact = out.actionFact
+                it.alreadyAtStart = out.alreadyAtStart
                 it.point = ctxAct.point.takeIf { step.kind == StepKind.PRESS }
                 it.waitedFor = want
                 it.waitMet = out.met
@@ -988,10 +1093,15 @@ internal fun VScreenOffloadHandler.runSegment(
             }
             if (out.met) {
                 so.text = tr("$label ${step.raw} → ${out.actionFact}；等到 ${out.metFact}（${s1(out.ms)}）", "$label ${step.raw} → ${out.actionFact}; got ${out.metFact} (${s1(out.ms)})")
+                if (so.gesture?.afterRelease == Gesture.AFTER_SNAPPED_BACK) {
+                    notes.add("SNAP_BACK", tr("第 $label 步（${step.raw}）拖动后松手弹回起点：可能未拖过触发阈值或不支持拖放。看图核对",
+                        "Step $label (${step.raw}) snapped back to its starting position after release: it may not have passed the trigger threshold or drop is not accepted. Check the picture"))
+                }
             } else {
-                so.code = "STEP_MISSED"
-                so.text = tr("$label ${step.raw} → ${out.actionFact}；等 $want：${s1(out.ms)} 未满足", "$label ${step.raw} → ${out.actionFact}; wait $want: not met after ${s1(out.ms)}")
-                missed = tr("第 $label 步 ${step.raw} 做了，但没等到 $want。", "Step $label ${step.raw} was done, but $want never came. ") + screenNow()
+                so.code = if (out.notRead) "NOT_READ" else "STEP_MISSED"
+                val reasonSuffix = out.missReason?.let { tr("（$it）", " ($it)") } ?: ""
+                so.text = tr("$label ${step.raw} → ${out.actionFact}；等 $want：${s1(out.ms)} 未满足$reasonSuffix", "$label ${step.raw} → ${out.actionFact}; wait $want: not met after ${s1(out.ms)}$reasonSuffix")
+                missed = tr("第 $label 步 ${step.raw} 做了，但没等到 $want$reasonSuffix。", "Step $label ${step.raw} was done, but $want never came$reasonSuffix. ") + screenNow()
             }
             put(so)
             return
@@ -1035,7 +1145,7 @@ internal fun VScreenOffloadHandler.runSegment(
                 step.until == null -> tr("等画面稳定：${s1(w.ms)} 到时间，画面还在变", "waiting for the screen to settle: time up at ${s1(w.ms)}, still changing")
                 else -> {
                     val seenNow = probe.now()
-                    so.status = "missed"; so.code = "STEP_MISSED"
+                    so.status = "missed"; so.code = probe.timeoutCode()
                     missed = tr("第 $label 步 ${step.raw} 做了，但没等到 ${so.waitedFor}（$seenNow）。", "Step $label ${step.raw} was done, but ${so.waitedFor} never came ($seenNow). ") + screenNow()
                     tr("等 ${so.waitedFor}：${s1(w.ms)} 到时间，没等到（$seenNow）", "wait ${so.waitedFor}: time up at ${s1(w.ms)}, never came ($seenNow)")
                 }
@@ -1081,9 +1191,19 @@ internal fun VScreenOffloadHandler.runSegment(
                     notes.add("UNPROVEN", tr("第 $label 步（${step.raw}）做在一直自己在动的画面上，之后的变化可能只是动画：不能说明它生效了（动画中的界面也可能还不接受操作）。看图核对，没生效就等那部分停下（或先暂停应用）再做",
                         "Step $label (${step.raw}) acted where the screen keeps moving by itself, so the change afterwards may be only the animation: it does not show the step worked (an animating screen may not take input yet). Check the picture; if it did not work, do it again once that part stops (or pause the app first)"))
                 }
-                if (same == true && so.status == "done") notes.add("NO_CHANGE", tr("第 $label 步（${step.raw}）之后画面没有任何变化：可能没点中、控件没响应，或变化不在画面上。看图核对这一步有没有生效", "After step $label (${step.raw}) nothing on the screen changed: it may have missed, the control may not respond, or the effect is not visible. Check the picture to see whether the step took effect"))
+                // 2.0.0-beta8 (C6): SNAP_BACK is more specific than NO_CHANGE and takes precedence when a drag snapped back.
+                val snappedBack = so.status == "done" && so.gesture?.afterRelease == Gesture.AFTER_SNAPPED_BACK
+                if (!snappedBack && same == true && so.status == "done") {
+                    notes.add("NO_CHANGE", tr("第 $label 步（${step.raw}）之后画面没有任何变化：可能没点中、控件没响应，或变化不在画面上。看图核对这一步有没有生效", "After step $label (${step.raw}) nothing on the screen changed: it may have missed, the control may not respond, or the effect is not visible. Check the picture to see whether the step took effect"))
+                }
             }
-            so.text = tr("$label ${step.raw} → $fact；$waitTxt", "$label ${step.raw} → $fact; $waitTxt") + if (so.changed == false) tr("；画面没有变化", "; the screen did not change") else ""
+            val snappedBackNow = so.gesture?.afterRelease == Gesture.AFTER_SNAPPED_BACK
+            if (so.status == "done" && snappedBackNow) {
+                notes.add("SNAP_BACK", tr("第 $label 步（${step.raw}）拖动后松手弹回起点：可能未拖过触发阈值或不支持拖放。看图核对",
+                    "Step $label (${step.raw}) snapped back to its starting position after release: it may not have passed the trigger threshold or drop is not accepted. Check the picture"))
+            }
+            so.text = tr("$label ${step.raw} → $fact；$waitTxt", "$label ${step.raw} → $fact; $waitTxt") +
+                if (so.changed == false && !snappedBackNow) tr("；画面没有变化", "; the screen did not change") else ""
             put(so)
         } finally { probe?.close(); before?.recycle() }
     }

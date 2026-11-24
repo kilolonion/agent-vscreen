@@ -47,7 +47,13 @@ internal data class El(val n: Int, val text: String, val box: Rect, val fromA11y
                        /** 1.4.0-beta13: a search box the app draws itself (its view id or class says search): a control, not content. */
                        val search: Boolean = false,
                        /** 2.0: found by the optional detector model (a textless tappable thing neither the tree nor OCR names). */
-                       val detected: Boolean = false) {
+                       val detected: Boolean = false,
+                       /** 2.0.0-beta8 (L.3): clickable icon button (ImageButton or clickable contentDescription-only node), excluded from page titles. */
+                       val iconButton: Boolean = false,
+                       /** 2.0.0-beta8 (L.3): AccessibilityNodeInfo.isHeading, preferred for page titles. */
+                       val heading: Boolean = false,
+                       /** 2.0.0-beta8 (L.3): non-clickable text inside a Toolbar/ActionBar container, preferred for page titles. */
+                       val toolbarTitle: Boolean = false) {
     val placeholder: Boolean get() = kind != ElKind.TEXT
     /** Nothing can be done with it: plain words. */
     val plain: Boolean get() = !clickable && !editable && !scrollable && checked == null && !password
@@ -199,7 +205,7 @@ internal fun a11yRaw(d: VScreenDisplay): List<El> {
     // would tap, with the words they would read on it. A wordless node is listed only when it is small (an icon
     // button); big wordless wrappers are layout, not targets. Its view id (stable across rotating placeholder
     // words) is shown when the app gives one.
-    fun walk(node: com.kilon.agentvscreen.core.A11yTree.Node) {
+    fun walk(node: com.kilon.agentvscreen.core.A11yTree.Node, inToolbar: Boolean = false) {
         if (raw.size > 400) return
         val n = node.info
         val visible = node.visible
@@ -213,15 +219,18 @@ internal fun a11yRaw(d: VScreenDisplay): List<El> {
         val area = b.width().toLong() * b.height()
         val big = area > screenArea / 4
         val start = raw.size
-        node.children.forEach { walk(it) }
+        val nextToolbar = inToolbar || (node.className?.let { it.contains("Toolbar", ignoreCase = true) || it.contains("ActionBar", ignoreCase = true) } == true)
+        node.children.forEach { walk(it, nextToolbar) }
         if (!inside || !(text != null || (actionable && !big) || n.isEditable)) return
         var words: Pair<ElKind, String>? = text?.let { tidy(it) }
+        var absorbedInner = false
         if (words == null && !n.isEditable && (n.isClickable || n.isCheckable)) {
             // Plain words drawn inside this tappable node (not inside a tappable child of it).
             val inner = (start until raw.size).filter { i -> raw[i].let { it.plain && !it.placeholder && b.contains(it.box.centerX(), it.box.centerY()) } }
             if (inner.isNotEmpty()) {
                 words = ElKind.TEXT to inner.map { raw[it].text }.distinct().joinToString(" · ").let { if (it.length > 60) it.take(58) + "…" else it }
                 inner.asReversed().forEach { raw.removeAt(it) }
+                absorbedInner = true
             }
         }
         val id = n.viewIdResourceName?.substringAfterLast('/')?.takeIf { it.length in 2..32 }
@@ -235,9 +244,12 @@ internal fun a11yRaw(d: VScreenDisplay): List<El> {
         raw.add(start.coerceAtMost(raw.size), El(0, if (kind == ElKind.TEXT) words!!.second else "", b, true,
             clickable = n.isClickable, editable = n.isEditable, scrollable = n.isScrollable,
             checked = if (n.isCheckable) n.isChecked else null, focused = n.isFocused, password = n.isPassword, kind = kind, hint = hint,
-            search = n.isClickable && ((n.viewIdResourceName?.substringAfterLast('/') ?: "") + " " + (n.className ?: "")).contains("search", ignoreCase = true)))
+            search = n.isClickable && ((n.viewIdResourceName?.substringAfterLast('/') ?: "") + " " + (n.className ?: "")).contains("search", ignoreCase = true),
+            iconButton = node.isIconButton && !absorbedInner,
+            heading = node.heading,
+            toolbarTitle = inToolbar && !n.isClickable && node.hasText))
     }
-    com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId).roots.forEach { walk(it) }
+    com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId).roots.forEach { walk(it, false) }
     // Same element at (nearly) the same place: once.
     val out = ArrayList<El>()
     for (r in raw) if (out.none { it.key == r.key && Math.abs(it.box.centerX() - r.box.centerX()) <= 20 && Math.abs(it.box.centerY() - r.box.centerY()) <= 20 }) out += r
@@ -423,7 +435,7 @@ internal fun VScreenOffloadHandler.snapshot(d: VScreenDisplay, freshMs: Long = 1
         val frameEpochMs = System.currentTimeMillis()
         val a11yF = snapPool.submit<List<El>> { runCatching { a11yRaw(d) }.getOrDefault(emptyList()) }
         val actF = snapPool.submit<String?> { runCatching { VScreenShell.topActivity(d.displayId) }.getOrNull() }
-        // 2.0: the optional detector looks at the same frame while OCR reads it (null when no model is installed).
+        // 2.0.0-beta8 (D): the optional detector runs concurrently with OCR on the shared non-spinning ORT thread pool.
         val iconsF = if (fv != null && com.kilon.agentvscreen.core.VScreenDetector.active())
             snapPool.submit<List<Rect>?> { runCatching { com.kilon.agentvscreen.core.VScreenDetector.detectFrame(d.displayId, fv.first, fv.second)?.map { it.box } }.getOrNull() } else null
         var reused = false
@@ -517,14 +529,14 @@ internal data class WordEvents(
 }
 
 /**
- * 2.0.0-beta3 (3.6), pure: event-based word facts from perception readings.
+ * 2.0.0-beta3 (3.6) + 2.0.0-beta8 (C5), pure: event-based word facts from perception readings.
  * - Appeared / disappeared / between words must persist in at least [Report.MIN_CONSECUTIVE_READINGS] (2)
  *   consecutive readings; single-flash words are suppressed.
- * - Exception: a toast in the bottom [Report.TOAST_BOTTOM_SHARE] (35%) of the screen that appears and
- *   disappears within [Report.TOAST_MAX_MS] (4s) is emitted on its own line `toast：<text>（-X.Xs）`.
+ * - OCR-based toast guessing was removed in beta8 (C5): system Toasts come exclusively from accessibility
+ *   `TYPE_NOTIFICATION_STATE_CHANGED` events via [formatSystemToasts].
  * - Caps: appeared <= [Report.MAX_APPEARED] (10), gone <= [Report.MAX_GONE] (10), between <= [Report.MAX_BETWEEN] (5).
  */
-internal fun wordFactsFromReadings(rs: List<VScreenPerception.Reading>, screenH: Int, toMs: Long): WordEvents {
+internal fun wordFactsFromReadings(rs: List<VScreenPerception.Reading>, @Suppress("UNUSED_PARAMETER") screenH: Int, @Suppress("UNUSED_PARAMETER") toMs: Long): WordEvents {
     if (rs.size < 2) return WordEvents(emptyList(), emptyList())
     data class Slot(val atMs: Long, val lastAtMs: Long, val words: List<String>, val normSet: Set<String>, val boxes: Map<String, Rect>)
     val slots = ArrayList<Slot>(rs.size * 2)
@@ -559,16 +571,7 @@ internal fun wordFactsFromReadings(rs: List<VScreenPerception.Reading>, screenH:
             Persistence.trailingPersisted(slots.mapIndexed { idx, s -> Obs(idx.toLong(), k !in s.normSet) })
     }.distinctBy { VScreenOcr.norm(it) }
 
-    // Transient words (appeared after start and disappeared before end): classify as toast or >=2-reading between.
-    class MidInfo(
-        val raw: String,
-        val firstAt: Long,
-        var lastAt: Long,
-        var maxRun: Int,
-        var box: Rect?,
-        val firstSlotNewCount: Int,
-    )
-    val mids = LinkedHashMap<String, MidInfo>()
+    // Transient words (appeared after start and disappeared before end): require >=2 consecutive readings.
     val midCandidates = LinkedHashMap<String, String>()
     for (s in slots.drop(1).dropLast(1)) {
         for (w in s.words) {
@@ -578,50 +581,48 @@ internal fun wordFactsFromReadings(rs: List<VScreenPerception.Reading>, screenH:
             }
         }
     }
-    val slotNewCounts = IntArray(slots.size) { i ->
-        if (i == 0) 0 else slots[i].normSet.count { it.isNotEmpty() && it !in slots[i - 1].normSet }
-    }
-    for ((k, raw) in midCandidates) {
-        var firstAt = -1L
-        var lastAt = -1L
-        var firstSlotNew = Int.MAX_VALUE
-        var box: Rect? = null
-        val obsSeq = ArrayList<Obs>(slots.size)
-        for ((idx, s) in slots.withIndex()) {
-            val present = k in s.normSet
-            obsSeq += Obs(idx.toLong(), present)
-            if (present) {
-                if (firstAt < 0L) {
-                    firstAt = s.atMs
-                    firstSlotNew = slotNewCounts[idx]
-                }
-                lastAt = maxOf(lastAt, s.lastAtMs)
-                if (box == null) box = s.boxes[k]
-            }
-        }
-        val maxRun = Persistence.maxRun(obsSeq)
-        if (firstAt >= 0L) mids[k] = MidInfo(raw, firstAt, lastAt, maxRun, box, firstSlotNew)
-    }
-
-    val toastThresholdY = if (screenH > 0) (screenH * (1.0 - Report.TOAST_BOTTOM_SHARE)).toInt() else Int.MAX_VALUE
-    val toasts = ArrayList<String>()
     val between = ArrayList<String>()
-    for (m in mids.values) {
-        val inBottom = screenH > 0 && m.box != null && m.box!!.centerY() >= toastThresholdY
-        val observedMs = (m.lastAt - m.firstAt).coerceAtLeast(0L)
-        if (inBottom && observedMs <= Report.TOAST_MAX_MS && m.firstSlotNewCount <= Report.TOAST_MAX_NEW_WORDS && toasts.size < Report.MAX_TOASTS) {
-            toasts += tr("toast：${m.raw.take(30)}（${Report.ago(m.firstAt, toMs)}）", "toast: ${m.raw.take(30)} (${Report.ago(m.firstAt, toMs)})")
-        } else if (m.maxRun >= Report.MIN_CONSECUTIVE_READINGS) {
-            between += m.raw
+    for ((k, raw) in midCandidates) {
+        val obsSeq = slots.mapIndexed { idx, s -> Obs(idx.toLong(), k in s.normSet) }
+        if (Persistence.maxRun(obsSeq) >= Report.MIN_CONSECUTIVE_READINGS) {
+            between += raw
         }
     }
 
     val staticLines = ArrayList<String>()
     if (appeared.isNotEmpty()) staticLines += tr("出现了：", "appeared: ") + list(appeared, Report.MAX_APPEARED)
     if (gone.isNotEmpty()) staticLines += tr("不见了：", "disappeared: ") + list(gone, Report.MAX_GONE)
-    staticLines += toasts
     val betweenLines = if (between.isNotEmpty()) listOf(tr("中途出现过又消失：", "appeared and disappeared meanwhile: ") + list(between, Report.MAX_BETWEEN)) else emptyList()
     return WordEvents(staticLines, betweenLines)
+}
+
+/**
+ * 2.0.0-beta8 (C5), pure: format real system Toast accessibility events matching the virtual display's
+ * foreground package [vdPkg] within [[fromMs], [toMs]]. When [mainTopPkg] equals [vdPkg], still includes
+ * the toast and notes that it may have originated from the same app on the main screen.
+ */
+internal fun formatSystemToasts(
+    events: List<com.kilon.agentvscreen.host.VScreenAccessibilityService.ToastEvent>,
+    vdPkg: String?,
+    mainTopPkg: String?,
+    fromMs: Long,
+    toMs: Long,
+): List<String> {
+    if (vdPkg.isNullOrBlank() || events.isEmpty()) return emptyList()
+    val sameOnMain = !mainTopPkg.isNullOrBlank() && mainTopPkg == vdPkg
+    val seen = LinkedHashSet<String>()
+    val out = ArrayList<String>()
+    for (ev in events) {
+        if (ev.packageName != vdPkg) continue
+        if (ev.epochMs < fromMs || ev.epochMs > toMs) continue
+        val text = ev.text.trim().take(80)
+        if (text.isEmpty() || !seen.add(text)) continue
+        val ago = Report.ago(ev.epochMs, toMs)
+        val suffix = if (sameOnMain) tr("（可能来自主屏上的同一应用）", " (may be from the same app on the main screen)") else ""
+        out += tr("toast：$text（$ago）$suffix", "toast: $text ($ago)$suffix")
+        if (out.size >= Report.MAX_TOASTS) break
+    }
+    return out
 }
 
 /** Words that appeared, went, or came and went between [from] and [to], from the perception readings. */
@@ -1147,7 +1148,8 @@ internal fun formatShortReply(
         val clean = s.step.substringBefore(" until ").trim()
         val cond = s.waitedFor ?: if (s.typeVerified) tr("已输入", "typed") else "ok"
         val waitSec = "${(maxOf(0L, s.waitMs ?: 0L) / 100) / 10.0}s"
-        sb.append("${s.n} $clean → $cond ✓ $waitSec").append('\n')
+        val startNote = if (s.alreadyAtStart && !s.fact.isNullOrBlank()) tr("（${s.fact}）", " (${s.fact})") else ""
+        sb.append("${s.n} $clean → $cond ✓ $waitSec$startNote").append('\n')
     }
     for (rf in rulesFired) {
         sb.append(rf.line(nowMs)).append('\n')
@@ -1374,6 +1376,15 @@ internal fun VScreenOffloadHandler.fourBlocks(
     attachSnapNotes(snap)
 
     var extraLookMs = 0L
+    val mainPkgNow = mainTop()?.substringBefore('/')
+    fun collectSystemToasts(endMs: Long): List<String> {
+        val vdPkg = snap.activity?.substringBefore('/') ?: actLoud?.startPkg
+        if (vdPkg.isNullOrBlank()) return emptyList()
+        val evs = com.kilon.agentvscreen.host.VScreenAccessibilityService.recentToasts(vdPkg, received, endMs)
+        return formatSystemToasts(evs, vdPkg, mainPkgNow, received, endMs)
+    }
+    var toastLines: List<String> = collectSystemToasts(System.currentTimeMillis())
+
     val reasons: List<String> = if (actLoud == null) {
         emptyList()
     } else {
@@ -1392,6 +1403,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
             elementCount = Loud.textElements(snap.els).size,
             lastExpectOnlyVisual = actLoud.lastExpectOnlyVisual,
             hasPageTextDiff = hasPageTextDiff,
+            hasToast = toastLines.isNotEmpty(),
             forced = actLoud.forced,
         )
         val pre = loudReasons(baseInput)
@@ -1416,6 +1428,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
                 extraLookMs = SystemClock.elapsedRealtime() - tRe
                 attachSnapNotes(snap)
             }
+            toastLines = collectSystemToasts(System.currentTimeMillis())
             loudReasons(
                 baseInput.copy(
                     afterChanged = afterChanged,
@@ -1423,6 +1436,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
                     elementCount = Loud.textElements(snap.els).size,
                     hasPageTextDiff = if (afterChanged) PageBook.hasTextDiff(sid, snap.activity, snap.els) else hasPageTextDiff,
                     hasBlockingNote = notes.firstBlocking() != null,
+                    hasToast = toastLines.isNotEmpty(),
                 )
             )
         } else {
@@ -1431,27 +1445,34 @@ internal fun VScreenOffloadHandler.fourBlocks(
     }
 
     val now = System.currentTimeMillis()
+    if (toastLines.isEmpty()) toastLines = collectSystemToasts(now)
     val els = numbered(sid, d, snap.els, snap.activity)
     synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] = ElSet(d.generation, now, els, snap.activity, snapAt) }
     val (card, _) = PageBook.match(sid, snap.activity, els, turn)
 
-    // 5.1 & 5.6: prepare post-reply --hold (freezes after HTTP/MCP reply flushes; non-blocking HOLD_UNSUPPORTED on API <= 33).
+    // 2.0.0-beta8 (C2): execute & verify --hold synchronously BEFORE sending the reply so we never
+    // claim "已暂停" without kernel confirmation (cgroup.events frozen 1 / wchan fallback).
     var holdFooter: String? = null
     var holdJson: org.json.JSONObject? = null
-    var holdAfterSend: (() -> Unit)? = null
     if (actLoud?.usedHold == true && outcome != "interrupted") {
         val holdPkg = snap.activity?.substringBefore('/')
         val holdAppName = holdPkg?.let { com.kilon.agentvscreen.core.VScreenKnowledge.label(it) ?: it }.orEmpty()
-        when (val prep = ActHold.prepare(sid, d.displayId, holdPkg, holdAppName, handoffSkip(), mainTop()?.substringBefore('/'))) {
-            is ActHold.PrepareOutcome.Unsupported -> notes.add("HOLD_UNSUPPORTED", prep.text)
-            is ActHold.PrepareOutcome.Skipped -> {}
-            is ActHold.PrepareOutcome.Armed -> {
-                holdFooter = prep.footerLine
-                holdJson = org.json.JSONObject()
-                    .put("app", prep.pkg)
-                    .put("name", prep.appName)
-                    .put("max_ms", prep.maxMs)
-                holdAfterSend = prep.afterSend
+        val res = ActHold.holdBeforeReply(
+            context = context,
+            sid = sid,
+            displayId = d.displayId,
+            pkg = holdPkg,
+            appName = holdAppName,
+            skipPkgs = handoffSkip(),
+            mainTopPkg = mainPkgNow,
+        )
+        when (res) {
+            is ActHold.HoldOutcome.Unsupported -> notes.add("HOLD_UNSUPPORTED", res.text)
+            is ActHold.HoldOutcome.Refused -> notes.add("HOLD_REFUSED", res.text)
+            is ActHold.HoldOutcome.Skipped -> {}
+            is ActHold.HoldOutcome.Held -> {
+                holdFooter = res.footerLine
+                holdJson = res.json()
             }
         }
     }
@@ -1506,7 +1527,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
             data.put("rules_fired", org.json.JSONArray(actLoud.rulesFired.map { it.json() }))
         }
         holdJson?.let { data.put("hold", it) }
-        return NativeOffloadResult(0, shortText, "OK", data, softFail = false, afterSend = holdAfterSend)
+        return NativeOffloadResult(0, shortText, "OK", data, softFail = false)
     }
 
     // ── Full reply path (loud act, launch, handoff) ──
@@ -1534,7 +1555,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
     // 4.4: full reply for any drag uses a fixed 4-cell strip (before down, drag midpoint, before release, 350ms after release).
     val dragKeyTimes = steps.lastOrNull { it.gesture?.afterRelease == Gesture.AFTER_SNAPPED_BACK }?.gesture?.keyTimesMs
         ?: steps.lastOrNull { it.gesture?.keyTimesMs != null }?.gesture?.keyTimesMs
-    val hasNoChange = notes.list.any { it.code == "NO_CHANGE" }
+    val hasNoChange = notes.list.any { it.code == "NO_CHANGE" || it.code == "SNAP_BACK" }
     val cellsF = when {
         dragKeyTimes != null -> REPORT_POOL.submit<Picked>(com.kilon.agentvscreen.I18n.carry {
             val dc = runCatching { Gesture.pickDragCells(d.displayId, dragKeyTimes, Report.CELL_SIDE) }.getOrDefault(emptyList())
@@ -1558,6 +1579,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
     timing.trackMs = SystemClock.elapsedRealtime() - tTrack
 
     val wordEv = wordEvents(d, from, System.currentTimeMillis())
+    val wordStaticWithToasts = wordEv.staticLines + toastLines
     val sinceHead = sinceHeader(from, now, totalActionMs, received)
     val sheetNote = when {
         isDragStrip -> tr(
@@ -1575,7 +1597,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
     val allSinceLines = buildList {
         add(sinceHead)
         picEv.maskLine?.let { add(it) }
-        addAll(wordEv.staticLines)
+        addAll(wordStaticWithToasts)
         addAll(wordEv.betweenLines)
         addAll(picEv.detailLines)
         if (size == 1) add(tr("文字和画面都没有明显变化（光标、细小动画这类小变动不算）", "no clear change in text or picture (cursors and tiny animations don't count)"))
@@ -1613,7 +1635,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
                 }
             } finally {
                 prevBmp?.recycle()
-                nowBmp.recycle()
+                nowBmp?.recycle()
             }
         }
     }
@@ -1653,7 +1675,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
             timingLine = timing.line(total),
             meanwhileHeader = sinceHead,
             maskLine = picEv.maskLine,
-            wordStaticLines = wordEv.staticLines,
+            wordStaticLines = wordStaticWithToasts,
             betweenLines = wordEv.betweenLines,
             picDetailLines = picEv.detailLines,
             picChangeCount = picEv.spanCount,
@@ -1695,7 +1717,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
         }
     }
     holdJson?.let { data.put("hold", it) }
-    return NativeOffloadResult(if (ok) 0 else 1, fullText, code, data, softFail = !ok, afterSend = holdAfterSend)
+    return NativeOffloadResult(if (ok) 0 else 1, fullText, code, data, softFail = !ok)
 }
 
 private val REPORT_POOL = java.util.concurrent.Executors.newCachedThreadPool { r -> Thread(r, "vscreen-report").apply { isDaemon = true } }
@@ -1811,7 +1833,7 @@ private fun buildNowSection(
     val outLines = ArrayList<String>(taken.size + 1)
     taken.forEach { outLines += it.line() }
     if (ordered.size > limit) {
-        outLines += tr("（还有 ${ordered.size - limit} 个没列出：zoom x1,y1,x2,y2 列出那块的全部元素）", "(${ordered.size - limit} more not listed: zoom x1,y1,x2,y2 lists every element in that area)")
+        outLines += tr("（还有 ${ordered.size - limit} 个没列出：look x1,y1,x2,y2 列出那块的全部元素）", "(${ordered.size - limit} more not listed: look x1,y1,x2,y2 lists every element in that area)")
     }
     return Triple(header, outLines, taken.toSet())
 }

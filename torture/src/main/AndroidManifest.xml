@@ -32,6 +32,11 @@
             android:windowSoftInputMode="stateHidden" />
 
         <service
+            android:name=".WorkerService"
+            android:exported="false"
+            android:process=":worker" />
+
+        <service
             android:name=".AttackA11yService"
             android:exported="true"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">

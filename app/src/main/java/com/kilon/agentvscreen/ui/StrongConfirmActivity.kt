@@ -317,8 +317,13 @@ class StrongConfirmActivity : ComponentActivity() {
             } else {
                 tr("令牌「${req.tokenName}」· ${req.commandName}", "Token \"${req.tokenName}\" · ${req.commandName}")
             }
+            val promptTitle = if (req.risks.size > 1) {
+                req.risks.joinToString(" + ") { it.title }
+            } else {
+                req.risk.title
+            }
             val prompt = BiometricPrompt.Builder(this)
-                .setTitle(req.risk.title)
+                .setTitle(promptTitle)
                 .setSubtitle(subtitle)
                 .setAllowedAuthenticators(authenticators)
                 .build()
@@ -387,13 +392,18 @@ class StrongConfirmActivity : ComponentActivity() {
                         .padding(bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    // Top bar: risk title + '?' help button (no prose wall on the card, per 6.5).
+                    // Top bar: risk title(s) + '?' help button (no prose wall on the card, per 6.5 & B2).
                     Row(
                         Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        val headerTitle = if (req.risks.size > 1) {
+                            tr("一次确认 ${req.risks.size} 项权限", "Confirm ${req.risks.size} permissions")
+                        } else {
+                            req.risk.title
+                        }
                         Text(
-                            req.risk.title,
+                            headerTitle,
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.weight(1f),
@@ -514,6 +524,12 @@ class StrongConfirmActivity : ComponentActivity() {
                                 )
                             }
                         } else {
+                            if (req.risks.size > 1) {
+                                InfoLine(
+                                    label = tr("本次一并确认", "Confirming together"),
+                                    value = req.risks.joinToString(" + ") { it.title },
+                                )
+                            }
                             InfoLine(
                                 label = tr("令牌", "Token"),
                                 value = "${req.tokenName}（${scopeLabel(req.tokenScope)}）",
@@ -526,6 +542,12 @@ class StrongConfirmActivity : ComponentActivity() {
                                 label = tr("操作", "Action"),
                                 value = req.commandName,
                             )
+                            if (req.detail.isNotBlank()) {
+                                InfoLine(
+                                    label = tr("说明", "Details"),
+                                    value = req.detail,
+                                )
+                            }
                         }
                         if (statusMsg != null) {
                             Text(

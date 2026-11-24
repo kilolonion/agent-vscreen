@@ -33,10 +33,12 @@ object PublicOAuth {
     private const val TAG = "PublicOAuth"
     private const val STORE_REL = "vscreen/public_oauth.json"
 
-    // Named limits & lifetimes per spec 7.2–7.3.
+    // Named limits & lifetimes per spec 7.2–7.3 & beta8 Section I.
     const val REGISTER_MAX_PER_HOUR = 5
+    const val REGISTER_GLOBAL_MAX_PER_HOUR = 20
     const val REGISTER_WINDOW_MS = 60 * 60_000L
     const val MAX_PENDING_PAIRINGS = 1
+    const val MAX_PENDING_PAIRINGS_GLOBAL = 3
     const val AUTHORIZE_DENY_LIMIT = 3
     const val AUTHORIZE_DENY_COOLDOWN_MS = 30 * 60_000L
     const val PAIRING_TTL_MS = 5 * 60_000L
@@ -158,6 +160,7 @@ object PublicOAuth {
         val state: String?,
         val selectableScopes: List<String>,
         val createdAt: Long,
+        val sourceBucket: String = "unknown",
     ) {
         @Volatile var status: String = "pending" // pending | approved | denied | expired | completed
         @Volatile var redirectLocation: String? = null
@@ -166,6 +169,11 @@ object PublicOAuth {
 
     data class AccessAuth(val token: Tokens.Token, val clientId: String, val scope: String)
 
+    sealed class AccessCheck {
+        data class Valid(val auth: AccessAuth) : AccessCheck()
+        data class Invalid(val knownClientId: String?) : AccessCheck()
+    }
+
     private val lock = Any()
     private val rng = SecureRandom()
     private val clients = LinkedHashMap<String, RegisteredClient>()
@@ -173,9 +181,14 @@ object PublicOAuth {
     private val refreshTokens = HashMap<String, RefreshTokenRecord>()
     private val authCodes = HashMap<String, AuthCodeRecord>()
     private val pairings = LinkedHashMap<String, Pairing>()
-    private val registerTimes = ArrayDeque<Long>()
-    private var recentDenies = 0
-    private var denyCooldownUntil = 0L
+    /** Bounded history of access-token hash -> clientId so expired/revoked tokens from known clients still bucket by client_id. */
+    private val knownTokenClients = object : LinkedHashMap<String, String>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean = size > 512
+    }
+    private val registerTimesGlobal = ArrayDeque<Long>()
+    private val registerTimesBySource = HashMap<String, ArrayDeque<Long>>()
+    private val deniesBySource = HashMap<String, Int>()
+    private val denyCooldownBySource = HashMap<String, Long>()
 
     @Volatile private var storageFile: File? = null
     @Volatile internal var clock: () -> Long = { System.currentTimeMillis() }
@@ -421,23 +434,143 @@ object PublicOAuth {
         )
     }
 
+    // ── Source bucketing (beta8 Section I: IPv4 /32, IPv6 /64, tailnet:<bucket>) ──
+
+    /**
+     * Normalize the `X-AVS-Public-Src` header injected by `tsbridge` into a stable rate-limit bucket key:
+     * - IPv4 (or IPv4-mapped IPv6 `::ffff:a.b.c.d`) -> `/32` canonical `a.b.c.d`
+     * - IPv6 -> `/64` prefix `xxxx:xxxx:xxxx:xxxx::/64`
+     * - `tailnet:<ip>` -> `tailnet:<normalized bucket>`
+     * - missing/blank -> `"unknown"`
+     * Pure numeric parsing (never performs DNS lookups).
+     */
+    fun sourceBucket(rawHeader: String?): String {
+        val raw = rawHeader?.trim()?.takeIf { it.isNotEmpty() } ?: return "unknown"
+        if (raw.startsWith("tailnet:", ignoreCase = true)) {
+            val rest = raw.substring(8).trim()
+            return "tailnet:" + normalizeIpBucket(rest)
+        }
+        return normalizeIpBucket(raw)
+    }
+
+    private fun normalizeIpBucket(input: String): String {
+        var s = input.trim()
+        if (s.isEmpty() || s.equals("unknown", ignoreCase = true)) return "unknown"
+        if (s.startsWith("[") && s.endsWith("]")) s = s.substring(1, s.length - 1)
+        val zoneIdx = s.indexOf('%')
+        if (zoneIdx > 0) s = s.substring(0, zoneIdx)
+        parseIpv4(s)?.let { b -> return "${b[0] and 0xff}.${b[1] and 0xff}.${b[2] and 0xff}.${b[3] and 0xff}" }
+        parseIpv6(s)?.let { b ->
+            // Unwrap IPv4-mapped IPv6 (::ffff:a.b.c.d) to its IPv4 /32 bucket.
+            val mapped = (0..9).all { b[it] == 0.toByte() } && b[10] == 0xff.toByte() && b[11] == 0xff.toByte()
+            if (mapped) {
+                return "${b[12].toInt() and 0xff}.${b[13].toInt() and 0xff}.${b[14].toInt() and 0xff}.${b[15].toInt() and 0xff}"
+            }
+            val g0 = ((b[0].toInt() and 0xff) shl 8) or (b[1].toInt() and 0xff)
+            val g1 = ((b[2].toInt() and 0xff) shl 8) or (b[3].toInt() and 0xff)
+            val g2 = ((b[4].toInt() and 0xff) shl 8) or (b[5].toInt() and 0xff)
+            val g3 = ((b[6].toInt() and 0xff) shl 8) or (b[7].toInt() and 0xff)
+            return "%x:%x:%x:%x::/64".format(java.util.Locale.ROOT, g0, g1, g2, g3)
+        }
+        return "other:" + s.take(64)
+    }
+
+    private fun parseIpv4(s: String): IntArray? {
+        val parts = s.split('.')
+        if (parts.size != 4) return null
+        val out = IntArray(4)
+        for (i in 0 until 4) {
+            val p = parts[i]
+            if (p.isEmpty() || p.length > 3 || !p.all { it in '0'..'9' }) return null
+            val v = p.toIntOrNull() ?: return null
+            if (v !in 0..255) return null
+            out[i] = v
+        }
+        return out
+    }
+
+    private fun parseIpv6(raw: String): ByteArray? {
+        if (':' !in raw) return null
+        var s = raw
+        var ipv4Tail: IntArray? = null
+        val lastColon = s.lastIndexOf(':')
+        if (lastColon >= 0 && '.' in s.substring(lastColon + 1)) {
+            ipv4Tail = parseIpv4(s.substring(lastColon + 1)) ?: return null
+            s = s.substring(0, lastColon) + ":0:0"
+        }
+        val dbl = s.indexOf("::")
+        if (dbl >= 0 && s.indexOf("::", dbl + 2) >= 0) return null
+        val headGroups = if (dbl >= 0) {
+            val h = s.substring(0, dbl)
+            if (h.isEmpty()) emptyList() else h.split(':')
+        } else {
+            s.split(':')
+        }
+        val tailGroups = if (dbl >= 0) {
+            val t = s.substring(dbl + 2)
+            if (t.isEmpty()) emptyList() else t.split(':')
+        } else {
+            emptyList()
+        }
+        val total = headGroups.size + tailGroups.size
+        if (dbl >= 0) {
+            if (total > 7) return null
+        } else {
+            if (total != 8) return null
+        }
+        val groups = IntArray(8)
+        var idx = 0
+        for (g in headGroups) {
+            if (g.isEmpty() || g.length > 4) return null
+            groups[idx++] = g.toIntOrNull(16) ?: return null
+        }
+        val zeros = 8 - total
+        idx += zeros
+        for (g in tailGroups) {
+            if (g.isEmpty() || g.length > 4) return null
+            groups[idx++] = g.toIntOrNull(16) ?: return null
+        }
+        val out = ByteArray(16)
+        for (i in 0 until 8) {
+            out[i * 2] = ((groups[i] ushr 8) and 0xff).toByte()
+            out[i * 2 + 1] = (groups[i] and 0xff).toByte()
+        }
+        if (ipv4Tail != null) {
+            for (i in 0 until 4) out[12 + i] = ipv4Tail[i].toByte()
+        }
+        return out
+    }
+
     // ── Dynamic client registration (RFC 7591) ─────────────────────────────
 
     fun handleRegister(r: ApiServer.Req): ApiServer.Resp {
         val now = nowMs()
-        val rateLimited = synchronized(lock) {
-            while (registerTimes.isNotEmpty() && now - registerTimes.first() >= REGISTER_WINDOW_MS) {
-                registerTimes.removeFirst()
+        val src = sourceBucket(r.headers["x-avs-public-src"])
+        val limitReason: String? = synchronized(lock) {
+            while (registerTimesGlobal.isNotEmpty() && now - registerTimesGlobal.first() >= REGISTER_WINDOW_MS) {
+                registerTimesGlobal.removeFirst()
             }
-            if (registerTimes.size >= REGISTER_MAX_PER_HOUR) {
-                true
-            } else {
-                registerTimes.addLast(now)
-                false
+            val sq = registerTimesBySource.getOrPut(src) { ArrayDeque() }
+            while (sq.isNotEmpty() && now - sq.first() >= REGISTER_WINDOW_MS) {
+                sq.removeFirst()
+            }
+            if (registerTimesBySource.size > 500) {
+                registerTimesBySource.entries.removeAll { (k, q) ->
+                    k != src && (q.isEmpty() || now - q.last() >= REGISTER_WINDOW_MS)
+                }
+            }
+            when {
+                sq.size >= REGISTER_MAX_PER_HOUR -> "src=$src limit=$REGISTER_MAX_PER_HOUR/h"
+                registerTimesGlobal.size >= REGISTER_GLOBAL_MAX_PER_HOUR -> "global limit=$REGISTER_GLOBAL_MAX_PER_HOUR/h"
+                else -> {
+                    sq.addLast(now)
+                    registerTimesGlobal.addLast(now)
+                    null
+                }
             }
         }
-        if (rateLimited) {
-            Audit.security("public_register_rate_limited", "limit=$REGISTER_MAX_PER_HOUR/h")
+        if (limitReason != null) {
+            Audit.security("public_register_rate_limited", limitReason)
             return oauthError(429, "too_many_requests", "Registration rate limit exceeded (max $REGISTER_MAX_PER_HOUR per hour)")
         }
 
@@ -546,16 +679,21 @@ object PublicOAuth {
         val state = r.q("state")
         val selectableScopes = resolveSelectableScopes(client.requestedScope, r.q("scope"))
         val redirectHost = runCatching { URI(redirectUri).host }.getOrNull().orEmpty()
+        val src = sourceBucket(r.headers["x-avs-public-src"])
 
         val pairing: Pairing = synchronized(lock) {
             pruneExpiredLocked(now)
-            if (now < denyCooldownUntil) {
-                val leftMin = ((denyCooldownUntil - now) / 60_000L).coerceAtLeast(1L)
+            val cooldownUntil = denyCooldownBySource[src] ?: 0L
+            if (now < cooldownUntil) {
+                val leftMin = ((cooldownUntil - now) / 60_000L).coerceAtLeast(1L)
                 return oauthError(429, "access_denied", "Authorization temporarily locked after repeated denials; retry in $leftMin min")
             }
-            val activePending = pairings.values.count { it.status == "pending" && now - it.createdAt < PAIRING_TTL_MS }
-            if (activePending >= MAX_PENDING_PAIRINGS) {
-                return oauthError(429, "temporarily_unavailable", "Another pairing confirmation is already pending on the phone")
+            val livePending = pairings.values.filter { it.status == "pending" && now - it.createdAt < PAIRING_TTL_MS }
+            if (livePending.count { it.sourceBucket == src } >= MAX_PENDING_PAIRINGS) {
+                return oauthError(429, "temporarily_unavailable", "A pairing confirmation from this source is already pending on the phone")
+            }
+            if (livePending.size >= MAX_PENDING_PAIRINGS_GLOBAL) {
+                return oauthError(429, "temporarily_unavailable", "Too many pairing confirmations are already pending on the phone")
             }
             val pid = "pair_" + randomHex(12)
             val p = Pairing(
@@ -570,6 +708,7 @@ object PublicOAuth {
                 state = state,
                 selectableScopes = selectableScopes,
                 createdAt = now,
+                sourceBucket = src,
             )
             pairings[pid] = p
             p
@@ -655,7 +794,7 @@ object PublicOAuth {
                 }
             }
             tokenId = tok.id
-            recentDenies = 0
+            deniesBySource.remove(pairing.sourceBucket)
 
             val rawCode = randomToken()
             val codeHash = Tokens.sha256(rawCode)
@@ -687,15 +826,17 @@ object PublicOAuth {
             if (pairing.status != "pending") return
             pairing.status = "denied"
             pairing.redirectLocation = null
-            recentDenies++
-            if (recentDenies >= AUTHORIZE_DENY_LIMIT) {
-                denyCooldownUntil = now + AUTHORIZE_DENY_COOLDOWN_MS
-                recentDenies = 0
+            val n = (deniesBySource[pairing.sourceBucket] ?: 0) + 1
+            if (n >= AUTHORIZE_DENY_LIMIT) {
+                denyCooldownBySource[pairing.sourceBucket] = now + AUTHORIZE_DENY_COOLDOWN_MS
+                deniesBySource[pairing.sourceBucket] = 0
                 enteredCooldown = true
+            } else {
+                deniesBySource[pairing.sourceBucket] = n
             }
         }
         if (enteredCooldown) {
-            Audit.security("public_authorize_cooldown", "client=${pairing.clientId} cooldown_min=${AUTHORIZE_DENY_COOLDOWN_MS / 60_000L}")
+            Audit.security("public_authorize_cooldown", "src=${pairing.sourceBucket} client=${pairing.clientId} cooldown_min=${AUTHORIZE_DENY_COOLDOWN_MS / 60_000L}")
         }
     }
 
@@ -789,6 +930,7 @@ object PublicOAuth {
                 resource = expectedRes,
                 scope = grantedScope,
             )
+            knownTokenClients[accessHash] = rec.clientId
             refreshTokens[refreshHash] = RefreshTokenRecord(
                 tokenId = tok.id,
                 clientId = rec.clientId,
@@ -873,13 +1015,15 @@ object PublicOAuth {
             val currentScope = if (tok.scope == "operate") "operate" else "look"
             val rawAccess = randomToken()
             val rawRefresh = randomToken()
-            accessTokens[Tokens.sha256(rawAccess)] = AccessTokenRecord(
+            val newAccessHash = Tokens.sha256(rawAccess)
+            accessTokens[newAccessHash] = AccessTokenRecord(
                 tokenId = tok.id,
                 clientId = rec.clientId,
                 expiresAt = now + ACCESS_TOKEN_TTL_MS,
                 resource = rec.resource,
                 scope = currentScope,
             )
+            knownTokenClients[newAccessHash] = rec.clientId
             refreshTokens[Tokens.sha256(rawRefresh)] = RefreshTokenRecord(
                 tokenId = tok.id,
                 clientId = rec.clientId,
@@ -909,18 +1053,32 @@ object PublicOAuth {
 
     // ── Access token verification & revocation ─────────────────────────────
 
-    /** Verify a Bearer access token presented to `POST /mcp` on [PublicServer]. */
-    fun validateAccessToken(rawToken: String?, expectedResource: String): AccessAuth? {
-        if (rawToken.isNullOrBlank()) return null
+    /**
+     * Verify a Bearer access token presented to `POST /mcp` on [PublicServer], returning
+     * either [AccessCheck.Valid] or [AccessCheck.Invalid] with `knownClientId` populated
+     * when the token belonged to a known client (expired, wrong resource, or revoked) so
+     * [PublicServer] can bucket known-client failures by `client_id` while isolating unknown
+     * Bearer tokens strictly to the source IP bucket (beta8 Section I).
+     */
+    fun inspectAccessToken(rawToken: String?, expectedResource: String): AccessCheck {
+        if (rawToken.isNullOrBlank()) return AccessCheck.Invalid(null)
         val now = nowMs()
         val hash = Tokens.sha256(rawToken)
-        val rec = synchronized(lock) { accessTokens[hash] } ?: return null
-        if (now >= rec.expiresAt) return null
-        if (!matchesResource(rec.resource, expectedResource)) return null
-        val tok = Tokens.byId(rec.tokenId)?.takeIf { it.publicOnly } ?: return null
+        val (rec, knownCid) = synchronized(lock) {
+            val r = accessTokens[hash]
+            r to (r?.clientId ?: knownTokenClients[hash])
+        }
+        if (rec == null) return AccessCheck.Invalid(knownCid)
+        if (now >= rec.expiresAt) return AccessCheck.Invalid(rec.clientId)
+        if (!matchesResource(rec.resource, expectedResource)) return AccessCheck.Invalid(rec.clientId)
+        val tok = Tokens.byId(rec.tokenId)?.takeIf { it.publicOnly } ?: return AccessCheck.Invalid(rec.clientId)
         val safeScope = if (tok.scope == "operate") "operate" else "look"
-        return AccessAuth(tok, rec.clientId, safeScope)
+        return AccessCheck.Valid(AccessAuth(tok, rec.clientId, safeScope))
     }
+
+    /** Verify a Bearer access token presented to `POST /mcp` on [PublicServer]. */
+    fun validateAccessToken(rawToken: String?, expectedResource: String): AccessAuth? =
+        (inspectAccessToken(rawToken, expectedResource) as? AccessCheck.Valid)?.auth
 
     fun revokeAllForToken(tokenId: String) {
         synchronized(lock) {
@@ -1048,9 +1206,11 @@ h1{font-size:20px;margin:0 0 8px}
             refreshTokens.clear()
             authCodes.clear()
             pairings.clear()
-            registerTimes.clear()
-            recentDenies = 0
-            denyCooldownUntil = 0L
+            knownTokenClients.clear()
+            registerTimesGlobal.clear()
+            registerTimesBySource.clear()
+            deniesBySource.clear()
+            denyCooldownBySource.clear()
             storageFile = file
             clock = { System.currentTimeMillis() }
             clockOffsetMs = 0L

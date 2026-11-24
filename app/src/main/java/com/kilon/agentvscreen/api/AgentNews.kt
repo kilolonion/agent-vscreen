@@ -63,6 +63,7 @@ object AgentNews {
         62 to "2.0.0-beta5",
         63 to "2.0.0-beta6",
         64 to "2.0.0-beta7",
+        65 to "2.0.0-beta8",
     )
 
     /**
@@ -71,22 +72,28 @@ object AgentNews {
      */
     fun since(since: Int): List<Abilities.Ability> = Abilities.changedSince(since).filter { it.changed <= BuildConfig.VERSION_CODE }
 
-    fun nameOf(code: Int): String = NAMES.filterKeys { it <= code }.maxByOrNull { it.key }?.value ?: tr("更早的版本", "an earlier version")
+    fun nameOf(code: Int): String =
+        com.kilon.agentvscreen.Changes.versionNameOf(code)
+            ?: NAMES.filterKeys { it <= code }.maxByOrNull { it.key }?.value
+            ?: tr("更早的版本", "an earlier version")
 
     /**
      * The notice, or null when this agent's note is current or it saw the notice a moment ago.
      *
-     * 1.4: abilities added or reworded since the agent's version come from [Abilities] (nobody has to remember to
-     * write them here), and when any did, the notice carries the whole new note for the agent to save in place of the
-     * old one: agents that were asked to "re-read the guide and update your note" mostly kept the old note.
+     * 2.0.0-beta8 (H): pulls agent-facing changelog entries from the unified [com.kilon.agentvscreen.Changes] table
+     * alongside any changed [Abilities] entries.
      */
     fun notice(tokenId: String, freshStretch: Boolean, via: Abilities.Via = Abilities.Via.CLI): String? {
         val ack = AgentLedger.ackVersion(tokenId)
         if (ack >= BuildConfig.VERSION_CODE) return null
         val abilities = since(ack)
-        if (abilities.isEmpty()) return null
+        val changeItems = com.kilon.agentvscreen.Changes.agentItemsSince(ack, BuildConfig.VERSION_CODE)
+        if (abilities.isEmpty() && changeItems.isEmpty()) return null
         if (!AgentLedger.nudgeDue(tokenId, freshStretch)) return null
-        val lines = abilities.mapNotNull { a -> a.news.takeIf { it.isNotEmpty() }?.let { "- $it" } }
+        val lines = buildList {
+            changeItems.forEach { (_, item) -> add("- ${item.title}：${item.detail}") }
+            abilities.mapNotNull { a -> a.news.takeIf { it.isNotEmpty() }?.let { "- $it" } }.forEach { add(it) }
+        }
         val was = if (ack <= 0) tr("你确认过的版本未知", "the version your note is for is unknown") else tr("你的说明是 ${nameOf(ack)} 时记下的", "your note is from ${nameOf(ack)}")
         val remembered = if (via == Abilities.Via.CLI) "vscreen remembered \"<存在哪里>\"" else "remembered <存在哪里>"
         val rememberedEn = if (via == Abilities.Via.CLI) "vscreen remembered \"<where>\"" else "remembered <where>"

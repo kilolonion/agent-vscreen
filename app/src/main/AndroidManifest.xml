@@ -61,7 +61,7 @@
             android:excludeFromRecents="true"
             android:taskAffinity="com.kilon.agentvscreen.fullscreen"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
-            android:theme="@android:style/Theme.Material.NoActionBar.TranslucentDecor"
+            android:theme="@style/Theme.AgentVScreen.Fullscreen"
             android:windowSoftInputMode="adjustResize" />
 
         <!-- 1.3: the user answers an agent's question (tap on the picture, a box, a choice, a line). -->

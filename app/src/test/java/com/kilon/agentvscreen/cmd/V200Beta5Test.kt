@@ -569,27 +569,35 @@ class V200Beta5Test {
         // API 30 -> Unsupported (HOLD_UNSUPPORTED), never freezes.
         ActHold.sdkIntFn = { 30 }
         ActHold.gateReadyFn = { true }
-        val api30 = ActHold.prepare("s1", 2, "com.example.app", "Demo", skip, null)
-        assertTrue("API 30 must return Unsupported: $api30", api30 is ActHold.PrepareOutcome.Unsupported)
+        val api30 = ActHold.holdBeforeReply(null, "s1", 2, "com.example.app", "Demo", skip, null)
+        assertTrue("API 30 must return Unsupported: $api30", api30 is ActHold.HoldOutcome.Unsupported)
 
-        // API 34 + eligible -> Armed; post-send freezes; next command unholds with paused duration.
+        // 2.0.0-beta8 (C2): API 34 + eligible -> synchronously freezes and verifies BEFORE returning Held;
+        // next command unholds with paused duration.
         val fakeClock = AtomicLong(100_000L)
         val heldCalls = ArrayList<List<String>>()
         var unholdCalls = 0
         ActHold.sdkIntFn = { 34 }
         ActHold.clockMsFn = { fakeClock.get() }
+        ActHold.sleepFn = {}
         ActHold.gateReadyFn = { true }
         ActHold.isDisplayBusyFn = { null }
-        ActHold.psNamesFn = { "NAME\ncom.example.app\ncom.example.app:sub\n" }
+        ActHold.appInfoFn = { _, _ -> ActHold.AppInfoSnapshot(uid = 10200, persistent = false) }
+        ActHold.currentImePkgFn = { null }
+        ActHold.mediaSessionDumpFn = { null }
+        ActHold.cgroupUidLsFn = { "pid_2001\npid_2002\n" }
+        ActHold.dumpsysProcessesFn = { "  *APP* UID 10200 ProcessRecord{a 2001:com.example.app/u0a200}\n  *APP* UID 10200 ProcessRecord{b 2002:com.example.app:sub/u0a200}\n" }
+        ActHold.dumpsysActivitiesFn = { "Display #2\n  * ActivityRecord{x u0 com.example.app/.Main}\n    app=ProcessRecord{a 2001:com.example.app/u0a200}\n" }
+        ActHold.verifyPidsFn = { _, targets ->
+            targets.map { t -> ActHold.ProcVerifyResult(t.pid, t.name, t.isDisplayProc, ActHold.ProcFreezeState.FROZEN, "cgroup") }
+        }
+        ActHold.checkFreezeCommandSupportedFn = { true }
         ActHold.gateHoldFn = { ps, _ -> heldCalls += ps; ps.size }
         ActHold.gateUnholdFn = { unholdCalls++; 1 }
 
-        val armed = ActHold.prepare("s1", 2, "com.example.app", "Demo", skip, null) as ActHold.PrepareOutcome.Armed
-        assertTrue(armed.footerLine.contains("已暂停 Demo"))
-        assertTrue(armed.footerLine.contains("120"))
-        assertTrue("not frozen before afterSend", heldCalls.isEmpty())
-
-        armed.afterSend()
+        val held = ActHold.holdBeforeReply(null, "s1", 2, "com.example.app", "Demo", skip, null) as ActHold.HoldOutcome.Held
+        assertTrue(held.footerLine.contains("已暂停 Demo"))
+        assertTrue(held.footerLine.contains("120"))
         assertEquals(listOf(listOf("com.example.app", "com.example.app:sub")), heldCalls)
         assertTrue(ActHold.isHeld())
 
@@ -601,30 +609,14 @@ class V200Beta5Test {
         assertEquals("已恢复（暂停了 14.2s）", resumed.line())
         assertFalse(ActHold.isHeld())
 
-        // Under su 2000 without readproc group, `ps -A -o NAME` omits app UIDs -> falls back to [pkg].
-        heldCalls.clear()
-        ActHold.psNamesFn = { "NAME\nsh\nps\nagent-vscreen:root\n" }
-        val armedSu = ActHold.prepare("s1", 2, "com.example.app", "Demo", skip, null) as ActHold.PrepareOutcome.Armed
-        armedSu.afterSend()
-        assertEquals(listOf(listOf("com.example.app")), heldCalls)
-        assertNotNull(ActHold.unholdBeforeCommand())
-        ActHold.psNamesFn = { "NAME\ncom.example.app\ncom.example.app:sub\n" }
-
-        // Race guard: if next command arrives BEFORE afterSend runs, afterSend must NOT freeze.
-        heldCalls.clear()
-        val armedRace = ActHold.prepare("s1", 2, "com.example.app", "Demo", skip, null) as ActHold.PrepareOutcome.Armed
-        assertNull(ActHold.unholdBeforeCommand())
-        armedRace.afterSend()
-        assertTrue("cancelled pending hold must not call gateHold", heldCalls.isEmpty())
-        assertFalse(ActHold.isHeld())
-
-        // If gateHold fails (returns 0 / -1), subsequent prepare() returns Unsupported.
+        // If gateHold fails because am freeze command itself is unsupported on this OS -> device-wide Unsupported.
         ActHold.gateHoldFn = { _, _ -> 0 }
-        val armedFail = ActHold.prepare("s1", 2, "com.example.app", "Demo", skip, null) as ActHold.PrepareOutcome.Armed
-        armedFail.afterSend()
+        ActHold.checkFreezeCommandSupportedFn = { false }
+        val unsup = ActHold.holdBeforeReply(null, "s1", 2, "com.example.app", "Demo", skip, null)
+        assertTrue("OS missing am freeze must return Unsupported: $unsup", unsup is ActHold.HoldOutcome.Unsupported)
         assertFalse(ActHold.isHeld())
-        val nextAfterFail = ActHold.prepare("s1", 2, "com.example.app", "Demo", skip, null)
-        assertTrue(nextAfterFail is ActHold.PrepareOutcome.Unsupported)
+        val nextAfterUnsup = ActHold.holdBeforeReply(null, "s1", 2, "com.other.app", "Other", skip, null)
+        assertTrue(nextAfterUnsup is ActHold.HoldOutcome.Unsupported)
 
         // Per-agent note hold on|off default.
         assertFalse(AgentLedger.holdDefault("agent-a"))

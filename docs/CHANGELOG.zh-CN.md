@@ -2,6 +2,10 @@
 
 当前测试版的更新内容见 [1.4.2-beta3（versionCode 54）](../README.zh-CN.md#142-beta3-更新内容)。之后 `main` 上的改动列在最前面。
 
+## 2.0.0-beta8（`v2.0` 分支）
+
+- 修复内置 Tailscale（`GOOS=android`）在 Android 上缺少 LocalAPI `cert/` 路由导致 Funnel HTTPS 握手 404 的问题，开启以真实拿到证书为准（中间态 `cert`）；公网开启改为 5 项前提清单（`funnel-check`、一键跳转/复制 `nodeAttrs`、回 App 自动重查、版本化一次同意）；公网限额按真实客户端来源（`ipn.FunnelConn.Src` → `X-AVS-Public-Src`，IPv4 `/32`、IPv6 `/64`）分桶并合并配对通知；强确认一次列出全部未批维度，新增「标准（默认）/ 严格」安全级别与接入时选权限一次授权、详情页可改权限；`--hold` 改为先冻结并核实 `cgroup.events`/`wchan` 后再回复、事前拒绝系统/常驻/输入法/系统媒体进程、按应用熔断；`until text:` 超时区分未出现、动作前已存在与 OCR 忙（`NOT_READ`）；系统 Toast 事件直入 `Loud.TOAST` 并移除 OCR 猜 toast；`seek` 改为闭环数值/自适应搜索并增加起点预检与读数超时上限；ONNX Runtime 统一为全局共享非自旋线程池并常驻 50 条推理诊断与 3 次检测模型验证哨兵；接入页三种连接方式平级并修复悬浮窗挖孔屏横屏几何、全屏无任务动画返回与小窗设置开关；新增升级后可点跳转的更新日志弹窗（与 `AgentNews` 共用数据源）；补齐 `guide <主题>`、移除旧写法提示并排除页标题中的图标按钮。
+
 ## 2.0.0-beta7（`v2.0` 分支）
 
 - 新增公网 MCP 接入（仅官方 Tailscale Funnel，Headscale 直接提示不支持）：独立本地监听 `PublicServer`（`127.0.0.1:18785`，`X-AVS-Public` 隔离，仅暴露 `/mcp` 与 OAuth 2.1 路径）、RFC 9728/8414/7591/8707 发现与动态注册、PKCE S256 + 8 位配对码手机生物识别强确认（默认 `look`、永不开放 `system`、禁用长按）、1 小时访问令牌与 30 天轮换刷新令牌（重用全撤销）、风险警告页、常驻关闭通知、24 小时无请求自动关闭与版本变更自动重置；核心 `guide` 增加屏幕文字防注入提示。

@@ -98,6 +98,9 @@ fun SettingsTab(bottom: Dp) {
     var update by remember { mutableStateOf<Updates.Outcome?>(null) }
 
     MiuixPage(tr("设置", "Settings"), back = false, bottom = bottom) {
+        val pubOn by com.kilon.agentvscreen.host.PublicAccess.enabledFlow.collectAsState()
+        val secLevel by com.kilon.agentvscreen.host.Risk.securityLevelFlow.collectAsState()
+
         // Who can reach the phone: the phone in the middle, each way in as a line, lit when it works.
         SmallTitle(tr("谁能连进来", "Who can connect"))
         Card(Modifier.padding(horizontal = 12.dp).fillMaxWidth(), insideMargin = PaddingValues(18.dp)) {
@@ -107,6 +110,21 @@ fun SettingsTab(bottom: Dp) {
                     WayLine(w, onClick = { if (i == 0) nav.go(Route.Connect) else nav.go(Route.Remote) })
                 }
                 if (ways.size == 1) WayLine(null, onClick = { nav.go(Route.Remote) })
+                WayLine(
+                    com.kilon.agentvscreen.host.Access.Way(
+                        name = tr("云端（公网 MCP）", "Cloud (Public MCP)"),
+                        state = when {
+                            !pubOn -> tr("默认关闭 · Tailscale Funnel", "Off · Tailscale Funnel")
+                            ts.funnel == "on" -> tr("已开启", "On")
+                            ts.funnel == "cert" -> tr("申请证书中…", "Fetching cert…")
+                            ts.funnel == "error" -> tr("启动失败", "Failed")
+                            else -> tr("启动中…", "Starting…")
+                        },
+                        ok = pubOn && ts.funnel == "on",
+                        inUse = false,
+                    ),
+                    onClick = { nav.go(Route.PublicAccess) },
+                )
                 // 1.4.0-beta8: connecting an agent is the 接入 tab now; here only the tokens.
                 SoftButton(onClick = { nav.go(Route.Tokens) }, modifier = Modifier.fillMaxWidth()) { Text(tr("令牌 ${tokens.size}", "Tokens ${tokens.size}")) }
             }
@@ -126,13 +144,23 @@ fun SettingsTab(bottom: Dp) {
                     }
                 }
             }
+            ArrowPreference(
+                title = tr("安全", "Security"),
+                endActions = {
+                    Value(if (secLevel == com.kilon.agentvscreen.host.Risk.SecurityLevel.STRICT) tr("严格", "Strict") else tr("标准", "Standard"))
+                },
+                onClick = { nav.go(Route.Security) },
+            )
             ArrowPreference(title = tr("应用规则", "App rules"), summary = tr("禁止、只读或每次询问", "Blocked, read-only or ask every time"),
                 endActions = { Value(if (rules.isEmpty()) tr("无", "None") else tr("${rules.size} 条", "${rules.size}")) }, onClick = { nav.go(Route.Rules) })
         }
 
         Group(tr("副屏", "Background screen")) {
-            SwitchPreference(checked = s.showPreview, onCheckedChange = { BackgroundOperation.setShowPreview(it); if (it) Overlay.refresh() },
-                title = tr("显示悬浮窗", "Floating window"), summary = tr("有副屏时显示在最上层", "On top while there is a screen"))
+            ArrowPreference(
+                title = tr("悬浮窗", "Floating window"),
+                summary = if (s.showPreview) tr("显示中 · 小窗交互与按钮", "Shown · mini-window behavior & buttons") else tr("已关闭", "Off"),
+                onClick = { nav.go(Route.FloatingWindow) },
+            )
             // 1.4.0-beta13 (rainbow): sound has its own page: the screen's muting, what is silent now, muting by hand.
             ArrowPreference(title = tr("应用静音", "App sound"), summary = if (com.kilon.agentvscreen.core.VScreenMute.enabled) tr("副屏静音开着；可手动静音、恢复应用", "Screen muting on; mute or unmute apps by hand")
                 else tr("副屏静音关着；可手动静音、恢复应用", "Screen muting off; mute or unmute apps by hand"), onClick = { nav.go(Route.Sound) })
@@ -179,6 +207,11 @@ fun SettingsTab(bottom: Dp) {
                 Value(when { checking -> tr("检查中…", "Checking…"); newer != null -> tr("有新版本 ${newer!!.version}", "New: ${newer!!.version}"); else -> BuildConfig.VERSION_NAME },
                     if (newer != null) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantActions)
             }, onClick = { if (!checking) scope.launch { update = withContext(Dispatchers.IO) { Updates.check(ctx) } } })
+            ArrowPreference(
+                title = tr("更新日志", "What's new"),
+                endActions = { Value(BuildConfig.VERSION_NAME) },
+                onClick = { ChangesSheetHost.show(com.kilon.agentvscreen.Changes.allUserReleases()) },
+            )
             // 1.4.2 (rainbow): which releases the check looks at.
             var channel by remember { mutableStateOf(Updates.channel(ctx)) }
             OverlayDropdownPreference(items = listOf(tr("正式版", "Releases"), tr("测试版（含正式版）", "Betas (and releases)")), selectedIndex = channel.ordinal,
@@ -388,4 +421,138 @@ internal object H {
     val setup get() = tr("只用 Shizuku（或 Root）这一条特权通道：不占用 adb，不改无线调试，不重启 adbd。每一项都只把本应用“加进去”，不动别的应用的设置。你的 agent 自己的 adb / Shizuku 照常用。", "Uses only Shizuku (or root) as its privilege channel: adb is not taken, wireless debugging is not changed, adbd is not restarted. Each item only adds this app and leaves other apps' settings alone. Your agent's own adb / Shizuku keep working.")
     val diag get() = tr("出问题时把诊断信息发给开发者：版本、配置状态和最近日志（不含令牌、不含你输入的字）。", "When something goes wrong, send this to the developer: version, setup state and recent log (no token, nothing you typed).")
 }
+
+/** 2.0.0-beta8 (B2): Settings › Security — Standard (default) vs Strict confirmation level. */
+@Composable
+fun SecurityPage() {
+    val ctx = LocalContext.current
+    val actx = ctx.applicationContext
+    val host = LocalHost.current
+    val level by com.kilon.agentvscreen.host.Risk.securityLevelFlow.collectAsState()
+    var help by remember { mutableStateOf(false) }
+
+    MiuixPage(
+        title = tr("安全", "Security"),
+        subtitle = tr("控制 agent 权限的有效期与重新确认频率", "Control how long agent grants stay valid"),
+        actions = {
+            LinkButton(onClick = { help = true }) { Text("?") }
+        },
+    ) {
+        Group(tr("安全级别", "Security level")) {
+            top.yukonga.miuix.kmp.preference.RadioButtonPreference(
+                title = tr("标准（默认）", "Standard (default)"),
+                summary = tr("接入时授予的权限一直有效，直到你撤销", "Granted scopes stay valid until you revoke them"),
+                selected = level == com.kilon.agentvscreen.host.Risk.SecurityLevel.STANDARD,
+                onClick = {
+                    if (level == com.kilon.agentvscreen.host.Risk.SecurityLevel.STRICT) {
+                        // Loosening from Strict -> Standard requires biometric/strong confirmation via TRUST_SET (B2).
+                        val mainTok = Tokens.byId(Tokens.MAIN)
+                            ?: Tokens.Token(Tokens.MAIN, tr("安全级别", "Security level"), "", "system", 0L)
+                        val req = com.kilon.agentvscreen.host.StrongConfirm.createUiMultiRiskRequest(
+                            ctx = actx,
+                            risks = listOf(com.kilon.agentvscreen.host.Risk.TRUST_SET),
+                            token = mainTok,
+                            commandName = tr("将安全级别从「严格」切到「标准」", "Switch security level to Standard"),
+                            detail = tr(
+                                "切换后，接入时授予的权限不再按 8 小时 / 24 小时过期；付款、发送、删除、安装、频率异常和开启公网仍需确认。",
+                                "Granted scopes will no longer expire after 8 h / 24 h. Payments, sends, deletes, installs, rate spikes, and public access still require confirmation.",
+                            ),
+                            onApprove = {
+                                com.kilon.agentvscreen.host.Risk.setSecurityLevel(actx, com.kilon.agentvscreen.host.Risk.SecurityLevel.STANDARD)
+                                host.say(tr("已切换到标准安全级别", "Switched to Standard security level"))
+                            },
+                        )
+                        StrongConfirmActivity.open(actx, req.id)
+                    }
+                },
+            )
+            top.yukonga.miuix.kmp.preference.RadioButtonPreference(
+                title = tr("严格", "Strict"),
+                summary = tr("系统操作每 24 小时、会话每 8 小时重新确认", "Re-confirm system scope every 24 h and sessions every 8 h"),
+                selected = level == com.kilon.agentvscreen.host.Risk.SecurityLevel.STRICT,
+                onClick = {
+                    if (level != com.kilon.agentvscreen.host.Risk.SecurityLevel.STRICT) {
+                        com.kilon.agentvscreen.host.Risk.setSecurityLevel(actx, com.kilon.agentvscreen.host.Risk.SecurityLevel.STRICT)
+                        host.say(tr("已切换到严格安全级别", "Switched to Strict security level"))
+                    }
+                },
+            )
+        }
+        Footnote(
+            tr(
+                "两档都会保留：高风险操作逐次确认（付款、发送、删除、卸载、安装）、异常频率确认、以及开启公网接入时的生物识别确认。",
+                "Both levels always keep per-action high-risk confirmation (payments, sends, deletes, installs), abnormal rate confirmation, and biometric confirmation for public access.",
+            ),
+        )
+    }
+
+    if (help) {
+        GlassDialog(
+            onDismissRequest = { help = false },
+            title = { DialogTitle(tr("安全级别说明", "About security levels")) },
+            text = {
+                Text(
+                    tr(
+                        "• 标准（默认）：接入新 agent 时由你在手机主屏一次授权，之后该 agent 在已授权限内不再反复弹窗；随时可在 agent 详情页降级或撤销。\n\n• 严格：沿用定时过期规则，系统级操作 24 小时过期，连续使用超过 8 小时重新确认。\n\n无论哪一档，授权都只能在手机主屏由你本人确认，副屏无法触及。",
+                        "• Standard (default): you authorize an agent's scope once on the main screen during onboarding; it won't re-prompt on timers. You can downgrade or revoke anytime on the agent's page.\n\n• Strict: system scope expires after 24 hours and sessions re-confirm every 8 hours.\n\nIn both levels, confirmations only happen on the main screen and cannot be reached from the virtual screen.",
+                    ),
+                    fontSize = 13.5.sp,
+                    lineHeight = 20.sp,
+                )
+            },
+            confirmButton = { LinkButton(onClick = { help = false }) { Text(tr("完成", "Done")) } },
+        )
+    }
+}
+
+/** 2.0.0-beta8 (K.5): Settings › Floating window — main toggle + mini-window behavior switches with "?" help. */
+@Composable
+fun FloatingWindowPage() {
+    val s by BackgroundOperation.state.collectAsState()
+    var help by remember { mutableStateOf(false) }
+
+    MiuixPage(
+        title = tr("悬浮窗", "Floating window"),
+        actions = {
+            LinkButton(onClick = { help = true }) { Text("?") }
+        },
+    ) {
+        Group {
+            SwitchPreference(
+                checked = s.showPreview,
+                onCheckedChange = { BackgroundOperation.setShowPreview(it); if (it) Overlay.refresh() },
+                title = tr("显示悬浮窗", "Show floating window"),
+            )
+            SwitchPreference(
+                checked = s.miniShowControls,
+                onCheckedChange = { BackgroundOperation.setMiniShowControls(it) },
+                title = tr("小窗显示按钮", "Show buttons on mini window"),
+            )
+            SwitchPreference(
+                checked = s.miniTapToExpand,
+                onCheckedChange = { BackgroundOperation.setMiniTapToExpand(it) },
+                title = tr("点小窗自动放大", "Tap mini window to expand"),
+            )
+        }
+    }
+
+    if (help) {
+        GlassDialog(
+            onDismissRequest = { help = false },
+            title = { DialogTitle(tr("悬浮窗说明", "About floating window")) },
+            text = {
+                Text(
+                    tr(
+                        "• 显示悬浮窗：有副屏时在最上层显示实时画面。\n\n• 小窗显示按钮：开启后，右上角小窗也显示标题、全屏、关闭和停止 AI 按钮。\n\n• 点小窗自动放大：默认开启；关闭后轻点小窗不再居中放大，只保留拖动、贴边折叠和长按操作。",
+                        "• Show floating window: displays the live background screen above other apps.\n\n• Show buttons on mini window: when on, the compact corner window also shows title, fullscreen, close, and stop-AI buttons.\n\n• Tap mini window to expand: on by default; turn off so tapping the mini window stays compact instead of expanding to center.",
+                    ),
+                    fontSize = 13.5.sp,
+                    lineHeight = 20.sp,
+                )
+            },
+            confirmButton = { LinkButton(onClick = { help = false }) { Text(tr("完成", "Done")) } },
+        )
+    }
+}
+
 
