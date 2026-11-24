@@ -97,6 +97,14 @@ object StrongConfirm {
         val reusable: Boolean = false,
         val allowHold: Boolean = true,
         val onApprove: (() -> Unit)? = null,
+        /** 2.0.0-beta7 (7.2, 7.7): public OAuth NEW_CLIENT pairing code, client name, redirect host & scope picker. */
+        val pairingCode: String? = null,
+        val publicClientName: String? = null,
+        val redirectHost: String? = null,
+        val selectableScopes: List<String> = emptyList(),
+        val defaultScope: String = "look",
+        val onApproveWithScope: ((String) -> Unit)? = null,
+        val onDeny: (() -> Unit)? = null,
     ) {
         @Volatile var answer: Boolean? = null
         @Volatile var answeredBy: String? = null
@@ -340,6 +348,123 @@ object StrongConfirm {
         return req
     }
 
+    /** 2.0.0-beta7 (7.4, 7.7): strong confirmation to enable public MCP access (never allows hold-to-confirm). */
+    fun createPublicEnableRequest(
+        ctx: Context,
+        onApprove: () -> Unit,
+        onDeny: (() -> Unit)? = null,
+    ): Request {
+        val key = "${Risk.PUBLIC_ENABLE.name}:main"
+        val now = clock()
+        return synchronized(lock) {
+            pruneRequestsLocked(now)
+            requests.removeAll { it.key == key && it.answer == null }
+            Request(
+                id = newId(),
+                risk = Risk.PUBLIC_ENABLE,
+                key = key,
+                tokenId = Tokens.MAIN,
+                tokenName = tr("本机设置", "Phone settings"),
+                tokenScope = "operate",
+                client = Risk.CLIENT_LOCAL,
+                commandName = tr("开启公网 MCP 接入", "Enable public MCP access"),
+                detail = tr("开启后将通过 Tailscale Funnel 提供公网 HTTPS MCP 入口", "Enables a public HTTPS MCP endpoint via Tailscale Funnel"),
+                at = now,
+                validMs = VALID_MS,
+                reusable = false,
+                allowHold = false,
+                onApprove = onApprove,
+                onDeny = onDeny,
+            ).also {
+                requests += it
+                publishPendingLocked(now)
+            }
+        }
+    }
+
+    /**
+     * 2.0.0-beta7 (7.2, 7.7, 7.8 #5): strong confirmation (`NEW_CLIENT`) for a public OAuth pairing.
+     * Displays pairing code, client_name, redirect_uri host, and look/operate picker (never system, never hold).
+     */
+    fun createPublicPairingRequest(
+        ctx: Context,
+        pairingId: String,
+        clientId: String,
+        clientName: String,
+        redirectHost: String,
+        pairingCode: String,
+        selectableScopes: List<String>,
+        validMs: Long,
+        onApproveWithScope: (String) -> Unit,
+        onDeny: () -> Unit,
+    ): Request {
+        val safeScopes = selectableScopes.filter { it in Tokens.PUBLIC_SCOPES }.distinct().ifEmpty { listOf("look") }
+        val key = "PUBLIC_PAIRING:$pairingId"
+        val now = clock()
+        val req = synchronized(lock) {
+            pruneRequestsLocked(now)
+            requests.removeAll { it.key == key && it.answer == null }
+            Request(
+                id = newId(),
+                risk = Risk.NEW_CLIENT,
+                key = key,
+                tokenId = "pending:$pairingId",
+                tokenName = clientName,
+                tokenScope = "look",
+                client = "public:$clientId",
+                commandName = tr("公网 MCP 客户端配对", "Public MCP client pairing"),
+                detail = redirectHost,
+                at = now,
+                validMs = validMs,
+                reusable = false,
+                allowHold = false,
+                pairingCode = pairingCode,
+                publicClientName = clientName,
+                redirectHost = redirectHost,
+                selectableScopes = safeScopes,
+                defaultScope = "look",
+                onApproveWithScope = onApproveWithScope,
+                onDeny = onDeny,
+            ).also {
+                requests += it
+                publishPendingLocked(now)
+            }
+        }
+        notify(ctx, req)
+        if (AppFront.visible) {
+            quiet("public-pairing-open") { com.kilon.agentvscreen.ui.StrongConfirmActivity.open(ctx, req.id) }
+        }
+        return req
+    }
+
+    /**
+     * 2.0.0-beta7 (7.2, 7.7): persist NEW_CLIENT (and SCOPE_OPERATE when granted) after a public OAuth pairing
+     * is approved on-phone so the client can immediately call MCP tools within its granted scope.
+     */
+    internal fun recordPublicPairingApproval(tokenId: String, client: String, grantedScope: String, by: String = BY_BIOMETRIC) {
+        val now = clock()
+        synchronized(lock) {
+            putApprovalLocked(Approval(Risk.NEW_CLIENT.name, tokenId, client, now, 0L, by))
+            if (grantedScope == "operate") {
+                putApprovalLocked(Approval(Risk.SCOPE_OPERATE.name, tokenId, client, now, 0L, by))
+            }
+            saveLocked()
+            publishApprovalsLocked()
+        }
+    }
+
+    /** Remove a public pairing request (e.g. when settled or cancelled externally). */
+    internal fun clearPublicPairing(ctx: Context?, pairingId: String) {
+        val key = "PUBLIC_PAIRING:$pairingId"
+        val removed = synchronized(lock) {
+            val ids = requests.filter { it.key == key }.map { it.id }
+            requests.removeAll { it.key == key }
+            publishPendingLocked(clock())
+            ids
+        }
+        if (ctx != null) removed.forEach { cancelNotification(ctx, it) }
+    }
+
     /**
      * Block a command for [risk] (6.3 / 6.4): reuses any pending request for the same key (no duplicate notification),
      * waits up to [WAIT_MS], throws `USER_DENIED` or `NEEDS_CONFIRM` (with structured `confirm` object).
@@ -360,7 +485,7 @@ object StrongConfirm {
             detail = "",
             validMs = VALID_MS,
             reusable = false,
-            allowHold = true,
+            allowHold = call.source != Call.Source.PUBLIC,
             nowMs = now,
         )
         if (created) notify(ctx, req)
@@ -444,7 +569,7 @@ object StrongConfirm {
             detail = detail,
             validMs = validMs,
             reusable = reusable,
-            allowHold = true,
+            allowHold = call?.source != Call.Source.PUBLIC,
             nowMs = now,
         )
         if (created) notify(ctx, req)
@@ -539,16 +664,23 @@ object StrongConfirm {
     /**
      * Called ONLY by [com.kilon.agentvscreen.ui.StrongConfirmActivity] after L4 biometric/PIN or 6.2 hold+L6 completes.
      */
-    internal fun approve(ctx: Context, id: String, by: String): Boolean {
+    internal fun approve(ctx: Context, id: String, by: String, chosenScope: String? = null): Boolean {
         require(by == BY_BIOMETRIC || by == BY_HOLD) { "invalid strong confirm method: $by" }
         val now = clock()
+        var holdRefusedRisk: String? = null
         val req = synchronized(lock) {
             val r = requests.firstOrNull { it.id == id && it.answer == null } ?: return false
+            if (by == BY_HOLD && !r.allowHold) {
+                holdRefusedRisk = r.risk.name
+                return@synchronized null
+            }
             r.answer = true
             r.answeredBy = by
             r.answeredAt = now
-            bumpLastConfirmLocked(r.tokenId, now)
-            if (r.risk != Risk.HIGH_RISK && r.risk != Risk.TRUST_SET) {
+            if (!r.tokenId.startsWith("pending:")) {
+                bumpLastConfirmLocked(r.tokenId, now)
+            }
+            if (r.risk != Risk.HIGH_RISK && r.risk != Risk.TRUST_SET && r.risk != Risk.PUBLIC_ENABLE && r.onApproveWithScope == null) {
                 val until = if (r.risk.ttlMs == 0L) 0L else now + r.risk.ttlMs
                 putApprovalLocked(Approval(r.risk.name, r.tokenId, r.client, now, until, by))
                 saveLocked()
@@ -558,6 +690,11 @@ object StrongConfirm {
             lock.notifyAll()
             r
         }
+        if (holdRefusedRisk != null) {
+            Audit.security("strong_confirm_hold_refused", "id=$id risk=$holdRefusedRisk")
+            return false
+        }
+        if (req == null) return false
         Audit.security(
             "strong_confirm_approved",
             "id=${req.id} risk=${req.risk.name} token=${req.tokenName} client=${req.client} by=$by",
@@ -565,7 +702,14 @@ object StrongConfirm {
         if (req.risk == Risk.HIGH_RISK) {
             Audit.consent(req.tokenName, "-", "${req.commandName} — ${req.detail}", "allowed ($by)")
         }
-        runCatching { req.onApprove?.invoke() }.onFailure { AppLogger.warning("StrongConfirm", "onApprove failed: ${it.message}") }
+        if (req.onApproveWithScope != null) {
+            val allowed = req.selectableScopes.filter { it in Tokens.PUBLIC_SCOPES }.ifEmpty { listOf("look") }
+            val granted = chosenScope?.takeIf { it in allowed } ?: req.defaultScope.takeIf { it in allowed } ?: "look"
+            runCatching { req.onApproveWithScope.invoke(granted) }
+                .onFailure { AppLogger.warning("StrongConfirm", "onApproveWithScope failed: ${it.message}") }
+        } else {
+            runCatching { req.onApprove?.invoke() }.onFailure { AppLogger.warning("StrongConfirm", "onApprove failed: ${it.message}") }
+        }
         cancelNotification(ctx, req.id)
         return true
     }
@@ -589,6 +733,7 @@ object StrongConfirm {
         if (req.risk == Risk.HIGH_RISK) {
             Audit.consent(req.tokenName, "-", "${req.commandName} — ${req.detail}", "denied")
         }
+        runCatching { req.onDeny?.invoke() }.onFailure { AppLogger.warning("StrongConfirm", "onDeny failed: ${it.message}") }
         cancelNotification(ctx, req.id)
         return true
     }
@@ -646,10 +791,17 @@ object StrongConfirm {
                 com.kilon.agentvscreen.ui.MainDisplay.options(),
             )
             val clientText = clientLabel(req.client)
-            val body = tr(
-                "令牌「${req.tokenName}」· $clientText · ${req.commandName}。点此打开强确认页。",
-                "Token \"${req.tokenName}\" · $clientText · ${req.commandName}. Tap to open strong confirmation.",
-            )
+            val body = if (req.pairingCode != null) {
+                tr(
+                    "配对码 ${req.pairingCode} · ${req.publicClientName ?: req.tokenName}（${req.redirectHost ?: "-"}）。点此核对并确认。",
+                    "Pairing code ${req.pairingCode} · ${req.publicClientName ?: req.tokenName} (${req.redirectHost ?: "-"}). Tap to verify and confirm.",
+                )
+            } else {
+                tr(
+                    "令牌「${req.tokenName}」· $clientText · ${req.commandName}。点此打开强确认页。",
+                    "Token \"${req.tokenName}\" · $clientText · ${req.commandName}. Tap to open strong confirmation.",
+                )
+            }
             val n = NotificationCompat.Builder(ctx, CHANNEL)
                 .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)

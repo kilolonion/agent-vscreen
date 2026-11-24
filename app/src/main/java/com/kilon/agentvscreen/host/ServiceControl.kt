@@ -113,6 +113,7 @@ object ServiceControl {
         if (BackgroundOperation.state.value.displayId != null) return false
         if (Wake.windowOpen(ctx, t)) return false
         if (UserAsk.open.value.any { it.live }) return false
+        if (PublicAccess.enabled) return false
         if (runCatching { com.kilon.agentvscreen.core.VScreenRules.running().isNotEmpty() || com.kilon.agentvscreen.cmd.Tasks.running() > 0 }.getOrDefault(false)) return false
         return true
     }

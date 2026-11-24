@@ -115,6 +115,7 @@ sealed interface Route : NavKey {
     @Serializable data object NewAgent : Route
     @Serializable data class Agent(val id: String) : Route
     @Serializable data object Remote : Route
+    @Serializable data object PublicAccess : Route
     @Serializable data object Tokens : Route
     @Serializable data object Rules : Route
     @Serializable data object Schedules : Route
@@ -214,6 +215,7 @@ fun AppRoot(host: AppHost, firstPage: Route?, snack: SnackbarHostState, firstTab
                 entry<Route.Setup>(swipeDismiss = swipe) { SetupFlowPage() }
                 entry<Route.Connect>(swipeDismiss = swipe) { ConnectPage() }
                 entry<Route.Remote>(swipeDismiss = swipe) { RemotePage() }
+                entry<Route.PublicAccess>(swipeDismiss = swipe) { PublicAccessPage() }
                 entry<Route.NewAgent>(swipeDismiss = swipe) { NewAgentPage() }
                 entry<Route.Agent>(swipeDismiss = swipe) { r -> AgentPage(r.id) }
                 entry<Route.Tokens>(swipeDismiss = swipe) { TokensPage() }

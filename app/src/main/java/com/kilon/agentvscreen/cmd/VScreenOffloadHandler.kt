@@ -102,7 +102,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         val sid = request.sessionId?.takeIf { it.isNotBlank() } ?: DEFAULT_SESSION
         if (argv.firstOrNull() != "release") com.kilon.agentvscreen.api.Turns.bumpTurn(sid)
         if (argv.firstOrNull() !in setOf(null, "help", "--help", "-h"))
-            com.kilon.agentvscreen.host.quiet("audit") { Audit.command(call?.tokenName ?: "main", call?.peer, sid, argv, r.codeOrDefault, r.exitCode, android.os.SystemClock.elapsedRealtime() - t0, call?.requestId) }
+            com.kilon.agentvscreen.host.quiet("audit") { Audit.command(call?.tokenName ?: "main", call?.peer, sid, argv, r.codeOrDefault, r.exitCode, android.os.SystemClock.elapsedRealtime() - t0, call?.requestId, call?.source?.key) }
         if (argv.firstOrNull() !in setOf(null, "help", "--help", "-h"))
             com.kilon.agentvscreen.host.quiet("tasklog") { com.kilon.agentvscreen.core.TaskLog.onCommand(sid, call?.tokenName ?: "main", argv, r.codeOrDefault, r.exitCode, android.os.SystemClock.elapsedRealtime() - t0, r.output, r) }
         return r

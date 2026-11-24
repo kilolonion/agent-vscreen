@@ -32,6 +32,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,7 +42,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
 import androidx.compose.material3.Icon
@@ -56,15 +59,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.kilon.agentvscreen.api.Tokens
 import com.kilon.agentvscreen.host.Audit
+import com.kilon.agentvscreen.host.Risk
 import com.kilon.agentvscreen.host.StrongConfirm
 import com.kilon.agentvscreen.tr
 import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.RadioButton
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -121,6 +128,7 @@ class StrongConfirmActivity : ComponentActivity() {
     private var requestIdState = mutableStateOf<String?>(null)
     private var secureState = mutableStateOf(false)
     private var statusMessageState = mutableStateOf<String?>(null)
+    private var selectedScopeState = mutableStateOf("look")
     private var bioCancel: CancellationSignal? = null
     private var actionBar: LinearLayout? = null
     private var denyBtn: TextView? = null
@@ -158,6 +166,7 @@ class StrongConfirmActivity : ComponentActivity() {
 
         requestIdState.value = resolveId(intent)
         secureState.value = isDeviceSecure()
+        selectedScopeState.value = resolveActiveRequest()?.defaultScope ?: "look"
 
         val root = FrameLayout(this)
         val compose = ComposeView(this).apply {
@@ -245,6 +254,7 @@ class StrongConfirmActivity : ComponentActivity() {
         statusMessageState.value = null
         requestIdState.value = resolveId(intent)
         secureState.value = isDeviceSecure()
+        selectedScopeState.value = resolveActiveRequest()?.defaultScope ?: "look"
         syncNativeBar()
     }
 
@@ -302,14 +312,19 @@ class StrongConfirmActivity : ComponentActivity() {
         try {
             val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
                 BiometricManager.Authenticators.DEVICE_CREDENTIAL
+            val subtitle = if (req.pairingCode != null) {
+                tr("配对码 ${req.pairingCode} · ${req.publicClientName ?: req.tokenName}", "Pairing ${req.pairingCode} · ${req.publicClientName ?: req.tokenName}")
+            } else {
+                tr("令牌「${req.tokenName}」· ${req.commandName}", "Token \"${req.tokenName}\" · ${req.commandName}")
+            }
             val prompt = BiometricPrompt.Builder(this)
                 .setTitle(req.risk.title)
-                .setSubtitle(tr("令牌「${req.tokenName}」· ${req.commandName}", "Token \"${req.tokenName}\" · ${req.commandName}"))
+                .setSubtitle(subtitle)
                 .setAllowedAuthenticators(authenticators)
                 .build()
             prompt.authenticate(sig, mainExecutor, object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    StrongConfirm.approve(applicationContext, req.id, StrongConfirm.BY_BIOMETRIC)
+                    StrongConfirm.approve(applicationContext, req.id, StrongConfirm.BY_BIOMETRIC, selectedScopeState.value)
                     if (!isFinishing && !isDestroyed) finish()
                 }
 
@@ -335,6 +350,7 @@ class StrongConfirmActivity : ComponentActivity() {
         val secure = secureState.value
         var showHelp by remember { mutableStateOf(false) }
         val statusMsg = statusMessageState.value
+        val chosenScope = selectedScopeState.value
 
         Box(
             Modifier
@@ -365,62 +381,139 @@ class StrongConfirmActivity : ComponentActivity() {
                 }
             } else {
                 Column(
-                    Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.SpaceBetween,
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(bottom = 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        // Top bar: risk title + '?' help button (no prose wall on the card, per 6.5).
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
+                    // Top bar: risk title + '?' help button (no prose wall on the card, per 6.5).
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            req.risk.title,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { showHelp = true }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.HelpOutline,
+                                contentDescription = tr("说明", "Help"),
+                                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            )
+                        }
+                    }
+
+                    // 6.2: permanent top warning banner when the phone has no screen lock PIN/biometric.
+                    if (!secure) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color(0x26FF9800))
+                                .border(1.dp, Color(0x66FF9800), RoundedCornerShape(16.dp))
+                                .padding(horizontal = 14.dp, vertical = 10.dp),
                         ) {
                             Text(
-                                req.risk.title,
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.weight(1f),
+                                if (req.allowHold) tr("建议设置锁屏密码，确认会更安全", "Set a screen lock PIN or biometric for stronger confirmations")
+                                else tr("公网相关确认必须先设置手机锁屏密码，不支持长按确认。", "Public access confirmations require a phone screen lock (PIN/biometric) and do not allow hold-to-confirm."),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = MiuixTheme.colorScheme.onSurface,
                             )
-                            IconButton(onClick = { showHelp = true }) {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.HelpOutline,
-                                    contentDescription = tr("说明", "Help"),
-                                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                )
-                            }
                         }
+                    }
 
-                        // 6.2: permanent top warning banner when the phone has no screen lock PIN/biometric.
-                        if (!secure) {
-                            Box(
+                    // 6.5 / 7.2 / 7.7: glass card (public pairing shows pairing code, client_name, redirect host, look/operate).
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .glass(RoundedCornerShape(24.dp))
+                            .border(
+                                1.2.dp,
+                                Brush.linearGradient(listOf(Color(0xFF8B7CFF), Palette.asking)),
+                                RoundedCornerShape(24.dp),
+                            )
+                            .padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        if (req.pairingCode != null) {
+                            Column(
                                 Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(16.dp))
-                                    .background(Color(0x26FF9800))
-                                    .border(1.dp, Color(0x66FF9800), RoundedCornerShape(16.dp))
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    .background(Color(0x1F7B6CFF))
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
                                 Text(
-                                    tr("建议设置锁屏密码，确认会更安全", "Set a screen lock PIN or biometric for stronger confirmations"),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MiuixTheme.colorScheme.onSurface,
+                                    tr("核对配对码", "Verify pairing code"),
+                                    fontSize = 12.sp,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                                Text(
+                                    req.pairingCode,
+                                    fontSize = 28.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    letterSpacing = 2.sp,
                                 )
                             }
-                        }
-
-                        // 6.5: glass card with fixed 3 lines (token name+scope, client, command name — no arg text).
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .glass(RoundedCornerShape(24.dp))
-                                .border(
-                                    1.2.dp,
-                                    Brush.linearGradient(listOf(Color(0xFF8B7CFF), Palette.asking)),
-                                    RoundedCornerShape(24.dp),
+                            InfoLine(
+                                label = tr("客户端", "Client"),
+                                value = req.publicClientName ?: req.tokenName,
+                            )
+                            InfoLine(
+                                label = tr("回调域名", "Redirect host"),
+                                value = req.redirectHost ?: "-",
+                            )
+                            val opts = req.selectableScopes.filter { it in Tokens.PUBLIC_SCOPES }.ifEmpty { listOf("look") }
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    tr("授予权限（公网永不开放“系统”权限）", "Granted scope (\"system\" is never available over public MCP)"),
+                                    fontSize = 12.sp,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                 )
-                                .padding(20.dp),
-                            verticalArrangement = Arrangement.spacedBy(14.dp),
-                        ) {
+                                opts.forEach { sc ->
+                                    val active = chosenScope == sc
+                                    Row(
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .clickable { selectedScopeState.value = sc }
+                                            .padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        RadioButton(selected = active, onClick = { selectedScopeState.value = sc })
+                                        Column {
+                                            Text(scopeLabel(sc), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                            Text(
+                                                if (sc == "operate") tr("可打开并操作应用（高风险步骤仍需在手机确认）", "Can open and operate apps (high-risk steps still confirm on phone)")
+                                                else tr("仅查看屏幕和状态，不能点击或输入（默认）", "View screen and status only; cannot tap or type (default)"),
+                                                fontSize = 12.sp,
+                                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } else if (req.risk == Risk.PUBLIC_ENABLE) {
+                            InfoLine(
+                                label = tr("操作", "Action"),
+                                value = req.commandName,
+                            )
+                            if (req.detail.isNotBlank()) {
+                                InfoLine(
+                                    label = tr("说明", "Details"),
+                                    value = req.detail,
+                                )
+                            }
+                        } else {
                             InfoLine(
                                 label = tr("令牌", "Token"),
                                 value = "${req.tokenName}（${scopeLabel(req.tokenScope)}）",
@@ -433,20 +526,20 @@ class StrongConfirmActivity : ComponentActivity() {
                                 label = tr("操作", "Action"),
                                 value = req.commandName,
                             )
-                            if (statusMsg != null) {
-                                Text(
-                                    statusMsg,
-                                    fontSize = 13.sp,
-                                    color = MiuixTheme.colorScheme.error,
-                                )
-                            }
-                            if (!secure && !req.allowHold) {
-                                Text(
-                                    tr("此操作必须先设置手机锁屏密码，不支持长按确认。", "This action requires a screen lock PIN/biometric and does not allow hold-to-confirm."),
-                                    fontSize = 13.sp,
-                                    color = MiuixTheme.colorScheme.error,
-                                )
-                            }
+                        }
+                        if (statusMsg != null) {
+                            Text(
+                                statusMsg,
+                                fontSize = 13.sp,
+                                color = MiuixTheme.colorScheme.error,
+                            )
+                        }
+                        if (!secure && !req.allowHold) {
+                            Text(
+                                tr("此操作必须先设置手机锁屏密码，不支持长按确认。", "This action requires a screen lock PIN/biometric and does not allow hold-to-confirm."),
+                                fontSize = 13.sp,
+                                color = MiuixTheme.colorScheme.error,
+                            )
                         }
                     }
                 }

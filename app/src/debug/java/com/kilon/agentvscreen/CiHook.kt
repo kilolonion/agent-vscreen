@@ -52,6 +52,11 @@ class CiHook : BroadcastReceiver() {
                     File(app.filesDir, "ci-wait.txt").writeText("wait_ms=$ms\n")
                     return@Thread
                 }
+                // 2.0.0-beta7 (7.6, 7.7): debug-only hook for tools/android-smoke/public_local.py (18785 secret, pairing, clock).
+                intent.getStringExtra("public")?.let { cmd ->
+                    PublicTestHook.handle(app, cmd)
+                    return@Thread
+                }
                 // 2.0.0-beta6 (6.8): `--es mk_token <name>:<scope>` creates a brand-new token with ZERO approvals.
                 intent.getStringExtra("mk_token")?.let { spec ->
                     val name = spec.substringBefore(':').ifBlank { "ci-fresh" }

@@ -52,6 +52,7 @@ jobs:
       # Debug: carries the CI hook (src/debug) that hands the test its token; release APKs never do.
       - run: ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease :torture:assembleDebug
       - run: tools/android-smoke/check_abis.sh "$AVS_BUILD_DIR/app/outputs/apk/debug/app-debug.apk" "$AVS_BUILD_DIR/app/outputs/apk/release/app-release.apk"
+      - run: tools/android-smoke/check_release_hooks.sh "$AVS_BUILD_DIR/app/outputs/apk/debug/app-debug.apk" "$AVS_BUILD_DIR/app/outputs/apk/release/app-release.apk"
       - uses: actions/upload-artifact@v5
         with:
           name: candidate
@@ -334,4 +335,39 @@ jobs:
           path: confirm-out/*
           if-no-files-found: warn
           retention-days: 7
+  public-local:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: candidate
+          path: test-apks
+      - run: |
+          find test-apks -type f -exec mv {} test-apks/ \; 2>/dev/null || true
+          ls -la test-apks
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          disable-animations: true
+          script: mkdir -p public-out && { python3 tools/android-smoke/public_local.py test-apks/app-debug.apk > public-out/public-local.log 2>&1; rc=$?; adb logcat -d > public-out/logcat.txt; cat public-out/public-local.log; grep -q '^SUMMARY all passed' public-out/public-local.log || exit 1; exit "$rc"; }
+      - if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: public-local-api34
+          path: public-out/*
+          if-no-files-found: warn
+          retention-days: 7
+
 

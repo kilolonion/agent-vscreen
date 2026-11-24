@@ -64,6 +64,9 @@ object Tailnet {
         val downS: Int = 0,
         /** 1.3.0: logged in, relay not reached yet since this start: connecting, not connected and not dropped. */
         val connecting: Boolean = false,
+        /** 2.0.0-beta7 (7.1, 7.8): Tailscale Funnel state ("starting", "on", "error") and exact error reason. */
+        val funnel: String? = null,
+        val funnelReason: String? = null,
     ) {
         /** Logged in and actually reachable. */
         val linkUp get() = loggedIn && controlOk && relayOk && !connecting
@@ -78,6 +81,7 @@ object Tailnet {
             .put("control", control ?: "tailscale").put("login_error", loginError ?: JSONObject.NULL)
             .put("control_ok", controlOk).put("relay_ok", relayOk).put("relay", relay ?: JSONObject.NULL)
             .put("flaps_10m", flaps).put("problem", problem ?: JSONObject.NULL)
+            .put("funnel", funnel ?: JSONObject.NULL).put("funnel_reason", funnelReason ?: JSONObject.NULL)
     }
 
     /**
@@ -225,7 +229,11 @@ object Tailnet {
     }
 
     @Synchronized fun sync(ctx: Context) {
-        if (ApiConfig.tailnetMode == Mode.BUILTIN) start(ctx.applicationContext) else stop("mode ${ApiConfig.tailnetMode}")
+        if (ApiConfig.tailnetMode == Mode.BUILTIN) start(ctx.applicationContext)
+        else {
+            if (PublicAccess.enabled) PublicAccess.disable(ctx.applicationContext, "tailnet_mode_${ApiConfig.tailnetMode.key}")
+            stop("mode ${ApiConfig.tailnetMode}")
+        }
     }
 
     @Synchronized private fun start(ctx: Context) {
@@ -247,7 +255,13 @@ object Tailnet {
     }
 
     /** Sign out of the tailnet (the node stays listed in the admin console until removed there). */
-    fun logout(ctx: Context? = null) { ctx?.let { forget(it) }; runCatching { stdin?.apply { write("logout\n"); flush() } } }
+    fun logout(ctx: Context? = null) {
+        ctx?.let {
+            if (PublicAccess.enabled) PublicAccess.disable(it.applicationContext, "tailnet_logout")
+            forget(it)
+        }
+        runCatching { stdin?.apply { write("logout\n"); flush() } }
+    }
 
     /** 1.1.7: ask the control server for a fresh login link (the bridge also does this by itself every 20 s). */
     fun login() { runCatching { stdin?.apply { write("login\n"); flush() } } }
@@ -278,6 +292,9 @@ object Tailnet {
         // Let the old node finish writing its state before it may be deleted.
         com.kilon.agentvscreen.host.quiet("Tailnet:134") { old?.waitFor(3, java.util.concurrent.TimeUnit.SECONDS) }
         ApiConfig.configureTailnet(control, authKey)
+        if (ApiConfig.tailnetControlUrl != null && PublicAccess.enabled) {
+            PublicAccess.disable(ctx.applicationContext, "headscale_selected")
+        }
         if (!authKey.isNullOrBlank()) {
             com.kilon.agentvscreen.host.quiet("Tailnet:138") { stateDir(ctx).deleteRecursively() }
         }
@@ -329,6 +346,14 @@ object Tailnet {
         ApiConfig.tailnetControlUrl?.let { env["TSB_CONTROL_URL"] = it }
         // An auth key is only needed until the node is registered; it is dropped as soon as the node runs.
         ApiConfig.tailnetAuthKey?.let { env["TSB_AUTHKEY"] = it }
+        // 2.0.0-beta7 (7.1, 7.7): enable Tailscale Funnel on official Tailscale with a freshly rotated secret (never logged).
+        if (PublicAccess.enabled && ApiConfig.tailnetControlUrl == null) {
+            val pubSrv = PublicAccess.ensureServer(ctx)
+            val pubPort = pubSrv.boundPort.takeIf { it > 0 } ?: PublicAccess.boundPort
+            env["TSB_FUNNEL"] = "1"
+            env["TSB_PUBLIC_TARGET"] = "127.0.0.1:$pubPort"
+            env["TSB_PUBLIC_SECRET"] = PublicAccess.rotateSecret()
+        }
         val p = synchronized(this) {
             if (g != gen || !wanted) return
             pb.start().also {
@@ -367,6 +392,8 @@ object Tailnet {
                 relay = o.optString("relay").takeIf { it.isNotBlank() }, flaps = o.optInt("flaps"),
                 problem = o.optString("problem").takeIf { it.isNotBlank() }, downS = o.optInt("down_s"),
                 connecting = o.optBoolean("connecting"),
+                funnel = o.optString("funnel").takeIf { it.isNotBlank() },
+                funnelReason = o.optString("reason").takeIf { it.isNotBlank() },
             )
             synchronized(this) {
                 if (g != gen) return@forEachLine

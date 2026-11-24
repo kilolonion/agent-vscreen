@@ -36,6 +36,7 @@ class NoteActions : BroadcastReceiver() {
                 }, "vscreen-handback").apply { isDaemon = true }.start()
             }
             Consent.ACTION -> Consent.answer(app, intent.getIntExtra("id", -1), intent.getBooleanExtra("allow", false))
+            PublicAccess.ACTION_PUBLIC_OFF -> PublicAccess.disable(app, "notification")
         }
     }
 }

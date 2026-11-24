@@ -54,6 +54,9 @@ jobs:
       - name: Built-in Tailscale node (tsbridge)
         run: ./tsbridge/build.sh
 
+      - name: tsbridge unit tests
+        run: (cd tsbridge && go test -v ./...)
+
       - name: OCR assets read on the app's onnxruntime
         run: |
           ORT=$(grep -o 'onnxruntime-android:[0-9.]*' app/build.gradle.kts | cut -d: -f2)
@@ -110,6 +113,9 @@ jobs:
 
       - name: Native code per APK (debug arm64 + x86_64, release arm64 only)
         run: tools/android-smoke/check_abis.sh "$AVS_BUILD_DIR/app/outputs/apk/debug/app-debug.apk" "$AVS_BUILD_DIR/app/outputs/apk/release/app-release.apk"
+
+      - name: Release APK contains no debug test hooks
+        run: tools/android-smoke/check_release_hooks.sh "$AVS_BUILD_DIR/app/outputs/apk/debug/app-debug.apk" "$AVS_BUILD_DIR/app/outputs/apk/release/app-release.apk"
 
       - name: Test reports
         if: failure()

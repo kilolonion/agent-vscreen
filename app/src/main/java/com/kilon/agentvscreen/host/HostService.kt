@@ -144,6 +144,7 @@ class HostService : Service() {
         Presence.start(applicationContext)
         A11yHeal.maybeHeal(applicationContext, "service start")
         Tailnet.sync(applicationContext)
+        PublicAccess.sync(applicationContext)
         com.kilon.agentvscreen.core.VScreenPower.heal(applicationContext, "service start")
         // 1.4.0-beta2 / 2.0.0-beta2: read a known picture once per app versionCode with both OCR engines, with a
         // crash guard persisted in private prefs so cold wakes do not repeat it or enter a crash loop.
@@ -153,6 +154,7 @@ class HostService : Service() {
         sleeper = scope.launch {
             while (true) {
                 kotlinx.coroutines.delay(60_000L)
+                PublicAccess.checkIdle(applicationContext)
                 if (ServiceControl.shouldSleep(applicationContext)) {
                     AppLogger.info("HostService", "nothing needs the service: hidden again")
                     BackgroundOperation.stopAndRelease(tr("用完了，自动收起", "Done: hidden again"))
@@ -229,6 +231,7 @@ class HostService : Service() {
         startGateBeat()
         Presence.start(applicationContext) // the overlay permission may have arrived since
         Tailnet.sync(applicationContext)
+        PublicAccess.sync(applicationContext)
         com.kilon.agentvscreen.core.VScreenPower.heal(applicationContext, "service restart")
         renotify()
         return START_STICKY
@@ -255,6 +258,7 @@ class HostService : Service() {
         beatThread?.interrupt(); beatThread = null
         watch?.cancel(); sleeper?.cancel()
         Tailnet.stop("service destroyed")
+        PublicAccess.onServiceDestroyed(applicationContext)
         com.kilon.agentvscreen.host.quiet("HostService:167") { getSystemService(NotificationManager::class.java)?.cancel(STOP_NOTE_ID) }
         Overlay.detach()
         Presence.stop()

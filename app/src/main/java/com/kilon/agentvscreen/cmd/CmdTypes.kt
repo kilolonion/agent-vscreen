@@ -32,7 +32,14 @@ class Call(val session: String, val tokenId: String = "main", val tokenName: Str
            /** The user gave this token a period without confirmations (epoch ms; 0 = none). */
            val trustUntil: Long = 0L,
            /** 1.4: how the caller reaches us (shell CLI, MCP, raw HTTP): texts for the agent name commands its way. */
-           val via: com.kilon.agentvscreen.api.Abilities.Via = com.kilon.agentvscreen.api.Abilities.Via.CLI) {
+           val via: com.kilon.agentvscreen.api.Abilities.Via = com.kilon.agentvscreen.api.Abilities.Via.CLI,
+           /** 2.0.0-beta7 (7.7): network origin (local / tailnet / public); separate from [via] reply format. */
+           val source: Source = Source.LOCAL) {
+    enum class Source(val key: String) {
+        LOCAL("local"),
+        TAILNET("tailnet"),
+        PUBLIC("public"),
+    }
     /** Set when the caller went away or cancelled the task: the command stops before its next step. */
     @Volatile var cancelled = false
     /**

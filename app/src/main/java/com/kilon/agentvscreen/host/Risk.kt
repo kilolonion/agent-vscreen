@@ -23,12 +23,13 @@ enum class Risk(
     HIGH_RISK("高风险操作", "High-risk action"),
     RATE("操作频率异常", "High action rate"),
     SESSION_AGE("长时间未重新确认", "Re-confirmation needed"),
-    TRUST_SET("开启免确认", "Enable no-confirm mode");
+    TRUST_SET("开启免确认", "Enable no-confirm mode"),
+    PUBLIC_ENABLE("开启公网接入", "Enable public access");
 
     /** Approval lifetime in ms; 0 = valid until the user revokes it. */
     val ttlMs: Long
         get() = when (this) {
-            NEW_CLIENT, SCOPE_OPERATE, TRUST_SET -> 0L
+            NEW_CLIENT, SCOPE_OPERATE, TRUST_SET, PUBLIC_ENABLE -> 0L
             SCOPE_SYSTEM -> SCOPE_SYSTEM_MS
             HIGH_RISK -> Consent.VALID_MS
             RATE -> RATE_APPROVAL_MS
@@ -55,9 +56,18 @@ enum class Risk(
 
         fun of(name: String?): Risk? = entries.firstOrNull { it.name == name }
 
-        /** Client identifier for [call]: `"local"` on loopback, tailnet peer name over tailnet. */
-        fun clientOf(call: Call?): String =
-            call?.peer?.trim()?.takeIf { it.isNotEmpty() && it != "?" } ?: CLIENT_LOCAL
+        /** Client identifier for [call]: `"local"` on loopback, tailnet peer over tailnet, `"public:<client_id>"` over public MCP. */
+        fun clientOf(call: Call?): String {
+            if (call == null) return CLIENT_LOCAL
+            val raw = call.peer?.trim()?.takeIf { it.isNotEmpty() && it != "?" }
+            return when (call.source) {
+                Call.Source.PUBLIC -> {
+                    val p = raw ?: "unknown"
+                    if (p.startsWith("public:")) p else "public:$p"
+                }
+                Call.Source.TAILNET, Call.Source.LOCAL -> raw ?: CLIENT_LOCAL
+            }
+        }
 
         /** Record one input action for [tokenId] in the 60 s sliding window. */
         fun recordInputAction(tokenId: String?, nowMs: Long = clock()) {
