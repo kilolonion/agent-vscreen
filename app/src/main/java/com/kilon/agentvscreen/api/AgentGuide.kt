@@ -155,6 +155,38 @@ ${ApiConfig.mcpJson(base, token)}
 3. When it is saved, call vscreen with the command remembered <where you saved it>, then tell me where you saved it.
 """).trim()
 
+    /**
+     * 2.0.0-beta9 (feedback 1): onboarding for a cloud client over public MCP. The same memory note and `remembered` as
+     * the local MCP message; the config has only the address (public MCP uses OAuth: no token, no header), and the
+     * message covers both kinds of client: one that edits its own MCP config, and one whose connector the user adds in
+     * its web settings (then step 1 is already done).
+     */
+    fun onboardPublic(url: String): String = tr("""
+请帮我接入 Agent-VScreen，让你以后能在我的手机上后台打开和操作应用（不打扰我正在用的屏幕）。按顺序做这三步：
+
+1. 如果你能自己改 MCP 配置（比如 Claude Code、Codex），把这段加进去（streamable HTTP，不要加令牌或 Authorization 头，公网用 OAuth）：
+${ApiConfig.mcpJsonPublic(url)}
+第一次连接时会打开一个授权页，我会在手机上核对配对码并批准；拿到授权码后马上换取访问令牌（授权码 10 分钟内有效，只能用一次）。
+如果你的 MCP 连接器只能由我在网页设置里添加（比如 claude.ai 的自定义连接器），我已经加好了，跳过这一步。
+
+2. 把下面这段话存进你的长期记忆（或建成一个 skill / 规则，用你自己保存长期信息的方式）。这是我的要求：以后的新对话里，你也要知道自己有这个能力，我让你在手机上做事时直接用它。
+「${memoryMcp()}」
+
+3. 存好以后调用 vscreen，命令填 remembered <你存在了哪里>，然后告诉我你把它存在了哪里。
+""", """
+Please connect Agent-VScreen so that from now on you can open and operate apps on my phone in the background (without disturbing the screen I'm using). Do these three steps in order:
+
+1. If you can edit your own MCP config (e.g. Claude Code, Codex), add this (streamable HTTP; no token and no Authorization header, public access uses OAuth):
+${ApiConfig.mcpJsonPublic(url)}
+The first connection opens an approval page; I check the pairing code on the phone and approve. Exchange the authorization code right away (it is valid for 10 minutes and only once).
+If your MCP connectors can only be added by me in your web settings (e.g. custom connectors on claude.ai), I have already added it: skip this step.
+
+2. Save the text below in your long-term memory (or as a skill / rule, whatever you use to keep things across conversations). This is my request: in future conversations you should know you have this ability and use it directly when I ask you to do something on my phone.
+"${memoryMcp()}"
+
+3. When it is saved, call vscreen with the command remembered <where you saved it>, then tell me where you saved it.
+""").trim()
+
     /** `vscreen guide`: the one page, without the install line (whoever runs it is installed). */
     fun guide(): String = prompt().lines().filterNot { it.contains("/cli | ") }.joinToString("\n") + "\n"
 

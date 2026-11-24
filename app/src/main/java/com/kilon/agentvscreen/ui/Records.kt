@@ -3,6 +3,7 @@ package com.kilon.agentvscreen.ui
 import androidx.compose.ui.Alignment
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.heightIn
 
 import androidx.compose.foundation.layout.size
 
@@ -125,7 +126,13 @@ fun RecordsTab(bottom: Dp) {
     var picking by remember { mutableStateOf(false) }
     // 1.4.0-beta9 (rainbow: the page was flat, two rows of chips stacked): one row of kinds; whose records is a
     // choice in the top bar, shown only when more than one agent left any.
-    MiuixPage(tr("记录", "Records"), back = false, bottom = bottom, actions = {
+    // 2.0.0-beta9 (feedback 6): the records are a lazy list (each task card, question and day header is its own item).
+    val shown = remember(lines, filter, who) {
+        lines.filter { (filter == Filter.ALL || (filter == Filter.TASKS && it is Line.T) || (filter == Filter.ASKS && it is Line.A)) && (who == null || agentOf(it) == who) }
+    }
+    val now = remember(shown) { shown.filter { it is Line.T && it.t.running } }
+    val past = remember(shown, now) { (shown - now.toSet()) }
+    MiuixLazyPage(tr("记录", "Records"), back = false, bottom = bottom, actions = {
         if (whoList.size > 1) Row(Modifier.padding(end = 12.dp).clip(RoundedCornerShape(50)).background(if (who != null) MiuixTheme.colorScheme.primary.copy(alpha = 0.14f) else MiuixTheme.colorScheme.surfaceContainer)
             .clickable { picking = true }.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(who?.let { com.kilon.agentvscreen.api.Agents.name(it) } ?: tr("所有 agent", "Every agent"), fontSize = 13.sp,
@@ -133,64 +140,67 @@ fun RecordsTab(bottom: Dp) {
             Text(" ▾", fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
         }
     }) {
-        if (picking) GlassDialog(onDismissRequest = { picking = false }, title = { Text(tr("看谁的记录", "Whose records")) }, text = {
-            Column {
-                (listOf<String?>(null) + whoList).forEach { id ->
-                    Text((if (who == id) "✓  " else "    ") + (id?.let { com.kilon.agentvscreen.api.Agents.name(it) } ?: tr("所有 agent", "Every agent")), fontSize = 15.sp,
-                        color = if (who == id) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
-                        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { who = id; picking = false }.padding(vertical = 10.dp))
+        item(key = "chips") {
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(Filter.ALL to tr("全部", "All"), Filter.TASKS to tr("任务", "Tasks"), Filter.ASKS to tr("提问", "Questions"),
+                    Filter.PLANS to tr("预约与盯守", "Plans"), Filter.LESSONS to tr("经验", "Kept")).forEach { (f, label) ->
+                    FilterChip(label, filter == f) { filter = f }
                 }
             }
-        }, confirmButton = {}, dismissButton = {})
-        Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(Filter.ALL to tr("全部", "All"), Filter.TASKS to tr("任务", "Tasks"), Filter.ASKS to tr("提问", "Questions"),
-                Filter.PLANS to tr("预约与盯守", "Plans"), Filter.LESSONS to tr("经验", "Kept")).forEach { (f, label) ->
-                FilterChip(label, filter == f) { filter = f }
-            }
         }
-        AnimatedContent(filter, transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) }, label = "filter") { f ->
-            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                when (f) {
-                    Filter.PLANS -> Plans(beat)
-                    Filter.LESSONS -> LessonsList(app.tick)
-                    else -> {
-                        val shown = lines.filter { (f == Filter.ALL || (f == Filter.TASKS && it is Line.T) || (f == Filter.ASKS && it is Line.A)) && (who == null || agentOf(it) == who) }
-                        if (shown.isEmpty()) {
-                            if (f == Filter.ASKS) EmptyState(androidx.compose.material.icons.Icons.Outlined.QuestionAnswer, tr("还没有提问", "No questions yet"),
-                                tr("agent 拿不准时会在手机上问你，你的回答会记在这里", "When an agent is unsure it asks you on the phone; your answers are kept here"))
-                            else EmptyState(androidx.compose.material.icons.Icons.Outlined.History, tr("还没有任务", "No tasks yet"),
-                                tr("agent 每次用副屏做了什么，会按时间排在这里", "What an agent did on the screen each time appears here, newest first"))
-                        }
-                        // 1.4.0-beta9: what is under way now stands apart, above the days.
-                        val now = shown.filter { it is Line.T && it.t.running }
-                        if (now.isNotEmpty()) {
-                            Text(tr("进行中", "Under way"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MiuixTheme.colorScheme.primary, modifier = Modifier.padding(start = 6.dp, top = 8.dp))
-                            now.forEach { l -> l as Line.T; TaskCard(l.t) { nav.go(Route.Task(l.t.id)) } }
-                        }
-                        var day = ""
-                        (shown - now.toSet()).forEach { l ->
-                            val d = dayOf(l.at)
-                            if (d != day) { day = d; Text(d, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(start = 6.dp, top = 8.dp)) }
-                            when (l) {
-                                is Line.T -> TaskCard(l.t) { nav.go(Route.Task(l.t.id)) }
-                                is Line.A -> {
-                                    val a = l.o.optString("answer")
-                                    TimelineNote(hhmm(l.at) + " · " + l.o.optString("what").substringBefore(" — ").take(40) + " → " + answerWord(a),
-                                        if (a == "allowed" || a.startsWith("answered")) Palette.takeover else Palette.stopped)
-                                }
-                            }
+        when (filter) {
+            Filter.PLANS -> item(key = "plans") { Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { Plans(beat) } }
+            Filter.LESSONS -> item(key = "lessons") { Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { LessonsList(app.tick) } }
+            else -> {
+                if (shown.isEmpty()) item(key = "empty") {
+                    Column(Modifier.padding(horizontal = 12.dp)) {
+                        if (filter == Filter.ASKS) EmptyState(androidx.compose.material.icons.Icons.Outlined.QuestionAnswer, tr("还没有提问", "No questions yet"),
+                            tr("agent 拿不准时会在手机上问你，你的回答会记在这里", "When an agent is unsure it asks you on the phone; your answers are kept here"))
+                        else EmptyState(androidx.compose.material.icons.Icons.Outlined.History, tr("还没有任务", "No tasks yet"),
+                            tr("agent 每次用副屏做了什么，会按时间排在这里", "What an agent did on the screen each time appears here, newest first"))
+                    }
+                }
+                if (now.isNotEmpty()) {
+                    item(key = "now") { Text(tr("进行中", "Under way"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MiuixTheme.colorScheme.primary, modifier = Modifier.padding(start = 18.dp, top = 8.dp, bottom = 4.dp)) }
+                    items(now.size, key = { i -> "now:" + lineKey(now[i]) }) { i -> val l = now[i] as Line.T
+                        Box(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) { TaskCard(l.t) { nav.go(Route.Task(l.t.id)) } } }
+                }
+                // Day headers are their own items: computed once per list, not while composing.
+                val rows = ArrayList<Any>(past.size + 8)
+                var day = ""
+                past.forEach { l -> val d = dayOf(l.at); if (d != day) { day = d; rows += d }; rows += l }
+                items(rows.size, key = { i -> rows[i].let { r -> if (r is String) "day:$r" else lineKey(r as Line) } }) { i ->
+                    when (val r = rows[i]) {
+                        is String -> Text(r, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(start = 18.dp, top = 12.dp, bottom = 4.dp))
+                        is Line.T -> Box(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) { TaskCard(r.t) { nav.go(Route.Task(r.t.id)) } }
+                        is Line.A -> Box(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
+                            val a = r.o.optString("answer")
+                            TimelineNote(hhmm(r.at) + " · " + r.o.optString("what").substringBefore(" — ").take(40) + " → " + answerWord(a),
+                                if (a == "allowed" || a.startsWith("allowed") || a.startsWith("answered") || a == "covered") Palette.takeover else Palette.stopped)
                         }
                     }
                 }
-                Spacer(Modifier.height(8.dp))
             }
         }
     }
+    if (picking) GlassDialog(onDismissRequest = { picking = false }, title = { Text(tr("看谁的记录", "Whose records")) }, text = {
+        androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 420.dp)) {
+            items((listOf<String?>(null) + whoList).size) { i -> val id = (listOf<String?>(null) + whoList)[i]
+                Text((if (who == id) "✓  " else "    ") + (id?.let { com.kilon.agentvscreen.api.Agents.name(it) } ?: tr("所有 agent", "Every agent")), fontSize = 15.sp,
+                    color = if (who == id) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { who = id; picking = false }.padding(vertical = 10.dp))
+            }
+        }
+    }, confirmButton = {}, dismissButton = {})
 }
+
+private fun lineKey(l: Line): String = when (l) { is Line.T -> "t:" + l.t.id; is Line.A -> "a:" + l.at + ":" + System.identityHashCode(l.o) }
 
 /** What the user did with a question, in their words; null for answers the app gave itself (pre-authorized, automatic). */
 private fun answerWord(a: String): String? = when {
-    a == "allowed" -> tr("你允许了", "you allowed")
+    a == "allowed" || a.startsWith("allowed (") -> tr("你允许了", "you allowed")
+    a == "covered" -> tr("按你之前的允许放行", "let through by an earlier allow")
+    a == "not allowed" -> tr("你定的规则不允许", "not allowed by your rules")
     a == "denied" -> tr("你拒绝了", "you refused")
     a.startsWith("answered") -> tr("你回答了", "you answered")
     a == "declined" -> tr("你没有回答", "you declined")
@@ -297,17 +307,18 @@ fun LogPage() {
     var rows by remember { mutableStateOf(emptyList<JSONObject>()) }
     var askClear by remember { mutableStateOf(false) }
     LaunchedEffect(n) { rows = withContext(Dispatchers.IO) { Audit.tail(200) } }
-    MiuixPage(tr("操作日志", "Activity log"), actions = {
+    MiuixLazyPage(tr("操作日志", "Activity log"), actions = {
         IconButton(onClick = { n++ }) { Icon(MiuixIcons.Refresh, tr("刷新", "Refresh")) }
         IconButton(onClick = { host.copy(tr("操作日志", "Activity log"), rows.joinToString("\n") { logLine(it) }) }) { Icon(MiuixIcons.Copy, tr("复制", "Copy")) }
         IconButton(onClick = { askClear = true }, modifier = Modifier.padding(end = 12.dp)) { Icon(MiuixIcons.Delete, tr("清空", "Clear")) }
     }) {
-        Group {
-            if (rows.isEmpty()) BasicComponent(title = tr("还没有记录", "Nothing recorded yet"))
-            rows.take(120).forEach { LogRow(it) }
+        // 2.0.0-beta9 (feedback 6): lazy rows.
+        if (rows.isEmpty()) item(key = "none") { Group { BasicComponent(title = tr("暂无记录", "Nothing recorded yet")) } }
+        else cardItems(null, rows.mapIndexed { i, o -> i to o }, key = { it.first }) { LogRow(it.second) }
+        item(key = "foot") {
+            Text(tr("谁（哪个令牌、哪台设备）、什么时候、做了什么、结果；输入的文字只记字数。", "Who (token, device), when, what and the result; typed text is recorded as a length only."),
+                fontSize = 12.sp, color = top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
         }
-        Text(tr("谁（哪个令牌、哪台设备）、什么时候、做了什么、结果；输入的文字只记字数。", "Who (token, device), when, what and the result; typed text is recorded as a length only."),
-            fontSize = 12.sp, color = top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
     }
     if (askClear) GlassDialog(
         onDismissRequest = { askClear = false },
@@ -341,7 +352,7 @@ fun DiagPage() {
     }
     MiuixPage(tr("诊断", "Diagnostics")) {
         Group {
-            ArrowPreference(title = tr("复制诊断信息", "Copy diagnostics"), summary = tr("版本、配置状态和最近日志；不含令牌和你输入的字", "Version, setup state and recent log; no token, nothing you typed"),
+            ArrowPreference(title = tr("复制诊断信息", "Copy diagnostics"), summary = tr("版本、配置状态和最近日志；不含令牌和输入内容", "Version, setup state and recent log; no token, nothing you typed"),
                 onClick = { collectDiagnostics { host.copy(tr("诊断信息", "Diagnostics"), it) } })
             ArrowPreference(title = tr("分享诊断信息", "Share diagnostics"), onClick = { collectDiagnostics { report ->
                 runCatching {

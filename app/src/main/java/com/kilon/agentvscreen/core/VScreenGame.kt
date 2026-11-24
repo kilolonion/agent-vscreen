@@ -191,8 +191,8 @@ internal object VScreenGame {
     val SPEND = Regex("购买|买入|购入|兑换|支付|付款|充值|下单|提交订单|去结算|结算|抢购|购\\s*买|^买$|订阅|续费|开通会员|立即开通|购票|打赏|赞赏|捐赠|" +
         "buy|purchase|pay\\b|checkout|subscribe|place order|order now|donate", RegexOption.IGNORE_CASE)
     /** Button words for steps that cannot be taken back. */
-    val IRREVERSIBLE = Regex("永久删除|彻底删除|删除|清空|注销|解绑|转账|卸载|恢复出厂|取消订单|申请退款|撤销授权|" +
-        "delete|erase|wipe|transfer|unsubscribe|factory reset|remove account", RegexOption.IGNORE_CASE)
+    val IRREVERSIBLE = Regex("永久删除|彻底删除|删除|清空|注销|解绑|转账|卸载|恢复出厂|取消订单|申请退款|撤销授权|清除数据|清除存储|格式化|" +
+        "delete|erase|wipe|transfer|unsubscribe|factory reset|remove account|uninstall|clear data|clear storage", RegexOption.IGNORE_CASE)
     /** 1.2.0-beta2: the words on the button that actually moves money (the last step, not the way to it). */
     val PAY = Regex("支付|付款|转账|充值|提交订单|确认购买|确认兑换|打赏|赞赏|捐赠|" +
         "\\bpay\\b|pay now|place order|confirm purchase|send money|transfer|donate", RegexOption.IGNORE_CASE)
@@ -209,6 +209,22 @@ internal object VScreenGame {
         IRREVERSIBLE.containsMatchIn(label) -> "irreversible"
         else -> null
     }
+    /**
+     * 2.0.0-beta8 (feedback 4): words of a step that cannot be undone afterwards (uninstall, clear an app's data,
+     * delete for good, close an account, factory reset, format). Any app; the generic system-dialog signal is in
+     * [com.kilon.agentvscreen.cmd.consentClass].
+     */
+    val DESTROY = Regex("永久删除|彻底删除|卸载|清除数据|清除存储|清除应用数据|删除应用数据|清空回收站|注销|删除账号|删除帐号|恢复出厂|格式化|抹掉所有|" +
+        "uninstall|clear data|clear storage|delete forever|delete permanently|permanently delete|delete account|remove account|close account|factory reset|erase all|wipe|format", RegexOption.IGNORE_CASE)
+
+    /** money / destroy / caution for a button label (see [com.kilon.agentvscreen.host.Consent]), null for an ordinary one. */
+    fun consentKind(label: String, besideInput: Boolean = false): String? = when (commitKind(label, besideInput)) {
+        "pay" -> com.kilon.agentvscreen.host.Consent.MONEY
+        "spend" -> com.kilon.agentvscreen.host.Consent.CAUTION
+        "irreversible" -> if (DESTROY.containsMatchIn(label)) com.kilon.agentvscreen.host.Consent.DESTROY else com.kilon.agentvscreen.host.Consent.CAUTION
+        else -> null
+    }
+
     /** Words that mean a committed step went through. */
     val COMMIT_DONE = Regex("成功|已完成|已提交|已购买|已下单|已支付|已兑换|已领取|已拥有|已获得|获得|已删除|已清空|已开通|已订阅|已转账|" +
         "success|completed|done|purchased|obtained|submitted|deleted|subscribed", RegexOption.IGNORE_CASE)

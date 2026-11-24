@@ -88,9 +88,9 @@ fun SoundPage() {
     MiuixPage(tr("应用静音", "App sound")) {
         Group {
             SwitchPreference(checked = screenMute, onCheckedChange = { screenMute = it; VScreenMute.enabled = it },
-                title = tr("副屏静音", "Mute the screen"), summary = tr("副屏里的应用不出声，离开副屏就恢复", "Apps on the screen are silent until they leave it"))
+                title = tr("副屏静音", "Mute the screen"), summary = tr("副屏中的应用静音，移出副屏后恢复", "Apps on the screen are silent until they leave it"))
         }
-        Group(tr("现在没有声音的应用", "Silent now")) {
+        Group(tr("当前已静音的应用", "Silent now")) {
             val l = silent
             when {
                 scanning && l == null -> BasicComponent(title = tr("正在检查…", "Checking…"))
@@ -119,10 +119,10 @@ fun SoundPage() {
                 summary = if (busy == "all") tr("逐个恢复并核实，应用多时要几十秒", "Each one is restored and read back; many apps take a while") else null,
                 endActions = { if (busy == "all") Working(tr("正在恢复…", "Unmuting…")) },
                 onClick = { run("all") { repairAll() } })
-            ArrowPreference(title = tr("手动静音一个应用", "Mute an app"), summary = tr("在哪块屏幕上都不出声，直到你恢复", "Silent on every screen until you unmute it"),
+            ArrowPreference(title = tr("手动静音应用", "Mute an app"), summary = tr("在所有屏幕上静音，直到手动恢复", "Silent on every screen until you unmute it"),
                 enabled = busy == null || busy == "mute", endActions = { if (busy == "mute") Working(tr("正在静音…", "Muting…")) }, onClick = { picking = true })
         }
-        Group(tr("在副屏里也出声", "Keeps its sound on the screen")) {
+        Group(tr("副屏中仍出声的应用", "Keeps its sound on the screen")) {
             val plays = VScreenMute.plays().sortedBy { label(it) }
             plays.forEach { p -> ArrowPreference(title = label(p), endActions = { Value(tr("移除", "Remove")) }, onClick = { VScreenMute.setPlays(p, false); tick++ }) }
             ArrowPreference(title = tr("添加应用", "Add an app"), onClick = { picking = false })

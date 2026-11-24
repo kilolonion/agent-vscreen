@@ -43,7 +43,8 @@ object PublicOAuth {
     const val AUTHORIZE_DENY_COOLDOWN_MS = 30 * 60_000L
     const val PAIRING_TTL_MS = 5 * 60_000L
     const val PAIRING_POLL_MS = 2_000L
-    const val AUTH_CODE_TTL_MS = 60_000L
+    /** 2.0.0-beta9 (rainbow P10): clients that poll slowly exchanged the code after 70–95 s and got invalid_grant; RFC 6749 allows up to 10 minutes. Single use still holds. */
+    const val AUTH_CODE_TTL_MS = 10 * 60_000L
     const val ACCESS_TOKEN_TTL_MS = 60 * 60_000L
     const val REFRESH_TOKEN_TTL_MS = 30L * 24 * 60 * 60_000L
     const val TOKEN_BYTES = 32
@@ -773,9 +774,11 @@ object PublicOAuth {
         return ApiServer.Resp.json(body)
     }
 
-    private fun onPairingApproved(pairing: Pairing, rawScope: String, by: String) {
+    private fun onPairingApproved(pairing: Pairing, rawLevel: String, by: String) {
         val now = nowMs()
-        val safeScope = if (rawScope == "operate" && "operate" in pairing.selectableScopes) "operate" else "look"
+        // 2.0.0-beta8 (feedback 2): the pairing card picks a level; the OAuth scope follows from it, capped by what the client asked.
+        val level = Tokens.levelOf(rawLevel)?.takeIf { "operate" in pairing.selectableScopes && it in Tokens.PUBLIC_LEVELS } ?: Tokens.LOOK
+        val safeScope = Tokens.scopeOfLevel(level).let { if (it == "look") "look" else "operate" }
         var tokenId: String? = null
         val ok = synchronized(lock) {
             pruneExpiredLocked(now)
@@ -786,11 +789,12 @@ object PublicOAuth {
             val client = clients[pairing.clientId] ?: return@synchronized false
             val existingTok = client.tokenId?.let { Tokens.byId(it) }?.takeIf { it.publicOnly }
             val tok = if (existingTok != null) {
-                Tokens.setScope(existingTok.id, safeScope)
+                Tokens.setLevel(existingTok.id, level)
                 Tokens.byId(existingTok.id) ?: existingTok
             } else {
                 Tokens.createPublic(client.clientName, safeScope).also { created ->
                     client.tokenId = created.id
+                    Tokens.setLevel(created.id, level)
                 }
             }
             tokenId = tok.id

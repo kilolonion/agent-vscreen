@@ -731,7 +731,8 @@ class ApiServer(private val ctx: Context) {
             else -> Call.Source.LOCAL
         }
         val scopes = if (r.viaPublic || t.publicOnly) t.scopes.intersect(Tokens.PUBLIC_SCOPES.toSet()) else t.scopes
-        val call = Call(session, t.id, t.name, scopes, r.peerName, requestId, com.kilon.agentvscreen.I18n.code, t.trustUntil, via, source)
+        val call = Call(session, t.id, t.name, scopes, r.peerName, requestId, com.kilon.agentvscreen.I18n.code, t.trustUntil, via, source,
+            srcAddr = if (r.viaPublic) r.headers["x-avs-public-src"]?.trim()?.take(64)?.takeIf { it.isNotEmpty() } else null)
         call.progress = onStep
         val key = requestId?.let { "${t.id}:$it" }
         var mine: Flight? = null

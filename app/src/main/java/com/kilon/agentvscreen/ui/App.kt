@@ -519,6 +519,67 @@ fun MiuixPage(
     }
 }
 
+/**
+ * 2.0.0-beta9 (feedback 6): [MiuixPage] for pages whose lists grow with use (agents, tokens, records, the log).
+ * The same bar, blur and paddings, but the content is a [androidx.compose.foundation.lazy.LazyColumn]: only the rows
+ * on screen are composed, so hundreds of entries cost what a dozen did. Rows that belong to one card use [cardItems].
+ */
+@Composable
+fun MiuixLazyPage(
+    title: String,
+    back: Boolean = true,
+    bottom: Dp = 0.dp,
+    actions: @Composable RowScope.() -> Unit = {},
+    content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
+) {
+    val nav = LocalNav.current
+    val surface = MiuixTheme.colorScheme.surface
+    val backdrop: LayerBackdrop? = if (Glass.blurOk) rememberLayerBackdrop { drawRect(surface); drawContent() } else null
+    val bar = MiuixScrollBehavior()
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    val moving = LocalPagerMoving.current
+    val blurNow by remember(backdrop) { androidx.compose.runtime.derivedStateOf { backdrop != null && (list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 0) && !moving() } }
+    Scaffold(
+        topBar = {
+            Box(if (blurNow && backdrop != null) Modifier.textureBlur(backdrop = backdrop, shape = RectangleShape, blurRadius = 25f,
+                colors = BlurDefaults.blurColors(blendColors = listOf(BlendColorEntry(color = surface.copy(0.8f))))) else Modifier) {
+                TopAppBar(title = title, scrollBehavior = bar, color = if (blurNow) Color.Transparent else surface,
+                    navigationIcon = {
+                        if (back) IconButton(onClick = { nav.back() }, modifier = Modifier.padding(start = 16.dp)) { Icon(MiuixIcons.Back, tr("返回", "Back")) }
+                    }, actions = actions)
+            }
+        },
+    ) { pad ->
+        Box(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
+            androidx.compose.foundation.lazy.LazyColumn(
+                state = list,
+                modifier = Modifier.fillMaxSize().overScrollVertical().nestedScroll(bar.nestedScrollConnection),
+                contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = maxOf(bottom, pad.calculateBottomPadding()) + 24.dp),
+                content = content,
+            )
+        }
+    }
+}
+
+/**
+ * The rows of one [Group]-like card as separate lazy items: a small title, then each row on the card's background,
+ * the first and last with the card's rounded corners. [key] must be stable (an id), so rows keep their state.
+ */
+fun <T> androidx.compose.foundation.lazy.LazyListScope.cardItems(
+    title: String?, rows: List<T>, key: (T) -> Any, row: @Composable (T) -> Unit,
+) {
+    if (rows.isEmpty()) return
+    item(key = "title:$title:${rows.size}") { if (title != null) SmallTitle(title) else Spacer(Modifier.height(12.dp)) }
+    items(rows.size, key = { i -> key(rows[i]) }) { i ->
+        val top = if (i == 0) 16.dp else 0.dp
+        val bottomR = if (i == rows.lastIndex) 16.dp else 0.dp
+        Box(Modifier.padding(horizontal = 12.dp).fillMaxWidth()
+            .clip(RoundedCornerShape(topStart = top, topEnd = top, bottomStart = bottomR, bottomEnd = bottomR))
+            .background(MiuixTheme.colorScheme.surfaceContainer)) { row(rows[i]) }
+    }
+    item(key = "gap:$title") { Spacer(Modifier.height(6.dp)) }
+}
+
 /** Miuix's string-only TopAppBar wraps the expanded title and truncates the collapsed one. Task titles
  * need a composable in both slots, but keep the same scroll state, paddings and navigation. */
 @Composable

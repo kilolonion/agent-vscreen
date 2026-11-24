@@ -237,58 +237,25 @@ class V200Beta8Test {
 
     @Test
     fun b2RiskEvaluateAllBatchedConfirmAndStandardVsStrictLevels() {
+        // 2.0.0-beta9 (changed on purpose): scope approvals, the 8 h / 24 h re-confirmations and the global security
+        // level are gone (one table per agent). What stays: every missing dimension in one confirmation, no expiry.
         val t0 = fakeNow.get()
-        // Default security level must be STANDARD (Ruling 5).
-        assertEquals(Risk.SecurityLevel.STANDARD, Risk.securityLevel)
-
         val call = Call("s1", tokenId = "tok_b2", tokenName = "agent-b2", scopes = setOf("look", "operate", "system"), peer = null)
         val forceArgs = VScreenOptions.args("stop", listOf("com.example.a", "--force"))
-
-        // 1) New agent running a SYSTEM command gets ALL missing dimensions at once (not one-by-one).
-        val allMissing = Risk.evaluateAll(call, spec("stop"), forceArgs, t0)
-        assertEquals(listOf(Risk.NEW_CLIENT, Risk.SCOPE_OPERATE, Risk.SCOPE_SYSTEM), allMissing)
-
-        // Risk.check throws ONE NEEDS_CONFIRM listing all three dimensions; ONE approval clears all three.
+        repeat(Risk.RATE_MAX_PER_MIN + 1) { Risk.recordInputAction("tok_b2", t0) }
+        assertEquals(listOf(Risk.NEW_CLIENT, Risk.RATE), Risk.evaluateAll(call, spec("stop"), forceArgs, t0))
         var err: com.kilon.agentvscreen.core.BackgroundOperation.ActionError? = null
-        try {
-            Risk.check(ctx, call, spec("stop"), forceArgs)
-        } catch (e: com.kilon.agentvscreen.core.BackgroundOperation.ActionError) {
-            err = e
-        }
-        assertNotNull(err)
+        try { Risk.check(ctx, call, spec("stop"), forceArgs) } catch (e: com.kilon.agentvscreen.core.BackgroundOperation.ActionError) { err = e }
         assertEquals("NEEDS_CONFIRM", err!!.code)
         val confirmObj = err.data!!.getJSONObject("confirm")
         val risksArr = confirmObj.getJSONArray("risks")
-        val listed = (0 until risksArr.length()).map { risksArr.getString(it) }
-        assertEquals(listOf("NEW_CLIENT", "SCOPE_OPERATE", "SCOPE_SYSTEM"), listed)
-        val reqId = confirmObj.getString("id")
-
-        assertTrue(StrongConfirm.approve(ctx, reqId, StrongConfirm.BY_BIOMETRIC))
-        assertTrue("one confirmation must clear all batched dimensions", Risk.evaluateAll(call, spec("stop"), forceArgs, t0).isEmpty())
-
-        // 2) Under default STANDARD: >8h (SESSION_AGE) and >24h (SCOPE_SYSTEM) do NOT re-prompt.
-        val tAfter8h = t0 + Risk.SESSION_AGE_MS + 1L
-        val tAfter24h = t0 + Risk.SCOPE_SYSTEM_MS + 1L
-        assertTrue("STANDARD must not trigger SESSION_AGE after 8h", Risk.evaluateAll(call, spec("launch"), emptyArgs(), tAfter8h).isEmpty())
-        assertTrue("STANDARD must not expire SCOPE_SYSTEM after 24h", Risk.evaluateAll(call, spec("stop"), forceArgs, tAfter24h).isEmpty())
-
-        // 3) Under STANDARD, RATE and HIGH_RISK/PUBLIC_ENABLE remain enforced.
-        fakeNow.set(tAfter24h)
-        repeat(Risk.RATE_MAX_PER_MIN + 1) { Risk.recordInputAction("tok_b2", tAfter24h) }
-        assertEquals(listOf(Risk.RATE), Risk.evaluateAll(call, spec("launch"), emptyArgs(), tAfter24h))
-
-        // 4) Under STRICT, both 8h SESSION_AGE and 24h SCOPE_SYSTEM trigger again.
-        Risk.setSecurityLevel(ctx, Risk.SecurityLevel.STRICT)
-        val strictMissing = Risk.evaluateAll(call, spec("stop"), forceArgs, tAfter24h + Risk.RATE_WINDOW_MS + 10L)
-        assertTrue("STRICT must trigger SCOPE_SYSTEM after 24h: $strictMissing", Risk.SCOPE_SYSTEM in strictMissing)
-        assertTrue("STRICT must trigger SESSION_AGE after 8h: $strictMissing", Risk.SESSION_AGE in strictMissing)
-
-        // 5) Scope downgrade immediately revokes higher scope approvals.
-        Risk.setSecurityLevel(ctx, Risk.SecurityLevel.STANDARD)
-        StrongConfirm.revokeScopesAbove("tok_b2", "look")
-        assertTrue(StrongConfirm.hasApproval(Risk.NEW_CLIENT, "tok_b2", Risk.CLIENT_LOCAL, tAfter24h))
-        assertFalse(StrongConfirm.hasApproval(Risk.SCOPE_OPERATE, "tok_b2", Risk.CLIENT_LOCAL, tAfter24h))
-        assertFalse(StrongConfirm.hasApproval(Risk.SCOPE_SYSTEM, "tok_b2", Risk.CLIENT_LOCAL, tAfter24h))
+        assertEquals(listOf("NEW_CLIENT", "RATE"), (0 until risksArr.length()).map { risksArr.getString(it) })
+        // A new agent with it is a fingerprint, not a tap.
+        assertFalse(StrongConfirm.approve(ctx, confirmObj.getString("id"), StrongConfirm.BY_TAP))
+        assertTrue(StrongConfirm.approve(ctx, confirmObj.getString("id"), StrongConfirm.BY_BIOMETRIC))
+        // The same fingerprint covers the high rate for this run: no second stop right after.
+        assertEquals(emptyList<Risk>(), Risk.evaluateAll(call, spec("stop"), forceArgs, t0 + 1L))
+        assertEquals(emptyList<Risk>(), Risk.evaluateAll(call, spec("stop"), forceArgs, t0 + 30L * 24 * 60 * 60_000L))
     }
 
     // ── C2: ActHold synchronous verification, upfront HOLD_REFUSED, partial child note, API 35 kill breaker ──
@@ -826,7 +793,7 @@ class V200Beta8Test {
         AgentLedger.init(ctx)
         val notice = AgentNews.notice("tok_news_test", freshStretch = true)
         assertNotNull(notice)
-        assertTrue(notice!!.contains("2.0.0-beta8"))
+        assertTrue(notice!!.contains(com.kilon.agentvscreen.BuildConfig.VERSION_NAME))
         assertTrue(notice.contains("seek"))
     }
 

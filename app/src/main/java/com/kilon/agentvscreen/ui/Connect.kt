@@ -96,13 +96,15 @@ fun ConnectPage(tab: Boolean = false, bottom: androidx.compose.ui.unit.Dp = 0.dp
     val ts by Tailnet.status.collectAsState()
     val pubOn by com.kilon.agentvscreen.host.PublicAccess.enabledFlow.collectAsState()
     val svcState = ServiceControl.now(ctx)
-    MiuixPage(tr("接入", "Connect"), back = !tab, bottom = bottom) {
-        val shown = tokens.filter { t -> agents[t.id]?.used == true || t.id != com.kilon.agentvscreen.api.Tokens.MAIN }
-        if (shown.isEmpty()) EmptyState(androidx.compose.material.icons.Icons.Outlined.AddLink, tr("还没有接入 agent", "No agent connected yet"),
-            tr("接入后，每个 agent 的记录、任务和提问各归各的", "Once connected, each agent's records, tasks and questions stay apart"))
-        else Group(tr("已经接入的 · ${shown.size}", "Connected · ${shown.size}")) {
-            shown.forEach { t -> AgentCard(t.id, agents[t.id] ?: AgentLedger.Snapshot()) { nav.go(Route.Agent(t.id)) } }
+    // 2.0.0-beta9 (feedback 6): a lazy list; only the agents on screen are composed.
+    val shown = remember(tokens, agents) { tokens.filter { t -> agents[t.id]?.used == true || t.id != com.kilon.agentvscreen.api.Tokens.MAIN } }
+    MiuixLazyPage(tr("接入", "Connect"), back = !tab, bottom = bottom) {
+        if (shown.isEmpty()) item(key = "empty") { Column(Modifier.padding(horizontal = 12.dp)) { EmptyState(androidx.compose.material.icons.Icons.Outlined.AddLink, tr("还没有接入 agent", "No agent connected yet"),
+            tr("接入后，每个 agent 的记录、任务和提问各归各的", "Once connected, each agent's records, tasks and questions stay apart")) } }
+        else cardItems(tr("已经接入的 · ${shown.size}", "Connected · ${shown.size}"), shown, key = { it.id }) { t ->
+            AgentCard(t.id, agents[t.id] ?: AgentLedger.Snapshot()) { nav.go(Route.Agent(t.id)) }
         }
+        item(key = "rest") { Column {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 14.dp)) {
             PrimaryButton(onClick = { nav.go(Route.NewAgent) }, modifier = Modifier.fillMaxWidth(), color = MiuixTheme.colorScheme.primary) {
                 Text(tr("接入新的 agent", "Connect a new agent"), color = MiuixTheme.colorScheme.onPrimary)
@@ -115,7 +117,7 @@ fun ConnectPage(tab: Boolean = false, bottom: androidx.compose.ui.unit.Dp = 0.dp
                 ServiceControl.State.BLOCKED -> tr("已关闭", "Off")
             }
             BasicComponent(
-                title = tr("这台手机上", "On this phone"),
+                title = tr("本机", "On this phone"),
                 summary = "127.0.0.1:${ApiConfig.port}",
                 endActions = {
                     Value(localStatus, if (svcState == ServiceControl.State.BLOCKED) Palette.stopped else Palette.takeover)
@@ -154,23 +156,53 @@ fun ConnectPage(tab: Boolean = false, bottom: androidx.compose.ui.unit.Dp = 0.dp
         Group {
             ArrowPreference(title = tr("令牌", "Tokens"), onClick = { nav.go(Route.Tokens) })
         }
+        } }
     }
 }
 
-private fun scopeLabel(scope: String): String = when (scope) {
-    "look" -> tr("只看", "Look only")
-    "operate" -> tr("看和操作", "Look & operate")
-    "system" -> tr("看、操作和系统操作", "Look, operate & system")
-    else -> scope
+internal fun levelLabel(level: String): String = com.kilon.agentvscreen.api.Policy.levelTitle(level)
+internal fun levelHint(level: String): String = com.kilon.agentvscreen.api.Policy.levelHint(level)
+
+/**
+ * 2.0.0-beta8 (rainbow 00:52): an agent's table, one row per class of action, three choices per row. Rows changed
+ * from the level's preset carry a small mark. [onChange] decides whether a change needs a fingerprint.
+ */
+@Composable
+internal fun PolicyForm(table: Map<String, com.kilon.agentvscreen.api.Policy.Act>, preset: Map<String, com.kilon.agentvscreen.api.Policy.Act>?,
+                        publicOnly: Boolean, onChange: (String, com.kilon.agentvscreen.api.Policy.Act) -> Unit) {
+    val c = MiuixTheme.colorScheme
+    com.kilon.agentvscreen.api.Policy.ROWS.forEach { row ->
+        if (publicOnly && row.key == com.kilon.agentvscreen.api.Policy.SYSTEM) return@forEach
+        val cur = table[row.key] ?: com.kilon.agentvscreen.api.Policy.Act.ASK
+        val changed = preset != null && preset[row.key] != cur
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(row.title, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                if (changed) Text(tr("已改", "Changed"), fontSize = 11.sp, color = c.primary,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).background(c.primary.copy(alpha = 0.12f)).padding(horizontal = 8.dp, vertical = 2.dp))
+            }
+            Text(row.hint, fontSize = 12.sp, lineHeight = 17.sp, color = c.onSurfaceVariantSummary)
+            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(c.surfaceContainerHigh).padding(3.dp)) {
+                listOf(com.kilon.agentvscreen.api.Policy.Act.ALLOW, com.kilon.agentvscreen.api.Policy.Act.ASK, com.kilon.agentvscreen.api.Policy.Act.DENY).forEach { a ->
+                    val offered = a in row.choices
+                    val on = a == cur
+                    val tint = when (a) { com.kilon.agentvscreen.api.Policy.Act.ALLOW -> Palette.takeover; com.kilon.agentvscreen.api.Policy.Act.ASK -> c.primary; else -> Palette.stopped }
+                    Box(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(if (on) tint.copy(alpha = 0.18f) else Color.Transparent)
+                        .clickable(enabled = offered && !on) { onChange(row.key, a) }.padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                        Text(a.title, fontSize = 13.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                            color = when { on -> tint; offered -> c.onSurface; else -> c.onSurfaceVariantSummary.copy(alpha = 0.4f) })
+                    }
+                }
+            }
+        }
+    }
 }
 
-private fun scopeRisksFor(scope: String, includeNewClient: Boolean): List<com.kilon.agentvscreen.host.Risk> = buildList {
-    if (includeNewClient) add(com.kilon.agentvscreen.host.Risk.NEW_CLIENT)
-    if (scope == "operate" || scope == "system") add(com.kilon.agentvscreen.host.Risk.SCOPE_OPERATE)
-    if (scope == "system") add(com.kilon.agentvscreen.host.Risk.SCOPE_SYSTEM)
-}
-
-/** 2.0.0-beta8 (B2, F.2, F.3, K.3): connecting one agent in 4 steps — name+scope (one-shot auth), where (local/Tailscale/Cloud), how (or Cloud checklist), then unified preview & copy. */
+/**
+ * 2.0.0-beta8: connecting one agent in 4 steps: name + level, where (local / Tailscale / cloud), how (or the cloud
+ * checklist), then what to send it. Feedback 5: the agent's token is made exactly once, by the user's confirmation
+ * when leaving step 3 (an action, never during composition), and the suggested name is fixed when the page opens.
+ */
 @Composable
 fun NewAgentPage() {
     val host = LocalHost.current
@@ -180,34 +212,21 @@ fun NewAgentPage() {
     var where by rememberSaveable { mutableIntStateOf(com.kilon.agentvscreen.host.Access.lastWay()) }
     var how by rememberSaveable { mutableIntStateOf(0) }
     var raw by remember { mutableStateOf(false) }
-    var selectedScope by rememberSaveable { mutableStateOf("operate") }
-    val tokens by com.kilon.agentvscreen.api.Tokens.list.collectAsState()
+    var level by rememberSaveable { mutableStateOf(com.kilon.agentvscreen.api.Tokens.FREE) }
+    // Rows changed on top of the level (kept as JSON so it survives rotation).
+    var customJson by rememberSaveable { mutableStateOf("{}") }
+    val custom = remember(customJson) { com.kilon.agentvscreen.api.Policy.fromJson(runCatching { org.json.JSONObject(customJson) }.getOrNull()) }
+    var showTable by rememberSaveable { mutableStateOf(false) }
     var name by rememberSaveable { mutableStateOf("") }
     var made by rememberSaveable { mutableStateOf<String?>(null) }
     var madeId by rememberSaveable { mutableStateOf<String?>(null) }
-    var madeFor by rememberSaveable { mutableStateOf<String?>(null) }
-    var grantedScope by rememberSaveable { mutableStateOf<String?>(null) }
-    val suggested = remember(tokens) {
-        val used = tokens.map { it.name }.toSet()
+    // Fixed once: a name computed from the live token list moved every time a token was made (feedback 5).
+    val suggested = rememberSaveable {
+        val used = com.kilon.agentvscreen.api.Tokens.list.value.map { it.name }.toSet()
         val base = tr("默认 Agent", "Default Agent")
         "$base ${generateSequence(1) { it + 1 }.first { "$base $it" !in used }}"
     }
-
-    fun ensureLocalToken(): Pair<String, String> {
-        val want = name.trim().ifEmpty { suggested }
-        val existingText = made
-        val existingId = madeId
-        if (existingText != null && existingId != null && madeFor == want && com.kilon.agentvscreen.api.Tokens.byId(existingId) != null) {
-            if (com.kilon.agentvscreen.api.Tokens.byId(existingId)?.scope != selectedScope) {
-                com.kilon.agentvscreen.api.Tokens.setScope(existingId, selectedScope)
-            }
-            return existingId to existingText
-        }
-        val (t, text) = com.kilon.agentvscreen.api.Tokens.create(want, selectedScope)
-        com.kilon.agentvscreen.host.Audit.security("token_created", "${t.name} ${t.scope}")
-        made = text; madeId = t.id; madeFor = want; grantedScope = null
-        return t.id to text
-    }
+    val want = name.trim().ifEmpty { suggested }
 
     val ts by Tailnet.status.collectAsState()
     val pubEnabled by com.kilon.agentvscreen.host.PublicAccess.enabledFlow.collectAsState()
@@ -222,7 +241,34 @@ fun NewAgentPage() {
     val canAdvanceHow = if (where == 2) (pubEnabled && !cloudUrl.isNullOrBlank()) else canCopyLocal
 
     var step by rememberSaveable { mutableIntStateOf(0) }
-    val steps = listOf(tr("起名", "Name"), tr("在哪", "Where"), tr("怎么连", "How"), tr("发给它", "Send"))
+    val steps = listOf(tr("起名", "Name"), tr("运行位置", "Where"), tr("连接方式", "How"), tr("发给它", "Send"))
+
+    /** Leaving step 3 for a local / tailnet agent: make (or update) its token, confirmed once with a fingerprint. */
+    fun confirmAgent() {
+        val T = com.kilon.agentvscreen.api.Tokens
+        val existing = madeId?.let { T.byId(it) }
+        if (existing != null && made != null) {
+            if (existing.name != want) T.rename(existing.id, want)
+            val next = com.kilon.agentvscreen.api.Policy.table(level, custom)
+            if (com.kilon.agentvscreen.api.Policy.widened(existing.policy, next).isEmpty()) { T.setLevel(existing.id, level, custom); step = 3; return }
+            val req = com.kilon.agentvscreen.host.StrongConfirm.createUiMultiRiskRequest(actx, listOf(com.kilon.agentvscreen.host.Risk.LEVEL_UP), existing,
+                tr("$want 升到「${levelLabel(level)}」", "Raise $want to \"${levelLabel(level)}\""), levelHint(level),
+                onApprove = { T.setLevel(existing.id, level, custom); com.kilon.agentvscreen.host.Audit.security("level_up", "$want ${existing.level}->$level"); step = 3 })
+            StrongConfirmActivity.open(actx, req.id)
+            return
+        }
+        val draft = com.kilon.agentvscreen.api.Tokens.Token("new", want, "", T.scopeOfLevel(level), System.currentTimeMillis(), level = level)
+        val req = com.kilon.agentvscreen.host.StrongConfirm.createUiMultiRiskRequest(actx, listOf(com.kilon.agentvscreen.host.Risk.NEW_CLIENT), draft,
+            tr("接入 $want（${levelLabel(level)}）", "Connect $want (${levelLabel(level)})"), levelHint(level),
+            onApprove = {
+                val (t, text) = T.createLevel(want, level, custom)
+                com.kilon.agentvscreen.host.StrongConfirm.grantAgent(t.id)
+                com.kilon.agentvscreen.host.Audit.security("token_created", "${t.name} ${t.level}")
+                made = text; madeId = t.id; step = 3
+            })
+        StrongConfirmActivity.open(actx, req.id)
+    }
+
     MiuixPage(tr("接入新的 agent", "Connect a new agent")) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             steps.forEachIndexed { i, label ->
@@ -237,36 +283,45 @@ fun NewAgentPage() {
         }
 
         if (step == 0) {
-            Group(tr("它叫什么", "Its name")) {
+            Group(tr("名称", "Name")) {
                 TextField(value = name, onValueChange = { name = it.take(24) }, label = tr("例如：通用助手（$suggested）", "e.g. General assistant ($suggested)"),
                     useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp))
             }
-            Group(tr("这个 agent 能做什么", "What this agent can do")) {
-                listOf(
-                    Triple("look", tr("只看", "Look only"), tr("查看副屏画面、文字和通知", "View screen, text and notifications")),
-                    Triple("operate", tr("看和操作", "Look & operate"), tr("打开应用、点击、输入、滚动（默认）", "Open apps, tap, type, scroll (default)")),
-                    Triple("system", tr("看、操作和系统操作", "Look, operate & system"), tr("包含修复权限、安装、清理等系统级命令", "Includes system-level commands like fix and cleanup")),
-                ).forEach { (sc, title, sub) ->
-                    RadioButtonPreference(
-                        title = title,
-                        summary = sub,
-                        selected = selectedScope == sc,
-                        onClick = { selectedScope = sc },
-                    )
+            Group(tr("权限档位", "Permission level")) {
+                com.kilon.agentvscreen.api.Tokens.LEVELS.forEach { lv ->
+                    RadioButtonPreference(title = levelLabel(lv), summary = levelHint(lv), selected = level == lv, onClick = {
+                        // Custom starts from what is on screen now; a preset starts clean.
+                        customJson = if (lv == com.kilon.agentvscreen.api.Policy.CUSTOM) com.kilon.agentvscreen.api.Policy.toJson(com.kilon.agentvscreen.api.Policy.table(level, custom)).toString() else "{}"
+                        level = lv
+                        if (lv == com.kilon.agentvscreen.api.Policy.CUSTOM) showTable = true
+                    })
+                }
+                ArrowPreference(title = tr("分项权限", "Per-action permissions"),
+                    summary = if (custom.isEmpty() || level == com.kilon.agentvscreen.api.Policy.CUSTOM) tr("与档位预设一致", "Same as the level preset") else tr("已修改 ${custom.size} 项", "${custom.size} changed"),
+                    endActions = { Value(if (showTable) tr("收起", "Hide") else tr("展开", "Show")) }, onClick = { showTable = !showTable })
+                AnimatedVisibility(showTable) {
+                    Column {
+                        PolicyForm(com.kilon.agentvscreen.api.Policy.table(level, custom), com.kilon.agentvscreen.api.Policy.PRESETS[level], false) { k, a ->
+                            val base = com.kilon.agentvscreen.api.Policy.PRESETS[level]
+                            val next = if (base != null && base[k] == a) custom - k else custom + (k to a)
+                            customJson = com.kilon.agentvscreen.api.Policy.toJson(next).toString()
+                        }
+                    }
                 }
             }
+            Footnote(tr("云端客户端的档位在手机上批准配对时选择，最高为“省心”。", "A cloud client's level is chosen when you approve its pairing on the phone, up to Easy."))
         }
 
-        if (step == 1) Group(tr("agent 在哪", "Where the agent runs")) {
+        if (step == 1) Group(tr("运行位置", "Where the agent runs")) {
             RadioButtonPreference(
-                title = tr("这台手机上", "On this phone"),
-                summary = tr("Termux、Operit 等，直接连 127.0.0.1:${ApiConfig.port}", "Termux, Operit…, direct to 127.0.0.1:${ApiConfig.port}"),
+                title = tr("本机", "On this phone"),
+                summary = tr("Termux、Operit 等，直接连接 127.0.0.1:${ApiConfig.port}", "Termux, Operit…, direct to 127.0.0.1:${ApiConfig.port}"),
                 selected = where == 0,
                 onClick = { where = 0 },
             )
             RadioButtonPreference(
                 title = tr("其它设备（Tailscale）", "Other device (Tailscale)"),
-                summary = tr("电脑或另一台手机，经你自己的 Tailscale 网络", "Computer or another phone over your own Tailscale network"),
+                summary = tr("电脑或其他手机，通过你的 Tailscale 网络", "Computer or another phone over your own Tailscale network"),
                 selected = where == 1,
                 onClick = { where = 1 },
             )
@@ -285,7 +340,7 @@ fun NewAgentPage() {
             }
             RadioButtonPreference(
                 title = tr("云端（公网 MCP）", "Cloud (Public MCP)"),
-                summary = tr("Claude / ChatGPT 等云端客户端，经 Tailscale Funnel 配对连接", "Cloud MCP clients via Tailscale Funnel with on-phone pairing"),
+                summary = tr("Claude、ChatGPT 等云端客户端，通过 Tailscale Funnel 配对连接", "Cloud MCP clients via Tailscale Funnel with on-phone pairing"),
                 selected = where == 2,
                 onClick = { where = 2 },
             )
@@ -299,8 +354,7 @@ fun NewAgentPage() {
                     PublicChecklistSection(showEnableButton = true)
                 }
             } else {
-                // 2.0.0-beta8 (K.3): concise subtitles avoid single-character orphan line wraps.
-                Group(tr("怎么连", "How it connects")) {
+                Group(tr("连接方式", "How it connects")) {
                     listOf(
                         Triple(tr("命令行", "Shell"), tr("带终端的 agent：安装 vscreen 并记住能力", "Terminal agents: installs vscreen and saves note"), 0),
                         Triple("MCP", tr("支持 MCP 的 agent：配置与能力说明", "MCP agents: config and ability note"), 1),
@@ -319,133 +373,107 @@ fun NewAgentPage() {
             PrimaryButton(
                 onClick = {
                     when (step) {
-                        0 -> {
-                            // 2.0.0-beta8 (B2): authorize NEW_CLIENT + chosen scopes in one confirmation.
-                            val want = name.trim().ifEmpty { suggested }
-                            val (tid, _) = ensureLocalToken()
-                            if (grantedScope == selectedScope && madeFor == want) {
-                                step = 1
-                            } else {
-                                val risks = scopeRisksFor(selectedScope, includeNewClient = true)
-                                val tokObj = com.kilon.agentvscreen.api.Tokens.byId(tid)
-                                    ?: com.kilon.agentvscreen.api.Tokens.Token(tid, want, "", selectedScope, System.currentTimeMillis())
-                                val req = com.kilon.agentvscreen.host.StrongConfirm.createUiMultiRiskRequest(
-                                    ctx = actx,
-                                    risks = risks,
-                                    token = tokObj,
-                                    commandName = tr("接入新 agent：${scopeLabel(selectedScope)}", "Connect agent: ${scopeLabel(selectedScope)}"),
-                                    detail = tr("确认后该 agent 在所选权限内无需逐项重复弹窗。", "After confirmation this agent will not prompt separately for each granted scope."),
-                                    onApprove = {
-                                        com.kilon.agentvscreen.host.StrongConfirm.grantForScope(tid, selectedScope)
-                                        grantedScope = selectedScope
-                                        step = 1
-                                    },
-                                )
-                                StrongConfirmActivity.open(actx, req.id)
-                            }
-                        }
-                        1 -> {
-                            if (where == 2) {
-                                // Cloud clients receive their own OAuth identity during on-phone pairing; discard unused draft local token.
-                                madeId?.let { id ->
-                                    if (AgentLedger.agents.value[id]?.used != true) {
-                                        com.kilon.agentvscreen.api.Tokens.revoke(id)
-                                        madeId = null; made = null; grantedScope = null
-                                    }
-                                }
-                            }
-                            step = 2
-                        }
-                        else -> step = 3
+                        0 -> step = 1
+                        1 -> step = 2
+                        else -> if (where == 2) step = 3 else confirmAgent()
                     }
                 },
                 enabled = nextEnabled,
                 modifier = Modifier.fillMaxWidth(),
                 color = MiuixTheme.colorScheme.primary,
             ) {
-                Text(tr("下一步", "Next"), color = MiuixTheme.colorScheme.onPrimary)
+                Text(if (step == 2 && where != 2 && made == null) tr("确认接入", "Confirm") else tr("下一步", "Next"), color = MiuixTheme.colorScheme.onPrimary)
             }
         }
 
         if (step == 3) {
             if (where == 2) {
+                // Feedback 1: the cloud also gets a message for the agent (config without a token + memory + remembered).
                 val url = cloudUrl.orEmpty()
-                Group(tr("添加到云端 MCP 客户端", "Add to your cloud MCP client"), padded = true) {
-                    Text(
-                        tr("复制下方地址填进云端客户端的 MCP 服务器设置，添加后在手机上确认配对即可（不需要令牌）。", "Paste the MCP URL below into your cloud client, then approve the pairing request on this phone (no token needed)."),
-                        fontSize = 13.5.sp,
-                        lineHeight = 20.sp,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    )
-                }
                 if (url.isNotBlank()) {
-                    WrappableCode(url) { host.copy(tr("公网 MCP 地址", "Public MCP URL"), url) }
+                    val msg = remember(url) { AgentGuide.onboardPublic(url) }
+                    Group(tr("1 · 服务地址（填入客户端）", "1 · Address (you add it to the client)")) {
+                        WrappableCode(url) { host.copy(tr("公网 MCP 地址", "Public MCP URL"), url) }
+                        BasicComponent(title = tr("复制地址", "Copy address"), summary = tr("适用于在网页中添加连接器的客户端（如 claude.ai）", "For clients where you add a connector in their web settings (e.g. claude.ai)"),
+                            onClick = { host.copy(tr("公网 MCP 地址", "Public MCP URL"), url) })
+                    }
+                    Group(tr("2 · 给 agent 的话", "2 · Message for the agent")) {
+                        BasicComponent(title = tr("写入长期记忆", "So it keeps this ability"),
+                            summary = tr("能自己改 MCP 配置的 agent 会照着加上；网页客户端会跳过配置，只存记忆", "Agents that edit their own MCP config add it; web clients skip that and only save the note"))
+                    }
                     Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-                        PrimaryButton(
-                            onClick = { host.copy(tr("公网 MCP 地址", "Public MCP URL"), url) },
-                            modifier = Modifier.fillMaxWidth(),
-                            color = MiuixTheme.colorScheme.primary,
-                        ) {
-                            Text(tr("复制公网 MCP 地址", "Copy public MCP URL"), color = MiuixTheme.colorScheme.onPrimary)
+                        PrimaryButton(onClick = { host.copy(tr("给 agent 的话", "Message for your agent"), msg) }, modifier = Modifier.fillMaxWidth(), color = MiuixTheme.colorScheme.primary) {
+                            Text(tr("复制给 agent 的话", "Copy message for your agent"), color = MiuixTheme.colorScheme.onPrimary)
                         }
+                    }
+                    Footnote(tr("第一次连接时会打开授权页，在这台手机上核对配对码批准；不需要令牌。", "The first connection opens an approval page; check the pairing code on this phone and approve. No token is needed."))
+                    Group(tr("预览", "Preview")) {
+                        ArrowPreference(title = tr("完整消息", "Full message"), endActions = { Value(if (raw) tr("收起", "Hide") else tr("查看", "Show")) }, onClick = { raw = !raw })
+                        AnimatedVisibility(raw) { Code(msg) { host.copy(tr("给 agent 的话", "Message for your agent"), msg) } }
                     }
                 }
             } else {
-                // 2.0.0-beta8 (F.3): single computed string drives BOTH the on-screen preview AND clipboard copy.
-                val (_, tok) = remember(made, madeId, madeFor, selectedScope) { ensureLocalToken() }
-                val messageText = remember(how, base, tok) {
-                    when (how) {
-                        1 -> AgentGuide.onboardMcp(base, tok)
-                        2 -> AgentGuide.onboardHttp(base, tok)
-                        else -> AgentGuide.onboard(base, tok)
-                    }
-                }
-                Group(tr("发给 ${name.trim().ifEmpty { suggested }}", "Send to ${name.trim().ifEmpty { suggested }}")) {
-                    BasicComponent(title = tr("在哪", "Where"), summary = if (where == 0) tr("这台手机上 · 127.0.0.1:${ApiConfig.port}", "This phone · 127.0.0.1:${ApiConfig.port}") else tr("其它设备（Tailscale） · $base", "Other device (Tailscale) · $base"))
-                    BasicComponent(title = tr("权限", "Scope"), summary = scopeLabel(selectedScope))
-                    BasicComponent(title = tr("怎么连", "How"), summary = listOf(tr("命令行", "Shell"), "MCP", "HTTP")[how])
-                }
-                Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
-                    PrimaryButton(
-                        onClick = { host.copy(tr("给 agent 的话", "Message for your agent"), messageText) },
-                        enabled = canCopyLocal,
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MiuixTheme.colorScheme.primary,
-                    ) {
-                        Text(tr("复制给 agent 的话", "Copy message for your agent"), color = MiuixTheme.colorScheme.onPrimary)
-                    }
-                }
-                Footnote(tr("每个 agent 发它自己的一段话：记录、任务和提问各归各的。", "One message per agent: their records, tasks and questions stay apart."))
-                Group(tr("预览与单独的部分", "Preview & pieces")) {
-                    val pieceText = remember(how, base, tok) {
+                val tok = made
+                if (tok == null) {
+                    Footnote(tr("尚未确认接入，请返回第 3 步点击“确认接入”。", "Not confirmed yet. Go back to step 3 and tap Confirm."))
+                } else {
+                    val messageText = remember(how, base, tok) {
                         when (how) {
-                            0 -> ApiConfig.installLine(base, tok)
-                            1 -> ApiConfig.mcpJson(base, tok)
-                            else -> messageText
+                            1 -> AgentGuide.onboardMcp(base, tok)
+                            2 -> AgentGuide.onboardHttp(base, tok)
+                            else -> AgentGuide.onboard(base, tok)
                         }
                     }
-                    ArrowPreference(
-                        title = if (how == 0) tr("安装命令", "Install command") else if (how == 1) tr("MCP 配置", "MCP config") else tr("完整消息预览", "Message preview"),
-                        endActions = { Value(if (raw) tr("收起", "Hide") else tr("查看", "Show")) },
-                        enabled = canCopyLocal,
-                        onClick = { raw = !raw },
-                    )
-                    AnimatedVisibility(raw && canCopyLocal) {
-                        Code(pieceText) { host.copy(if (how == 0) tr("安装命令", "Install command") else if (how == 1) tr("MCP 配置", "MCP config") else tr("给 agent 的话", "Message"), pieceText) }
+                    Group(tr("发给 $want", "Send to $want")) {
+                        BasicComponent(title = tr("运行位置", "Where"), summary = if (where == 0) tr("这台手机上 · 127.0.0.1:${ApiConfig.port}", "This phone · 127.0.0.1:${ApiConfig.port}") else tr("其它设备（Tailscale） · $base", "Other device (Tailscale) · $base"))
+                        BasicComponent(title = tr("权限档位", "Level"), summary = levelLabel(level))
+                        BasicComponent(title = tr("连接方式", "How"), summary = listOf(tr("命令行", "Shell"), "MCP", "HTTP")[how])
                     }
-                    BasicComponent(title = tr("能力说明", "Ability note"), summary = tr("贴进 agent 的自定义指令或记忆", "Paste into the agent's custom instructions or memory"),
-                        endActions = {
-                            IconButton(onClick = { host.copy(tr("能力说明", "Ability note"), when (how) { 1 -> AgentGuide.memoryMcp(); 2 -> AgentGuide.memoryHttp(base); else -> AgentGuide.memory(base) }) }, enabled = canCopyLocal) {
-                                Icon(MiuixIcons.Copy, tr("复制", "Copy"))
+                    Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
+                        PrimaryButton(
+                            onClick = { host.copy(tr("给 agent 的话", "Message for your agent"), messageText) },
+                            enabled = canCopyLocal,
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MiuixTheme.colorScheme.primary,
+                        ) {
+                            Text(tr("复制给 agent 的话", "Copy message for your agent"), color = MiuixTheme.colorScheme.onPrimary)
+                        }
+                    }
+                    Footnote(tr("每个 agent 使用独立的消息，其记录、任务和提问分别归属。", "One message per agent: their records, tasks and questions stay apart."))
+                    Group(tr("预览与分段复制", "Preview & pieces")) {
+                        val pieceText = remember(how, base, tok) {
+                            when (how) {
+                                0 -> ApiConfig.installLine(base, tok)
+                                1 -> ApiConfig.mcpJson(base, tok)
+                                else -> messageText
                             }
-                        })
+                        }
+                        ArrowPreference(
+                            title = if (how == 0) tr("安装命令", "Install command") else if (how == 1) tr("MCP 配置", "MCP config") else tr("完整消息预览", "Message preview"),
+                            endActions = { Value(if (raw) tr("收起", "Hide") else tr("查看", "Show")) },
+                            enabled = canCopyLocal,
+                            onClick = { raw = !raw },
+                        )
+                        AnimatedVisibility(raw && canCopyLocal) {
+                            Code(pieceText) { host.copy(if (how == 0) tr("安装命令", "Install command") else if (how == 1) tr("MCP 配置", "MCP config") else tr("给 agent 的话", "Message"), pieceText) }
+                        }
+                        BasicComponent(title = tr("能力说明", "Ability note"), summary = tr("可粘贴到 agent 的自定义指令或记忆中", "Paste into the agent's custom instructions or memory"),
+                            endActions = {
+                                IconButton(onClick = { host.copy(tr("能力说明", "Ability note"), when (how) { 1 -> AgentGuide.memoryMcp(); 2 -> AgentGuide.memoryHttp(base); else -> AgentGuide.memory(base) }) }, enabled = canCopyLocal) {
+                                    Icon(MiuixIcons.Copy, tr("复制", "Copy"))
+                                }
+                            })
+                    }
                 }
             }
         }
     }
 }
 
-/** 1.4.0-beta9 + 2.0.0-beta8 (B2): an agent's own page: state, editable scope (downgrade immediate, upgrade confirmed), name, forget. */
+/**
+ * An agent's own page: state, its level (lower at once, higher with a fingerprint), payments for a while, the allows
+ * it holds, name, forget. 2.0.0-beta8 (feedback 2): the level is the one setting per agent.
+ */
 @Composable
 fun AgentPage(id: String) {
     val nav = LocalNav.current
@@ -454,6 +482,7 @@ fun AgentPage(id: String) {
     val main = id == com.kilon.agentvscreen.api.Tokens.MAIN
     val agents by AgentLedger.agents.collectAsState()
     val tokens by com.kilon.agentvscreen.api.Tokens.list.collectAsState()
+    val approvals by com.kilon.agentvscreen.host.StrongConfirm.approvals.collectAsState()
     val token = remember(tokens, id) { tokens.firstOrNull { it.id == id } }
     val l = agents[id] ?: AgentLedger.Snapshot()
     var n by remember { mutableStateOf(com.kilon.agentvscreen.api.Agents.name(id)) }
@@ -465,55 +494,87 @@ fun AgentPage(id: String) {
             when (k) { Kept.CAME_BACK -> tr("已记下，后来也在用", "Saved, and still using it"); Kept.SAVED -> tr("已记下说明", "Note saved"); Kept.CONNECTED -> tr("还没说记在哪", "Has not said where it saved it"); Kept.NONE -> tr("还没连上过", "Not connected yet") },
             remember(l, id) { keptText(id, l) })
         AgentNow(id)
-        if (!main && token != null) {
-            val allowedScopes = if (token.publicOnly) com.kilon.agentvscreen.api.Tokens.PUBLIC_SCOPES else com.kilon.agentvscreen.api.Tokens.SCOPES
-            val curRank = allowedScopes.indexOf(token.scope).coerceAtLeast(0)
-            Group(tr("权限", "Permissions")) {
-                allowedScopes.forEachIndexed { idx, sc ->
+        if (token != null) {
+            val T = com.kilon.agentvscreen.api.Tokens
+            val allowed = if (token.publicOnly) T.PUBLIC_LEVELS else T.LEVELS
+            /** Apply a new table: narrower or equal at once, anything wider with a fingerprint. */
+            fun apply(level: String, custom: Map<String, com.kilon.agentvscreen.api.Policy.Act>, what: String) {
+                val next = com.kilon.agentvscreen.api.Policy.table(level, custom, token.publicOnly)
+                val wider = com.kilon.agentvscreen.api.Policy.widened(token.policy, next)
+                if (wider.isEmpty()) {
+                    T.setLevel(id, level, custom)
+                    com.kilon.agentvscreen.host.Audit.security("policy_narrow", "${token.name} $what")
+                    host.say(tr("已改：$what", "Changed: $what"))
+                } else {
+                    val rows = wider.mapNotNull { com.kilon.agentvscreen.api.Policy.row(it)?.title }.joinToString(tr("、", ", "))
+                    val req = com.kilon.agentvscreen.host.StrongConfirm.createUiMultiRiskRequest(actx, listOf(com.kilon.agentvscreen.host.Risk.LEVEL_UP), token,
+                        tr("${token.name}：$what", "${token.name}: $what"), tr("放宽了：$rows", "Wider: $rows"),
+                        onApprove = {
+                            T.setLevel(id, level, custom)
+                            com.kilon.agentvscreen.host.Audit.security("policy_widen", "${token.name} $what")
+                        })
+                    StrongConfirmActivity.open(actx, req.id)
+                }
+            }
+            Group(tr("权限档位", "Permission level")) {
+                allowed.forEach { lv ->
                     RadioButtonPreference(
-                        title = scopeLabel(sc),
-                        summary = when (sc) {
-                            "look" -> tr("只能查看副屏", "Read-only access")
-                            "operate" -> tr("可点击、输入、滚动和打开应用", "Tap, type, scroll and open apps")
-                            else -> tr("含系统级命令", "Includes system commands")
-                        },
-                        selected = token.scope == sc,
+                        title = levelLabel(lv),
+                        summary = levelHint(lv),
+                        selected = token.level == lv,
                         onClick = {
-                            if (sc == token.scope) return@RadioButtonPreference
-                            if (idx < curRank) {
-                                // Downgrade takes effect immediately (B2).
-                                com.kilon.agentvscreen.api.Tokens.setScope(id, sc)
-                                com.kilon.agentvscreen.host.StrongConfirm.revokeScopesAbove(id, sc)
-                                com.kilon.agentvscreen.host.Audit.security("scope_downgrade", "${token.name} ${token.scope}->$sc")
-                                host.say(tr("已调整权限为：${scopeLabel(sc)}", "Scope updated: ${scopeLabel(sc)}"))
-                            } else {
-                                // Upgrade requires strong confirmation on phone (B2).
-                                val addedRisks = buildList {
-                                    if (curRank < 1 && idx >= 1) add(com.kilon.agentvscreen.host.Risk.SCOPE_OPERATE)
-                                    if (curRank < 2 && idx >= 2) add(com.kilon.agentvscreen.host.Risk.SCOPE_SYSTEM)
-                                }
-                                val req = com.kilon.agentvscreen.host.StrongConfirm.createUiMultiRiskRequest(
-                                    ctx = actx,
-                                    risks = addedRisks,
-                                    token = token,
-                                    commandName = tr("提升权限为 ${scopeLabel(sc)}", "Upgrade scope to ${scopeLabel(sc)}"),
-                                    detail = tr("确认后该 agent 将立即获得上述权限。", "Once confirmed, this agent immediately gains the selected scope."),
-                                    onApprove = {
-                                        com.kilon.agentvscreen.api.Tokens.setScope(id, sc)
-                                        com.kilon.agentvscreen.host.StrongConfirm.grantForScope(id, sc)
-                                        com.kilon.agentvscreen.host.Audit.security("scope_upgrade", "${token.name} ${token.scope}->$sc")
-                                        host.say(tr("已提升权限为：${scopeLabel(sc)}", "Scope upgraded: ${scopeLabel(sc)}"))
-                                    },
-                                )
-                                StrongConfirmActivity.open(actx, req.id)
-                            }
+                            if (lv == token.level) return@RadioButtonPreference
+                            apply(lv, if (lv == com.kilon.agentvscreen.api.Policy.CUSTOM) token.policy else emptyMap(), levelLabel(lv))
                         },
                     )
                 }
             }
+            val preset = com.kilon.agentvscreen.api.Policy.PRESETS[token.level]
+            // rainbow: the per-action table is folded by default; the level above is the usual choice.
+            var showTable by rememberSaveable(id) { mutableStateOf(false) }
+            Group {
+                ArrowPreference(title = tr("分项权限", "Per-action permissions"),
+                    summary = if (preset == null) tr("自定义", "Custom") else if (token.custom.isEmpty()) tr("与档位预设一致", "Same as the level preset") else tr("已修改 ${token.custom.size} 项", "${token.custom.size} changed"),
+                    endActions = { Value(if (showTable) tr("收起", "Hide") else tr("展开", "Show")) }, onClick = { showTable = !showTable })
+                AnimatedVisibility(showTable) { Column {
+                PolicyForm(token.policy, preset, token.publicOnly) { k, a ->
+                    val next = if (preset != null && preset[k] == a) token.custom - k else token.custom + (k to a)
+                    apply(token.level, next, "${com.kilon.agentvscreen.api.Policy.row(k)?.title ?: k} → ${a.title}")
+                }
+                } }
+                if (preset != null && token.custom.isNotEmpty()) BasicComponent(title = tr("恢复「${levelLabel(token.level)}」预设", "Restore the \"${levelLabel(token.level)}\" preset"),
+                    summary = tr("撤销已修改的 ${token.custom.size} 项", "Undo the ${token.custom.size} changed rows"),
+                    onClick = { apply(token.level, emptyMap(), tr("恢复预设", "restore preset")) })
+            }
+            // Feedback 2: "no confirmations for 30 minutes" is a temporary action here, not a setting.
+            if (token.act(com.kilon.agentvscreen.api.Policy.OPERATE) != com.kilon.agentvscreen.api.Policy.Act.DENY) Group {
+                run {
+                    val fmt = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.ROOT) }
+                    if (token.trusted) BasicComponent(title = tr("支付免确认至 ${fmt.format(java.util.Date(token.trustUntil))}", "Payments without confirmation until ${fmt.format(java.util.Date(token.trustUntil))}"),
+                        summary = tr("到期自动恢复确认", "Confirmation resumes when it ends"),
+                        endActions = { LinkButton(onClick = { T.trust(id, 0); com.kilon.agentvscreen.host.Audit.security("trust_end", token.name) }) { Text(tr("现在结束", "End now")) } })
+                    else ArrowPreference(title = tr("临时免确认支付（30 分钟）", "Payments without confirmation (30 min)"),
+                        summary = tr("需指纹验证；设为“每次确认”的应用仍需确认", "Requires a fingerprint; apps set to confirm every time still ask"),
+                        onClick = {
+                            val req = com.kilon.agentvscreen.host.StrongConfirm.createUiRequest(actx, com.kilon.agentvscreen.host.Risk.TRUST_SET, token,
+                                tr("${token.name}：30 分钟内支付免确认", "${token.name}: payments without confirmation for 30 minutes")) {
+                                T.trust(id, 30)
+                                com.kilon.agentvscreen.host.Audit.security("trust", "${token.name} 30min")
+                            }
+                            StrongConfirmActivity.open(actx, req.id)
+                        })
+                }
+            }
+            val grants = remember(approvals, id) { approvals.filter { it.token == id && it.risk.startsWith(com.kilon.agentvscreen.host.StrongConfirm.GRANT_PREFIX) } }
+            if (grants.isNotEmpty()) Group(tr("有效的临时许可", "Active temporary allowances")) {
+                grants.forEach { g ->
+                    BasicComponent(title = grantTitle(g.risk), summary = grantRange(g),
+                        endActions = { LinkButton(onClick = { com.kilon.agentvscreen.host.StrongConfirm.revoke(g) }) { Text(tr("撤销", "Revoke"), color = MiuixTheme.colorScheme.error) } })
+                }
+            }
         }
-        Group(tr("名字", "Name")) {
-            TextField(value = n, onValueChange = { n = it.take(24) }, label = tr("名字", "Name"), useLabelAsPlaceholder = true, singleLine = true,
+        Group(tr("名称", "Name")) {
+            TextField(value = n, onValueChange = { n = it.take(24) }, label = tr("名称", "Name"), useLabelAsPlaceholder = true, singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp))
             val can = n.isNotBlank() && n.trim() != com.kilon.agentvscreen.api.Agents.name(id)
             Text(tr("保存名字", "Save name"), fontSize = 15.sp, color = if (can) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -526,11 +587,32 @@ fun AgentPage(id: String) {
                     com.kilon.agentvscreen.host.Audit.security("revoke", n); nav.back()
                 }
             }.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(if (sure) tr("再点一次确认", "Tap again to confirm") else tr("忘掉这个 agent", "Forget this agent"), fontSize = 15.sp, color = MiuixTheme.colorScheme.error)
-                Text(tr("它的令牌作废，连不上了；做过的任务还留在记录里", "Its token stops working; its past tasks stay in the records"), fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                Text(if (sure) tr("再点一次确认", "Tap again to confirm") else tr("移除此 agent", "Remove this agent"), fontSize = 15.sp, color = MiuixTheme.colorScheme.error)
+                Text(tr("令牌立即失效；历史任务保留在记录中", "Its token stops working at once; past tasks stay in the records"), fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
         }
     }
+}
+
+/** "GRANT:<kind>:<pkg>" as the user reads it. */
+internal fun grantTitle(key: String): String {
+    val rest = key.removePrefix(com.kilon.agentvscreen.host.StrongConfirm.GRANT_PREFIX)
+    val kind = rest.substringBefore(':'); val pkg = rest.substringAfter(':', "*")
+    val app = if (pkg == "*") "" else (com.kilon.agentvscreen.core.VScreenKnowledge.label(pkg) ?: pkg)
+    val what = when (kind) {
+        com.kilon.agentvscreen.host.Consent.DESTROY -> tr("不可撤销操作", "Irreversible actions")
+        com.kilon.agentvscreen.host.Consent.CAUTION -> tr("敏感操作", "Sensitive actions")
+        com.kilon.agentvscreen.host.Consent.APP -> tr("在“每次确认”的应用中操作", "Actions in a confirm-every-time app")
+        "rate" -> tr("高频操作", "High action rate")
+        else -> kind
+    }
+    return if (app.isEmpty()) what else "$what · $app"
+}
+
+internal fun grantRange(g: com.kilon.agentvscreen.host.StrongConfirm.Approval): String {
+    val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.ROOT)
+    return if (g.by.endsWith(":" + com.kilon.agentvscreen.host.StrongConfirm.Range.ROUND.key)) tr("本轮任务内（超过任务轮次时长无新命令即结束）", "This turn (ends once no command arrives for a turn length)")
+    else tr("今天内（至 ${fmt.format(java.util.Date(g.until))}）", "Today (until ${fmt.format(java.util.Date(g.until))})")
 }
 
 /**
@@ -551,11 +633,11 @@ private fun AgentNow(id: String) {
     val waits = open.count { mine(it.session) } + given.values.count { mine(it.session) }
     val s by BackgroundOperation.state.collectAsState()
     val using = mine(s.ownerSessionId) && s.displayId != null
-    Group(tr("它现在", "Now")) {
+    Group(tr("当前状态", "Now")) {
         if (using) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Dot(Palette.brand); Text(tr("  正在用副屏", "  Using the screen now"), fontSize = 15.sp)
         }
-        if (waits > 0) ArrowPreference(title = tr("等你处理 $waits 件", "$waits waiting for you"), summary = tr("在首页最上面", "At the top of the home page"), onClick = { nav.tab(0) })
+        if (waits > 0) ArrowPreference(title = tr("待处理 $waits 项", "$waits waiting for you"), summary = tr("显示在首页顶部", "At the top of the home page"), onClick = { nav.tab(0) })
         books.forEach { e ->
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -579,7 +661,7 @@ private fun AgentNow(id: String) {
         if (!using && waits == 0 && books.isEmpty() && watches.isEmpty())
             Text(tr("没有在用副屏，也没有预约或盯守", "Not using the screen; no bookings or watches"), fontSize = 14.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp))
-        ArrowPreference(title = tr("它的记录", "Its records"), onClick = { RecordsWho.value = id; nav.tab(TAB_RECORDS) })
+        ArrowPreference(title = tr("任务记录", "Its records"), onClick = { RecordsWho.value = id; nav.tab(TAB_RECORDS) })
     }
 }
 
@@ -694,7 +776,7 @@ fun RemotePage() {
     val M = Tailnet.Mode.entries
     fun open(url: String) { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }
 
-    MiuixPage(tr("远程连接", "Remote access"), subtitle = tr("只限你自己的 Tailscale 网络", "Only from your own Tailscale network")) {
+    MiuixPage(tr("远程连接", "Remote access"), subtitle = tr("仅限你的 Tailscale 网络", "Only from your own Tailscale network")) {
         Group(tr("方式", "Mode")) {
             listOf(
                 tr("关", "Off") to tr("只有这台手机上的 agent 能连", "Only agents on this phone can connect"),
@@ -759,10 +841,10 @@ private fun VpnGuide(host: AppHost, switchTo: (Tailnet.Mode) -> Unit) {
         tr("手机上的 VPN 可能影响内置 Tailscale 的连接。如果一直连不上，可以尝试以下办法：",
             "A VPN on this phone may affect the built-in Tailscale connection. If it keeps failing, try one of these options:"))
     if (hasApp) ArrowPreference(title = tr("① 改用手机上的 Tailscale App", "① Use the Tailscale app on this phone"),
-        summary = tr("你已经装了它。打开它并连上，这里切到“外部 Tailscale App”", "It is installed. Open it and connect; this switches to \"External Tailscale app\""),
+        summary = tr("已安装。打开并连接后，将此处切换为“外部 Tailscale App”", "It is installed. Open it and connect; this switches to \"External Tailscale app\""),
         endActions = { Value(tr("切换", "Switch")) }, onClick = { switchTo(Tailnet.Mode.SYSTEM) })
     ArrowPreference(title = tr("${if (hasApp) "②" else "①"} 让 VPN 放过本应用", "${if (hasApp) "②" else "①"} Let the VPN skip this app"),
-        summary = tr("在你的 VPN / 代理 App 里把 Agent-VScreen 设为不走 VPN", "In your VPN / proxy app, set Agent-VScreen to bypass it"),
+        summary = tr("在 VPN / 代理 App 中将 Agent-VScreen 设为不经过 VPN", "In your VPN / proxy app, set Agent-VScreen to bypass it"),
         endActions = { Value(if (how) tr("收起", "Hide") else tr("怎么做", "How")) }, onClick = { how = !how })
     if (how) Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         listOf(tr("打开你的 VPN 或代理 App", "Open your VPN or proxy app"),
@@ -775,7 +857,7 @@ private fun VpnGuide(host: AppHost, switchTo: (Tailnet.Mode) -> Unit) {
             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { host.copy(tr("包名", "Package name"), ctx.packageName) }.padding(vertical = 4.dp))
     }
     BasicComponent(title = tr("${if (hasApp) "③" else "②"} 暂时关掉那个 VPN", "${if (hasApp) "③" else "②"} Turn that VPN off for now"),
-        summary = tr("关掉后这里自己连上；之后再开，可能又会断", "It connects by itself; turning the VPN on again may break it again"))
+        summary = tr("关闭后将自动重连；再次开启可能再次断开", "It connects by itself; turning the VPN on again may break it again"))
 }
 
 /** The built-in node: one phase decides the card (Tailnet.phase), the same word the settings row and agents see. */
@@ -810,7 +892,7 @@ private fun BuiltinState(ts: Tailnet.Status, host: AppHost, open: (String) -> Un
         }
         TsPhase.CONNECTED -> {
             InfoCard(Palette.takeover, tr("已连上 Tailscale", "Connected to Tailscale"),
-                tr("名字", "Name") + " ${ts.dnsName ?: ApiConfig.tailnetHostname}\n" + tr("地址", "Address") + " ${ts.ip}" +
+                tr("名称", "Name") + " ${ts.dnsName ?: ApiConfig.tailnetHostname}\n" + tr("地址", "Address") + " ${ts.ip}" +
                     (ts.user?.let { "\n" + tr("账号", "Account") + " $it" } ?: "") +
                     (if (ts.ownServer) "\n" + tr("服务器", "Server") + " ${ts.serverName}" else "") +
                     "\n" + tr("在线设备 ${ts.online} 台", "${ts.online} devices online") +

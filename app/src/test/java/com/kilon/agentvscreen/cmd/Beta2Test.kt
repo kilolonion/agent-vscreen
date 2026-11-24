@@ -17,13 +17,13 @@ import org.robolectric.RobolectricTestRunner
 class Beta2Test {
     private fun args(cmd: String, vararg rest: String) = VScreenOptions.args(cmd, VScreenOptions.normalize(cmd, rest.toList()))
 
+    // 2.0.0-beta9: the global hands-off/careful switch became each agent's own table (Policy). Behaviour changed on purpose.
     @Test fun handsOffAsksOnlyForMoneyAndTheUsersOwnRule() {
-        assertTrue(Consent.asks("pay", "auto"))
-        assertTrue(Consent.asks("app", "auto"))
-        assertFalse(Consent.asks("spend", "auto"))
-        assertFalse(Consent.asks("irreversible", "auto"))
-        assertFalse(Consent.asks("system", "auto"))
-        listOf("pay", "app", "spend", "irreversible", "system").forEach { assertTrue(it, Consent.asks(it, "careful")) }
+        val free = com.kilon.agentvscreen.api.Policy.table(com.kilon.agentvscreen.api.Tokens.FREE, emptyMap())
+        assertEquals(com.kilon.agentvscreen.api.Policy.Act.ASK, free[com.kilon.agentvscreen.api.Policy.MONEY]); assertEquals(com.kilon.agentvscreen.api.Policy.Act.ALLOW, free[com.kilon.agentvscreen.api.Policy.CAUTION])
+        val careful = com.kilon.agentvscreen.api.Policy.table(com.kilon.agentvscreen.api.Tokens.CAREFUL, emptyMap())
+        listOf(com.kilon.agentvscreen.api.Policy.MONEY, com.kilon.agentvscreen.api.Policy.DESTROY, com.kilon.agentvscreen.api.Policy.CAUTION).forEach { assertEquals(it, com.kilon.agentvscreen.api.Policy.Act.ASK, careful[it]) }
+        assertEquals(com.kilon.agentvscreen.api.Policy.Act.ASK, Consent.actFor(Consent.APP, null))
     }
 
     @Test fun buttonWordsAreSortedByWhatTheyDo() {

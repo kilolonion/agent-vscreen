@@ -4,6 +4,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.Switch
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -41,137 +42,69 @@ import java.util.Locale
 @Composable
 private fun Small(t: String) = Text(t, fontSize = 12.sp, lineHeight = 17.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
 
-/** One token per agent: make, limit, pre-authorize, revoke. [copy] puts text on the clipboard; [base] is the address agents use. */
+/**
+ * 2.0.0-beta9 (feedback 5, 6): one row per token, composed lazily by [TokensPage]. What an agent may do is set on its
+ * own page (tap the row); here: its level, when it was last used, remove.
+ */
 @Composable
-fun TokensPanel(base: String, copy: (String, String) -> Unit) {
-    val actx = androidx.compose.ui.platform.LocalContext.current.applicationContext
-    val list by Tokens.list.collectAsState()
-    var adding by remember { mutableStateOf(false) }
-    var made by remember { mutableStateOf<Pair<Tokens.Token, String>?>(null) }
-    var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(Unit) { while (true) { delay(20_000); tick++ } }
-    val fmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.ROOT) }
-    list.forEach { t ->
-        @Suppress("UNUSED_EXPRESSION") tick
-        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MiuixTheme.colorScheme.surfaceContainerHigh).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+internal fun TokenRow(t: Tokens.Token, fmt: SimpleDateFormat, open: () -> Unit, remove: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = open).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(if (t.id == Tokens.MAIN) tr("主令牌（默认内置令牌）", "Main token (built-in default)") else t.name, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-            Small(tr("权限：", "Permission: ") + scopeWord(t.scope) + " · " + (if (t.lastUsedAt > 0) tr("上次使用 ", "last used ") + fmt.format(Date(t.lastUsedAt)) else tr("还没用过", "never used")) +
-                if (t.trusted) tr(" · 免确认到 ", " · no confirmations until ") + fmt.format(Date(t.trustUntil)) else "")
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (t.id != Tokens.MAIN) {
-                    val pool = if (t.publicOnly) Tokens.PUBLIC_SCOPES else Tokens.SCOPES
-                    LinkButton(onClick = { Tokens.setScope(t.id, pool[(pool.indexOf(t.scope).coerceAtLeast(0) + 1) % pool.size]) }) { Text(tr("改权限", "Change")) }
-                }
-                if (t.trusted) LinkButton(onClick = { Tokens.trust(t.id, 0) }) { Text(tr("结束免确认", "End no-confirm")) }
-                else LinkButton(onClick = {
-                    val req = com.kilon.agentvscreen.host.StrongConfirm.createUiRequest(
-                        actx,
-                        com.kilon.agentvscreen.host.Risk.TRUST_SET,
-                        t,
-                        tr("免确认 30 分钟", "No confirm 30 min"),
-                    ) {
-                        Tokens.trust(t.id, 30)
-                        Audit.security("trust", "${t.name} 30min")
-                    }
-                    StrongConfirmActivity.open(actx, req.id)
-                }) { Text(tr("免确认 30 分钟", "No confirm 30 min")) }
-                if (t.id != Tokens.MAIN) LinkButton(onClick = { val id = t.id; Thread { com.kilon.agentvscreen.api.Agents.forget(actx, id) }.start(); Audit.security("revoke", t.name) }) { Text(tr("撤销", "Revoke"), color = MiuixTheme.colorScheme.error) }
-            }
+            Small(com.kilon.agentvscreen.api.Policy.levelTitle(t.level) + (if (t.custom.isNotEmpty() && t.level != com.kilon.agentvscreen.api.Policy.CUSTOM) tr("（改过 ${t.custom.size} 项）", " (${t.custom.size} changed)") else "") +
+                " · " + (if (t.lastUsedAt > 0) tr("上次使用 ", "last used ") + fmt.format(Date(t.lastUsedAt)) else tr("还没用过", "never used")) +
+                if (t.trusted) tr(" · 支付免确认至 ", " · payments unconfirmed until ") + fmt.format(Date(t.trustUntil)) else "")
         }
-    }
-    SoftButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) { Text(tr("新建令牌", "New token")) }
-
-    if (adding) {
-        var name by remember { mutableStateOf("") }
-        var scope by remember { mutableIntStateOf(1) }
-        GlassDialog(onDismissRequest = { adding = false }, title = { Text(tr("新建令牌", "New token")) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    top.yukonga.miuix.kmp.basic.TextField(value = name, onValueChange = { name = it.take(24) }, label = tr("给谁用（如 电脑上的助手）", "Who it is for (e.g. desktop assistant)"), useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth())
-                    Tokens.SCOPES.forEachIndexed { i, s ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            top.yukonga.miuix.kmp.basic.RadioButton(selected = scope == i, onClick = { scope = i })
-                            Column { Text(scopeWord(s), fontSize = 14.sp); Small(scopeHint(s)) }
-                        }
-                    }
-                }
-            },
-            confirmButton = { LinkButton(onClick = { made = Tokens.create(name, Tokens.SCOPES[scope]); Audit.security("token_created", "${made!!.first.name} ${made!!.first.scope}"); adding = false }) { Text(tr("创建", "Create")) } },
-            dismissButton = { LinkButton(onClick = { adding = false }) { Text(tr("取消", "Cancel")) } })
-    }
-    made?.let { (t, text) ->
-        GlassDialog(onDismissRequest = { made = null }, title = { Text(tr("令牌「${t.name}」", "Token \"${t.name}\"")) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Small(tr("令牌只显示这一次（App 里只存它的指纹）。现在就复制给 agent 的话，或单独复制令牌。", "The token is shown only this once (the app keeps only its fingerprint). Copy the message for the agent now, or the token alone."))
-                    Text(text, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                    PrimaryButton(onClick = { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboard(base, text)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制给 agent 的话（命令行）", "Copy message for the agent (shell)")) }
-                    SoftButton(onClick = { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboardMcp(base, text)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制给 agent 的话（MCP）", "Copy message for the agent (MCP)")) }
-                    SoftButton(onClick = { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboardHttp(base, text)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制给 agent 的话（HTTP）", "Copy message for the agent (HTTP)")) }
-                    SoftButton(onClick = { copy(tr("令牌", "Token"), text) }, modifier = Modifier.fillMaxWidth()) { Text(tr("只复制令牌", "Copy the token only")) }
-                }
-            },
-            confirmButton = { LinkButton(onClick = { made = null }) { Text(tr("我已复制", "I copied it")) } })
+        if (t.id != Tokens.MAIN) LinkButton(onClick = remove) { Text(tr("删除", "Remove"), color = MiuixTheme.colorScheme.error) }
     }
 }
 
-/** 2.0.0-beta6 (6.6): confirmed access records grouped by token; revoking requires no strong confirmation. */
+/** New token (an agent made by hand, outside the connect flow): name and level, confirmed with a fingerprint. */
 @Composable
-fun ApprovalsPanel() {
-    val approvals by com.kilon.agentvscreen.host.StrongConfirm.approvals.collectAsState()
-    val tokens by Tokens.list.collectAsState()
-    val fmt = remember { SimpleDateFormat("MM-dd HH:mm", Locale.ROOT) }
-    val tokenNames = remember(tokens) {
-        tokens.associate { it.id to (if (it.id == Tokens.MAIN) tr("主令牌", "Main token") else it.name) }
-    }
-    if (approvals.isEmpty()) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(MiuixTheme.colorScheme.surfaceContainerHigh)
-                .padding(12.dp),
-        ) {
-            Small(tr("还没有已确认的接入记录。", "No confirmed access records yet."))
-        }
-        return
-    }
-    val grouped = remember(approvals) { approvals.groupBy { it.token } }
-    grouped.forEach { (tid, items) ->
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(MiuixTheme.colorScheme.surfaceContainerHigh)
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Text(tokenNames[tid] ?: tid, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-            items.forEach { a ->
-                val riskTitle = com.kilon.agentvscreen.host.Risk.of(a.risk)?.title ?: a.risk
-                val byLabel = when (a.by) {
-                    com.kilon.agentvscreen.host.StrongConfirm.BY_BIOMETRIC -> tr("生物识别/密码", "biometric/PIN")
-                    com.kilon.agentvscreen.host.StrongConfirm.BY_HOLD -> tr("长按", "hold")
-                    com.kilon.agentvscreen.host.StrongConfirm.BY_MIGRATED -> tr("升级迁移", "migrated")
-                    else -> a.by
-                }
-                val untilLabel = if (a.until == 0L) tr("直到撤销", "until revoked") else tr("有效期至 ", "until ") + fmt.format(Date(a.until))
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("$riskTitle · ${com.kilon.agentvscreen.host.StrongConfirm.clientLabel(a.client)}", fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                        Small("$byLabel · $untilLabel")
-                    }
-                    LinkButton(onClick = { com.kilon.agentvscreen.host.StrongConfirm.revoke(a) }) {
-                        Text(tr("撤销", "Revoke"), color = MiuixTheme.colorScheme.error)
+internal fun NewTokenDialog(base: String, copy: (String, String) -> Unit, close: () -> Unit) {
+    val actx = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    var name by remember { mutableStateOf("") }
+    var level by remember { mutableStateOf(Tokens.FREE) }
+    var made by remember { mutableStateOf<Pair<Tokens.Token, String>?>(null) }
+    val m = made
+    if (m == null) GlassDialog(onDismissRequest = close, title = { Text(tr("新建令牌", "New token")) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                top.yukonga.miuix.kmp.basic.TextField(value = name, onValueChange = { name = it.take(24) }, label = tr("给谁用（如 电脑上的助手）", "Who it is for (e.g. desktop assistant)"), useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Tokens.LEVELS.filter { it != com.kilon.agentvscreen.api.Policy.CUSTOM }.forEach { lv ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        top.yukonga.miuix.kmp.basic.RadioButton(selected = level == lv, onClick = { level = lv })
+                        Column { Text(com.kilon.agentvscreen.api.Policy.levelTitle(lv), fontSize = 14.sp); Small(com.kilon.agentvscreen.api.Policy.levelHint(lv)) }
                     }
                 }
             }
-        }
-    }
+        },
+        confirmButton = { LinkButton(onClick = {
+            val want = name.trim().ifEmpty { tr("新的 agent", "New agent") }
+            val draft = Tokens.Token("new", want, "", Tokens.scopeOfLevel(level), System.currentTimeMillis(), level = level)
+            val req = com.kilon.agentvscreen.host.StrongConfirm.createUiMultiRiskRequest(actx, listOf(com.kilon.agentvscreen.host.Risk.NEW_CLIENT), draft,
+                tr("接入 $want（${com.kilon.agentvscreen.api.Policy.levelTitle(level)}）", "Connect $want (${com.kilon.agentvscreen.api.Policy.levelTitle(level)})"), com.kilon.agentvscreen.api.Policy.levelHint(level),
+                onApprove = {
+                    val r = Tokens.createLevel(want, level)
+                    com.kilon.agentvscreen.host.StrongConfirm.grantAgent(r.first.id)
+                    Audit.security("token_created", "${r.first.name} ${r.first.level}")
+                    made = r
+                })
+            StrongConfirmActivity.open(actx, req.id)
+        }) { Text(tr("创建", "Create")) } },
+        dismissButton = { LinkButton(onClick = close) { Text(tr("取消", "Cancel")) } })
+    else GlassDialog(onDismissRequest = close, title = { Text(tr("令牌「${m.first.name}」", "Token \"${m.first.name}\"")) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Small(tr("令牌只显示这一次（App 里只存它的指纹）。现在就复制给 agent 的话，或单独复制令牌。", "The token is shown only this once (the app keeps only its fingerprint). Copy the message for the agent now, or the token alone."))
+                Text(m.second, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                PrimaryButton(onClick = { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboard(base, m.second)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制给 agent 的话（命令行）", "Copy message for the agent (shell)")) }
+                SoftButton(onClick = { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboardMcp(base, m.second)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制给 agent 的话（MCP）", "Copy message for the agent (MCP)")) }
+                SoftButton(onClick = { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboardHttp(base, m.second)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制给 agent 的话（HTTP）", "Copy message for the agent (HTTP)")) }
+                SoftButton(onClick = { copy(tr("令牌", "Token"), m.second) }, modifier = Modifier.fillMaxWidth()) { Text(tr("只复制令牌", "Copy the token only")) }
+            }
+        },
+        confirmButton = { LinkButton(onClick = close) { Text(tr("我已复制", "I copied it")) } })
 }
 
 private fun scopeWord(s: String) = when (s) { "look" -> tr("只看", "look only"); "operate" -> tr("可操作", "operate"); else -> tr("全部（含系统修复、强制结束）", "everything (incl. system repair, force-stop)") }

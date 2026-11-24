@@ -143,6 +143,17 @@ object AgentLedger {
         if (::prefs.isInitialized) prefs.edit().apply { prefs.all.keys.filter { it.startsWith("$id.") || it == "ack_$id" || it == "ack_at_$id" }.forEach { remove(it) } }.apply()
     }
 
+    /** 2.0.0-beta8 (feedback 5): forget many records with one scan and one write. */
+    fun forgetMany(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        _agents.value = _agents.value - ids
+        ids.forEach { replyModes.remove(it); holdDefaults.remove(it) }
+        _snap.value = combined(_agents.value.values)
+        if (::prefs.isInitialized) prefs.edit().apply {
+            prefs.all.keys.filter { k -> k.substringBefore('.') in ids || k.removePrefix("ack_at_") in ids || k.removePrefix("ack_") in ids }.forEach { remove(it) }
+        }.apply()
+    }
+
     // ── 1.3 beta4: which app version each agent's note is for (per token) ──
     private val nudged = java.util.concurrent.ConcurrentHashMap<String, Long>()
     const val NUDGE_EVERY_MS = 20 * 60_000L

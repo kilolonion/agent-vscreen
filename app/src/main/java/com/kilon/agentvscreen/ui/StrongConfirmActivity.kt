@@ -129,6 +129,7 @@ class StrongConfirmActivity : ComponentActivity() {
     private var secureState = mutableStateOf(false)
     private var statusMessageState = mutableStateOf<String?>(null)
     private var selectedScopeState = mutableStateOf("look")
+    private var selectedRangeState = mutableStateOf(StrongConfirm.Range.ONCE)
     private var bioCancel: CancellationSignal? = null
     private var actionBar: LinearLayout? = null
     private var denyBtn: TextView? = null
@@ -167,6 +168,7 @@ class StrongConfirmActivity : ComponentActivity() {
         requestIdState.value = resolveId(intent)
         secureState.value = isDeviceSecure()
         selectedScopeState.value = resolveActiveRequest()?.defaultScope ?: "look"
+        selectedRangeState.value = resolveActiveRequest()?.ranges?.firstOrNull() ?: StrongConfirm.Range.ONCE
 
         val root = FrameLayout(this)
         val compose = ComposeView(this).apply {
@@ -220,7 +222,11 @@ class StrongConfirmActivity : ComponentActivity() {
                 StrongConfirm.byId(activeId)?.let { launchBiometric(it) }
             },
             onHoldCompleted = { activeId ->
-                StrongConfirm.approve(applicationContext, activeId, StrongConfirm.BY_HOLD)
+                StrongConfirm.approve(applicationContext, activeId, StrongConfirm.BY_HOLD, selectedScopeState.value, selectedRangeState.value)
+                if (!isFinishing && !isDestroyed) finish()
+            },
+            onTapCompleted = { activeId ->
+                StrongConfirm.approve(applicationContext, activeId, StrongConfirm.BY_TAP, null, selectedRangeState.value)
                 if (!isFinishing && !isDestroyed) finish()
             },
         )
@@ -255,6 +261,7 @@ class StrongConfirmActivity : ComponentActivity() {
         requestIdState.value = resolveId(intent)
         secureState.value = isDeviceSecure()
         selectedScopeState.value = resolveActiveRequest()?.defaultScope ?: "look"
+        selectedRangeState.value = resolveActiveRequest()?.ranges?.firstOrNull() ?: StrongConfirm.Range.ONCE
         syncNativeBar()
     }
 
@@ -279,7 +286,8 @@ class StrongConfirmActivity : ComponentActivity() {
         val secure = secureState.value
         bar.visibility = View.VISIBLE
         denyBtn?.text = tr("拒绝", "Deny")
-        confirmBtn?.bind(req.id, secure, secure || req.allowHold)
+        val tap = req.strength == Risk.Strength.TAP
+        confirmBtn?.bind(req.id, secure && !tap, tap || secure || req.allowHold, tap)
     }
 
     override fun onStart() {
@@ -329,7 +337,7 @@ class StrongConfirmActivity : ComponentActivity() {
                 .build()
             prompt.authenticate(sig, mainExecutor, object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    StrongConfirm.approve(applicationContext, req.id, StrongConfirm.BY_BIOMETRIC, selectedScopeState.value)
+                    StrongConfirm.approve(applicationContext, req.id, StrongConfirm.BY_BIOMETRIC, selectedScopeState.value, selectedRangeState.value)
                     if (!isFinishing && !isDestroyed) finish()
                 }
 
@@ -397,10 +405,13 @@ class StrongConfirmActivity : ComponentActivity() {
                         Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        val headerTitle = if (req.risks.size > 1) {
-                            tr("一次确认 ${req.risks.size} 项权限", "Confirm ${req.risks.size} permissions")
-                        } else {
-                            req.risk.title
+                        val headerTitle = when {
+                            req.risk == Risk.HIGH_RISK -> req.commandName
+                            Risk.LEVEL_UP in req.risks && req.targetLevel?.startsWith("row:") == true -> (com.kilon.agentvscreen.api.Policy.row(req.targetLevel.removePrefix("row:"))?.title ?: req.targetLevel).let {
+                                tr("${req.tokenName} 请求允许「$it」", "${req.tokenName} asks to allow \"$it\"") }
+                            Risk.LEVEL_UP in req.risks -> tr("${req.tokenName} 请求提升至「${levelLabel(req.targetLevel ?: Tokens.FREE)}」", "${req.tokenName} asks for \"${levelLabel(req.targetLevel ?: Tokens.FREE)}\"")
+                            req.risks.size > 1 -> req.risks.joinToString(" + ") { it.title }
+                            else -> req.risk.title
                         }
                         Text(
                             headerTitle,
@@ -418,7 +429,7 @@ class StrongConfirmActivity : ComponentActivity() {
                     }
 
                     // 6.2: permanent top warning banner when the phone has no screen lock PIN/biometric.
-                    if (!secure) {
+                    if (!secure && req.strength == Risk.Strength.BIOMETRIC) {
                         Box(
                             Modifier
                                 .fillMaxWidth()
@@ -481,10 +492,10 @@ class StrongConfirmActivity : ComponentActivity() {
                                 label = tr("回调域名", "Redirect host"),
                                 value = req.redirectHost ?: "-",
                             )
-                            val opts = req.selectableScopes.filter { it in Tokens.PUBLIC_SCOPES }.ifEmpty { listOf("look") }
+                            val opts = req.selectableScopes.filter { it in Tokens.PUBLIC_LEVELS }.ifEmpty { listOf(Tokens.LOOK) }
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
-                                    tr("授予权限（公网永不开放“系统”权限）", "Granted scope (\"system\" is never available over public MCP)"),
+                                    tr("权限档位（公网接入不开放系统操作）", "Permission level (system actions are never available over public MCP)"),
                                     fontSize = 12.sp,
                                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                 )
@@ -501,10 +512,9 @@ class StrongConfirmActivity : ComponentActivity() {
                                     ) {
                                         RadioButton(selected = active, onClick = { selectedScopeState.value = sc })
                                         Column {
-                                            Text(scopeLabel(sc), fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                                            Text(levelLabel(sc), fontSize = 15.sp, fontWeight = FontWeight.Medium)
                                             Text(
-                                                if (sc == "operate") tr("可打开并操作应用（高风险步骤仍需在手机确认）", "Can open and operate apps (high-risk steps still confirm on phone)")
-                                                else tr("仅查看屏幕和状态，不能点击或输入（默认）", "View screen and status only; cannot tap or type (default)"),
+                                                levelHint(sc),
                                                 fontSize = 12.sp,
                                                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                             )
@@ -531,8 +541,8 @@ class StrongConfirmActivity : ComponentActivity() {
                                 )
                             }
                             InfoLine(
-                                label = tr("令牌", "Token"),
-                                value = "${req.tokenName}（${scopeLabel(req.tokenScope)}）",
+                                label = tr("agent", "Agent"),
+                                value = req.tokenName + (Tokens.byId(req.tokenId)?.let { tr("（${levelLabel(it.level)}）", " (${levelLabel(it.level)})") } ?: ""),
                             )
                             InfoLine(
                                 label = tr("客户端", "Client"),
@@ -547,6 +557,28 @@ class StrongConfirmActivity : ComponentActivity() {
                                     label = tr("说明", "Details"),
                                     value = req.detail,
                                 )
+                            }
+                        }
+                        if (req.ranges.size > 1) {
+                            val picked = selectedRangeState.value
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(tr("许可范围", "Allow for"), fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    req.ranges.forEach { r ->
+                                        val on = picked == r
+                                        Text(
+                                            r.title,
+                                            fontSize = 14.sp,
+                                            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                                            color = if (on) MiuixTheme.colorScheme.onPrimary else MiuixTheme.colorScheme.onSurface,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(50))
+                                                .background(if (on) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.surfaceContainerHigh)
+                                                .clickable { selectedRangeState.value = r }
+                                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                                        )
+                                    }
+                                }
                             }
                         }
                         if (statusMsg != null) {
@@ -575,14 +607,14 @@ class StrongConfirmActivity : ComponentActivity() {
                 text = {
                     Text(
                         tr(
-                            "为了防止 agent 自己点“同意”，重要接入与高风险操作必须在本机主屏完成验证：\n" +
-                                "• 已设锁屏密码时，使用系统生物识别或锁屏密码验证；\n" +
-                                "• 未设锁屏密码时，需要真实手指按住确认按钮 3 秒（自动忽略注入与无障碍点击）；\n" +
-                                "• 随时可在 设置 › 令牌 › 已确认的接入 里撤销。",
-                            "To stop an agent from approving its own requests, new access and high-risk actions must be verified on the main screen:\n" +
-                                "• With a screen lock set, system biometric or PIN verification is used;\n" +
-                                "• Without a screen lock, a 3-second real-finger hold is required (injected and accessibility clicks are ignored);\n" +
-                                "• You can revoke any approval at any time under Settings › Tokens › Confirmed access.",
+                            "确认只能在主屏上由真实触摸完成，副屏上的 agent 无法点击或看到此页面：\n" +
+                                "• 支付、接入新 agent、放宽权限、开启公网接入、临时免确认支付：需指纹或锁屏密码（未设锁屏时长按 3 秒）；\n" +
+                                "• 其他操作（不可撤销操作、敏感操作、“每次确认”的应用等）：单击“允许”，可选择本轮任务内或今天内同类操作不再确认；\n" +
+                                "• 已授予的许可可在 接入 › agent 详情 中随时撤销。",
+                            "Only your finger on the phone's main screen can confirm; an agent on its own screen can neither tap nor see this page:\n" +
+                                "• Paying, a new agent, a higher level, public access, payments for a while: fingerprint or screen-lock PIN (a 3-second hold without a screen lock);\n" +
+                                "• Everything else (delete, uninstall, force-stop, an app you set to ask…): one tap on Allow, and you can let the same kind of step through for this run or today;\n" +
+                                "• You can take any allow back under Connect › the agent.",
                         ),
                         fontSize = 14.sp,
                         lineHeight = 21.sp,
@@ -602,6 +634,9 @@ class StrongConfirmActivity : ComponentActivity() {
             Text(value, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
         }
     }
+
+    private fun levelLabel(l: String): String = com.kilon.agentvscreen.ui.levelLabel(l)
+    private fun levelHint(l: String): String = com.kilon.agentvscreen.ui.levelHint(l)
 
     private fun scopeLabel(s: String): String = when (s) {
         "look" -> tr("只看", "look only")
@@ -626,7 +661,10 @@ internal class StrongConfirmButtonView(
     private var enabledAction: Boolean,
     private val onTriggerBiometric: (String) -> Unit,
     private val onHoldCompleted: (String) -> Unit,
+    /** 2.0.0-beta8 (feedback 3): a light confirmation is one real tap on "Allow" (L6 real touch, never a11y). */
+    private val onTapCompleted: (String) -> Unit = {},
 ) : View(context) {
+    private var tapMode = false
 
     private val handler = Handler(Looper.getMainLooper())
     private var holding = false
@@ -687,13 +725,14 @@ internal class StrongConfirmButtonView(
         contentDescription = labelText()
     }
 
-    fun bind(id: String, bio: Boolean, enabled: Boolean) {
+    fun bind(id: String, bio: Boolean, enabled: Boolean, tap: Boolean = false) {
         if (requestId != id) {
             cancelHold()
             completed = false
         }
         requestId = id
-        biometricMode = bio
+        tapMode = tap
+        biometricMode = bio || tap
         enabledAction = enabled
         contentDescription = labelText()
         invalidate()
@@ -721,6 +760,7 @@ internal class StrongConfirmButtonView(
 
     private fun labelText(): String = when {
         !enabledAction -> tr("需设锁屏密码", "Screen lock required")
+        tapMode -> tr("允许", "Allow")
         biometricMode -> tr("确认", "Confirm")
         holding -> {
             val leftSec = (((1f - holdProgress) * StrongConfirm.HOLD_CONFIRM_MS) / 1000f).coerceAtLeast(0.1f)
@@ -760,6 +800,29 @@ internal class StrongConfirmButtonView(
 
     override fun onTouchEvent(ev: MotionEvent): Boolean {
         if (!enabledAction || completed) return false
+        if (tapMode) {
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (!StrongConfirm.isRealTouch(ev)) { logL6Ignored(ev); return false }
+                    downInBiometric = true
+                    invalidate()
+                    return true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val wasDown = downInBiometric
+                    downInBiometric = false
+                    invalidate()
+                    if (!StrongConfirm.isRealTouch(ev)) { logL6Ignored(ev); return true }
+                    if (wasDown && inside(ev.x, ev.y)) {
+                        completed = true
+                        onTapCompleted(requestId)
+                    }
+                    return true
+                }
+                MotionEvent.ACTION_CANCEL -> { downInBiometric = false; invalidate(); return true }
+            }
+            return true
+        }
         if (biometricMode) {
             when (ev.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {

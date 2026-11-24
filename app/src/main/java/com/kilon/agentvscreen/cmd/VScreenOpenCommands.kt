@@ -281,7 +281,7 @@ private fun VScreenOffloadHandler.handoffIn(sid: String, pkgArg: String?): Nativ
     com.kilon.agentvscreen.core.Guard.require(com.kilon.agentvscreen.core.Guard.Act.TAKE, pick.pkg)
     // 1.2: taking the app the user is using off their screen is theirs to allow, on the phone.
     run { val app = VScreenKnowledge.label(pick.pkg) ?: pick.pkg
-        com.kilon.agentvscreen.host.Consent.require(context, "handoff:${pick.pkg}", tr("把你正在用的 $app 接到后台副屏", "move $app, which you are using, to the background screen"), tr("它会从主屏消失，停在当前页面，由 Agent 在后台继续操作", "it leaves the main screen, stays on its current page, and the agent carries on in the background"), kind = "system") }
+        com.kilon.agentvscreen.host.Consent.require(context, "handoff:${pick.pkg}", tr("把你正在用的 $app 接到后台副屏", "move $app, which you are using, to the background screen"), tr("它会从主屏消失，停在当前页面，由 Agent 在后台继续操作", "it leaves the main screen, stays on its current page, and the agent carries on in the background"), kind = com.kilon.agentvscreen.host.Consent.CAUTION, pkg = pick.pkg) }
     val want = VScreenShell.appOrientation(context, pick.pkg, null) ?: VScreenMap.profile(pick.pkg)["orientation"]?.let { it == "landscape" }
     // 1.4.2-beta6: building / rebuilding the screen and removing a task come before the action itself: not while the
     // user holds the screen or has stopped the AI.
@@ -354,7 +354,7 @@ internal fun VScreenOffloadHandler.stopCmd(sid: String?, args: OffloadArgs): Nat
     if (force) {
         val target = pkgArg ?: runCatching { BackgroundOperation.previewDisplayFor(s)?.let { VScreenShell.topPackage(it.displayId) } }.getOrNull() ?: "?"
         val app = VScreenKnowledge.label(target) ?: target
-        com.kilon.agentvscreen.host.Consent.require(context, "force-stop:$target", tr("结束整个 $app（force-stop）", "stop the whole of $app (force-stop)"), tr("主屏上的 $app 也会被结束，没保存的内容会丢", "$app on the main screen is stopped too; unsaved content is lost"), kind = "system")
+        com.kilon.agentvscreen.host.Consent.require(context, "force-stop:$target", tr("结束整个 $app（force-stop）", "stop the whole of $app (force-stop)"), tr("主屏上的 $app 也会被结束，没保存的内容会丢", "$app on the main screen is stopped too; unsaved content is lost"), kind = com.kilon.agentvscreen.host.Consent.CAUTION, pkg = target)
     }
     val stopped = VScreenKnowledge.journey(s)
     VScreenKnowledge.endJourney(s)

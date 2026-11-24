@@ -34,7 +34,9 @@ class Call(val session: String, val tokenId: String = "main", val tokenName: Str
            /** 1.4: how the caller reaches us (shell CLI, MCP, raw HTTP): texts for the agent name commands its way. */
            val via: com.kilon.agentvscreen.api.Abilities.Via = com.kilon.agentvscreen.api.Abilities.Via.CLI,
            /** 2.0.0-beta7 (7.7): network origin (local / tailnet / public); separate from [via] reply format. */
-           val source: Source = Source.LOCAL) {
+           val source: Source = Source.LOCAL,
+           /** 2.0.0-beta9: the real public address of a public MCP caller (from tsbridge's X-AVS-Public-Src), for the audit log only. */
+           val srcAddr: String? = null) {
     enum class Source(val key: String) {
         LOCAL("local"),
         TAILNET("tailnet"),
