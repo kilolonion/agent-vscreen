@@ -39,7 +39,7 @@ internal object Tasks {
             prune()
             if (tasks.values.count { it.result == null } >= MAX_RUNNING) throw ActionError("BUSY", tr("已经有 $MAX_RUNNING 个任务在运行：task 看列表，等一个做完或 task cancel", "$MAX_RUNNING tasks are already running: task lists them; wait for one or task cancel"))
             val id = "t" + (++seq) + "-" + java.lang.Long.toString((Math.random() * 46656).toLong(), 36)
-            val c = Call(sid, parent?.tokenId ?: "main", parent?.tokenName ?: "main", parent?.scopes ?: setOf("look", "operate", "system"), parent?.peer, parent?.requestId, parent?.lang, parent?.trustUntil ?: 0L, parent?.via ?: com.kilon.agentvscreen.api.Abilities.Via.CLI)
+            val c = Call(sid, parent?.tokenId ?: "main", parent?.tokenName ?: "main", parent?.scopes ?: setOf("look", "operate", "system"), parent?.peer, parent?.requestId, parent?.lang, parent?.trustUntil ?: 0L, parent?.via ?: com.kilon.agentvscreen.api.Abilities.Via.CLI, parent?.source ?: Call.Source.LOCAL)
             c.taskId = id
             // 1.4.2-beta6: a task plans with what its caller saw, so it keeps the epoch the request arrived in.
             parent?.let { c.epoch = it.epoch }

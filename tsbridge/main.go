@@ -13,7 +13,9 @@
 // Configuration comes from the environment so nothing secret shows up in `ps`:
 //
 //	TSB_DIR (state dir), TSB_HOSTNAME, TSB_PORT, TSB_TARGET (host:port), TSB_SECRET, TSB_AUTHKEY (optional),
-//	TSB_CONTROL_URL (optional, e.g. a Headscale server), TSB_DNS (comma separated resolvers of the phone's network).
+//	TSB_CONTROL_URL (optional, e.g. a Headscale server), TSB_DNS (comma separated resolvers of the phone's network),
+//	TSB_FUNNEL ("1" to expose PublicServer via Tailscale Funnel :443), TSB_PUBLIC_TARGET (default 127.0.0.1:18785),
+//	TSB_PUBLIC_SECRET (per-launch random secret injected as X-AVS-Public; never logged).
 package main
 
 import (
@@ -78,6 +80,9 @@ type status struct {
 	// "connecting", not "connected" and not "dropped". Before, "Running" showed as connected at once and the relay's
 	// 10 s connect timeout then looked like a drop.
 	Connecting bool `json:"connecting,omitempty"`
+	// 2.0.0-beta7 (7.1, 7.8): Tailscale Funnel status ("starting", "on", "error") and exact error reason.
+	Funnel       string `json:"funnel,omitempty"`
+	FunnelReason string `json:"reason,omitempty"`
 }
 
 // normalizeControlURL turns what a person types ("hs.example.com", "https://hs.example.com/") into the URL tsnet needs.
@@ -191,16 +196,34 @@ func loginError(health []string) string {
 }
 
 var (
-	outMu    sync.Mutex
-	last     string
-	lastPeer string
-	peerMu   sync.Mutex
+	outMu        sync.Mutex
+	outWriter    io.Writer = os.Stdout
+	last         string
+	lastPeer     string
+	peerMu       sync.Mutex
+	funnelMu     sync.Mutex
+	funnelState  string
+	funnelReason string
+	lastBase     status
+	hasLastBase  bool
 )
 
 func emit(s status) {
 	peerMu.Lock()
 	s.LastPeer = lastPeer
 	peerMu.Unlock()
+	funnelMu.Lock()
+	lastBase = s
+	hasLastBase = true
+	if s.Funnel == "" {
+		s.Funnel = funnelState
+		s.FunnelReason = funnelReason
+	}
+	funnelMu.Unlock()
+	emitLocked(s)
+}
+
+func emitLocked(s status) {
 	b, _ := json.Marshal(s)
 	outMu.Lock()
 	defer outMu.Unlock()
@@ -208,7 +231,48 @@ func emit(s status) {
 		return
 	}
 	last = string(b)
-	fmt.Fprintln(os.Stdout, string(b))
+	fmt.Fprintln(outWriter, string(b))
+}
+
+func setFunnelStatus(state, reason string) {
+	funnelMu.Lock()
+	funnelState = state
+	funnelReason = reason
+	s := lastBase
+	have := hasLastBase
+	funnelMu.Unlock()
+	if !have {
+		s = status{State: "Starting"}
+	}
+	peerMu.Lock()
+	s.LastPeer = lastPeer
+	peerMu.Unlock()
+	s.Funnel = state
+	s.FunnelReason = reason
+	emitLocked(s)
+}
+
+// 2.0.0-beta7 (7.7): strip every caller-supplied X-VScreen-* and X-AVS-* header (case-insensitive)
+// before forwarding so a public or tailnet caller can never spoof internal bridge headers.
+func stripInternalHeaders(h http.Header) {
+	for k := range h {
+		lk := strings.ToLower(k)
+		if strings.HasPrefix(lk, "x-vscreen-") || strings.HasPrefix(lk, "x-avs-") {
+			delete(h, k)
+		}
+	}
+}
+
+// preparePublicProxyRequest rewrites an incoming Funnel :443 request for PublicServer on 127.0.0.1.
+// All X-VScreen-* and X-AVS-* headers are stripped first and ONLY X-AVS-Public is set.
+func preparePublicProxyRequest(r *http.Request, base func(*http.Request), pubSecret string) {
+	host := r.Host
+	if base != nil {
+		base(r)
+	}
+	r.Host = host
+	stripInternalHeaders(r.Header)
+	r.Header.Set("X-AVS-Public", pubSecret)
 }
 
 // 1.3: tsnet repeats some lines every few seconds (the login prompt, with its link) and they filled the app's
@@ -427,6 +491,11 @@ func main() {
 		r.Host = host // the app checks that the caller named this node
 		r.Header.Del("X-VScreen-Tailnet")
 		r.Header.Del("X-VScreen-Peer")
+		for k := range r.Header {
+			if strings.HasPrefix(strings.ToLower(k), "x-avs-") {
+				delete(r.Header, k)
+			}
+		}
 		r.Header.Set("X-VScreen-Tailnet", secret)
 		who := r.RemoteAddr
 		if wi, err := lc.WhoIs(r.Context(), r.RemoteAddr); err == nil && wi != nil {
@@ -457,8 +526,96 @@ func main() {
 
 	// Commands from the app; EOF = the app is gone.
 	quit := make(chan struct{})
+	var (
+		funnelLnMu sync.Mutex
+		funnelLn   net.Listener
+		funnelSrv  *http.Server
+	)
+	closeFunnel := func() {
+		funnelLnMu.Lock()
+		s := funnelSrv
+		l := funnelLn
+		funnelSrv, funnelLn = nil, nil
+		funnelLnMu.Unlock()
+		if s != nil {
+			_ = s.Close()
+		}
+		if l != nil {
+			_ = l.Close()
+		}
+	}
+	defer closeFunnel()
+
+	// 2.0.0-beta7 (7.1, 7.7, 7.8 #1): optional Tailscale Funnel on :443 in an independent goroutine
+	// (ListenFunnel blocks until the node reaches Running). Do NOT pass FunnelOnly(): all :443 traffic,
+	// whether from the public internet or the same tailnet, goes through PublicServer + OAuth.
+	funnelFlag := strings.ToLower(strings.TrimSpace(os.Getenv("TSB_FUNNEL")))
+	if funnelFlag == "1" || funnelFlag == "true" {
+		pubTarget := env("TSB_PUBLIC_TARGET", "127.0.0.1:18785")
+		pubSecret := os.Getenv("TSB_PUBLIC_SECRET")
+		if pubSecret == "" {
+			setFunnelStatus("error", "TSB_PUBLIC_SECRET missing")
+		} else if srv.ControlURL != "" {
+			setFunnelStatus("error", "Funnel is only supported on official Tailscale")
+		} else {
+			setFunnelStatus("starting", "")
+			go func() {
+				fln, ferr := srv.ListenFunnel("tcp", ":443")
+				if ferr != nil {
+					select {
+					case <-quit:
+						return
+					default:
+					}
+					setFunnelStatus("error", ferr.Error())
+					fmt.Fprintln(os.Stderr, "funnel listen error:", ferr.Error())
+					return
+				}
+				ptu, _ := url.Parse("http://" + pubTarget)
+				prp := httputil.NewSingleHostReverseProxy(ptu)
+				prp.FlushInterval = -1
+				pbase := prp.Director
+				prp.Director = func(r *http.Request) {
+					preparePublicProxyRequest(r, pbase, pubSecret)
+				}
+				prp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+					w.Header().Set("Content-Type", "application/json; charset=utf-8")
+					w.WriteHeader(http.StatusBadGateway)
+					fmt.Fprintf(w, `{"ok":false,"code":"APP_NOT_ANSWERING","error":"Agent-VScreen public server did not answer (%s)"}`, strings.ReplaceAll(err.Error(), `"`, `'`))
+				}
+				psrv := &http.Server{Handler: bounded(prp), ReadHeaderTimeout: 30 * time.Second}
+				funnelLnMu.Lock()
+				select {
+				case <-quit:
+					funnelLnMu.Unlock()
+					_ = fln.Close()
+					return
+				default:
+					funnelLn = fln
+					funnelSrv = psrv
+				}
+				funnelLnMu.Unlock()
+				setFunnelStatus("on", "")
+				if serr := psrv.Serve(fln); serr != nil && !errors.Is(serr, http.ErrServerClosed) && !errors.Is(serr, net.ErrClosed) {
+					select {
+					case <-quit:
+					default:
+						setFunnelStatus("error", serr.Error())
+						fmt.Fprintln(os.Stderr, "funnel serve error:", serr.Error())
+					}
+				}
+			}()
+		}
+	}
+
 	var quitOnce sync.Once
-	stop := func(why string) { quitOnce.Do(func() { fmt.Fprintln(os.Stderr, "quit:", why); close(quit) }) }
+	stop := func(why string) {
+		quitOnce.Do(func() {
+			fmt.Fprintln(os.Stderr, "quit:", why)
+			close(quit)
+			closeFunnel()
+		})
+	}
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	go func() { s := <-sigs; stop("signal " + s.String()) }()

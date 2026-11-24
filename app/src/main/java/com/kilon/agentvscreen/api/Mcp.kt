@@ -48,6 +48,14 @@ internal object Mcp {
             .put("annotations", JSONObject().put("readOnlyHint", c.scope == CommandSpec.Scope.LOOK))
     }
 
+    /** 2.0.0-beta7 (7.8 #3): shared pre-auth check for /mcp used by both ApiServer and PublicServer. */
+    fun preAuthCheck(r: ApiServer.Req): ApiServer.Resp? =
+        if (r.path == "/mcp" && r.method != "POST") {
+            ApiServer.Resp(405, "text/plain; charset=utf-8", "MCP: POST JSON-RPC".toByteArray(), mapOf("Allow" to "POST"))
+        } else {
+            null
+        }
+
     fun handle(server: ApiServer, r: ApiServer.Req): ApiServer.Resp {
         val body = r.bodyText.trim()
         if (body.startsWith("[")) {

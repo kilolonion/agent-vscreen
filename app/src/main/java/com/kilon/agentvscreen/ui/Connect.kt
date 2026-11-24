@@ -455,8 +455,17 @@ fun RemotePage() {
             }
             else -> {}
         }
-        if (mode == Tailnet.Mode.BUILTIN && Tailnet.available(ctx)) Group {
-            ArrowPreference(title = tr("高级选项", "Advanced"), summary = tr("自建服务器（Headscale）、auth key", "Own server (Headscale), auth key"), onClick = { advanced = true })
+        val nav = LocalNav.current
+        val pubEnabled by com.kilon.agentvscreen.host.PublicAccess.enabledFlow.collectAsState()
+        Group {
+            ArrowPreference(
+                title = tr("公网接入", "Public access"),
+                summary = if (pubEnabled) tr("已开启 · 云端 MCP（Tailscale Funnel）", "On · Cloud MCP (Tailscale Funnel)") else tr("默认关闭 · 云端 MCP 客户端", "Off · Cloud MCP clients"),
+                onClick = { nav.go(Route.PublicAccess) },
+            )
+            if (mode == Tailnet.Mode.BUILTIN && Tailnet.available(ctx)) {
+                ArrowPreference(title = tr("高级选项", "Advanced"), summary = tr("自建服务器（Headscale）、auth key", "Own server (Headscale), auth key"), onClick = { advanced = true })
+            }
         }
         if (mode != Tailnet.Mode.OFF) Group(tr("安全", "Safety"), padded = true) { RemoteSafety() }
     }

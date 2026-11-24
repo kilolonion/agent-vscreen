@@ -2,6 +2,10 @@
 
 For [1.4.2-beta3 (versionCode 54)](../README.md#whats-new-in-142-beta3), see the current beta notes. Changes on `main` since then come first.
 
+## 2.0.0-beta7 (`v2.0` branch)
+
+- Added public MCP access over official Tailscale Funnel (Headscale rejected upfront): dedicated loopback `PublicServer` (`127.0.0.1:18785`, constant-time `X-AVS-Public`, `/mcp` and OAuth 2.1 endpoints only), RFC 9728/8414/7591/8707 discovery and dynamic registration, PKCE S256 with 8-char pairing code and biometric/PIN strong confirmation (default `look`, `system` never granted, hold-to-confirm disabled), 1 h access tokens and 30 d rotating refresh tokens with reuse full-revocation, 4-point risk warning flow, ongoing Off notification, 24 h idle auto-close, auto-reset on app update, and prompt-injection notice in core `guide`.
+
 ## 2.0.0-beta5 (`v2.0` branch)
 
 - Added `act --hold` and `note hold on|off` (Android 14+ post-reply app pause managed by the privileged Gate with automatic unhold before the next command, on timeout/takeover/release, or on app exit), short-range single-act rules `act --on "<cond> => <step>[ x1..x3]"` with shared persistence debounce and claimed BEFORE/AFTER windows, and first-line reply time hints (`X.Xs since last reply`) with a one-time `BEFORE` coaching note.

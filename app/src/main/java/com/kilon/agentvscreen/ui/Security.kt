@@ -58,7 +58,10 @@ fun TokensPanel(base: String, copy: (String, String) -> Unit) {
             Small(tr("权限：", "Permission: ") + scopeWord(t.scope) + " · " + (if (t.lastUsedAt > 0) tr("上次使用 ", "last used ") + fmt.format(Date(t.lastUsedAt)) else tr("还没用过", "never used")) +
                 if (t.trusted) tr(" · 免确认到 ", " · no confirmations until ") + fmt.format(Date(t.trustUntil)) else "")
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (t.id != Tokens.MAIN) LinkButton(onClick = { Tokens.setScope(t.id, Tokens.SCOPES[(Tokens.SCOPES.indexOf(t.scope) + 1) % Tokens.SCOPES.size]) }) { Text(tr("改权限", "Change")) }
+                if (t.id != Tokens.MAIN) {
+                    val pool = if (t.publicOnly) Tokens.PUBLIC_SCOPES else Tokens.SCOPES
+                    LinkButton(onClick = { Tokens.setScope(t.id, pool[(pool.indexOf(t.scope).coerceAtLeast(0) + 1) % pool.size]) }) { Text(tr("改权限", "Change")) }
+                }
                 if (t.trusted) LinkButton(onClick = { Tokens.trust(t.id, 0) }) { Text(tr("结束免确认", "End no-confirm")) }
                 else LinkButton(onClick = {
                     val req = com.kilon.agentvscreen.host.StrongConfirm.createUiRequest(

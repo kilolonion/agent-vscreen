@@ -23,6 +23,7 @@ class VScreenApp : Application() {
         Audit.init(this)
         StrongConfirm.init(this)
         StrongConfirm.migrateIfNeeded(this, com.kilon.agentvscreen.api.Tokens.list.value)
+        PublicAccess.init(this)
         com.kilon.agentvscreen.core.TaskLog.init(this)
         com.kilon.agentvscreen.api.EventHub.init(this)
         com.kilon.agentvscreen.api.AgentLedger.init(this)

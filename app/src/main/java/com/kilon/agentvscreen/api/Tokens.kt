@@ -25,16 +25,25 @@ import java.security.SecureRandom
 object Tokens {
     const val MAIN = "main"
     val SCOPES = listOf("look", "operate", "system")
+    /** 2.0.0-beta7 (7.2, 7.5, 7.8 #5): public OAuth clients can NEVER hold "system". */
+    val PUBLIC_SCOPES = listOf("look", "operate")
 
     class Token(val id: String, val name: String, val key: String, val scope: String, val createdAt: Long,
-                val lastUsedAt: Long = 0L, val revoked: Boolean = false, val trustUntil: Long = 0L) {
-        /** look ⊂ operate ⊂ system. */
-        val scopes: Set<String> get() = SCOPES.take(SCOPES.indexOf(scope).coerceAtLeast(0) + 1).toSet()
+                val lastUsedAt: Long = 0L, val revoked: Boolean = false, val trustUntil: Long = 0L,
+                /** 2.0.0-beta7 (7.7): stable identity for a public OAuth client; has no local secret and is never accepted on local/tailnet endpoints. */
+                val publicOnly: Boolean = false) {
+        /** look ⊂ operate ⊂ system (public tokens capped at look ⊂ operate). */
+        val scopes: Set<String> get() {
+            val allowed = if (publicOnly) PUBLIC_SCOPES else SCOPES
+            val effective = if (publicOnly && scope == "system") "operate" else scope
+            return allowed.take(allowed.indexOf(effective).coerceAtLeast(0) + 1).toSet()
+        }
         val trusted: Boolean get() = trustUntil > System.currentTimeMillis()
         fun json(): JSONObject = JSONObject().put("id", id).put("name", name).put("key", key).put("scope", scope)
             .put("created", createdAt).put("used", lastUsedAt).put("revoked", revoked).put("trust_until", trustUntil)
+            .put("public", publicOnly)
         fun with(lastUsedAt: Long = this.lastUsedAt, revoked: Boolean = this.revoked, trustUntil: Long = this.trustUntil, scope: String = this.scope, name: String = this.name) =
-            Token(id, name, key, scope, createdAt, lastUsedAt, revoked, trustUntil)
+            Token(id, name, key, scope, createdAt, lastUsedAt, revoked, trustUntil, publicOnly)
     }
 
     private var prefs: SharedPreferences? = null
@@ -48,8 +57,13 @@ object Tokens {
         prefs = ctx.getSharedPreferences("agent_vscreen_tokens", Context.MODE_PRIVATE)
         _list.value = runCatching {
             val a = JSONArray(prefs!!.getString("tokens", "[]"))
-            (0 until a.length()).map { a.getJSONObject(it) }.map { o -> Token(o.getString("id"), o.getString("name"), o.getString("key"), o.optString("scope", "system"),
-                o.optLong("created"), o.optLong("used"), o.optBoolean("revoked"), o.optLong("trust_until")) }
+            (0 until a.length()).map { a.getJSONObject(it) }.map { o ->
+                val pub = o.optBoolean("public", false)
+                val rawScope = o.optString("scope", if (pub) "look" else "system")
+                val scope = if (pub) (if (rawScope == "operate") "operate" else "look") else rawScope
+                Token(o.getString("id"), o.getString("name"), o.getString("key"), scope,
+                    o.optLong("created"), o.optLong("used"), o.optBoolean("revoked"), o.optLong("trust_until"), pub)
+            }
         }.getOrDefault(emptyList())
         syncMain()
     }
@@ -85,6 +99,21 @@ object Tokens {
         return t to "avs_${id}_$secret"
     }
 
+    /**
+     * 2.0.0-beta7 (7.2, 7.7): stable identity entry for a public OAuth client.
+     * Has NO usable local secret (`key = ""`, `publicOnly = true`) so local and tailnet endpoints reject it;
+     * scope is strictly "look" or "operate" (never "system").
+     */
+    @Synchronized fun createPublic(clientName: String, scope: String): Token {
+        var id: String
+        do { id = random(6).lowercase() } while (_list.value.any { it.id == id })
+        val label = "公网·" + clientName.trim().ifEmpty { "MCP" }.take(16)
+        val safeScope = if (scope == "operate") "operate" else "look"
+        val t = Token(id, label, "", safeScope, System.currentTimeMillis(), publicOnly = true)
+        save(_list.value + t)
+        return t
+    }
+
     /** (id, secret) of a token text; the old single token is ("main", text). */
     fun parse(text: String): Pair<String, String> {
         val m = Regex("^avs_([a-z0-9]{4,12})_([A-Za-z0-9]{16,64})$").find(text.trim())
@@ -93,11 +122,12 @@ object Tokens {
 
     fun byId(id: String?): Token? = _list.value.firstOrNull { it.id == id && !it.revoked }
 
-    /** The live token a bearer text belongs to. */
+    /** The live local/tailnet token a bearer text belongs to. Public OAuth identities are never accepted here (7.7). */
     fun byBearer(text: String?): Token? {
         if (text.isNullOrBlank()) return null
         val (id, secret) = parse(text)
         val t = byId(id) ?: return null
+        if (t.publicOnly || t.key.isEmpty()) return null
         return if (ApiServer.constTimeEq(sha256(secret), t.key)) t else null
     }
 
@@ -115,9 +145,26 @@ object Tokens {
         if (id != MAIN) {
             save(_list.value.filter { it.id != id })
             com.kilon.agentvscreen.host.StrongConfirm.revokeAllForToken(id)
+            PublicOAuth.revokeAllForToken(id)
         }
     }
-    @Synchronized fun setScope(id: String, scope: String) { if (scope in SCOPES && id != MAIN) save(_list.value.map { if (it.id == id) it.with(scope = scope) else it }) }
+    @Synchronized fun revokeAllPublic(): List<String> {
+        val ids = _list.value.filter { it.publicOnly && it.id != MAIN }.map { it.id }
+        if (ids.isNotEmpty()) {
+            save(_list.value.filterNot { it.publicOnly && it.id != MAIN })
+            ids.forEach { id ->
+                com.kilon.agentvscreen.host.StrongConfirm.revokeAllForToken(id)
+                PublicOAuth.revokeAllForToken(id)
+            }
+        }
+        return ids
+    }
+    @Synchronized fun setScope(id: String, scope: String) {
+        if (id == MAIN) return
+        val cur = _list.value.firstOrNull { it.id == id } ?: return
+        val allowed = if (cur.publicOnly) PUBLIC_SCOPES else SCOPES
+        if (scope in allowed) save(_list.value.map { if (it.id == id) it.with(scope = scope) else it })
+    }
     /** [minutes] 0 ends the period now. */
     @Synchronized fun trust(id: String, minutes: Int) =
         save(_list.value.map { if (it.id == id) it.with(trustUntil = if (minutes <= 0) 0L else System.currentTimeMillis() + minutes.coerceAtMost(24 * 60) * 60_000L) else it })

@@ -12,15 +12,12 @@ import com.kilon.agentvscreen.host.AppLogger
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
-import java.io.ByteArrayOutputStream
-import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
-import java.net.URLDecoder
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.SynchronousQueue
@@ -428,18 +425,26 @@ class ApiServer(private val ctx: Context) {
         @Volatile var peer: InetAddress? = null
         @Volatile internal var sock: Socket? = null
         @Volatile var auth: Auth? = null
-        /** Forwarded by the built-in Tailscale node (loopback + its secret). */
-        val viaBuiltinTailnet: Boolean get() = peer?.isLoopbackAddress == true &&
+        /** 2.0.0-beta7 (7.7): true when handled by [PublicServer] via Funnel; never treated as tailnet even if X-VScreen-Tailnet is present. */
+        @Volatile var viaPublic: Boolean = false
+        /** 2.0.0-beta7 (7.7): OAuth client_id when [viaPublic] is true. */
+        @Volatile var publicClientId: String? = null
+        /** Forwarded by the built-in Tailscale node (loopback + its secret, never on public path). */
+        val viaBuiltinTailnet: Boolean get() = !viaPublic && peer?.isLoopbackAddress == true &&
             headers["x-vscreen-tailnet"]?.let { constTimeEq(it, com.kilon.agentvscreen.host.Tailnet.secret) } == true
-        val remote: Boolean get() = viaBuiltinTailnet || peer?.isLoopbackAddress == false
+        val remote: Boolean get() = viaPublic || viaBuiltinTailnet || peer?.isLoopbackAddress == false
         /** The other device, as the tailnet names it (null on this phone). */
         val peerName: String? get() = when {
+            viaPublic -> publicClientId?.let { "public:$it" } ?: "public"
             viaBuiltinTailnet -> headers["x-vscreen-peer"] ?: "?"
             peer?.isLoopbackAddress == false -> peer?.hostAddress
             else -> null
         }
         /** Who is calling, for the app's "last caller" line. */
-        val caller: String get() = (peerName?.let { "Tailscale: $it" } ?: tr("本机", "This phone")) + (auth?.token?.takeIf { it.id != Tokens.MAIN }?.let { " · ${it.name}" } ?: "")
+        val caller: String get() = when {
+            viaPublic -> tr("公网", "Public") + (auth?.token?.let { " · ${it.name}" } ?: "")
+            else -> (peerName?.let { "Tailscale: $it" } ?: tr("本机", "This phone")) + (auth?.token?.takeIf { it.id != Tokens.MAIN }?.let { " · ${it.name}" } ?: "")
+        }
         fun q(k: String) = query[k]?.firstOrNull()
         val bodyText: String get() = String(body, Charsets.UTF_8)
         fun accepts(type: String): Boolean = headers["accept"]?.contains(type) == true
@@ -468,13 +473,13 @@ class ApiServer(private val ctx: Context) {
                 Resp(status, "application/json; charset=utf-8", o.toString().toByteArray(), headers)
             fun text(t: String, status: Int = 200, headers: Map<String, String> = emptyMap()) =
                 Resp(status, "text/plain; charset=utf-8", t.toByteArray(), headers)
+            fun html(h: String, status: Int = 200, headers: Map<String, String> = emptyMap()) =
+                Resp(status, "text/html; charset=utf-8", h.toByteArray(), headers)
             fun err(status: Int, code: String, msg: String) = json(JSONObject().put("ok", false).put("code", code).put("error", msg)
                 .put("next", com.kilon.agentvscreen.cmd.Codes.next(code)), status, mapOf("X-VScreen-Code" to code))
             fun sse(block: (Emitter) -> Unit) = Resp(200, "text/event-stream; charset=utf-8", ByteArray(0), stream = block)
         }
     }
-
-    private class HttpError(val status: Int, val code: String, message: String) : Exception(message)
 
     private fun serve(s: Socket) {
         var afterSend: (() -> Unit)? = null
@@ -486,7 +491,7 @@ class ApiServer(private val ctx: Context) {
                 val inp = BufferedInputStream(sock.getInputStream())
                 val out = sock.getOutputStream()
                 synchronized(reading) { reading[sock] = System.currentTimeMillis() }
-                val req = try { read(inp) } catch (e: HttpError) { write(out, Resp.err(e.status, e.code, e.message ?: e.code)); return }
+                val req = try { HttpCore.readRequest(inp) } catch (e: HttpError) { write(out, Resp.err(e.status, e.code, e.message ?: e.code)); return }
                     catch (e: java.net.SocketTimeoutException) { quiet("http-408") { write(out, Resp.err(408, "REQUEST_TIMEOUT", "the request did not arrive in time")) }; return }
                     finally { synchronized(reading) { reading.remove(sock) } } ?: return
                 req.peer = sock.inetAddress
@@ -503,68 +508,11 @@ class ApiServer(private val ctx: Context) {
         afterSend?.let { quiet("http-after-send") { it() } }
     }
 
-    private fun read(inp: InputStream): Req? {
-        val t0 = android.os.SystemClock.elapsedRealtime()
-        val head = ByteArrayOutputStream()
-        var last4 = 0
-        while (true) {
-            val b = inp.read(); if (b < 0) return null
-            head.write(b); last4 = (last4 shl 8) or b
-            if (last4 == 0x0D0A0D0A) break
-            if (head.size() > MAX_HEAD) throw HttpError(431, "HEADERS_TOO_LARGE", "request headers over $MAX_HEAD bytes")
-            if (head.size() % 512 == 0 && android.os.SystemClock.elapsedRealtime() - t0 > HEAD_MS) throw HttpError(408, "REQUEST_TIMEOUT", "request headers took too long")
-        }
-        val lines = head.toString("UTF-8").split("\r\n")
-        val parts = lines.first().split(" ")
-        if (parts.size < 2) throw HttpError(400, "BAD_REQUEST", "bad request line")
-        val headers = HashMap<String, String>()
-        for (l in lines.drop(1)) { val i = l.indexOf(':'); if (i > 0) headers[l.substring(0, i).trim().lowercase()] = l.substring(i + 1).trim() }
-        val body: ByteArray = if (headers["transfer-encoding"]?.lowercase()?.contains("chunked") == true) readChunked(inp, t0) else {
-            val len = headers["content-length"]?.toIntOrNull() ?: 0
-            if (len < 0 || len > MAX_BODY) throw HttpError(413, "BODY_TOO_LARGE", "request body over $MAX_BODY bytes")
-            val b = ByteArray(len)
-            var off = 0
-            while (off < len) {
-                val n = inp.read(b, off, len - off); if (n < 0) throw HttpError(400, "BAD_REQUEST", "body shorter than Content-Length")
-                off += n
-                if (android.os.SystemClock.elapsedRealtime() - t0 > BODY_MS) throw HttpError(408, "REQUEST_TIMEOUT", "request body took too long")
-            }
-            b
-        }
-        val target = parts[1]
-        return Req(parts[0].uppercase(), target, parseForm(target.substringAfter('?', "")), headers, body)
-    }
-
-    /** 1.2: Transfer-Encoding: chunked request bodies (some HTTP clients and proxies send nothing else). */
-    private fun readChunked(inp: InputStream, t0: Long): ByteArray {
-        val out = ByteArrayOutputStream()
-        fun line(): String { val sb = StringBuilder(); while (true) { val c = inp.read(); if (c < 0) throw HttpError(400, "BAD_REQUEST", "chunked body cut off"); if (c == '\n'.code) break; if (c != '\r'.code) sb.append(c.toChar()); if (sb.length > 256) throw HttpError(400, "BAD_REQUEST", "bad chunk header") }; return sb.toString() }
-        while (true) {
-            val size = line().substringBefore(';').trim().toIntOrNull(16) ?: throw HttpError(400, "BAD_REQUEST", "bad chunk size")
-            if (size == 0) { while (line().isNotEmpty()) { /* trailers */ }; break }
-            if (size < 0 || out.size() + size > MAX_BODY) throw HttpError(413, "BODY_TOO_LARGE", "request body over $MAX_BODY bytes")
-            val b = ByteArray(size); var off = 0
-            while (off < size) { val n = inp.read(b, off, size - off); if (n < 0) throw HttpError(400, "BAD_REQUEST", "chunked body cut off"); off += n }
-            out.write(b); line()
-            if (android.os.SystemClock.elapsedRealtime() - t0 > BODY_MS) throw HttpError(408, "REQUEST_TIMEOUT", "request body took too long")
-        }
-        return out.toByteArray()
-    }
-
-    private fun write(out: OutputStream, r: Resp) {
-        val reason = when (r.status) { 200 -> "OK"; 202 -> "Accepted"; 400 -> "Bad Request"; 401 -> "Unauthorized"; 403 -> "Forbidden"; 404 -> "Not Found"; 405 -> "Method Not Allowed"; 408 -> "Request Timeout"; 413 -> "Payload Too Large"; 429 -> "Too Many Requests"; 431 -> "Request Header Fields Too Large"; 503 -> "Service Unavailable"; else -> "Error" }
-        val sb = StringBuilder("HTTP/1.1 ${r.status} $reason\r\nContent-Type: ${r.type}\r\n")
-        if (r.stream == null) sb.append("Content-Length: ${r.body.size}\r\n")
-        sb.append("Connection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-VScreen-Version: ${cliVersion()}\r\n")
-        r.headers.forEach { (k, v) -> sb.append(k).append(": ").append(v.replace("\r", "").replace("\n", " ")).append("\r\n") }
-        sb.append("\r\n")
-        out.write(sb.toString().toByteArray())
-        if (r.stream == null) { out.write(r.body); out.flush() } else { out.flush(); r.stream.invoke(Emitter(out)) }
-    }
+    private fun write(out: OutputStream, r: Resp) = HttpCore.writeResponse(out, r, cliVersion())
 
     // ── routing ───────────────────────────────────────────────────────────
 
-    private fun route(r: Req): Resp {
+    internal fun route(r: Req): Resp {
         // No browser may drive the phone (CSRF / DNS rebinding): only known hosts, no Origin.
         val host = r.headers["host"]?.substringBeforeLast(':')?.lowercase()?.takeIf { it.isNotEmpty() } ?: r.headers["host"]?.lowercase()
         val remote = r.peer?.let { !it.isLoopbackAddress } == true
@@ -597,7 +545,7 @@ class ApiServer(private val ctx: Context) {
                 // takes only the one that answers this): sha256hex(K \n n \n ping \n K). Says nothing to anyone else.
                 .also { o -> val kid = r.q("me"); val n = r.q("n")
                     if (kid != null && n != null && n.length in 8..64 && n.all { it.isLetterOrDigit() })
-                        Tokens.byId(kid)?.let { t -> o.put("you", Tokens.sha256("${t.key}\n$n\nping\n${t.key}")) } }
+                        Tokens.byId(kid)?.takeIf { !it.publicOnly && it.key.isNotEmpty() }?.let { t -> o.put("you", Tokens.sha256("${t.key}\n$n\nping\n${t.key}")) } }
                 .put("version", BuildConfig.VERSION_NAME).put("code", BuildConfig.VERSION_CODE).put("pid", android.os.Process.myPid())
                 .put("time", System.currentTimeMillis() / 1000).put("api", JSONArray(listOf("v2", "v1")))
                 // 1.3: ready + the codes of what blocks (no details before the token is checked).
@@ -610,6 +558,8 @@ class ApiServer(private val ctx: Context) {
             "/skill" -> return langOf(r) { Resp.text(AgentGuide.skill()) }
             "/memory" -> return langOf(r) { Resp.text(AgentGuide.memoryFor(when (r.q("via")) { "mcp" -> Abilities.Via.MCP; "http" -> Abilities.Via.HTTP; else -> Abilities.Via.CLI }) + "\n") }
         }
+        // 2.0.0-beta7 (7.8 #3): /mcp method check (GET/DELETE -> 405 + Allow: POST) runs BEFORE auth, shared with PublicServer.
+        Mcp.preAuthCheck(r)?.let { return it }
         val auth = when (val a = authenticate(r)) { is Auth -> a; is Resp -> return a; else -> return Resp.err(401, "BAD_TOKEN", "?") }
         r.auth = auth
         Tokens.used(auth.token.id)
@@ -625,7 +575,7 @@ class ApiServer(private val ctx: Context) {
             r.path.startsWith("/v1/shot/") || r.path.startsWith("/v2/shot/") -> shot(r.path.substringAfterLast('/'))
             r.path == "/v1/events" || r.path == "/v2/events" -> events(r, auth)
             r.path == "/v2/cli" -> Resp.text(cliScript())
-            r.path == "/mcp" -> if (r.method == "POST") Mcp.handle(this, r) else Resp(405, "text/plain", "MCP: POST JSON-RPC".toByteArray(), mapOf("Allow" to "POST"))
+            r.path == "/mcp" -> Mcp.handle(this, r)
             else -> Resp.err(404, "NOT_FOUND", r.path)
         } }
         // 1.2: a signed request gets a signed answer, so the caller knows the reply (and a CLI update) came from this
@@ -634,37 +584,21 @@ class ApiServer(private val ctx: Context) {
     }
 
     private fun <T> langOf(r: Req, block: () -> T): T = com.kilon.agentvscreen.I18n.with((r.headers["x-vscreen-lang"] ?: r.q("lang"))?.lowercase()?.take(2), block)
+    internal fun <T> withLang(r: Req, block: () -> T): T = langOf(r, block)
+    internal fun notePublicCaller(r: Req) {
+        requests++
+        lastClient = r.headers["user-agent"]?.take(60)
+        lastCaller = r.caller
+    }
 
     // ── who is calling ───────────────────────────────────────────────────
 
-    /** Failed checks per caller in the last minute; a remote caller that keeps failing is shut out for a while. */
-    private val fails = HashMap<String, ArrayDeque<Long>>()
-    private val lockedUntil = HashMap<String, Long>()
+    /** Shared auth failure lockout used by both [ApiServer] and [PublicServer] (7.3, 7.7). */
+    internal val failLimiter = AuthFailLimiter(ctx)
     private val nonces = LinkedHashMap<String, Long>()
 
-    private fun failed(r: Req, code: String, msg: String, status: Int = 401): Resp {
-        val who = r.peerName ?: "local"
-        val now = System.currentTimeMillis()
-        val n = synchronized(fails) {
-            val q = fails.getOrPut(who) { ArrayDeque() }
-            q.addLast(now); while (q.isNotEmpty() && now - q.first() > 60_000L) q.removeFirst()
-            if (fails.size > 500) fails.keys.firstOrNull()?.let { fails.remove(it) }
-            q.size
-        }
-        Audit.security("auth_failed", "$who $code ${r.path}")
-        if (r.remote && n >= MAX_FAILS) {
-            val first = synchronized(fails) { val was = lockedUntil[who] ?: 0L; lockedUntil[who] = now + LOCK_MS; was < now }
-            if (first) {
-                Audit.security("locked_out", who)
-                quiet("lockout-notify") { com.kilon.agentvscreen.core.VScreenHandoff.alert(ctx, 7390, tr("有设备在反复尝试连接 Agent-VScreen", "A device keeps trying to connect to Agent-VScreen"),
-                    tr("$who 一分钟内 $n 次验证失败，已暂停接受它的请求 ${LOCK_MS / 60_000} 分钟。不是你的设备的话，在 其它设备 里关掉远程访问或重置令牌", "$who failed verification $n times within a minute; its requests are refused for ${LOCK_MS / 60_000} minutes. If it is not your device, turn off remote access or reset the token under Other devices"),
-                    com.kilon.agentvscreen.host.Needs.open(ctx, com.kilon.agentvscreen.host.Needs.Page.CONNECT, 2)) }
-            }
-        }
-        // Slow every wrong guess down a little (bounded: it holds one worker).
-        Thread.sleep(if (r.remote) 400 else 100)
-        return Resp.err(status, code, msg)
-    }
+    private fun failed(r: Req, code: String, msg: String, status: Int = 401): Resp =
+        failLimiter.recordFailure(r.peerName ?: "local", r.remote, r.path, code, msg, status)
 
     /**
      * [Auth] when the request proved a live token, else the refusal.
@@ -680,12 +614,11 @@ class ApiServer(private val ctx: Context) {
      */
     private fun authenticate(r: Req): Any {
         val who = r.peerName ?: "local"
-        if (r.remote) synchronized(fails) { lockedUntil[who] }?.let { until ->
-            if (until > System.currentTimeMillis()) return Resp.err(429, "RATE_LIMITED", tr("验证失败次数太多，${(until - System.currentTimeMillis()) / 1000 + 1} 秒后再试", "Too many failed verifications; try again in ${(until - System.currentTimeMillis()) / 1000 + 1} s"))
-        }
+        failLimiter.checkLocked(who, r.remote)?.let { return it }
         val kid = r.headers["x-vscreen-key"]
         if (kid != null) {
-            val t = Tokens.byId(kid) ?: return failed(r, "BAD_TOKEN", tr("没有这个令牌（可能已被用户撤销）：请用户在 Agent-VScreen 里重新复制接入命令", "No such token (the user may have revoked it): ask the user to copy the connect message in Agent-VScreen again"))
+            val t = Tokens.byId(kid)?.takeIf { !it.publicOnly && it.key.isNotEmpty() }
+                ?: return failed(r, "BAD_TOKEN", tr("没有这个令牌（可能已被用户撤销）：请用户在 Agent-VScreen 里重新复制接入命令", "No such token (the user may have revoked it): ask the user to copy the connect message in Agent-VScreen again"))
             val ts = r.headers["x-vscreen-time"]?.toLongOrNull() ?: return failed(r, "BAD_SIGNATURE", "X-VScreen-Time missing")
             val nonce = r.headers["x-vscreen-nonce"]?.takeIf { it.length in 8..64 && it.all { c -> c.isLetterOrDigit() } } ?: return failed(r, "BAD_SIGNATURE", "X-VScreen-Nonce missing (8-64 letters/digits)")
             val sign = r.headers["x-vscreen-sign"]?.lowercase() ?: return failed(r, "BAD_SIGNATURE", "X-VScreen-Sign missing")
@@ -780,7 +713,13 @@ class ApiServer(private val ctx: Context) {
             r.headers["x-vscreen-client"] == "cli" -> Abilities.Via.CLI
             else -> Abilities.Via.HTTP
         }
-        val call = Call(session, t.id, t.name, t.scopes, r.peerName, requestId, com.kilon.agentvscreen.I18n.code, t.trustUntil, via)
+        val source = when {
+            r.viaPublic -> Call.Source.PUBLIC
+            r.viaBuiltinTailnet || r.peer?.isLoopbackAddress == false -> Call.Source.TAILNET
+            else -> Call.Source.LOCAL
+        }
+        val scopes = if (r.viaPublic || t.publicOnly) t.scopes.intersect(Tokens.PUBLIC_SCOPES.toSet()) else t.scopes
+        val call = Call(session, t.id, t.name, scopes, r.peerName, requestId, com.kilon.agentvscreen.I18n.code, t.trustUntil, via, source)
         call.progress = onStep
         val key = requestId?.let { "${t.id}:$it" }
         var mine: Flight? = null
@@ -937,14 +876,14 @@ class ApiServer(private val ctx: Context) {
     internal fun cliVersion() = "${BuildConfig.VERSION_NAME}-${com.kilon.agentvscreen.I18n.code}"
 
     companion object {
-        const val MAX_CONN = 24
-        const val MAX_HEAD = 16_384
-        const val MAX_BODY = 1_048_576
-        const val HEAD_MS = 10_000L
-        const val BODY_MS = 20_000L
+        const val MAX_CONN = HttpCore.MAX_CONN
+        const val MAX_HEAD = HttpCore.MAX_HEAD
+        const val MAX_BODY = HttpCore.MAX_BODY
+        const val HEAD_MS = HttpCore.HEAD_MS
+        const val BODY_MS = HttpCore.BODY_MS
         const val SKEW_S = 300L
-        const val MAX_FAILS = 8
-        const val LOCK_MS = 5 * 60_000L
+        const val MAX_FAILS = HttpCore.MAX_FAILS
+        const val LOCK_MS = HttpCore.LOCK_MS
         const val GRACE_MS = 3_000L
         const val IDEM_MS = 10 * 60_000L
         const val IDEM_MAX = 200
@@ -986,17 +925,7 @@ class ApiServer(private val ctx: Context) {
                 .flatMap { cm.getLinkProperties(it)?.linkAddresses.orEmpty() }.map { it.address }.firstOrNull { isTailnet(it) }
         }.getOrNull()
 
-        fun parseForm(s: String): Map<String, List<String>> {
-            if (s.isEmpty()) return emptyMap()
-            val out = LinkedHashMap<String, MutableList<String>>()
-            for (kv in s.split('&')) {
-                if (kv.isEmpty()) continue
-                val k = URLDecoder.decode(kv.substringBefore('='), "UTF-8")
-                val v = URLDecoder.decode(kv.substringAfter('=', ""), "UTF-8")
-                out.getOrPut(k) { ArrayList() } += v
-            }
-            return out
-        }
+        fun parseForm(s: String): Map<String, List<String>> = HttpCore.parseForm(s)
 
         /** Shell-like split: spaces separate, "…" and '…' group, backslash escapes inside "…" and outside quotes. */
         fun splitCommand(s: String): List<String> {

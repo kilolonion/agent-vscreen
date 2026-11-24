@@ -43,6 +43,7 @@ class MainActivity : ComponentActivity(), AppHost {
             null, "", "MAIN" -> null
             "CONNECT" -> Route.Connect
             "REMOTE" -> Route.Remote
+            "PUBLIC" -> Route.PublicAccess
             "TOKENS" -> Route.Tokens
             "RULES", "PERMS" -> Route.Rules
             "SCHEDULE", "SCHEDULES" -> Route.Schedules

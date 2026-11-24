@@ -35,9 +35,10 @@ object Audit {
         }.take(600)
     }
 
-    fun command(token: String, peer: String?, session: String, argv: List<String>, code: String, exit: Int, ms: Long, requestId: String? = null) =
+    fun command(token: String, peer: String?, session: String, argv: List<String>, code: String, exit: Int, ms: Long, requestId: String? = null, source: String? = null) =
         write(JSONObject().put("kind", "command").put("token", token).put("peer", peer ?: JSONObject.NULL).put("session", session)
-            .put("cmd", redact(argv)).put("code", code).put("exit", exit).put("ms", ms).also { o -> requestId?.let { o.put("request_id", it.take(64)) } })
+            .put("cmd", redact(argv)).put("code", code).put("exit", exit).put("ms", ms)
+            .also { o -> requestId?.let { o.put("request_id", it.take(64)) }; source?.let { o.put("source", it) } })
 
     fun consent(token: String, session: String, what: String, answer: String) =
         write(JSONObject().put("kind", "consent").put("token", token).put("session", session).put("what", what.take(200)).put("answer", answer))
