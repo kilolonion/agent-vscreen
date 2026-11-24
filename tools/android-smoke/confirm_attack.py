@@ -768,9 +768,25 @@ def run_suite(sdk: int, out_dir: Path):
     run("adb", "wait-for-device", check_rc=False)
     time.sleep(2.0)
     IS_ROOT_ADB = True
-    parts_after = read_app_file("files/ci.txt").split()
-    fwd_port = int(parts_after[1]) if len(parts_after) == 2 and parts_after[1].isdigit() and int(parts_after[1]) > 0 else (GATE_PORT or 18765)
-    run("adb", "forward", f"tcp:{LOCAL_PORT}", f"tcp:{fwd_port}", check_rc=False)
+    def refresh_forward_port():
+        for _ in range(15):
+            raw = ci_hook("attack", "server_port", "files/ci-attack.txt", wait_secs=5)
+            if raw.startswith("{"):
+                try:
+                    p = int(json.loads(raw).get("port", 0))
+                except Exception:
+                    p = 0
+                if p > 0:
+                    run("adb", "forward", f"tcp:{LOCAL_PORT}", f"tcp:{p}", check_rc=False)
+                    print(f"adb forward tcp:{LOCAL_PORT} -> tcp:{p}", flush=True)
+                    return p
+            time.sleep(0.4)
+        parts_after = read_app_file("files/ci.txt").split()
+        fallback = int(parts_after[1]) if len(parts_after) == 2 and parts_after[1].isdigit() and int(parts_after[1]) > 0 else (GATE_PORT or 18765)
+        run("adb", "forward", f"tcp:{LOCAL_PORT}", f"tcp:{fallback}", check_rc=False)
+        return fallback
+
+    refresh_forward_port()
 
     if sdk < 34:
         # API 30: ATM denies non-privileged uid 10168 from calling startActivity with launchDisplayId on
@@ -826,6 +842,7 @@ def run_suite(sdk: int, out_dir: Path):
         a for a in read_audit_lines()
         if a.get("what") == "strong_confirm_approved" and cid1 in str(a.get("detail", "")) and "by=hold" in str(a.get("detail", ""))
     ]
+    refresh_forward_port()
     c_h2, b_h2 = api_run(["apps"], token=tok1_secret, session="s6-t1", timeout=30)
     check(
         "[Hold/6.10 #1] sendevent real-touch 3.5s hold confirms token #1 (approvals by=hold + audit + resend ok)",

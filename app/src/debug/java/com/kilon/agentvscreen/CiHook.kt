@@ -114,6 +114,9 @@ class CiHook : BroadcastReceiver() {
                             com.kilon.agentvscreen.ui.StrongConfirmActivity.open(app, cid)
                             res.put("opened", true).put("id", cid)
                         }
+                        what == "server_port" -> {
+                            res.put("port", HostService.server?.boundPort ?: 0)
+                        }
                         what == "finish_confirm" -> {
                             com.kilon.agentvscreen.ui.StrongConfirmActivity.finishLiveForCi()
                             res.put("closed", true)
