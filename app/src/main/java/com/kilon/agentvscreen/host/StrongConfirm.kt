@@ -55,9 +55,9 @@ object StrongConfirm {
 
     /** How long an allow covers the same kind of step of the same agent in the same app (feedback 3). */
     enum class Range(val key: String, val zh: String, val en: String) {
-        ONCE("once", "只这一次", "Just this once"),
-        ROUND("round", "这一轮任务内", "This run"),
-        TODAY("today", "今天", "Today");
+        ONCE("once", "仅此一次", "Just this once"),
+        ROUND("round", "本轮任务内", "This turn"),
+        TODAY("today", "今天内", "Today");
         val title: String get() = tr(zh, en)
         companion object { fun of(k: String?): Range = entries.firstOrNull { it.key == k } ?: ONCE }
     }
@@ -897,7 +897,7 @@ object StrongConfirm {
         }
         if (req.onApproveWithScope != null) {
             val allowed = req.selectableScopes.filter { it in Tokens.PUBLIC_LEVELS }.ifEmpty { listOf(Tokens.LOOK) }
-            val granted = chosenScope?.takeIf { it in allowed } ?: req.defaultScope.takeIf { it in allowed } ?: "look"
+            val granted = Tokens.levelOf(chosenScope)?.takeIf { it in allowed } ?: req.defaultScope.takeIf { it in allowed } ?: Tokens.LOOK
             runCatching { req.onApproveWithScope.invoke(granted) }
                 .onFailure { AppLogger.warning("StrongConfirm", "onApproveWithScope failed: ${it.message}") }
         } else {

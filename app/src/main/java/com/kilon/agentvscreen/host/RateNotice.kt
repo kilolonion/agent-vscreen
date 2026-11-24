@@ -27,14 +27,14 @@ object RateNotice {
         }
         val open = c.packageManager.getLaunchIntentForPackage(c.packageName)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) ?: return
         val pi = PendingIntent.getActivity(c, ID, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val text = tr("$agent 一分钟操作了 $perMin 次。想停就在悬浮窗或 App 里停止。", "$agent made $perMin actions in a minute. To stop it, use the floating window or the app.")
+        val text = tr("$agent 在一分钟内执行了 $perMin 次操作。如需停止，可在悬浮窗或 App 中操作。", "$agent performed $perMin actions in one minute. To stop it, use the floating window or the app.")
         val n = NotificationCompat.Builder(c, CHANNEL)
             .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOnlyAlertOnce(true)
             .setAutoCancel(true)
             .setTimeoutAfter(10 * 60_000L)
-            .setContentTitle(tr("操作很频繁", "Many actions"))
+            .setContentTitle(tr("高频操作", "High action rate"))
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(pi)

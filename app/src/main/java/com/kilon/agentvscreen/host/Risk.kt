@@ -28,11 +28,11 @@ enum class Risk(
     val zh: String,
     val en: String,
 ) {
-    NEW_CLIENT("新的接入", "New client"),
-    LEVEL_UP("提高档位", "Raise level"),
-    HIGH_RISK("需要你确认的一步", "A step that needs you"),
-    RATE("操作频率异常", "High action rate"),
-    TRUST_SET("临时放开付钱", "Allow payments for a while"),
+    NEW_CLIENT("新 agent 接入", "New agent"),
+    LEVEL_UP("放宽权限", "Widen permissions"),
+    HIGH_RISK("操作确认", "Action confirmation"),
+    RATE("高频操作", "High action rate"),
+    TRUST_SET("临时免确认支付", "Payments without confirmation"),
     PUBLIC_ENABLE("开启公网接入", "Enable public access");
 
     /** Approval lifetime in ms; 0 = valid until the user revokes it. Grants with a range carry their own end. */

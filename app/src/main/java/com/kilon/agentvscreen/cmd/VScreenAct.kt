@@ -1506,9 +1506,9 @@ internal fun VScreenOffloadHandler.payGuardCheck(sid: String, displayId: Int, la
     }
     try {
         val what = when (kind) {
-            com.kilon.agentvscreen.host.Consent.MONEY -> tr("点付钱的按钮“${l.take(20)}”", "tap the payment button \"${l.take(20)}\"")
-            com.kilon.agentvscreen.host.Consent.DESTROY -> tr("点做了就回不来的按钮“${l.take(20)}”", "tap \"${l.take(20)}\", which cannot be undone")
-            else -> tr("点要小心的按钮“${l.take(20)}”", "tap \"${l.take(20)}\", which needs care")
+            com.kilon.agentvscreen.host.Consent.MONEY -> tr("点击支付按钮“${l.take(20)}”", "tap the payment button \"${l.take(20)}\"")
+            com.kilon.agentvscreen.host.Consent.DESTROY -> tr("点击不可撤销操作“${l.take(20)}”", "tap \"${l.take(20)}\" (irreversible)")
+            else -> tr("点击敏感操作“${l.take(20)}”", "tap \"${l.take(20)}\" (sensitive)")
         }
         com.kilon.agentvscreen.host.Consent.require(context, "commit:$pkg:${VScreenOcr.norm(l).take(40)}", what,
             tr("在 $app 里点 ($x,$y) 的“${l.take(30)}”", "tap \"${l.take(30)}\" at ($x,$y) in $app"), kind = kind, pkg = pkg)
@@ -1573,7 +1573,7 @@ internal fun VScreenOffloadHandler.appRuleForPkg(pkg: String, step: Step, fromRu
                 throw StepRefused(
                     "CONFIRM_PENDING",
                     tr(
-                        "规则不能在“每次询问”的应用 $app 里自动执行“${step.raw.take(40)}”：整条 act 已中止",
+                        "规则不能在“每次确认”的应用 $app 里自动执行“${step.raw.take(40)}”：整条 act 已中止",
                         "Rules cannot auto-run \"${step.raw.take(40)}\" in ask-every-time app $app: act aborted",
                     ),
                 )

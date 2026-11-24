@@ -45,6 +45,16 @@ object Tokens {
     /** The level an old scope maps to when nothing else is known (an agent created by scope, e.g. by a test hook). */
     fun defaultLevelFor(scope: String): String = when (scope) { "look" -> LOOK; "system" -> FREE_SYSTEM; else -> FREE }
     /**
+     * A level as given by any caller: a level key as is, or an older scope name (look / operate / system) mapped to its
+     * default level. Callers written before 2.0.0-beta9 (pairing approval, test hooks, scripts) still pass scopes.
+     */
+    fun levelOf(raw: String?): String? = when {
+        raw == null -> null
+        raw in LEVELS -> raw
+        raw in SCOPES -> defaultLevelFor(raw)
+        else -> null
+    }
+    /**
      * Upgrade migration (feedback 2): the old per-token scope plus the old global "放手跑 / 谨慎" become one level.
      * look -> look; operate + careful -> careful; operate + auto -> free; system + auto -> free_system;
      * system + careful -> careful (conservative: the user can raise it).

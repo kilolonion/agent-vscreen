@@ -407,7 +407,9 @@ class StrongConfirmActivity : ComponentActivity() {
                     ) {
                         val headerTitle = when {
                             req.risk == Risk.HIGH_RISK -> req.commandName
-                            Risk.LEVEL_UP in req.risks -> tr("${req.tokenName} 想升到「${levelLabel(req.targetLevel ?: Tokens.FREE)}」", "${req.tokenName} asks for \"${levelLabel(req.targetLevel ?: Tokens.FREE)}\"")
+                            Risk.LEVEL_UP in req.risks && req.targetLevel?.startsWith("row:") == true -> (com.kilon.agentvscreen.api.Policy.row(req.targetLevel.removePrefix("row:"))?.title ?: req.targetLevel).let {
+                                tr("${req.tokenName} 请求允许「$it」", "${req.tokenName} asks to allow \"$it\"") }
+                            Risk.LEVEL_UP in req.risks -> tr("${req.tokenName} 请求提升至「${levelLabel(req.targetLevel ?: Tokens.FREE)}」", "${req.tokenName} asks for \"${levelLabel(req.targetLevel ?: Tokens.FREE)}\"")
                             req.risks.size > 1 -> req.risks.joinToString(" + ") { it.title }
                             else -> req.risk.title
                         }
@@ -493,7 +495,7 @@ class StrongConfirmActivity : ComponentActivity() {
                             val opts = req.selectableScopes.filter { it in Tokens.PUBLIC_LEVELS }.ifEmpty { listOf(Tokens.LOOK) }
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
-                                    tr("给它的档位（公网不开放系统操作）", "Its level (system actions are never available over public MCP)"),
+                                    tr("权限档位（公网接入不开放系统操作）", "Permission level (system actions are never available over public MCP)"),
                                     fontSize = 12.sp,
                                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                 )
@@ -560,7 +562,7 @@ class StrongConfirmActivity : ComponentActivity() {
                         if (req.ranges.size > 1) {
                             val picked = selectedRangeState.value
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(tr("允许多久", "Allow for"), fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                                Text(tr("许可范围", "Allow for"), fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     req.ranges.forEach { r ->
                                         val on = picked == r
@@ -605,10 +607,10 @@ class StrongConfirmActivity : ComponentActivity() {
                 text = {
                     Text(
                         tr(
-                            "确认只能在手机主屏上由你的手指完成，agent 在副屏上点不到、也看不到这一页：\n" +
-                                "• 付钱、接入新 agent、提高档位、开公网、临时放开付钱：用指纹或锁屏密码（没设锁屏时按住 3 秒）；\n" +
-                                "• 其它（删除、卸载、强制结束、你设了“每次询问”的应用等）：点一下“允许”，可以选这一轮或今天内同类步骤不再问；\n" +
-                                "• 给出的允许可以在 接入 › 这个 agent 里随时收回。",
+                            "确认只能在主屏上由真实触摸完成，副屏上的 agent 无法点击或看到此页面：\n" +
+                                "• 支付、接入新 agent、放宽权限、开启公网接入、临时免确认支付：需指纹或锁屏密码（未设锁屏时长按 3 秒）；\n" +
+                                "• 其他操作（不可撤销操作、敏感操作、“每次确认”的应用等）：单击“允许”，可选择本轮任务内或今天内同类操作不再确认；\n" +
+                                "• 已授予的许可可在 接入 › agent 详情 中随时撤销。",
                             "Only your finger on the phone's main screen can confirm; an agent on its own screen can neither tap nor see this page:\n" +
                                 "• Paying, a new agent, a higher level, public access, payments for a while: fingerprint or screen-lock PIN (a 3-second hold without a screen lock);\n" +
                                 "• Everything else (delete, uninstall, force-stop, an app you set to ask…): one tap on Allow, and you can let the same kind of step through for this run or today;\n" +

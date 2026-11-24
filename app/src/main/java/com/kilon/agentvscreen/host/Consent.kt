@@ -9,7 +9,7 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * 1.2: the user's yes, given on the phone, for the steps an agent must not decide alone: a payment or irreversible
  * button, force-stopping an app, changing system settings, taking the app off the user's main screen, and anything in
- * an app the user set to "ask every time".
+ * an app the user set to "confirm every time".
  *
  * Before 1.2 the agent added `--confirmed` itself after "asking the user": the tool could not tell a real yes from a
  * model that simply added the flag. Now the question appears on the phone (a heads-up notification with Allow / Deny,
@@ -30,7 +30,7 @@ object Consent {
      * 2.0.0-beta8 (feedback 4): three classes by "can it be undone afterwards" ([com.kilon.agentvscreen.api.Policy]
      * rows), plus the user's own per-app rule. money: pay, place an order, transfer, top up. destroy: uninstall, clear
      * an app's data, delete for good, close an account, factory reset, format. caution: an ordinary delete, a step
-     * toward buying, force-stop, taking the app the user is using to the background. app: an app set to "ask every time".
+     * toward buying, force-stop, taking the app the user is using to the background. app: an app set to "confirm every time".
      */
     const val MONEY = com.kilon.agentvscreen.api.Policy.MONEY
     const val DESTROY = com.kilon.agentvscreen.api.Policy.DESTROY
@@ -40,7 +40,7 @@ object Consent {
     /**
      * Returns when the step may go on; throws USER_DENIED / CONFIRM_PENDING / SCOPE_DENIED otherwise. How a [kind] is
      * handled is this agent's own table ([com.kilon.agentvscreen.api.Tokens.Token.policy]); an app the user set to
-     * "ask every time" always asks. [pkg]: the app the step is in; an allow for "this run" or "today" covers the same
+     * "confirm every time" always asks. [pkg]: the app the step is in; an allow for "this run" or "today" covers the same
      * [kind] in the same app for the same agent.
      */
     fun require(ctx: Context, key: String, title: String, detail: String, kind: String = MONEY, pkg: String = "*") {

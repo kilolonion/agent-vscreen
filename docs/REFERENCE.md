@@ -37,7 +37,7 @@
 一步没达到预期，这段就停在这一步，后面的不做，结果是失败（退出码 1，outcome=missed/refused）：
       until 到时间没等到；字画面上找不到；同样的字有好几处（AMBIGUOUS，会列出每一处的坐标，改用坐标）；#N 的元素已经不在原位（STALE_ELEMENT）；
       type 没有获得焦点的输入框、或输入后框里没有你的字。type 前先点输入框，【现在】里它标“可输入 有焦点”。
-真正付钱的按钮（支付、提交订单、转账）、用户设为“每次询问”的应用（用户选“谨慎”档时还有删除等不可撤销的按钮）：手机上会弹出确认，用户点了允许才会做（最多等 60 秒；没答复是 CONFIRM_PENDING，告诉用户去手机上允许，再重发）。
+支付按钮（付款、提交订单、转账）、用户设为“每次确认”的应用，以及这个 agent 的权限表里设为“问我”的类别（不可撤销操作、敏感操作等）：手机上会弹出确认，用户允许后才会执行；设为“不允许”的类别直接返回 SCOPE_DENIED（最多等 60 秒；没答复是 CONFIRM_PENDING，告诉用户去手机上允许，再重发）。
 例：act "tap 搜索; type 耳机; key enter until text:综合"
         act "drag 300 900 800 900" --watch 2s
         act "drag 200 1500 540 600 hold until color:540,600=#4CAF50 2s"
@@ -49,7 +49,7 @@
         act --stop "text:到货" --keep notify --for 2h
 
 - `--stop <条件>` 整段一直盯着，满足就停下，后面的步骤不做
-- `--on <条件 => 一步>` 短程规则（仅本次 act 生效，可写 1–3 条，不跨轮）：条件成立时执行一步（只允许 tap / key back / scroll / wait 时长，可选 x1–x3，默认 x1；条件不能是 stable / still；text: / gone: 连续 2 次独立读屏才触发，间隔 500ms；规则不能触发付款或“每次询问”应用）
+- `--on <条件 => 一步>` 短程规则（仅本次 act 生效，可写 1–3 条，不跨轮）：条件成立时执行一步（只允许 tap / key back / scroll / wait 时长，可选 x1–x3，默认 x1；条件不能是 stable / still；text: / gone: 连续 2 次独立读屏才触发，间隔 500ms；规则不能触发付款或“每次确认”应用）
 - `--hold` 回复发出前暂停副屏前台应用并核实，下一条命令前自动恢复（最长 120 秒，仅 Android 14+；一直要就 note hold on）。注意：Android 15 起，暂停正在频繁刷新的应用时，系统可能直接结束它；暂停只对按帧计时的应用有效，按真实时钟计时的应用恢复后会直接跳过这段时间；暂停期间网络连接可能超时
 - `--watch <时长>` 步骤做完再看这么久（会动的画面）
 - `--fast` 只跳过动作之间的画面稳定等待（游戏、连续点击）；最后一步以及 repeat 内每轮的 until / 稳定等待仍会执行
@@ -299,7 +299,7 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `UNPROVEN` | `look` | 这一步做在画面上一直自己在动的地方，之后的变化可能只是动画，不能说明它生效了。看图核对。 |
 | `SCREEN_RESUMED` | `look` | 副屏刚从省电暂停中恢复；暂停期间应用不在前台，可能自己暂停或弹出菜单。以这次回复的画面为准。 |
 | `NEEDS_CONFIRM` | `ask_user` | 需要用户在手机上的 Agent-VScreen 里强确认（风控维度）。已发通知。请用户打开强确认页完成验证后，把这条命令原样重发。这一步没有做。 |
-| `CONFIRM_PENDING` | `ask_user` | 这一步要用户在手机上的 Agent-VScreen 强确认页里确认（付费/不可撤销/用户设为每次询问的应用/会影响主屏的操作），用户还没答复，没做。请用户点通知打开强确认页确认，然后把这一段重发一遍。 |
+| `CONFIRM_PENDING` | `ask_user` | 这一步要用户在手机上的 Agent-VScreen 强确认页里确认（付费/不可撤销/用户设为每次确认的应用/会影响主屏的操作），用户还没答复，没做。请用户点通知打开强确认页确认，然后把这一段重发一遍。 |
 | `USER_DENIED` | `ask_user` | 用户在手机上拒绝了这一步。不要重试，问用户想怎么办。 |
 | `CONFIRM_REQUIRED` | `ask_user` | 同 CONFIRM_PENDING（旧名字）。 |
 | `APP_BLOCKED` | `ask_user` | 用户禁止后台操作这个应用。不要绕过，也不要从别的入口进同一个应用。 |
@@ -407,7 +407,7 @@ conditions: text:<word> (newly appearing after action; * may match zero chars: 9
 A step that does not reach what it expects stops the stretch there, skips the rest, and the result is a failure (exit code 1, outcome=missed/refused):
       until timed out; text not found on the screen; the same text in several places (AMBIGUOUS, every place is listed with its point: use coordinates); the element of #N is no longer where it was (STALE_ELEMENT);
       type found no focused input box, or your text is not in the box afterwards. Tap the input box before type; in [Now] it is marked "input focused".
-Buttons that actually spend money (pay, place order, transfer) and apps the user set to "ask every time" (in the user's "careful" mode also irreversible buttons such as delete): the phone asks the user, and the step is done only after the user allows it (waits up to 60 s; no answer is CONFIRM_PENDING: tell the user to allow it on the phone, then send again).
+Buttons that actually spend money (pay, place order, transfer) and apps the user set to "confirm every time" (plus the classes this agent's permission table sets to "Ask me", such as irreversible or sensitive actions): the phone asks the user, and the step is done only after the user allows it; classes set to "Not allowed" return SCOPE_DENIED (waits up to 60 s; no answer is CONFIRM_PENDING: tell the user to allow it on the phone, then send again).
 e.g. act "tap Search; type headphones; key enter until text:All"
          act "drag 300 900 800 900" --watch 2s
          act "drag 200 1500 540 600 hold until color:540,600=#4CAF50 2s"

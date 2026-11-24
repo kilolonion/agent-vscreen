@@ -97,6 +97,11 @@ class V200Beta9Test {
         assertEquals(Tokens.FREE, Tokens.migrateLevel("operate", "auto", false))
         assertEquals(Tokens.FREE_SYSTEM, Tokens.migrateLevel("system", "auto", false))
         assertEquals(Tokens.FREE, Tokens.migrateLevel("system", "auto", true))
+        // Older callers (pairing hook, scripts) pass scope names; they map to the scope's default level.
+        assertEquals(Tokens.FREE, Tokens.levelOf("operate"))
+        assertEquals(Tokens.LOOK, Tokens.levelOf("look"))
+        assertEquals(Tokens.CAREFUL, Tokens.levelOf(Tokens.CAREFUL))
+        assertEquals(null, Tokens.levelOf("bogus"))
     }
 
     @Test fun loopTokensPicksOnlyUnusedSuggestedBurstTokens() {

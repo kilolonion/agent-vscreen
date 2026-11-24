@@ -45,7 +45,7 @@ fun DetectorPreference() {
     val on = remember(tick) { VScreenDetector.active(ctx) }
     ArrowPreference(
         title = tr("无字图标识别", "Textless icon finder"),
-        summary = tr("帮 agent 找到没有文字的按钮", "Helps agents find buttons without words"),
+        summary = tr("识别没有文字标签的按钮和图标", "Finds buttons and icons without text labels"),
         endActions = {
             Value(
                 when {

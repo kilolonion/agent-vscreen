@@ -313,7 +313,7 @@ fun LogPage() {
         IconButton(onClick = { askClear = true }, modifier = Modifier.padding(end = 12.dp)) { Icon(MiuixIcons.Delete, tr("清空", "Clear")) }
     }) {
         // 2.0.0-beta9 (feedback 6): lazy rows.
-        if (rows.isEmpty()) item(key = "none") { Group { BasicComponent(title = tr("还没有记录", "Nothing recorded yet")) } }
+        if (rows.isEmpty()) item(key = "none") { Group { BasicComponent(title = tr("暂无记录", "Nothing recorded yet")) } }
         else cardItems(null, rows.mapIndexed { i, o -> i to o }, key = { it.first }) { LogRow(it.second) }
         item(key = "foot") {
             Text(tr("谁（哪个令牌、哪台设备）、什么时候、做了什么、结果；输入的文字只记字数。", "Who (token, device), when, what and the result; typed text is recorded as a length only."),
@@ -352,7 +352,7 @@ fun DiagPage() {
     }
     MiuixPage(tr("诊断", "Diagnostics")) {
         Group {
-            ArrowPreference(title = tr("复制诊断信息", "Copy diagnostics"), summary = tr("版本、配置状态和最近日志；不含令牌和你输入的字", "Version, setup state and recent log; no token, nothing you typed"),
+            ArrowPreference(title = tr("复制诊断信息", "Copy diagnostics"), summary = tr("版本、配置状态和最近日志；不含令牌和输入内容", "Version, setup state and recent log; no token, nothing you typed"),
                 onClick = { collectDiagnostics { host.copy(tr("诊断信息", "Diagnostics"), it) } })
             ArrowPreference(title = tr("分享诊断信息", "Share diagnostics"), onClick = { collectDiagnostics { report ->
                 runCatching {

@@ -188,7 +188,7 @@ fun OverviewTab(bottom: Dp) {
                 NextUp(beat, app.tick)
                 if (tasks.isNotEmpty()) {
                     Row(Modifier.fillMaxWidth().padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        SmallTitle(tr("刚才", "Just now"), modifier = Modifier.weight(1f))
+                        SmallTitle(tr("最近", "Just now"), modifier = Modifier.weight(1f))
                         LinkButton(onClick = { nav.tab(TAB_RECORDS) }) { Text(tr("全部记录", "All records")) }
                     }
                     Card(Modifier.padding(horizontal = 12.dp).fillMaxWidth(), insideMargin = PaddingValues(0.dp)) {
@@ -454,7 +454,7 @@ private fun NeedsGroup() {
     AnimatedVisibility(n > 0, enter = slideInVertically(tween(380)) { -it / 3 } + fadeIn(tween(300)) + expandVertically(tween(380)),
         exit = fadeOut(tween(220)) + shrinkVertically(tween(320))) {
         Column {
-            SmallTitle(tr("等你处理 · $n", "Waiting for you · $n"))
+            SmallTitle(tr("待处理 · $n", "Waiting for you · $n"))
             // 2.0.0-beta6 (6.1): strong confirmation never approves inline — tapping only opens StrongConfirmActivity.
             strongPending.firstOrNull()?.let { sc ->
                 NeedCard(
@@ -528,7 +528,7 @@ private fun NextUp(beat: Int, tick: Int) {
     LaunchedEffect(beat / 5, tick) { books = withContext(Dispatchers.IO) { runCatching { val now = System.currentTimeMillis(); Wake.list(ctx).filter { it.on && it.pending(now) != null } }.getOrDefault(emptyList()) } }
     val watches = remember(beat, tick) { VScreenRules.list().filter { !it.stopped } }
     if (books.isEmpty() && watches.isEmpty()) return
-    SmallTitle(tr("接下来", "Coming up"))
+    SmallTitle(tr("即将执行", "Coming up"))
     Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         books.forEach { e ->
             val next = e.pending(System.currentTimeMillis())

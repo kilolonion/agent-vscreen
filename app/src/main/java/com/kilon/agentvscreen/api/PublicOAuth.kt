@@ -777,7 +777,7 @@ object PublicOAuth {
     private fun onPairingApproved(pairing: Pairing, rawLevel: String, by: String) {
         val now = nowMs()
         // 2.0.0-beta8 (feedback 2): the pairing card picks a level; the OAuth scope follows from it, capped by what the client asked.
-        val level = if ("operate" in pairing.selectableScopes && rawLevel in Tokens.PUBLIC_LEVELS) rawLevel else Tokens.LOOK
+        val level = Tokens.levelOf(rawLevel)?.takeIf { "operate" in pairing.selectableScopes && it in Tokens.PUBLIC_LEVELS } ?: Tokens.LOOK
         val safeScope = Tokens.scopeOfLevel(level).let { if (it == "look") "look" else "operate" }
         var tokenId: String? = null
         val ok = synchronized(lock) {

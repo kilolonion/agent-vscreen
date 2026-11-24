@@ -9,7 +9,7 @@ import org.json.JSONObject
  * Each row is a class of action, each cell how it is handled: allowed, asked on the phone, or not allowed. A level is
  * a preset of that table (只看 / 稳妥 / 省心 / 全权); the user can change any row of a preset for one agent (the page
  * marks the changed rows and can restore the preset) or start from 自定义. Widening a row takes a fingerprint,
- * narrowing applies at once. Per-app rules ("ask every time" / read-only / blocked) stay separate: they are about apps,
+ * narrowing applies at once. Per-app rules ("confirm every time" / read-only / blocked) stay separate: they are about apps,
  * not agents.
  */
 object Policy {
@@ -36,12 +36,12 @@ object Policy {
 
     private val ALL3 = listOf(Act.ALLOW, Act.ASK, Act.DENY)
     val ROWS = listOf(
-        Row(OPERATE, "操作应用", "Operate apps", "打开、点、输入、滑动", "Open, tap, type, swipe", ALL3),
-        Row(CAUTION, "要小心的步骤", "Steps that need care", "普通删除、去购买的中间步骤、强制结束、把你在用的应用接到后台", "Ordinary delete, steps toward buying, force-stop, taking the app you use to the background", ALL3),
-        Row(DESTROY, "删了回不来的", "Cannot be undone", "卸载、清除应用数据、彻底删除、注销账号、恢复出厂", "Uninstall, clear app data, delete for good, close an account, factory reset", ALL3),
-        Row(MONEY, "付钱", "Paying", "支付、付款、提交订单、转账、充值（不能设为允许）", "Pay, place an order, transfer, top up (cannot be set to allowed)", listOf(Act.ASK, Act.DENY)),
-        Row(SYSTEM, "系统操作", "System actions", "修复权限、清理、强制结束等系统级命令", "Repair, cleanup, force-stop and other system commands", ALL3),
-        Row(RATE, "操作很频繁", "Many actions a minute", "一分钟超过 ${com.kilon.agentvscreen.host.Risk.RATE_MAX_PER_MIN} 次；允许时只记下并通知你", "Over ${com.kilon.agentvscreen.host.Risk.RATE_MAX_PER_MIN} a minute; when allowed it is only logged and you are notified", listOf(Act.ALLOW, Act.ASK)),
+        Row(OPERATE, "应用操作", "App actions", "启动应用、点击、输入、滑动", "Launch apps, tap, type, swipe", ALL3),
+        Row(CAUTION, "敏感操作", "Sensitive actions", "可恢复的删除、购买流程中的中间步骤、强制停止应用、将前台应用移至后台", "Recoverable deletes, intermediate purchase steps, force-stopping apps, moving the foreground app to the background", ALL3),
+        Row(DESTROY, "不可撤销操作", "Irreversible actions", "卸载应用、清除应用数据、永久删除、注销账号、恢复出厂设置", "Uninstalling, clearing app data, permanent deletion, closing accounts, factory reset", ALL3),
+        Row(MONEY, "支付", "Payments", "付款、提交订单、转账、充值；不可设为“允许”", "Paying, placing orders, transfers, top-ups; cannot be set to Allowed", listOf(Act.ASK, Act.DENY)),
+        Row(SYSTEM, "系统操作", "System actions", "修复权限、清理后台、强制停止等系统级命令", "Permission repair, background cleanup, force-stop and other system-level commands", ALL3),
+        Row(RATE, "高频操作", "High action rate", "每分钟超过 ${com.kilon.agentvscreen.host.Risk.RATE_MAX_PER_MIN} 次操作；设为“允许”时仅记录并发送通知", "More than ${com.kilon.agentvscreen.host.Risk.RATE_MAX_PER_MIN} actions per minute; when Allowed it is only logged and notified", listOf(Act.ALLOW, Act.ASK)),
     )
     fun row(key: String): Row? = ROWS.firstOrNull { it.key == key }
 
@@ -95,11 +95,11 @@ object Policy {
     }
 
     fun levelHint(level: String): String = when (level) {
-        Tokens.LOOK -> tr("看画面、读状态，不动手", "Sees the screen and status; does not act")
-        Tokens.CAREFUL -> tr("操作应用，要小心的、回不来的、付钱都先问你", "Operates apps; asks before careful steps, the irreversible and paying")
-        Tokens.FREE -> tr("操作应用，只有回不来的和付钱问你（默认）", "Operates apps; asks only before the irreversible and paying (default)")
-        Tokens.FREE_SYSTEM -> tr("省心再加系统操作", "Easy plus system actions")
-        CUSTOM -> tr("每一类自己定", "You set each row")
+        Tokens.LOOK -> tr("仅查看画面和状态，不执行任何操作", "Views the screen and status only; performs no actions")
+        Tokens.CAREFUL -> tr("可操作应用；敏感、不可撤销和支付操作需确认", "Operates apps; sensitive, irreversible and payment actions need confirmation")
+        Tokens.FREE -> tr("可操作应用；仅不可撤销和支付操作需确认（默认）", "Operates apps; only irreversible and payment actions need confirmation (default)")
+        Tokens.FREE_SYSTEM -> tr("在“省心”基础上允许系统操作", "Easy, plus system actions")
+        CUSTOM -> tr("逐项设置每类操作的处理方式", "Set the handling of each action type")
         else -> ""
     }
 
