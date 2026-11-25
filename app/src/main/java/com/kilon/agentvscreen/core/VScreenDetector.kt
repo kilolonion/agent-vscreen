@@ -171,6 +171,7 @@ object VScreenDetector {
      * off, failed). Takes tens to a few hundred ms; call it off the main thread.
      */
     fun detect(frame: Bitmap, ctx: Context? = BackgroundOperation.appContextOrNull()): List<Hit>? {
+        if (com.kilon.agentvscreen.host.ThermalGuard.limited) return null
         if (ctx == null) return null
         if (!checked) { checked = true; checkLastRun(ctx) }
         if (!active(ctx)) return null

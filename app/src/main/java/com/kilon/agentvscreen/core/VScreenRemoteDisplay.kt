@@ -130,6 +130,21 @@ internal object VScreenRemoteDisplay {
         }
     }
 
+    /**
+     * 2.0.0-beta12 (service off = nothing left): end the privileged screen service process. It gives back any muted
+     * app and releases its screens on the way out (DESTROY); Shizuku's copy is also unbound and removed.
+     */
+    fun shutdown() {
+        if (Privileged.via == Privileged.Via.ROOT) { RootBackend.stop(); return }
+        val b = shizukuBinder
+        if (b != null && b.isBinderAlive) runCatching {
+            val d = Parcel.obtain(); val r = Parcel.obtain()
+            try { b.transact(VScreenDisplayService.DESTROY_CODE, d, r, 0) } finally { d.recycle(); r.recycle() }
+        }
+        runCatching { if (ShizukuManager.isReady()) Shizuku.unbindUserService(args, conn, true) }
+        shizukuBinder = null
+    }
+
     fun create(name: String, width: Int, height: Int, dpi: Int, surface: Surface): Result<Created> = runCatching {
         val b = service().getOrThrow()
         timed("create") {

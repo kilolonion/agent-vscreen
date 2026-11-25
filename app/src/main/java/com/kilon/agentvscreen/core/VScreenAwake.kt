@@ -33,6 +33,13 @@ import org.json.JSONObject
  *    on the user's main screen, so it is not done; status says the background screen sleeps with the phone.
  */
 object VScreenAwake {
+    private val wakeBudget = com.kilon.agentvscreen.host.WakeBudget()
+    internal fun suspendForHeat() {
+        keeper?.interrupt(); releaseLock()
+        val ctx = appContext ?: return
+        val pi = PendingIntent.getBroadcast(ctx, 7291, Intent(ACTION_TICK).setPackage(ctx.packageName), PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE) ?: return
+        ctx.getSystemService(AlarmManager::class.java)?.cancel(pi)
+    }
     private const val TAG = "VScreenAwake"
     private const val CHECK_MS = 15_000L
     private const val ALARM_MS = 60_000L
@@ -81,11 +88,13 @@ object VScreenAwake {
      * caller's notes when something was done or could not be done; null when it was awake. Never throws.
      */
     fun ensure(d: VScreenDisplay): String? {
+        if (com.kilon.agentvscreen.host.ThermalGuard.limited || (screenOff && !BackgroundOperation.needsAwake())) return null
         if (d.released || d.parked) return null
         val st = stateOf(d) ?: return null
         if (st == Display.STATE_ON) return null
         if (!canWakeAlone(d)) return tr("副屏处于休眠（状态 ${stateName(st)}），这台手机上它和主屏一起休眠，单独唤醒会点亮主屏，所以没唤醒：画面可能不动", "The screen is asleep (state ${stateName(st)}); on this phone it sleeps with the main screen and waking it alone would light the main screen, so it was not woken: the picture may not move")
         require(d.displayId != Display.DEFAULT_DISPLAY) { "VScreenAwake must never run input on display 0" }
+        if (!wakeBudget.allow(SystemClock.elapsedRealtime())) return tr("副屏唤醒过于频繁，已暂停发键", "Repeated display wake suppressed")
         val ok = runCatching { VScreenShell.run(arrayOf("input", "-d", d.displayId.toString(), "keyevent", "KEYCODE_WAKEUP"), 4_000L).exitCode == 0 }.getOrDefault(false)
         val t0 = SystemClock.elapsedRealtime()
         while (ok && SystemClock.elapsedRealtime() - t0 < 2_000L && stateOf(d) != Display.STATE_ON) Thread.sleep(100)
@@ -103,7 +112,7 @@ object VScreenAwake {
     }
 
     /** Work is pending on the background screen: a chat turn owns it, or a watch runs. */
-    private fun needed(): Boolean = BackgroundOperation.needsAwake()
+    private fun needed(): Boolean = !com.kilon.agentvscreen.host.ThermalGuard.limited && BackgroundOperation.needsAwake()
 
     /** Start the keeper if work is pending (called on screen off, on the timer, and when a screen / watch starts). */
     fun kick(why: String) {

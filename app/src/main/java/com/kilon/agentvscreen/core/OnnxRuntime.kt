@@ -311,6 +311,8 @@ internal object OnnxRuntime {
         activeHandles.filter { it.timedOutAtMonoMs > 0L }.map { it to (now - it.startMonoMs).coerceAtLeast(0L) }
     }
 
+    internal fun computing(): Boolean = inFlight.get() > 0
+
     fun recentCount(): Int = synchronized(metricsLock) { records.size }
 
     fun recent(limit: Int = MAX_RECORDS): List<Record> = synchronized(metricsLock) {

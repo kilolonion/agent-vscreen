@@ -693,8 +693,9 @@ class VScreenDisplayService : Binder {
     private fun injectKey(displayId: Int, code: Int, longPress: Boolean, epoch: Long): Boolean = synchronized(fence.lock(displayId)) {
         if (!fence.admits(displayId, epoch)) return@synchronized false
         val now = SystemClock.uptimeMillis()
+        val kf = keyFlags(code)
         val down = KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
-            0, InputDevice.SOURCE_KEYBOARD)
+            kf, InputDevice.SOURCE_KEYBOARD)
         var ok = inject(down, displayId)
         if (longPress) {
             Thread.sleep(600)
@@ -702,10 +703,10 @@ class VScreenDisplayService : Binder {
             if (!fence.admits(displayId, epoch)) { cancelKeys(displayId, listOf(down)); return@synchronized false }
             val t = SystemClock.uptimeMillis()
             ok = inject(KeyEvent(now, t, KeyEvent.ACTION_DOWN, code, 1, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
-                KeyEvent.FLAG_LONG_PRESS, InputDevice.SOURCE_KEYBOARD), displayId) && ok
+                kf or KeyEvent.FLAG_LONG_PRESS, InputDevice.SOURCE_KEYBOARD), displayId) && ok
         }
         val up = KeyEvent(now, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, code, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
-            0, InputDevice.SOURCE_KEYBOARD)
+            kf, InputDevice.SOURCE_KEYBOARD)
         inject(up, displayId) && ok
     }
 
@@ -1122,6 +1123,16 @@ class VScreenDisplayService : Binder {
          */
         const val GATE = FIRST_CALL_TRANSACTION + 23
         /** The rule of [mayInject]: never the main screen; a display this service created, or one the app owns. */
+        /**
+         * 2.0.0-beta12 (test on HONOR: `key back`, `esc` did nothing on the screen while enter/del worked): BACK went in
+         * as a plain keyboard key, and that ROM's window policy drops a BACK that does not come from the system. The
+         * system's own back (the navigation bar and the back gesture, for every display) is a key marked
+         * FROM_SYSTEM | VIRTUAL_HARD_KEY; navigation keys are sent the same way. Typing keys stay plain.
+         */
+        internal fun keyFlags(code: Int): Int =
+            if (code in SYSTEM_NAV_KEYS) KeyEvent.FLAG_FROM_SYSTEM or KeyEvent.FLAG_VIRTUAL_HARD_KEY else 0
+        internal val SYSTEM_NAV_KEYS = setOf(KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE)
+
         internal fun injectableDisplay(displayId: Int, created: Boolean, owner: String?, appPkg: String): Boolean = when {
             displayId == android.view.Display.DEFAULT_DISPLAY -> false
             created -> true

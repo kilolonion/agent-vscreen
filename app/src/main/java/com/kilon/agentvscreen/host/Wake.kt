@@ -359,6 +359,8 @@ object Wake {
 
     /** Work out every entry's next window and set one alarm for the earliest. Called on change, boot, app start and after each alarm. */
     @Synchronized fun arm(ctx: Context) {
+        // 2.0.0-beta12: off (blocked) leaves no alarm behind either; turning it back on re-arms (HostService start).
+        if (ThermalGuard.locked || Prefs.blocked(ctx)) { ctx.getSystemService(AlarmManager::class.java)?.cancel(alarmIntent(ctx)); return }
         load(ctx)
         val am = ctx.getSystemService(AlarmManager::class.java) ?: return
         val now = System.currentTimeMillis()
@@ -381,6 +383,7 @@ object Wake {
 
     /** The alarm went off: open every window that starts within the lead time. */
     internal fun onAlarm(ctx: Context) {
+        if (ThermalGuard.locked) { arm(ctx); return }
         load(ctx)
         val now = System.currentTimeMillis()
         val due = synchronized(lock) {
@@ -501,7 +504,7 @@ class WakeReceiver : BroadcastReceiver() {
         if (intent.action != Wake.ACTION_WAKE) return
         // 1.3 beta4: the CLI reads this answer from `am broadcast`: "blocked" = the user blocked agents (say so, do not
         // blame the system), "waking" = on its way.
-        if (Prefs.blocked(context)) { resultData = "blocked"; return }
+        if (ThermalGuard.locked || Prefs.blocked(context)) { resultData = "blocked"; return }
         resultData = "waking"
         Wake.poke(context.applicationContext)
     }

@@ -507,6 +507,7 @@ object PublicAccess {
 
     /** Called by [HostService] on create/start to bring [PublicServer] and ongoing notification in sync. */
     fun sync(ctx: Context) {
+        if (ThermalGuard.locked) return
         val app = ctx.applicationContext
         val tunnel = channel.tunnel.takeIf { enabled }
         stopTunnels("channel ${channel.key}, enabled=$enabled", keep = tunnel)
@@ -535,6 +536,7 @@ object PublicAccess {
 
     /** Enable public MCP after warning + `Risk.PUBLIC_ENABLE` biometric/PIN confirmation (7.4). */
     fun enable(ctx: Context) {
+        if (ThermalGuard.locked) return
         val app = ctx.applicationContext
         val now = clock()
         val ver = currentVersionCode()

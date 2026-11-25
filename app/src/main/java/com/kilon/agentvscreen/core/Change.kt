@@ -59,6 +59,32 @@ object Change {
         return if (n == 0) -1.0 else diff.toDouble() / n
     }
 
+    /**
+     * 2.0.0-beta12 (test: a long-press menu and a stopwatch's 开始 → 暂停 never counted as `until change`): a reaction
+     * can be small on a big screen (a label, a toggle, a little menu), far under [CHANGED] of the whole picture. The
+     * cell of [cell]×[cell] pixels (outside [skip]) that changed most, when at least [LOCAL_CHANGED] of it differs; a
+     * caret or a moving dot stays under that.
+     */
+    fun localChange(a: Bitmap?, b: Bitmap?, skip: List<Rect> = emptyList(), cell: Int = 18): Rect? {
+        if (a == null || b == null || a.isRecycled || b.isRecycled || a.width != b.width || a.height != b.height) return null
+        var best: Rect? = null; var bestR = LOCAL_CHANGED
+        var y = 0
+        while (y + cell / 2 < a.height) {
+            var x = 0
+            while (x + cell / 2 < a.width) {
+                val r = Rect(x, y, minOf(x + cell, a.width), minOf(y + cell, a.height))
+                if (skip.none { Rect.intersects(it, r) }) {
+                    val v = ratio(a, b, r)
+                    if (v >= bestR) { bestR = v; best = r }
+                }
+                x += cell / 2
+            }
+            y += cell / 2
+        }
+        return best
+    }
+    const val LOCAL_CHANGED = 0.2
+
     /** [a] and [b] are the same at [level] (false when they cannot be compared). */
     fun same(a: Bitmap?, b: Bitmap?, level: Level, region: Rect? = null, skip: List<Rect> = emptyList()): Boolean =
         ratio(a, b, region, skip).let { it >= 0.0 && it <= level.max }

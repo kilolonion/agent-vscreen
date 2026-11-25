@@ -59,6 +59,7 @@ class PublicServer(
     val running: Boolean get() = server?.isClosed == false
 
     fun start(preferredPort: Int = DEFAULT_PORT, span: Int = PORT_SPAN): Int = synchronized(bindLock) {
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return@synchronized -1
         if (running && boundPort > 0) return@synchronized boundPort
         stopLocked()
         for (p in preferredPort until (preferredPort + span).coerceAtMost(65536)) {
@@ -266,7 +267,8 @@ class PublicServer(
                     code = "BAD_TOKEN",
                     msg = tr("公网访问令牌无效、已过期或目标地址不匹配", "Public access token is invalid, expired, or bound to another resource"),
                     status = 401,
-                    headers = wwwAuth,
+                    // RFC 6750 §3.1: a token that was sent and refused says so, so a client knows to refresh or re-pair.
+                    headers = mapOf("WWW-Authenticate" to """Bearer error="invalid_token", resource_metadata="$prmUrl""""),
                 )
             }
         }

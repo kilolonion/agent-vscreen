@@ -61,7 +61,8 @@ fun PublicGuidePage(channelKey: String) {
 private data class Btn(val label: String, val run: () -> Unit)
 
 @Composable
-private fun Step(n: Int, title: String, body: String, code: String? = null, codeLabel: String = "", buttons: List<Btn> = emptyList()) {
+private fun Step(n: Int, title: String, body: String, code: String? = null, codeLabel: String = "", buttons: List<Btn> = emptyList(),
+                 field: (@Composable () -> Unit)? = null, after: List<Btn> = emptyList()) {
     val host = LocalHost.current
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -77,7 +78,48 @@ private fun Step(n: Int, title: String, body: String, code: String? = null, code
         if (buttons.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(start = 36.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             buttons.forEach { b -> SoftButton(onClick = b.run) { Text(b.label, fontSize = 13.sp, color = MiuixTheme.colorScheme.primary) } }
         }
+        field?.let { Box(Modifier.fillMaxWidth().padding(start = 36.dp)) { it() } }
+        if (after.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(start = 36.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            after.forEach { b -> SoftButton(onClick = b.run) { Text(b.label, fontSize = 13.sp, color = MiuixTheme.colorScheme.primary) } }
+        }
     }
+}
+
+/**
+ * 2.0.0-beta12 (rainbow: fill in while following the guide, instead of leaving it for each value): the value a step
+ * asks for is entered right in that step. Paste reads the clipboard (the user copies it in the browser and comes
+ * back); a value saves on its own, so the steps can be done in any order and the guide never has to be left.
+ */
+@Composable
+private fun GuideField(label: String, saved: String?, onSave: (String) -> String?) {
+    val ctx = LocalContext.current
+    val host = LocalHost.current
+    var v by rememberSaveable { mutableStateOf("") }
+    var problem by remember { mutableStateOf<String?>(null) }
+    fun save(text: String) {
+        problem = onSave(text)
+        if (problem == null) { v = ""; host.say(tr("已保存", "Saved")) }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (saved != null) Text("✓ " + saved, fontSize = 13.sp, color = Palette.takeover)
+        TextField(value = v, onValueChange = { v = it; problem = null }, label = label, useLabelAsPlaceholder = true, singleLine = true,
+            modifier = Modifier.fillMaxWidth())
+        problem?.let { Text(it, fontSize = 12.5.sp, lineHeight = 18.sp, color = MiuixTheme.colorScheme.error) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            SoftButton(onClick = {
+                val clip = runCatching { ctx.getSystemService(android.content.ClipboardManager::class.java)?.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString() }.getOrNull()
+                if (clip.isNullOrBlank()) host.say(tr("剪贴板是空的：先在网页里点复制", "The clipboard is empty: press copy on the web page first")) else save(clip)
+            }) { Text(tr("粘贴并保存", "Paste and save"), fontSize = 13.sp, color = MiuixTheme.colorScheme.primary) }
+            if (v.isNotBlank()) SoftButton(onClick = { save(v) }) { Text(tr("保存", "Save"), fontSize = 13.sp, color = MiuixTheme.colorScheme.primary) }
+        }
+    }
+}
+
+/** The last step's way back to the public page, where turning on needs the risk note and a fingerprint. */
+@Composable
+private fun backToPublic(): Btn {
+    val nav = LocalNav.current
+    return Btn(tr("回到公网页面开启", "Back to turn it on")) { nav.back() }
 }
 
 @Composable
@@ -112,7 +154,8 @@ private fun TailscaleGuide() {
             code = PublicAccess.FUNNEL_NODE_ATTRS_SNIPPET, codeLabel = "nodeAttrs",
             buttons = listOf(Btn(tr("打开访问控制", "Open Access controls")) { open(PublicAccess.ADMIN_ACL_URL) }))
         Step(4, tr("开启公网接入", "Turn on public access"),
-            tr("回到公网页面，清单会自动重查。全部 ✓ 后同意风险说明，点“开启公网接入”并验证指纹。第一次申请证书约 30–60 秒。", "Back on the public page the checklist rechecks by itself. When all show ✓, accept the risk note, press Turn on public access and confirm with your fingerprint. The first certificate takes about 30–60 seconds."))
+            tr("回到公网页面，清单会自动重查。全部 ✓ 后同意风险说明，点“开启公网接入”并验证指纹。第一次申请证书约 30–60 秒。", "Back on the public page the checklist rechecks by itself. When all show ✓, accept the risk note, press Turn on public access and confirm with your fingerprint. The first certificate takes about 30–60 seconds."),
+            buttons = listOf(backToPublic()))
         Step(5, tr("把地址交给云端客户端", "Give the address to the cloud client"),
             tr("复制 MCP 地址，在客户端里添加（如 claude.ai 的“添加连接器”）。第一次连接时，手机上会弹出配对请求：核对配对码一致再批准，并选择这个客户端的权限档位。", "Copy the MCP address and add it in the client (e.g. Add connector on claude.ai). On the first connection the phone shows a pairing request: check the code matches, approve, and pick the client's permission level."))
     }
@@ -143,20 +186,24 @@ private fun CloudflareGuide() {
             buttons = listOf(Btn(tr("打开 Cloudflare", "Open Cloudflare")) { open(Cloudflared.ADD_SITE_URL) }))
     }
     Group(tr("步骤", "Steps")) {
+        val cf by Cloudflared.config.collectAsState()
         Step(2, tr("新建隧道", "Create a tunnel"),
             tr("打开 Cloudflare Zero Trust（第一次进入按提示选免费计划、起团队名），进入 网络（Networks）› 隧道（Tunnels）› 创建隧道，类型选 Cloudflared，名字随意（如 agent-vscreen），保存。",
                 "Open Cloudflare Zero Trust (the first time, follow the prompts: free plan, team name), go to Networks › Tunnels › Create a tunnel, choose Cloudflared, name it (e.g. agent-vscreen) and save."),
             buttons = listOf(Btn(tr("打开 Zero Trust", "Open Zero Trust")) { open(Cloudflared.DASHBOARD_URL) }))
         Step(3, tr("复制令牌，粘贴到本 App", "Copy the token into this app"),
-            tr("在“安装并运行连接器”页面，任选一个系统，复制显示的整条命令（其中 eyJ 开头的长串就是令牌），粘贴到公网页面的“隧道令牌”。不需要在电脑上运行这条命令：连接器就在这台手机上。",
-                "On Install and run a connector, pick any system and copy the whole command shown (the long string starting with eyJ is the token), then paste it into Tunnel token on the public page. Don't run it on a computer: the connector is this phone."))
+            tr("在“安装并运行连接器”页面，任选一个系统，复制显示的整条命令（其中 eyJ 开头的长串就是令牌），回来点“粘贴并保存”。不需要在电脑上运行这条命令：连接器就在这台手机上。",
+                "On Install and run a connector, pick any system and copy the whole command shown (the long string starting with eyJ is the token), come back and press Paste and save. Don't run it on a computer: the connector is this phone."),
+            field = { GuideField(tr("隧道令牌或整条安装命令", "Tunnel token or the whole install command"), cf.tunnelId?.let { tr("隧道令牌已保存", "Tunnel token saved") }) { Cloudflared.save(it, null) } })
         Step(4, tr("添加公网域名，指向手机", "Add the public hostname, pointing at the phone"),
             tr("下一步“公共主机名”（新版界面可能叫“已发布的应用路由”）：子域名填如 phone，域名选你的域名，路径留空；服务类型选 HTTP，URL 填下面这个地址（不要写 localhost，也不要改端口），保存。",
                 "Next, Public Hostname (newer screens may call it Published application routes): subdomain e.g. phone, pick your domain, leave the path empty; service type HTTP, URL exactly as below (not localhost, same port), then save."),
             code = Cloudflared.ORIGIN_URL.removePrefix("http://"), codeLabel = tr("服务地址", "Service URL"))
         Step(5, tr("填写域名并开启", "Enter the hostname and turn it on"),
-            tr("回到公网页面，填写刚才的完整域名（如 phone.example.com）并保存。清单全部 ✓ 后同意风险说明，点“开启公网接入”并验证指纹。",
-                "Back on the public page, enter the full hostname (e.g. phone.example.com) and save. When the checklist is all ✓, accept the risk note, press Turn on public access and confirm with your fingerprint."))
+            tr("在下面填刚才的完整域名（如 phone.example.com）。然后回到公网页面：清单全部 ✓ 后同意风险说明，点“开启公网接入”并验证指纹。",
+                "Enter the full hostname below (e.g. phone.example.com). Then go back to the public page: when the checklist is all ✓, accept the risk note, press Turn on public access and confirm with your fingerprint."),
+            field = { GuideField(tr("公网域名，例如 phone.example.com", "Public hostname, e.g. phone.example.com"), cf.hostname) { Cloudflared.save(null, it) } },
+            after = listOf(backToPublic()))
         Step(6, tr("等两项变绿，再交给客户端", "Wait for two green rows, then give it to the client"),
             tr("“隧道连接”显示已连上、“公网地址自检”通过，说明外网已经能到这台手机。复制 MCP 地址添加到云端客户端；第一次连接时在手机上核对配对码并批准。",
                 "When Tunnel connection shows connected and Public address self-test passes, the internet can reach this phone. Copy the MCP address into the cloud client; on the first connection check the pairing code on the phone and approve."))
@@ -253,17 +300,21 @@ private fun NgrokGuide() {
             fontSize = 12.5.sp, lineHeight = 18.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
     }
     Group(tr("步骤", "Steps")) {
+        val ngrok by Ngrok.config.collectAsState()
         Step(1, tr("注册 ngrok 账号", "Sign up for ngrok"),
             tr("用邮箱或 GitHub、Google 账号注册（免费），按提示完成验证。不需要下载或安装 ngrok：代理就在这台手机上。", "Sign up with email, GitHub or Google (free) and finish the verification it asks for. No need to download or install ngrok: the agent is this phone."),
             buttons = listOf(Btn(tr("打开 ngrok 注册", "Open ngrok sign-up")) { open(Ngrok.SIGNUP_URL) }))
         Step(2, tr("复制 authtoken", "Copy your authtoken"),
-            tr("后台左侧 Getting Started › Your Authtoken，点复制，粘贴到公网页面的“authtoken”。粘贴整条 ngrok config add-authtoken 命令也可以。", "In the dashboard, Getting Started › Your Authtoken, press copy and paste it into Authtoken on the public page. Pasting the whole ngrok config add-authtoken command works too."),
-            buttons = listOf(Btn(tr("打开 Your Authtoken", "Open Your Authtoken")) { open(Ngrok.TOKEN_URL) }))
+            tr("后台左侧 Getting Started › Your Authtoken，点复制，回来点“粘贴并保存”。复制整条 ngrok config add-authtoken 命令也可以。", "In the dashboard, Getting Started › Your Authtoken, press copy, come back and press Paste and save. Copying the whole ngrok config add-authtoken command works too."),
+            buttons = listOf(Btn(tr("打开 Your Authtoken", "Open Your Authtoken")) { open(Ngrok.TOKEN_URL) }),
+            field = { GuideField(tr("authtoken", "Authtoken"), ngrok.token?.let { tr("authtoken 已保存", "Authtoken saved") }) { Ngrok.save(it, null) } })
         Step(3, tr("复制你的固定域名", "Copy your static domain"),
-            tr("后台左侧 Universal Gateway › Domains（旧版界面在 Cloud Edge › Domains）。免费账号已自动分配一个，形如 名字.ngrok-free.app；列表为空时点“新建域名”领取。把它粘贴到“固定域名”。", "In the dashboard, Universal Gateway › Domains (older screens: Cloud Edge › Domains). Free accounts already have one, like name.ngrok-free.app; if the list is empty, create one. Paste it into Static domain."),
-            buttons = listOf(Btn(tr("打开 Domains", "Open Domains")) { open(Ngrok.DOMAINS_URL) }))
-        Step(4, tr("保存并开启", "Save and turn it on"),
-            tr("保存后清单全部 ✓，同意风险说明，点“开启公网接入”并验证指纹。", "After saving, when the checklist is all ✓, accept the risk note, press Turn on public access and confirm with your fingerprint."))
+            tr("后台左侧 Universal Gateway › Domains（旧版界面在 Cloud Edge › Domains）。免费账号已自动分配一个，形如 名字.ngrok-free.app；列表为空时点“新建域名”领取。复制后回来点“粘贴并保存”。", "In the dashboard, Universal Gateway › Domains (older screens: Cloud Edge › Domains). Free accounts already have one, like name.ngrok-free.app; if the list is empty, create one. Copy it, come back and press Paste and save."),
+            buttons = listOf(Btn(tr("打开 Domains", "Open Domains")) { open(Ngrok.DOMAINS_URL) }),
+            field = { GuideField(tr("固定域名，例如 name.ngrok-free.app", "Static domain, e.g. name.ngrok-free.app"), ngrok.domain) { Ngrok.save(null, it) } })
+        Step(4, tr("开启", "Turn it on"),
+            tr("上面两项都保存后，回到公网页面：清单全部 ✓，同意风险说明，点“开启公网接入”并验证指纹。", "With both saved above, go back to the public page: when the checklist is all ✓, accept the risk note, press Turn on public access and confirm with your fingerprint."),
+            buttons = listOf(backToPublic()))
         Step(5, tr("等两项变绿，再交给客户端", "Wait for two green rows, then give it to the client"),
             tr("“隧道连接”显示已连上、“公网地址自检”通过，就可以复制 MCP 地址添加到云端客户端。第一次连接时在手机上核对配对码并批准。在浏览器里打开配对页时，ngrok 可能先显示一个提示页，点 Visit Site 继续即可。", "When Tunnel connection shows connected and Public address self-test passes, copy the MCP address into the cloud client. On the first connection check the pairing code on the phone and approve. If a browser opens the pairing page, ngrok may show a notice first; press Visit Site to continue."))
     }

@@ -359,13 +359,22 @@ internal object ActHold {
     }
 
     /** Pure check for whether `dumpsys media_session` shows an active playing session owned by a system process for [pkg]. */
-    fun hasActiveSystemMediaSession(dumpsysMedia: String?, pkg: String): Boolean {
+    fun hasActiveSystemMediaSession(dumpsysMedia: String?, pkg: String): Boolean = playingSession(dumpsysMedia, pkg, systemOnly = true)
+
+    /**
+     * 2.0.0-beta12 (test H1: Bilibili playing a video stayed `frozen 0` while a clock and a calculator froze): whether
+     * [pkg] has a media session that is playing. Android keeps an app that plays sound or video running (its media
+     * service), and freezing it does not take.
+     */
+    fun isPlayingMedia(dumpsysMedia: String?, pkg: String): Boolean = playingSession(dumpsysMedia, pkg, systemOnly = false)
+
+    private fun playingSession(dumpsysMedia: String?, pkg: String, systemOnly: Boolean): Boolean {
         if (dumpsysMedia.isNullOrBlank() || pkg.isBlank()) return false
         var blockPkg: String? = null
         var blockUid: Int? = null
         var blockPlaying = false
         fun flush(): Boolean {
-            val match = blockPlaying && blockPkg == pkg && (blockUid != null && blockUid!! < FIRST_APP_UID)
+            val match = blockPlaying && blockPkg == pkg && (!systemOnly || (blockUid != null && blockUid!! < FIRST_APP_UID))
             blockPkg = null; blockUid = null; blockPlaying = false
             return match
         }
@@ -585,10 +594,17 @@ internal object ActHold {
                 }
                 ProcFreezeState.NOT_FROZEN -> {
                     runCatching { gateUnholdFn() }
-                    val reason = tr("进程仍处于未冻结状态", "process remained unfrozen")
-                    tripAppBreakerLocked(sid, pkg, reason)
-                    val msg = tr("没能暂停 $appName（$reason）", "Could not pause $appName ($reason)")
-                    recordDiag(pkg, uid, "NOT_FROZEN", "display proc ${screenRes.name}(${screenRes.pid}) stayed frozen 0", verified)
+                    val playing = isPlayingMedia(mediaDump ?: runCatching { mediaSessionDumpFn() }.getOrNull(), pkg)
+                    val msg = if (playing) {
+                        // Not a fault of this app or this phone, and it can change (playback paused): no breaker.
+                        tr("没能暂停 $appName：它正在播放视频或声音，系统让正在播放的应用一直运行，冻不住。要它停下，先在应用里点暂停播放",
+                            "Could not pause $appName: it is playing video or sound, and Android keeps a playing app running, so it cannot be frozen. To stop it, pause the playback in the app first")
+                    } else {
+                        val reason = tr("进程仍处于未冻结状态", "process remained unfrozen")
+                        tripAppBreakerLocked(sid, pkg, reason)
+                        tr("没能暂停 $appName（$reason）", "Could not pause $appName ($reason)")
+                    }
+                    recordDiag(pkg, uid, if (playing) "NOT_FROZEN_PLAYING" else "NOT_FROZEN", "display proc ${screenRes.name}(${screenRes.pid}) stayed frozen 0", verified)
                     HoldOutcome.Refused(msg)
                 }
                 ProcFreezeState.UNVERIFIABLE, null -> {

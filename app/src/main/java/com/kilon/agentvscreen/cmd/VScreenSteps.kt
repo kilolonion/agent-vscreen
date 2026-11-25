@@ -271,6 +271,8 @@ internal object Steps {
     }
 
     /** try / if / repeat (1.3.0-beta18). */
+    private val REPEAT_ONE = Regex("^(\\d+)\\s*(?:次|x|times)?\\s*[:：]\\s*(.+)$", RegexOption.DOT_MATCHES_ALL)
+
     private fun blockStep(raw: String, verb: String, verbTok: String): Step {
         val rest = rawAfterVerb(raw, verbTok)
         when (verb) {
@@ -301,7 +303,13 @@ internal object Steps {
             }
             else -> {
                 val open = openBrace(rest)
-                if (open < 0) bad(raw, tr("写成 repeat 次数 { 步骤 } 或 repeat { 步骤 } until <条件>", "write repeat <times> { steps } or repeat { steps } until <condition>"))
+                // 2.0.0-beta12 (test: the documented `repeat 40: swipe …` was refused): one step after a colon.
+                if (open < 0) REPEAT_ONE.matchEntire(rest)?.let { m ->
+                    val n = m.groupValues[1].toInt()
+                    if (n !in 1..REPEAT_MAX) bad(raw, tr("repeat 次数是 1 到 $REPEAT_MAX", "repeat takes 1 to $REPEAT_MAX times"))
+                    return Step(raw, StepKind.REPEAT, untilMs = CHECK_DEFAULT_MS, body = listOf(parse(m.groupValues[2].trim())), times = n)
+                }
+                if (open < 0) bad(raw, tr("写成 repeat 次数 { 步骤 }、repeat 次数: 一步，或 repeat { 步骤 } until <条件>", "write repeat <times> { steps }, repeat <times>: one step, or repeat { steps } until <condition>"))
                 val head = rest.substring(0, open).trim()
                 val n = if (head.isEmpty()) null else (head.removeSuffix("次").removeSuffix("x").removeSuffix("times").trim().toIntOrNull() ?: bad(raw, tr("repeat 后面写次数（数字）", "write a number of times after repeat")))
                 val (body, close) = block(raw, rest, open)
@@ -510,7 +518,8 @@ internal object Steps {
         // 1.4.0-beta5/6: words then a signed offset (read before numbers: `8 +50,+100` is the word 8 and an offset), `设置 +120,-8`: the point that far from the words (an icon or a switch
         // beside its label). Both signs are required, so a word that is a number is never read as an offset.
         var dx = 0; var dy = 0
-        val off = Regex("^([+-]\\d+)[,，]([+-]\\d+)$")
+        // 2.0.0-beta12 (test: the documented `tap 热门 +186,0` was NOT_FOUND): the first number's sign is enough.
+        val off = Regex("^([+-]\\d+)[,，]([+-]?\\d+)$")
         if (a.size >= 2) {
             val one = off.find(a.last())
             val two = if (a.size >= 3 && Regex("^[+-]\\d+$").matches(a[a.size - 2]) && Regex("^[+-]\\d+$").matches(a.last())) a[a.size - 2] to a.last() else null

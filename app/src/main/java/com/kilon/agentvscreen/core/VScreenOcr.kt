@@ -104,6 +104,8 @@ internal object VScreenOcr {
      * null when reading works. Never silent: an element list from accessibility alone looks complete but is not.
      */
     fun downLine(err: String?): String? {
+        // 2.0.0-beta12: the heat limit (ThermalGuard) pauses reading on purpose; say so, not "OCR is broken".
+        if (err == THERMAL_LIMIT || (err == null && com.kilon.agentvscreen.host.ThermalGuard.limited)) return thermalLine()
         BackgroundOperation.appContextOrNull()?.let { recoverIfNeeded(it) }
         if (mlkitCrashed && paddleCrashed) {
             return tr("文字识别不可用：PP-OCRv6 与 ML Kit 在自检时均崩溃，本版本已禁用。下面的元素只来自无障碍，画面上的字可能没列出来，以截图为准；vscreen diag 可重新自检，并告诉用户",
@@ -117,6 +119,11 @@ internal object VScreenOcr {
     }
     @Volatile private var accurateCache: Result? = null
 
+    const val THERMAL_LIMIT = "THERMAL_LIMIT"
+    fun thermalLine(): String = tr(
+        "手机发热，为降温暂停了文字识别：下面的元素只来自无障碍，画面上的字可能没列出来，以截图为准。不是故障，手机凉下来后自动恢复；少发命令、别让用户以为坏了",
+        "The phone is hot, so text recognition is paused to cool it down: the elements below come from accessibility only and words on the picture may be missing; trust the screenshot. Not a fault: it comes back by itself when the phone cools; send fewer commands meanwhile")
+
     private fun reusable(c: Result?, displayId: Int, frame: Bitmap, version: Long): Boolean {
         if (c == null || c.displayId != displayId || c.error != null) return false
         if (c.frameVersion == version) return true
@@ -125,6 +132,15 @@ internal object VScreenOcr {
         val old = c.sig ?: return false
         val ch = sig.compare(old)
         return ch.kind == ScreenSig.Kind.NONE && ch.ratio < Change.Level.STILL.max
+    }
+
+    /**
+     * How long a caller waits for the reading now running ([runningMs] in) to end: what is left of a usual reading
+     * ([avgMs]) plus half again, at least 3 s, never past the reading's deadline.
+     */
+    internal fun shareWaitMs(avgMs: Long, runningMs: Long): Long {
+        val usual = if (avgMs > 0L) avgMs * 3 / 2 else VScreenPaddleOcr.SLOT_WAIT_MS
+        return (usual - runningMs).coerceIn(VScreenPaddleOcr.SLOT_WAIT_MS, (VScreenPaddleOcr.TIMEOUT_MS - runningMs).coerceAtLeast(VScreenPaddleOcr.SLOT_WAIT_MS))
     }
 
     /** Average time of an accurate reading on this phone (0 = none yet). */
@@ -286,6 +302,7 @@ internal object VScreenOcr {
     @Volatile var selfTestReport: String? = null; private set
 
     fun maybeStartSelfTest(ctx: android.content.Context): Boolean {
+        if (com.kilon.agentvscreen.host.ThermalGuard.limited) return false
         val app = ctx.applicationContext
         recoverIfNeeded(app)
         synchronized(selfTestLock) {
@@ -327,6 +344,7 @@ internal object VScreenOcr {
     }
 
     private fun runSelfTest(ctx: android.content.Context, manual: Boolean): String = synchronized(selfTestRunLock) {
+        if (com.kilon.agentvscreen.host.ThermalGuard.limited) return@synchronized "THERMAL_LIMIT"
         val ver = versionCodeProvider()
         val p = selfTestPrefs(ctx)
         if (manual) {
@@ -431,6 +449,7 @@ internal object VScreenOcr {
      * it is not loaded in this versionCode and the other engine takes over.
      */
     fun recognize(displayId: Int, frame: Bitmap, version: Long, accurate: Boolean = false): Result {
+        if (com.kilon.agentvscreen.host.ThermalGuard.limited) return Result(emptyList(), displayId, version, 0L, THERMAL_LIMIT)
         val ctx = BackgroundOperation.appContextOrNull()
         if (ctx != null) recoverIfNeeded(ctx)
         if (mlkitCrashed && paddleCrashed) {
@@ -443,6 +462,17 @@ internal object VScreenOcr {
         if (wantPaddle && ctx != null) {
             val ac = accurateCache
             if (reusable(ac, displayId, frame, version)) return ac!!
+            // 2.0.0-beta12 (test: 19 "PP-OCRv6 busy … switched to ML Kit" in one round): a reading already running is
+            // almost always the background watcher reading this same picture. Wait for it as long as a reading takes
+            // on this phone now (a hot phone took ~7 s, more than the old fixed 3 s), then share its result when the
+            // picture is the same, instead of failing over to the other engine.
+            if (VScreenPaddleOcr.busy() && VScreenPaddleOcr.busyMs() < VScreenPaddleOcr.TIMEOUT_MS) {
+                val budget = shareWaitMs(accurateMs, VScreenPaddleOcr.busyMs())
+                if (VScreenPaddleOcr.awaitIdle(budget)) {
+                    val shared = accurateCache
+                    if (reusable(shared, displayId, frame, version)) return shared!!
+                }
+            }
             val t0 = SystemClock.elapsedRealtime()
             try {
                 val items = VScreenPaddleOcr.recognize(ctx, frame)
@@ -487,6 +517,7 @@ internal object VScreenOcr {
 
     /** OCR of [r0] alone: enlarged (small regions up to 3×) and set on a plain margin of its own edge colour. */
     fun readCrop(frame: Bitmap, r0: Rect): List<Item> {
+        if (com.kilon.agentvscreen.host.ThermalGuard.limited) return emptyList()
         val r = Rect(r0)
         if (!r.intersect(0, 0, frame.width, frame.height) || r.width() < 4 || r.height() < 4) return emptyList()
         val zoom = (160.0 / minOf(r.width(), r.height())).coerceIn(1.0, 3.0)

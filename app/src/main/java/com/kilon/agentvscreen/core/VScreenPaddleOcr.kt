@@ -150,6 +150,17 @@ internal object VScreenPaddleOcr {
     /** A reading is running (maybe one its caller gave up on): it takes CPU from whatever reads the screen meanwhile. */
     fun busy(): Boolean = slot.availablePermits() == 0
 
+    /**
+     * 2.0.0-beta12: wait until the reading now running ends (at most [ms]); true when the engine is free. The slot is
+     * not kept: the caller then looks at the reading that just finished before starting one of its own.
+     */
+    fun awaitIdle(ms: Long): Boolean {
+        if (!busy()) return true
+        if (ms <= 0L || !slot.tryAcquire(ms, java.util.concurrent.TimeUnit.MILLISECONDS)) return false
+        slot.release()
+        return true
+    }
+
     /** How long the current PP-OCRv6 reading has been running (0 when idle). */
     fun busyMs(): Long = if (busy() && busySince > 0L) (android.os.SystemClock.elapsedRealtime() - busySince).coerceAtLeast(0L) else 0L
 
