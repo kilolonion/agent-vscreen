@@ -429,6 +429,8 @@ class ApiServer(private val ctx: Context) {
         @Volatile var viaPublic: Boolean = false
         /** 2.0.0-beta7 (7.7): OAuth client_id when [viaPublic] is true. */
         @Volatile var publicClientId: String? = null
+        /** 2.0.0-beta11: what this public credential may do now ([PublicOAuth.effectiveScope]); null off the public path. */
+        @Volatile var publicScope: String? = null
         /** Forwarded by the built-in Tailscale node (loopback + its secret, never on public path). */
         val viaBuiltinTailnet: Boolean get() = !viaPublic && peer?.isLoopbackAddress == true &&
             headers["x-vscreen-tailnet"]?.let { constTimeEq(it, com.kilon.agentvscreen.host.Tailnet.secret) } == true
@@ -583,7 +585,7 @@ class ApiServer(private val ctx: Context) {
         return if (auth.signed && auth.nonce != null && resp.stream == null) resp.plus(mapOf("X-VScreen-Proof" to proof(auth.token.key, auth.nonce, resp.body))) else resp
     }
 
-    private fun <T> langOf(r: Req, block: () -> T): T = com.kilon.agentvscreen.I18n.with((r.headers["x-vscreen-lang"] ?: r.q("lang"))?.lowercase()?.take(2), block)
+    private fun <T> langOf(r: Req, block: () -> T): T = com.kilon.agentvscreen.I18n.with((r.headers["x-vscreen-lang"] ?: r.q("lang") ?: com.kilon.agentvscreen.I18n.agentDefault())?.lowercase()?.take(2), block)
     internal fun <T> withLang(r: Req, block: () -> T): T = langOf(r, block)
     internal fun notePublicCaller(r: Req) {
         requests++
@@ -704,7 +706,10 @@ class ApiServer(private val ctx: Context) {
             val res0 = handler.handle(NativeOffloadRequest(listOf("vscreen") + argv, session))
             // 1.3 beta4: the agent's note is for an older version: what changed, and how to refresh it (AgentNews).
             val notice = AgentNews.notice(com.kilon.agentvscreen.cmd.Call.current()?.tokenId ?: "main", fresh, com.kilon.agentvscreen.cmd.Call.current()?.via ?: Abilities.Via.CLI)
-            val res = if (notice != null) res0.copy(output = notice + "\n" + res0.output) else res0
+            // 2.0.0-beta11: the agent's permissions changed since its last reply (host/Permissions).
+            val permNote = com.kilon.agentvscreen.host.Permissions.changeNotice(com.kilon.agentvscreen.cmd.Call.current())
+            val res1 = if (permNote != null) res0.copy(output = permNote + "\n" + res0.output) else res0
+            val res = if (notice != null) res1.copy(output = notice + "\n" + res1.output) else res1
             if (notice != null) return res
             // First call after a long silence (likely a new conversation): one line pointing at the short usage.
             if (!fresh || argv.first() == "help") return res
@@ -730,7 +735,8 @@ class ApiServer(private val ctx: Context) {
             r.viaBuiltinTailnet || r.peer?.isLoopbackAddress == false -> Call.Source.TAILNET
             else -> Call.Source.LOCAL
         }
-        val scopes = if (r.viaPublic || t.publicOnly) t.scopes.intersect(Tokens.PUBLIC_SCOPES.toSet()) else t.scopes
+        val scopes = if (r.viaPublic || t.publicOnly) t.scopes.intersect(Tokens.PUBLIC_SCOPES.toSet())
+            .let { s -> if (r.viaPublic && r.publicScope != "operate") s.intersect(setOf("look")) else s } else t.scopes
         val call = Call(session, t.id, t.name, scopes, r.peerName, requestId, com.kilon.agentvscreen.I18n.code, t.trustUntil, via, source,
             srcAddr = if (r.viaPublic) r.headers["x-avs-public-src"]?.trim()?.take(64)?.takeIf { it.isNotEmpty() } else null)
         call.progress = onStep

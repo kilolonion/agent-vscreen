@@ -53,7 +53,10 @@ object PublicOAuth {
     const val PAIRING_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     val ALLOWED_SCOPES = listOf("look", "operate")
 
-    private val SUPPORTED_GRANTS = setOf("authorization_code", "refresh_token")
+    const val DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
+    private val SUPPORTED_GRANTS = setOf("authorization_code", "refresh_token", DEVICE_GRANT)
+    /** RFC 8628 polling interval (s); polling faster answers slow_down. */
+    const val DEVICE_INTERVAL_S = 3L
     private val PKCE_VERIFIER_RE = Regex("^[A-Za-z0-9._~-]{43,128}$")
     private val PKCE_CHALLENGE_RE = Regex("^[A-Za-z0-9_-]{43,128}$")
 
@@ -166,9 +169,23 @@ object PublicOAuth {
         @Volatile var status: String = "pending" // pending | approved | denied | expired | completed
         @Volatile var redirectLocation: String? = null
         @Volatile var confirmId: String? = null
+        /** 2.0.0-beta11: RFC 8628 device pairing (no browser, no redirect): sha256 of the device_code. */
+        @Volatile var deviceCodeHash: String? = null
+        /** Raw one-time auth code kept for the device poll that collects it (device pairings only). */
+        @Volatile var deviceAuthCode: String? = null
+        @Volatile var lastPollAt: Long = 0L
+        val isDevice: Boolean get() = deviceCodeHash != null
     }
 
     data class AccessAuth(val token: Tokens.Token, val clientId: String, val scope: String)
+
+    /**
+     * 2.0.0-beta11 (review): the one rule for what a public credential may do: the scope it was issued with (the level
+     * picked when pairing, which the client asked for) and the agent's level now, whichever is smaller. A lower level on
+     * the phone applies to old credentials at once; a credential issued for looking never starts operating because the
+     * level was raised later: that takes a new pairing. Issue, refresh and every request use this.
+     */
+    fun effectiveScope(issued: String, tok: Tokens.Token): String = if (issued == "operate" && tok.scope == "operate") "operate" else "look"
 
     sealed class AccessCheck {
         data class Valid(val auth: AccessAuth) : AccessCheck()
@@ -428,7 +445,10 @@ object PublicOAuth {
                 .put("token_endpoint", "$cleanBase/oauth/token")
                 .put("registration_endpoint", "$cleanBase/oauth/register")
                 .put("response_types_supported", JSONArray().put("code"))
-                .put("grant_types_supported", JSONArray(listOf("authorization_code", "refresh_token")))
+                .put("grant_types_supported", JSONArray(listOf("authorization_code", "refresh_token", DEVICE_GRANT)))
+                // 2.0.0-beta11: RFC 8628 for clients without a browser (cloud VMs, CLIs): the user approves on the
+                // phone itself after checking the user_code; no redirect, no copied URL.
+                .put("device_authorization_endpoint", "$cleanBase/oauth/device_authorization")
                 .put("code_challenge_methods_supported", JSONArray().put("S256"))
                 .put("token_endpoint_auth_methods_supported", JSONArray().put("none"))
                 .put("scopes_supported", JSONArray(ALLOWED_SCOPES)),
@@ -578,9 +598,18 @@ object PublicOAuth {
         val body = runCatching { JSONObject(r.bodyText) }.getOrNull()
             ?: return oauthError(400, "invalid_client_metadata", "Request body must be a JSON object")
 
-        val urisJson = body.optJSONArray("redirect_uris")
-            ?: return oauthError(400, "invalid_redirect_uri", "redirect_uris is required")
-        if (urisJson.length() == 0 || urisJson.length() > 16) {
+        val reqGrants: List<String> = body.optJSONArray("grant_types")?.let { arr ->
+            (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { g -> g.isNotBlank() } }
+        } ?: emptyList()
+        if (reqGrants.any { it !in SUPPORTED_GRANTS } ||
+            (reqGrants.isNotEmpty() && "authorization_code" !in reqGrants && DEVICE_GRANT !in reqGrants)
+        ) {
+            return oauthError(400, "invalid_client_metadata", "Supported grant_types: authorization_code, refresh_token, $DEVICE_GRANT")
+        }
+        val deviceOnly = DEVICE_GRANT in reqGrants && "authorization_code" !in reqGrants
+        val urisJson = body.optJSONArray("redirect_uris") ?: if (deviceOnly) JSONArray() else
+            return oauthError(400, "invalid_redirect_uri", "redirect_uris is required (or register grant_types [\"$DEVICE_GRANT\"] for a browserless client)")
+        if ((urisJson.length() == 0 && !deviceOnly) || urisJson.length() > 16) {
             return oauthError(400, "invalid_redirect_uri", "redirect_uris must have 1..16 entries")
         }
         val uris = ArrayList<String>(urisJson.length())
@@ -597,12 +626,6 @@ object PublicOAuth {
             return oauthError(400, "invalid_client_metadata", "Only public clients (token_endpoint_auth_method=none) are supported")
         }
 
-        body.optJSONArray("grant_types")?.let { arr ->
-            val reqGrants = (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { g -> g.isNotBlank() } }
-            if (reqGrants.any { it !in SUPPORTED_GRANTS } || (reqGrants.isNotEmpty() && "authorization_code" !in reqGrants)) {
-                return oauthError(400, "invalid_client_metadata", "Only authorization_code and refresh_token grant_types are supported")
-            }
-        }
         body.optJSONArray("response_types")?.let { arr ->
             val reqTypes = (0 until arr.length()).mapNotNull { arr.optString(it).takeIf { t -> t.isNotBlank() } }
             if (reqTypes.any { it != "code" }) {
@@ -626,7 +649,7 @@ object PublicOAuth {
             .put("client_id", clientId)
             .put("client_name", clientName)
             .put("redirect_uris", JSONArray(uris))
-            .put("grant_types", JSONArray(listOf("authorization_code", "refresh_token")))
+            .put("grant_types", JSONArray(if (deviceOnly) listOf(DEVICE_GRANT, "refresh_token") else listOf("authorization_code", "refresh_token", DEVICE_GRANT)))
             .put("response_types", JSONArray().put("code"))
             .put("token_endpoint_auth_method", "none")
             .put("client_id_issued_at", now / 1000L)
@@ -682,19 +705,48 @@ object PublicOAuth {
         val redirectHost = runCatching { URI(redirectUri).host }.getOrNull().orEmpty()
         val src = sourceBucket(r.headers["x-avs-public-src"])
 
+        val pairing = when (val started = startPairing(ctx, client, redirectUri, redirectHost, challenge, boundResource, state, selectableScopes, src, null)) {
+            is Started.Ok -> started.pairing
+            is Started.Refused -> return started.resp
+        }
+        val html = pairingPageHtml(pairing)
+        val csp = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'"
+        return ApiServer.Resp.html(html, 200, mapOf("Content-Security-Policy" to csp))
+    }
+
+    private sealed class Started {
+        class Ok(val pairing: Pairing) : Started()
+        class Refused(val resp: ApiServer.Resp) : Started()
+    }
+
+    /** The one way a pairing starts (browser authorize and RFC 8628 device authorization): limits, record, phone card. */
+    private fun startPairing(
+        ctx: Context,
+        client: RegisteredClient,
+        redirectUri: String,
+        redirectHost: String,
+        challenge: String,
+        boundResource: String,
+        state: String?,
+        selectableScopes: List<String>,
+        src: String,
+        deviceCodeHash: String?,
+    ): Started {
+        val now = nowMs()
+        val clientId = client.clientId
         val pairing: Pairing = synchronized(lock) {
             pruneExpiredLocked(now)
             val cooldownUntil = denyCooldownBySource[src] ?: 0L
             if (now < cooldownUntil) {
                 val leftMin = ((cooldownUntil - now) / 60_000L).coerceAtLeast(1L)
-                return oauthError(429, "access_denied", "Authorization temporarily locked after repeated denials; retry in $leftMin min")
+                return Started.Refused(oauthError(429, "access_denied", "Authorization temporarily locked after repeated denials; retry in $leftMin min"))
             }
             val livePending = pairings.values.filter { it.status == "pending" && now - it.createdAt < PAIRING_TTL_MS }
             if (livePending.count { it.sourceBucket == src } >= MAX_PENDING_PAIRINGS) {
-                return oauthError(429, "temporarily_unavailable", "A pairing confirmation from this source is already pending on the phone")
+                return Started.Refused(oauthError(429, "temporarily_unavailable", "A pairing confirmation from this source is already pending on the phone"))
             }
             if (livePending.size >= MAX_PENDING_PAIRINGS_GLOBAL) {
-                return oauthError(429, "temporarily_unavailable", "Too many pairing confirmations are already pending on the phone")
+                return Started.Refused(oauthError(429, "temporarily_unavailable", "Too many pairing confirmations are already pending on the phone"))
             }
             val pid = "pair_" + randomHex(12)
             val p = Pairing(
@@ -711,6 +763,7 @@ object PublicOAuth {
                 createdAt = now,
                 sourceBucket = src,
             )
+            p.deviceCodeHash = deviceCodeHash
             pairings[pid] = p
             p
         }
@@ -741,10 +794,87 @@ object PublicOAuth {
                 },
             ).id
         }
+        return Started.Ok(pairing)
+    }
 
-        val html = pairingPageHtml(pairing)
-        val csp = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'"
-        return ApiServer.Resp.html(html, 200, mapOf("Content-Security-Policy" to csp))
+    /**
+     * 2.0.0-beta11: RFC 8628 device authorization. The phone shows its pairing card at once (same card, same
+     * limits as the browser flow); the client shows user_code to the user and polls the token endpoint.
+     */
+    fun handleDeviceAuthorization(ctx: Context, r: ApiServer.Req, base: String): ApiServer.Resp {
+        val form = HttpCore.parseForm(r.bodyText)
+        fun f(k: String): String? = form[k]?.firstOrNull()?.takeIf { it.isNotBlank() }
+        val clientId = f("client_id") ?: return oauthError(400, "invalid_request", "client_id is required")
+        val client = synchronized(lock) { clients[clientId] }
+            ?: return oauthError(400, "invalid_client", "Unknown client_id (register at /oauth/register first)")
+        val expectedResource = mcpResource(base)
+        val reqResource = f("resource")
+        if (reqResource != null && !matchesResource(reqResource, expectedResource)) {
+            return oauthError(400, "invalid_target", "resource must match this server's MCP URL")
+        }
+        if (!deviceSecureCheck(ctx)) {
+            Audit.security("public_authorize_no_lockscreen", "client=$clientId device=1")
+            return oauthError(403, "access_denied", "Public MCP requires a screen lock PIN or biometric on the phone")
+        }
+        val rawDevice = randomToken()
+        val src = sourceBucket(r.headers["x-avs-public-src"])
+        val scopes = resolveSelectableScopes(client.requestedScope, f("scope"))
+        val pairing = when (val started = startPairing(ctx, client, "", tr("无回调地址（设备码配对）", "no redirect (device code)"), "", expectedResource, null, scopes, src, Tokens.sha256(rawDevice))) {
+            is Started.Ok -> started.pairing
+            is Started.Refused -> return started.resp
+        }
+        val verify = "${base.trimEnd('/')}/oauth/device"
+        return ApiServer.Resp.json(
+            JSONObject()
+                .put("device_code", rawDevice)
+                .put("user_code", pairing.code)
+                .put("verification_uri", verify)
+                .put("verification_uri_complete", "$verify?user_code=" + URLEncoder.encode(pairing.code, "UTF-8"))
+                .put("expires_in", PAIRING_TTL_MS / 1000L)
+                .put("interval", DEVICE_INTERVAL_S)
+                .put("message", "Approve on the phone: Agent-VScreen shows a pairing card now. Tell the user to check that its code is ${pairing.code}. No browser is needed."),
+        )
+    }
+
+    /** verification_uri page: there is nothing to type, the approval happens on the phone. */
+    fun devicePageHtml(): ApiServer.Resp = ApiServer.Resp.html(
+        errorPageHtml(
+            tr("请在手机上批准", "Approve on your phone"),
+            tr(
+                "Agent-VScreen 已在手机上弹出配对确认。核对卡片上的配对码和 agent 告诉你的一致后批准即可，这个页面不用操作。",
+                "Agent-VScreen shows a pairing card on the phone. Check that its code matches the one the agent gave you and approve it there; nothing to do on this page.",
+            ),
+        ),
+        200,
+    )
+
+    /** Token endpoint, RFC 8628 §3.4/3.5. */
+    private fun handleDeviceGrant(deviceCode: String?, clientId: String?, resource: String?, base: String): ApiServer.Resp {
+        if (deviceCode == null || clientId == null) return oauthError(400, "invalid_request", "device_code and client_id are required")
+        val now = nowMs()
+        val hash = Tokens.sha256(deviceCode)
+        val rawCode: String = synchronized(lock) {
+            pruneExpiredLocked(now)
+            val p = pairings.values.firstOrNull { it.deviceCodeHash == hash }
+                ?: return oauthError(400, "expired_token", "device_code is unknown or expired; start again at /oauth/device_authorization")
+            if (p.clientId != clientId) return oauthError(400, "invalid_grant", "client_id mismatch")
+            val tooFast = p.lastPollAt != 0L && now - p.lastPollAt < DEVICE_INTERVAL_S * 1000L
+            p.lastPollAt = now
+            when (p.status) {
+                "pending" -> return if (tooFast) oauthError(400, "slow_down", "Poll every $DEVICE_INTERVAL_S s or slower")
+                else oauthError(400, "authorization_pending", "Waiting for the user to approve on the phone")
+                "denied" -> return oauthError(400, "access_denied", "The user denied the pairing on the phone")
+                "approved" -> {
+                    val c = p.deviceAuthCode ?: return oauthError(400, "expired_token", "device_code already used")
+                    p.deviceAuthCode = null
+                    p.status = "completed"
+                    c
+                }
+                "completed" -> return oauthError(400, "invalid_grant", "device_code already used")
+                else -> return oauthError(400, "expired_token", "The pairing expired; start again")
+            }
+        }
+        return issueFromAuthCode(rawCode, clientId, resource, base) { null }
     }
 
     fun handleAuthorizeStatus(r: ApiServer.Req): ApiServer.Resp {
@@ -811,7 +941,8 @@ object PublicOAuth {
                 grantedScope = safeScope,
                 expiresAt = now + AUTH_CODE_TTL_MS,
             )
-            pairing.redirectLocation = buildRedirectUrl(pairing.redirectUri, rawCode, pairing.state)
+            if (pairing.isDevice) pairing.deviceAuthCode = rawCode
+            else pairing.redirectLocation = buildRedirectUrl(pairing.redirectUri, rawCode, pairing.state)
             pairing.status = "approved"
             saveLocked()
             true
@@ -879,8 +1010,9 @@ object PublicOAuth {
                 clientId = f("client_id"),
                 resource = f("resource"),
             )
+            DEVICE_GRANT -> handleDeviceGrant(f("device_code"), f("client_id"), f("resource"), base)
             null -> oauthError(400, "invalid_request", "grant_type is required")
-            else -> oauthError(400, "unsupported_grant_type", "Only authorization_code and refresh_token are supported")
+            else -> oauthError(400, "unsupported_grant_type", "Supported: authorization_code, refresh_token, $DEVICE_GRANT")
         }
     }
 
@@ -895,6 +1027,23 @@ object PublicOAuth {
         if (code == null || redirectUri == null || clientId == null || codeVerifier == null) {
             return oauthError(400, "invalid_request", "code, redirect_uri, client_id, and code_verifier are required")
         }
+        return issueFromAuthCode(code, clientId, resource, base) { rec ->
+            when {
+                rec.redirectUri != redirectUri -> oauthError(400, "invalid_grant", "redirect_uri mismatch")
+                !verifyPkceS256(codeVerifier, rec.codeChallenge) -> oauthError(400, "invalid_grant", "PKCE code_verifier verification failed")
+                else -> null
+            }
+        }
+    }
+
+    /** Consumes a one-time auth code and issues access + refresh (browser flow checks redirect/PKCE in [extraCheck]). */
+    private fun issueFromAuthCode(
+        code: String,
+        clientId: String,
+        resource: String?,
+        base: String,
+        extraCheck: (AuthCodeRecord) -> ApiServer.Resp?,
+    ): ApiServer.Resp {
         val now = nowMs()
         val codeHash = Tokens.sha256(code)
         // Consume immediately (single-use even if validation fails).
@@ -906,20 +1055,17 @@ object PublicOAuth {
         if (rec.clientId != clientId) {
             return oauthError(400, "invalid_grant", "client_id mismatch")
         }
-        if (rec.redirectUri != redirectUri) {
-            return oauthError(400, "invalid_grant", "redirect_uri mismatch")
-        }
+        extraCheck(rec)?.let { return it }
         val expectedRes = rec.resource.ifBlank { mcpResource(base) }
         if (resource != null && !matchesResource(resource, expectedRes)) {
             return oauthError(400, "invalid_target", "resource mismatch")
         }
-        if (!verifyPkceS256(codeVerifier, rec.codeChallenge)) {
-            return oauthError(400, "invalid_grant", "PKCE code_verifier verification failed")
-        }
         val tok = Tokens.byId(rec.tokenId)?.takeIf { it.publicOnly }
             ?: return oauthError(400, "invalid_grant", "Client token was revoked")
 
-        val grantedScope = if (rec.grantedScope == "operate" && tok.scope == "operate") "operate" else "look"
+        // The credential remembers the pairing's scope as its upper bound; what it may do now is [effectiveScope].
+        val issuedScope = if (rec.grantedScope == "operate") "operate" else "look"
+        val grantedScope = effectiveScope(issuedScope, tok)
         val rawAccess = randomToken()
         val rawRefresh = randomToken()
         val accessHash = Tokens.sha256(rawAccess)
@@ -932,7 +1078,7 @@ object PublicOAuth {
                 clientId = rec.clientId,
                 expiresAt = now + ACCESS_TOKEN_TTL_MS,
                 resource = expectedRes,
-                scope = grantedScope,
+                scope = issuedScope,
             )
             knownTokenClients[accessHash] = rec.clientId
             refreshTokens[refreshHash] = RefreshTokenRecord(
@@ -940,7 +1086,7 @@ object PublicOAuth {
                 clientId = rec.clientId,
                 expiresAt = now + REFRESH_TOKEN_TTL_MS,
                 resource = expectedRes,
-                scope = grantedScope,
+                scope = issuedScope,
                 retired = false,
             )
             saveLocked()
@@ -1016,7 +1162,7 @@ object PublicOAuth {
             // Rotate: mark old refresh token retired (keep hash until original expiry to detect reuse),
             // mint new access + refresh tokens WITHOUT modifying the Tokens entry (7.7).
             rec.retired = true
-            val currentScope = if (tok.scope == "operate") "operate" else "look"
+            val currentScope = if (rec.scope == "operate") "operate" else "look" // the bound stays the pairing's
             val rawAccess = randomToken()
             val rawRefresh = randomToken()
             val newAccessHash = Tokens.sha256(rawAccess)
@@ -1044,7 +1190,7 @@ object PublicOAuth {
                 .put("token_type", "Bearer")
                 .put("expires_in", ACCESS_TOKEN_TTL_MS / 1000L)
                 .put("refresh_token", rawRefresh)
-                .put("scope", currentScope)
+                .put("scope", effectiveScope(currentScope, tok))
         }
 
         if (reuseClientId != null) {
@@ -1076,8 +1222,7 @@ object PublicOAuth {
         if (now >= rec.expiresAt) return AccessCheck.Invalid(rec.clientId)
         if (!matchesResource(rec.resource, expectedResource)) return AccessCheck.Invalid(rec.clientId)
         val tok = Tokens.byId(rec.tokenId)?.takeIf { it.publicOnly } ?: return AccessCheck.Invalid(rec.clientId)
-        val safeScope = if (tok.scope == "operate") "operate" else "look"
-        return AccessCheck.Valid(AccessAuth(tok, rec.clientId, safeScope))
+        return AccessCheck.Valid(AccessAuth(tok, rec.clientId, effectiveScope(rec.scope, tok)))
     }
 
     /** Verify a Bearer access token presented to `POST /mcp` on [PublicServer]. */
@@ -1150,6 +1295,9 @@ h1{font-size:20px;margin:0 0 8px}
 .meta{font-size:13px;color:#c3cbe0;text-align:left;background:#121520;border-radius:12px;padding:12px 14px;margin:16px 0;line-height:1.6}
 .status{font-size:14px;color:#9aa3b8;margin-top:14px}
 .err{color:#ff7b7b}
+#cb{display:none;text-align:left;margin-top:16px}
+#cb textarea{width:100%;box-sizing:border-box;height:84px;background:#121520;color:#c3cbe0;border:1px solid #2b3145;border-radius:10px;padding:8px;font:12px ui-monospace,monospace}
+#cb button,#cb a{display:inline-block;margin:8px 8px 0 0;padding:8px 14px;border-radius:10px;border:0;background:#6f5cf2;color:#fff;font-size:14px;text-decoration:none}
 </style>
 </head>
 <body>
@@ -1162,18 +1310,38 @@ h1{font-size:20px;margin:0 0 8px}
     <div><strong>Redirect host:</strong> $safeHost</div>
   </div>
   <div id="st" class="status">等待手机确认… / Waiting for phone confirmation…</div>
+  <div id="cb">
+    <div class="sub">若跳转后打不开（比如在手机浏览器里打开了电脑上的回调地址），复制下面的完整地址发给 agent。<br>If the redirect does not open (e.g. a computer's callback opened on a phone), copy this full address to the agent.</div>
+    <textarea id="cbu" readonly></textarea>
+    <button id="cp" type="button">复制 / Copy</button><a id="go" href="#">继续跳转 / Continue</a>
+  </div>
 </div>
 <script>
 (function(){
   var id="$safeId";
   var st=document.getElementById("st");
+  // 2.0.0-beta11: the callback is shown and kept (Back returns here) because a phone browser cannot reach a
+  // 127.0.0.1 callback on another machine and its address bar hides the code.
+  function show(u){
+    document.getElementById("cb").style.display="block";
+    var t=document.getElementById("cbu"); t.value=u;
+    document.getElementById("go").href=u;
+    document.getElementById("cp").onclick=function(){
+      t.select();
+      try{navigator.clipboard.writeText(u);}catch(e){try{document.execCommand("copy");}catch(e2){}}
+      st.textContent="已复制 / Copied";
+    };
+  }
+  try{var kept=sessionStorage.getItem("avs_cb_"+id);if(kept){st.textContent="已确认 / Confirmed";show(kept);return;}}catch(e){}
   function poll(){
     fetch("/oauth/authorize/status?id="+encodeURIComponent(id),{cache:"no-store"})
       .then(function(r){return r.json();})
       .then(function(d){
         if(d.status==="approved"&&d.redirect_uri){
           st.textContent="已确认，正在跳转… / Confirmed, redirecting…";
-          window.location.replace(d.redirect_uri);
+          try{sessionStorage.setItem("avs_cb_"+id,d.redirect_uri);}catch(e){}
+          show(d.redirect_uri);
+          setTimeout(function(){window.location.assign(d.redirect_uri);},1500);
           return;
         }
         if(d.status==="denied"){

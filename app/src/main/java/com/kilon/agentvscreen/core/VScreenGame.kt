@@ -196,6 +196,13 @@ internal object VScreenGame {
     /** 1.2.0-beta2: the words on the button that actually moves money (the last step, not the way to it). */
     val PAY = Regex("支付|付款|转账|充值|提交订单|确认购买|确认兑换|打赏|赞赏|捐赠|" +
         "\\bpay\\b|pay now|place order|confirm purchase|send money|transfer|donate", RegexOption.IGNORE_CASE)
+    /**
+     * 2.0.0-beta11 (test R6): stopping an app, in the words ROMs use (强制停止, 强行停止, 结束运行, Force stop). Before,
+     * only "强制停止" was in the row's description and no list matched the button, so a force stop went through unasked.
+     */
+    val FORCE_STOP = Regex("强制停止|强行停止|强制结束|结束运行|结束进程|force stop|force-stop|force quit|end process", RegexOption.IGNORE_CASE)
+    /** The clear button of a search or input box, named by its accessibility text (删除查询, Clear query): it empties the box. */
+    private val INPUT_CLEAR = Regex("^\\s*(删除查询|清除查询|清空查询|清除搜索|清空搜索|清除搜索内容|清除输入|清空输入|清除文本|clear query|clear search|clear text|clear input)\\s*$", RegexOption.IGNORE_CASE)
     /** A bare "clear" word: it empties an input box when one is next to it, and is destructive only elsewhere. */
     private val BARE_CLEAR = Regex("^\\s*(清空|清除|clear)\\s*$", RegexOption.IGNORE_CASE)
     /**
@@ -206,6 +213,8 @@ internal object VScreenGame {
         PAY.containsMatchIn(label) -> "pay"
         SPEND.containsMatchIn(label) -> "spend"
         besideInput && BARE_CLEAR.matches(label) -> null
+        INPUT_CLEAR.containsMatchIn(label) -> null
+        FORCE_STOP.containsMatchIn(label) -> "irreversible"
         IRREVERSIBLE.containsMatchIn(label) -> "irreversible"
         else -> null
     }

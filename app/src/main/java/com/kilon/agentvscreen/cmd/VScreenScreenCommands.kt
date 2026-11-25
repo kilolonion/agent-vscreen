@@ -115,6 +115,8 @@ internal fun VScreenOffloadHandler.status(sid: String?, args: OffloadArgs): Nati
         .put("idle", s.idle)
         .put("power_saving", s.powerSaving)
         .put("background_network", com.kilon.agentvscreen.core.VScreenPower.check(context).json())
+        // 2.0.0-beta11: what this agent may do, from the same source the checks use (host/Permissions).
+        .put("permissions", com.kilon.agentvscreen.host.Permissions.json(Call.current()))
         .put("app_rules", JSONObject().also { o -> VScreenStore.rules.value.forEach { (k, v) -> o.put(k, v.key) } })
         .put("keeps", JSONArray(VScreenRules.list().filter { it.spec.agentId == me }.map { it.json() }))
         .put("idle_release_in_s", if (idleAt > 0) ((idleAt - SystemClock.elapsedRealtime()) / 1000).coerceAtLeast(0) else JSONObject.NULL)

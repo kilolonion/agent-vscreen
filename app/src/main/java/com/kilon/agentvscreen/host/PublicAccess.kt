@@ -60,7 +60,23 @@ object PublicAccess {
         NO_LOCKSCREEN,
     }
 
+    /**
+     * 2.0.0-beta11 (rainbow: support Cloudflare beside Tailscale): which public channel carries public MCP. Only one is
+     * on at a time; switching turns public access off, so the new channel is enabled with its own confirmation.
+     */
+    enum class Channel(val key: String) {
+        TAILSCALE("tailscale"), CLOUDFLARE("cloudflare"), NGROK("ngrok");
+        val title: String get() = when (this) { TAILSCALE -> "Tailscale Funnel"; CLOUDFLARE -> "Cloudflare Tunnel"; NGROK -> "ngrok" }
+        /** The tunnel client of this channel; Tailscale Funnel runs inside the built-in Tailscale node instead. */
+        val tunnel: PublicTunnel? get() = when (this) { TAILSCALE -> null; CLOUDFLARE -> Cloudflared; NGROK -> Ngrok }
+        companion object { fun of(k: String?): Channel = entries.firstOrNull { it.key == k } ?: TAILSCALE }
+    }
+
     enum class CheckId {
+        CF_TOKEN,
+        CF_HOSTNAME,
+        NGROK_TOKEN,
+        NGROK_DOMAIN,
         TAILSCALE_OFFICIAL,
         HTTPS_CERT,
         FUNNEL_ACL,
@@ -101,6 +117,12 @@ object PublicAccess {
     data class FunnelMessage(val title: String, val fix: String)
 
     private var prefs: SharedPreferences? = null
+    private const val KEY_CHANNEL = "channel"
+    private val _channel = MutableStateFlow(Channel.TAILSCALE)
+    val channelFlow: StateFlow<Channel> = _channel.asStateFlow()
+    val channel: Channel get() = _channel.value
+    /** Cloudflare's local origin: the [PublicServer] the tunnel forwards to ([Cloudflared.ORIGIN_PORT]). */
+    @Volatile var cfOrigin: PublicServer? = null; private set
     private val rng = SecureRandom()
     private val _enabled = MutableStateFlow(false)
     val enabledFlow: StateFlow<Boolean> = _enabled.asStateFlow()
@@ -125,6 +147,9 @@ object PublicAccess {
     fun init(ctx: Context) {
         val p = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs = p
+        _channel.value = Channel.of(p.getString(KEY_CHANNEL, null))
+        Cloudflared.init(ctx)
+        Ngrok.init(ctx)
         PublicOAuth.init(ctx)
         val savedEnabled = p.getBoolean(KEY_ENABLED, false)
         val savedVersion = p.getInt(KEY_VERSION_CODE, -1)
@@ -167,6 +192,7 @@ object PublicAccess {
 
     /** Preconditions checked in order before the warning page & `PUBLIC_ENABLE` strong confirmation (7.1, 7.4). */
     fun checkPreconditions(ctx: Context): BlockReason? {
+        if (channel.tunnel != null) return if (!isDeviceSecure(ctx)) BlockReason.NO_LOCKSCREEN else null
         if (ApiConfig.tailnetControlUrl != null) return BlockReason.HEADSCALE
         if (ApiConfig.tailnetMode != Tailnet.Mode.BUILTIN || !Tailnet.status.value.loggedIn) {
             return BlockReason.TAILNET_NOT_READY
@@ -381,8 +407,81 @@ object PublicAccess {
     fun canEnable(checklist: ChecklistSnapshot, consentAccepted: Boolean = riskConsentAccepted): Boolean =
         checklist.allOk && consentAccepted
 
-    fun publicBaseUrl(): String? =
-        Tailnet.status.value.dnsName?.trim()?.takeIf { it.isNotEmpty() }?.let { "https://$it" }
+    fun publicBaseUrl(): String? = when (channel) {
+        Channel.CLOUDFLARE, Channel.NGROK -> channel.tunnel?.baseUrl
+        Channel.TAILSCALE -> Tailnet.status.value.dnsName?.trim()?.takeIf { it.isNotEmpty() }?.let { "https://$it" }
+    }
+
+    /** Switch the public channel. A running public access is turned off first: the new one is enabled on its own. */
+    fun setChannel(ctx: Context, c: Channel) {
+        if (c == channel) return
+        if (enabled) disable(ctx.applicationContext, "channel_${c.key}")
+        _channel.value = c
+        prefs?.edit()?.putString(KEY_CHANNEL, c.key)?.apply()
+        Audit.security("public_channel", c.key)
+    }
+
+    /**
+     * The Cloudflare checklist: what can be checked before enabling (token, hostname, screen lock). Whether the tunnel
+     * connects and the hostname reaches this phone is shown live once it runs ([Cloudflared.status], [Cloudflared.selfTest]).
+     */
+    fun cloudflareChecklist(cfg: Cloudflared.Config, deviceSecure: Boolean): ChecklistSnapshot {
+        val tok = CheckItem(CheckId.CF_TOKEN, if (cfg.tunnelId != null) CheckState.OK else CheckState.FAIL,
+            tr("已填写隧道令牌", "Tunnel token entered"),
+            if (cfg.tunnelId != null) tr("隧道 ${cfg.tunnelId!!.take(8)}…", "Tunnel ${cfg.tunnelId!!.take(8)}…")
+            else tr("在 Cloudflare 新建隧道后，粘贴安装命令或令牌", "After creating a tunnel in Cloudflare, paste its install command or token"))
+        val host = CheckItem(CheckId.CF_HOSTNAME, if (cfg.hostname != null) CheckState.OK else CheckState.FAIL,
+            tr("已填写公网域名", "Public hostname entered"),
+            cfg.hostname ?: tr("隧道里“公共主机名”添加的域名，例如 phone.example.com", "The hostname added under the tunnel's Public Hostname, e.g. phone.example.com"))
+        val items = listOf(tok, host, lockItem(deviceSecure))
+        return ChecklistSnapshot(items, items.all { it.state == CheckState.OK }, checking = false, shouldWait = false, dnsName = cfg.hostname)
+    }
+
+    /** The ngrok checklist: authtoken, domain, screen lock; connection and self-test are shown live ([Ngrok.status]). */
+    fun ngrokChecklist(cfg: Ngrok.Config, deviceSecure: Boolean): ChecklistSnapshot {
+        val tok = CheckItem(CheckId.NGROK_TOKEN, if (cfg.token != null) CheckState.OK else CheckState.FAIL,
+            tr("已填写 authtoken", "Authtoken entered"),
+            if (cfg.token != null) tr("已保存（${cfg.token.take(4)}…）", "Saved (${cfg.token.take(4)}…)")
+            else tr("ngrok 后台 Your Authtoken 页面复制", "Copy it from Your Authtoken in the ngrok dashboard"))
+        val dom = CheckItem(CheckId.NGROK_DOMAIN, if (cfg.domain != null) CheckState.OK else CheckState.FAIL,
+            tr("已填写固定域名", "Static domain entered"),
+            cfg.domain ?: tr("ngrok 后台 Domains 页面里的域名（免费账号有一个），例如 name.ngrok-free.app", "The domain under Domains in the ngrok dashboard (free accounts get one), e.g. name.ngrok-free.app"))
+        val items = listOf(tok, dom, lockItem(deviceSecure))
+        return ChecklistSnapshot(items, items.all { it.state == CheckState.OK }, checking = false, shouldWait = false, dnsName = cfg.domain)
+    }
+
+    private fun lockItem(deviceSecure: Boolean): CheckItem {
+        return CheckItem(CheckId.LOCKSCREEN, if (deviceSecure) CheckState.OK else CheckState.FAIL,
+            tr("手机已设置锁屏密码", "Phone screen lock is set"),
+            if (deviceSecure) tr("可用于生物识别或锁屏密码确认", "Ready for biometric or screen-lock confirmation")
+            else tr("公网开启与客户端配对必须通过生物识别或锁屏密码确认。", "Enabling public access and approving cloud clients require biometric or PIN confirmation."),
+            action = if (deviceSecure) CheckAction.NONE else CheckAction.OPEN_LOCKSCREEN,
+            actionLabel = if (deviceSecure) "" else tr("去设置锁屏密码", "Set screen lock"))
+    }
+
+    @Synchronized private fun ensureCfOrigin(ctx: Context) {
+        if (cfOrigin?.running == true) return
+        val api = HostService.ensureServer(ctx.applicationContext)
+        val srv = PublicServer(ctx.applicationContext, api, cloudflareOrigin = true)
+        if (srv.start(Cloudflared.ORIGIN_PORT, span = 1) == 0) AppLogger.warning(TAG, "Cloudflare origin port ${Cloudflared.ORIGIN_PORT} is taken")
+        cfOrigin = srv
+    }
+
+    @Synchronized private fun stopCfOrigin() { cfOrigin?.stop(); cfOrigin = null }
+
+    /** Start the current channel's tunnel (and what it forwards to). */
+    private fun startTunnel(app: Context) {
+        val t = channel.tunnel ?: return
+        ensureServer(app)
+        if (t === Cloudflared) ensureCfOrigin(app)
+        t.start(app)
+    }
+
+    /** Stop every tunnel except [keep]'s (all of them when null). */
+    private fun stopTunnels(why: String, keep: PublicTunnel? = null) {
+        if (keep !== Cloudflared) { Cloudflared.stop(why); stopCfOrigin() }
+        if (keep !== Ngrok) Ngrok.stop(why)
+    }
 
     fun mcpUrl(): String? = publicBaseUrl()?.let { "$it/mcp" }
 
@@ -409,6 +508,13 @@ object PublicAccess {
     /** Called by [HostService] on create/start to bring [PublicServer] and ongoing notification in sync. */
     fun sync(ctx: Context) {
         val app = ctx.applicationContext
+        val tunnel = channel.tunnel.takeIf { enabled }
+        stopTunnels("channel ${channel.key}, enabled=$enabled", keep = tunnel)
+        if (tunnel != null) {
+            startTunnel(app)
+            showOngoingNotification(app)
+            return
+        }
         if (enabled && ApiConfig.tailnetControlUrl == null && ApiConfig.tailnetMode == Tailnet.Mode.BUILTIN) {
             ensureServer(app)
             showOngoingNotification(app)
@@ -422,6 +528,7 @@ object PublicAccess {
     }
 
     fun onServiceDestroyed(ctx: Context) {
+        stopTunnels("service destroyed")
         stopServer()
         cancelOngoingNotification(ctx.applicationContext)
     }
@@ -439,12 +546,12 @@ object PublicAccess {
             ?.putLong(KEY_LAST_ACTIVITY, now)
             ?.apply()
         if (startServerOnEnable) {
-            ensureServer(app)
+            if (channel.tunnel != null) startTunnel(app) else ensureServer(app)
         }
         showOngoingNotification(app)
-        Audit.security("public_enabled", "v=$ver")
+        Audit.security("public_enabled", "v=$ver channel=${channel.key}")
         AppLogger.info(TAG, "public access enabled (port=$boundPort)")
-        if (startServerOnEnable && ApiConfig.tailnetMode == Tailnet.Mode.BUILTIN && ApiConfig.tailnetControlUrl == null) {
+        if (startServerOnEnable && channel == Channel.TAILSCALE && ApiConfig.tailnetMode == Tailnet.Mode.BUILTIN && ApiConfig.tailnetControlUrl == null) {
             Thread({ Tailnet.restart(app) }, "vscreen-public-ts-restart").apply { isDaemon = true }.start()
         }
     }
@@ -457,13 +564,14 @@ object PublicAccess {
         val wasOn = _enabled.value
         _enabled.value = false
         prefs?.edit()?.putBoolean(KEY_ENABLED, false)?.apply()
+        stopTunnels("disabled: $why")
         stopServer()
         cancelOngoingNotification(app)
         if (notifyIdle) showIdleClosedNotification(app)
         if (wasOn) {
             Audit.security("public_disabled", why)
             AppLogger.info(TAG, "public access disabled: $why")
-            if (ApiConfig.tailnetMode == Tailnet.Mode.BUILTIN && Tailnet.status.value.running) {
+            if (channel == Channel.TAILSCALE && ApiConfig.tailnetMode == Tailnet.Mode.BUILTIN && Tailnet.status.value.running) {
                 Thread({ Tailnet.restart(app) }, "vscreen-public-ts-stop").apply { isDaemon = true }.start()
             }
         }

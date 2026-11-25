@@ -437,6 +437,10 @@ func main() {
 		os.Exit(4)
 	}
 	setupDNS(dnsServerList(os.Getenv("TSB_DNS")))
+	if os.Getenv("TSB_MODE") == "ngrok" { // 2.0.0-beta11: the ngrok channel (ngrok.go)
+		runNgrok()
+		return
+	}
 	setupInterfaces()
 	os.Setenv("TS_NO_LOGS_NO_SUPPORT", "true") // no log upload to Tailscale
 

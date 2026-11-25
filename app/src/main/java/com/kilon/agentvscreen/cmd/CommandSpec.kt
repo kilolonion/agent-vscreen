@@ -43,7 +43,15 @@ internal object CommandSpec {
                * stop --force and handoff in reach beyond the background screen). Null = [scope].
                */
               val scopeOf: ((OffloadArgs) -> Scope)? = null,
-              private val scopeNoteZh: String = "", private val scopeNoteEn: String = "") {
+              private val scopeNoteZh: String = "", private val scopeNoteEn: String = "",
+              /**
+               * 2.0.0-beta11 (review): the lowest level that may call it and whether it changes anything are two things.
+               * `elevate` is callable while looking only (else a viewer could never ask), yet it notifies the phone and
+               * may change the agent's table, so it is not read-only.
+               */
+              val sideEffects: Boolean = false) {
+        /** For MCP's readOnlyHint: callable while looking only and changes nothing. */
+        val readOnly: Boolean get() = scope == Scope.LOOK && !sideEffects
         val scopeNote: String get() = tr(scopeNoteZh, scopeNoteEn)
         fun scopeFor(args: OffloadArgs): Scope = scopeOf?.invoke(args) ?: scope
         val positional: String get() = tr(posZh, posEn)
@@ -188,6 +196,18 @@ internal object CommandSpec {
             listOf("在悬浮窗上显示你正在做什么（最多 40 字，给用户看；不带文字 = 清除；这一轮结束时自动清除）。"),
             listOf("show what you are doing on the floating window (up to 40 characters, for the user; no text = clear; cleared when this turn ends)."),
             screen = false),
+        Cmd("permissions", "", "",
+            listOf("这个 agent 现在的权限：每类操作是允许、每次确认还是不允许，临时许可何时结束，哪些应用每次确认、禁止或只读，以及固定边界。任务开始前看一次，按它规划；用户问起时照此转告。手机在每条命令执行前按同一张表检查。"),
+            listOf("this agent's permissions now: whether each class of action is allowed, confirmed each time or not allowed, when temporary allows end, which apps confirm every time, are blocked or read-only, and the fixed limits. Read it once before a task and plan by it; pass it on when the user asks. The phone checks every command against the same table before it runs."),
+            scope = Scope.LOOK, screen = false, sumZh = "查看这个 agent 的权限设置", sumEn = "show this agent's permission settings"),
+        Cmd("elevate", "<类别|档位>", "<class|level>",
+            listOf("提前向用户申请更高的许可，写明原因：手机上弹出确认（通知 → 指纹），用户选择本轮任务内、今天内或永久。类别 caution/destroy/system/operate/rate，档位 careful/free/free_system。",
+                "临时许可到期自动收回；支付不能申请（每次付款都单独确认）。命令遇到“不允许”的类别时也会弹出同样的确认。"),
+            listOf("ask the user ahead for more permission, with your reason: the phone shows a confirmation (notification → fingerprint) and the user picks this turn, today or permanently. Classes caution/destroy/system/operate/rate, levels careful/free/free_system.",
+                "A temporary permission ends by itself; payments cannot be asked for (each payment is confirmed on its own). A command that meets a Not allowed class brings up the same confirmation."),
+            listOf(Opt("why", Kind.VALUE, "原因", "reason", "为什么需要（用户在确认卡上看到，最多 120 字）", "why you need it (shown on the card, up to 120 characters)"),
+                Opt("for", Kind.VALUE, "round|today|always", "round|today|always", "希望的范围（默认 round；用户可以改）", "the range you hope for (default round; the user may pick another)")),
+            scope = Scope.LOOK, screen = false, sumZh = "向用户申请临时或永久的更高许可（手机上指纹确认）", sumEn = "ask the user for temporary or permanent extra permission (fingerprint on the phone)", sideEffects = true),
         Cmd("done", "", "",
             listOf("这一轮做完了：副屏马上省电暂停、页面保留 10 分钟，别的会话可以接手（不 done 的话安静满 N 分钟自动结束，N 在 App 里设）。"),
             listOf("this turn is finished: the screen pauses to save power at once, the page is kept 10 minutes, and other sessions can take over (without done, it ends after N quiet minutes, set in the app).")),

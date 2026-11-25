@@ -56,7 +56,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         }
 
         /** Commands that do not read the app on the screen themselves (act and launch check the app rules per step). */
-        internal val RULE_FREE = setOf("status", "apps", "sound", "release", "stop", "fix", "help", "handoff", "note", "keep", "schedule", "ask", "teach", "launch", "act", "events", "done", "title", "task", "tasks", "diag")
+        internal val RULE_FREE = setOf("status", "apps", "sound", "release", "stop", "fix", "help", "handoff", "note", "keep", "schedule", "ask", "teach", "launch", "act", "events", "done", "title", "task", "tasks", "diag", "elevate", "permissions")
 
         /**
          * 1.2: the screen queue. There is one background screen; commands that work on it run one at a time, in the
@@ -174,14 +174,16 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         if (need.key == "look") return
         val tok = com.kilon.agentvscreen.api.Tokens.byId(call.tokenId)
         if (call.source == Call.Source.PUBLIC || tok == null || tok.publicOnly) {
-            if (need.key in call.scopes && (tok == null || tok.act(need.key) != com.kilon.agentvscreen.api.Policy.Act.ASK)) return
+            if (need.key in call.scopes && (tok == null || com.kilon.agentvscreen.host.StrongConfirm.effectiveAct(tok, need.key) != com.kilon.agentvscreen.api.Policy.Act.ASK)) return
             if (need.key in call.scopes && tok != null) return askRow(call, spec, need.key)
             if (need.key == "system") throw ActionError("SCOPE_DENIED", tr("公网 MCP 不开放系统操作（${spec.name}），这是固定的边界，不是设置问题；不要换别的办法绕过。确实需要时，请用户在这台手机上或经 Tailscale 接入一个 agent 来做",
                 "System actions (${spec.name}) are never available over public MCP; this is a fixed boundary, not a setting. Don't work around it. If it is really needed, the user can connect an agent on this phone or over Tailscale to do it"))
+            if (tok != null && tok.scope == "operate") throw ActionError("SCOPE_DENIED", tr("这个公网客户端（${call.tokenName}）配对时只获准查看，之后在手机上调高档位不会放宽这次配对发出的凭据，这条 ${spec.name} 没有执行。要操作，请重新连接这个客户端并在手机上批准一次配对",
+                "This public client (${call.tokenName}) was paired to look only; raising its level on the phone later does not widen the credentials of that pairing, so this ${spec.name} did not run. To operate, reconnect the client and approve a new pairing on the phone"))
             throw ActionError("SCOPE_DENIED", tr("这个公网客户端（${call.tokenName}）只获准查看，这条 ${spec.name} 没有执行。要操作，请用户在 Agent-VScreen › 接入 › 这个 agent 里把档位改成能操作的（或重新配对时选择）",
                 "This public client (${call.tokenName}) may only look, so this ${spec.name} did not run. To operate, the user can raise its level in Agent-VScreen › Connect › this agent (or pick one when pairing again)"))
         }
-        when (tok.act(need.key)) {
+        when (com.kilon.agentvscreen.host.StrongConfirm.effectiveAct(tok, need.key)) {
             com.kilon.agentvscreen.api.Policy.Act.ALLOW -> return
             com.kilon.agentvscreen.api.Policy.Act.ASK -> askRow(call, spec, need.key)
             com.kilon.agentvscreen.api.Policy.Act.DENY -> {
@@ -295,6 +297,8 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
             "task" -> Tasks.command(s, args)
             "done" -> doneCmd(sid)
             "title" -> titleCmd(sid, args)
+            "elevate" -> elevateCmd(args)
+            "permissions" -> NativeOffloadResult(0, com.kilon.agentvscreen.host.Permissions.text(Call.current()), data = com.kilon.agentvscreen.host.Permissions.json(Call.current()))
             "spots" -> spotsCmd(sid, args)
             "look" -> lookCmd(sid, args)
             "zoom" -> lookCmd(sid, args, "zoom")

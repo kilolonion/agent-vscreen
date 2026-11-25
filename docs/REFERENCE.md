@@ -105,6 +105,22 @@ hold on|off：按当前 agent 保存默认是否开启 act --hold（默认 off�
 
 权限范围: `operate`
 
+### `permissions`
+
+这个 agent 现在的权限：每类操作是允许、每次确认还是不允许，临时许可何时结束，哪些应用每次确认、禁止或只读，以及固定边界。任务开始前看一次，按它规划；用户问起时照此转告。手机在每条命令执行前按同一张表检查。
+
+权限范围: `look`
+
+### `elevate <类别|档位> [--why <原因>] [--for <round|today|always>]`
+
+提前向用户申请更高的许可，写明原因：手机上弹出确认（通知 → 指纹），用户选择本轮任务内、今天内或永久。类别 caution/destroy/system/operate/rate，档位 careful/free/free_system。
+临时许可到期自动收回；支付不能申请（每次付款都单独确认）。命令遇到“不允许”的类别时也会弹出同样的确认。
+
+- `--why <原因>` 为什么需要（用户在确认卡上看到，最多 120 字）
+- `--for <round|today|always>` 希望的范围（默认 round；用户可以改）
+
+权限范围: `look`
+
 ### `done`
 
 这一轮做完了：副屏马上省电暂停、页面保留 10 分钟，别的会话可以接手（不 done 的话安静满 N 分钟自动结束，N 在 App 里设）。
@@ -474,6 +490,22 @@ scope: `look` · runs in the screen queue
 show what you are doing on the floating window (up to 40 characters, for the user; no text = clear; cleared when this turn ends).
 
 scope: `operate`
+
+### `permissions`
+
+this agent's permissions now: whether each class of action is allowed, confirmed each time or not allowed, when temporary allows end, which apps confirm every time, are blocked or read-only, and the fixed limits. Read it once before a task and plan by it; pass it on when the user asks. The phone checks every command against the same table before it runs.
+
+scope: `look`
+
+### `elevate <class|level> [--why <reason>] [--for <round|today|always>]`
+
+ask the user ahead for more permission, with your reason: the phone shows a confirmation (notification → fingerprint) and the user picks this turn, today or permanently. Classes caution/destroy/system/operate/rate, levels careful/free/free_system.
+A temporary permission ends by itself; payments cannot be asked for (each payment is confirmed on its own). A command that meets a Not allowed class brings up the same confirmation.
+
+- `--why <reason>` why you need it (shown on the card, up to 120 characters)
+- `--for <round|today|always>` the range you hope for (default round; the user may pick another)
+
+scope: `look`
 
 ### `done`
 

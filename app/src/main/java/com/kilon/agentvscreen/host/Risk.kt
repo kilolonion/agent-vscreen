@@ -110,7 +110,7 @@ enum class Risk(
 
         /** Feedback 4: a high rate asks only when this agent's table says "ask"; otherwise it is logged and shown. */
         fun rateAsks(call: Call?): Boolean =
-            (Tokens.byId(call?.tokenId)?.act(com.kilon.agentvscreen.api.Policy.RATE) ?: com.kilon.agentvscreen.api.Policy.Act.ASK) == com.kilon.agentvscreen.api.Policy.Act.ASK
+            (Tokens.byId(call?.tokenId)?.let { StrongConfirm.effectiveAct(it, com.kilon.agentvscreen.api.Policy.RATE) } ?: com.kilon.agentvscreen.api.Policy.Act.ASK) == com.kilon.agentvscreen.api.Policy.Act.ASK
 
         /**
          * Pure evaluation: every dimension that stops this command now, or an empty list when it may run.
@@ -166,6 +166,22 @@ enum class Risk(
                 if (missing.isEmpty()) return
                 StrongConfirm.requireForRisks(ctx, call, missing, spec.name)
             }
+        }
+
+        /**
+         * 2.0.0-beta11 (test R16: 160 taps in 56 s at the careful level, never asked): the rate was checked only when a
+         * command started, so four 40-step acts counted 0, 40, 80 and 120 at their starts and never went over. Now every
+         * input step counts itself and checks the window right then, before it acts; a stretch that crosses the limit
+         * stops there and asks.
+         */
+        internal fun checkRate(ctx: Context, call: Call?) {
+            if (call == null) return
+            val now = clock()
+            val n = inputActionCount(call.tokenId, now)
+            if (n <= RATE_MAX_PER_MIN) return
+            if (!rateAsks(call)) { noteRate(call, n, now); return }
+            if (StrongConfirm.hasGrant(call.tokenId, StrongConfirm.grantKey("rate", "*"), now)) return
+            StrongConfirm.requireForRisks(ctx, call, listOf(RATE), "act")
         }
 
         /** Test helper: reset in-memory rate counters and clock. */

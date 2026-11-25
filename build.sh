@@ -21,6 +21,11 @@ SO=app/src/main/jniLibs/arm64-v8a/libtsbridge.so
 if [ ! -f "$SO" ] || [ ! -f app/src/main/jniLibs/x86_64/libtsbridge.so ] || [ -n "$(find tsbridge -newer "$SO" -type f \( -name '*.go' ! -name '*_test.go' -o -name 'go.mod' -o -name 'go.sum' -o -name 'build.sh' \) -print -quit)" ]; then
   ./tsbridge/build.sh >> "$AVS_BUILD_DIR/logs/tsb.log" 2>&1
 fi
+# 2.0.0-beta11: the Cloudflare tunnel client, likewise not in git.
+CF=app/src/main/jniLibs/arm64-v8a/libcloudflared.so
+if [ ! -f "$CF" ] || [ ! -f app/src/main/jniLibs/x86_64/libcloudflared.so ] || [ -n "$(find cloudflared tsbridge/dns.go -newer "$CF" -type f -print -quit)" ]; then
+  ./cloudflared/build.sh >> "$AVS_BUILD_DIR/logs/cloudflared.log" 2>&1
+fi
 # 1.4.0-beta2: the OCR models must build and read on the app's own onnxruntime version (beta1 did not on the phone).
 ORT=$(grep -o 'onnxruntime-android:[0-9.]*' app/build.gradle.kts | cut -d: -f2)
 OCR_PYTHON="${AVS_OCR_PYTHON:-$BASE/cache/ocrbench/venv-$ORT/bin/python}"

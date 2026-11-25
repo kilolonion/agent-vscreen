@@ -23,8 +23,8 @@ import org.robolectric.annotation.Config
 class V142Beta1Test {
 
     @Test fun versionAndNewsName() {
-        assertEquals(67, com.kilon.agentvscreen.BuildConfig.VERSION_CODE)
-        assertEquals("2.0.0-beta10", com.kilon.agentvscreen.BuildConfig.VERSION_NAME)
+        assertEquals(68, com.kilon.agentvscreen.BuildConfig.VERSION_CODE)
+        assertEquals("2.0.0-beta11", com.kilon.agentvscreen.BuildConfig.VERSION_NAME)
         assertEquals("1.4.2-beta1", com.kilon.agentvscreen.api.AgentNews.nameOf(52))
         assertEquals("1.4.2-beta2", com.kilon.agentvscreen.api.AgentNews.nameOf(53))
         assertEquals("1.4.2-beta3", com.kilon.agentvscreen.api.AgentNews.nameOf(54))

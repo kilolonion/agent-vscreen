@@ -45,7 +45,7 @@ internal object Mcp {
         JSONObject().put("name", PREFIX + c.name)
             .put("description", c.summary + "\n" + c.body.joinToString("\n"))
             .put("inputSchema", CommandSpec.inputSchema(c))
-            .put("annotations", JSONObject().put("readOnlyHint", c.scope == CommandSpec.Scope.LOOK))
+            .put("annotations", JSONObject().put("readOnlyHint", c.readOnly))
     }
 
     /** 2.0.0-beta7 (7.8 #3): shared pre-auth check for /mcp used by both ApiServer and PublicServer. */

@@ -34,6 +34,14 @@ class PublicServer(
     private val secretProvider: () -> String = { PublicAccess.secret },
     private val baseProvider: () -> String? = { PublicAccess.publicBaseUrl() },
     private val wakeService: () -> Unit = { if (!HostService.isAlive) HostService.wakeFor(ctx, "public mcp") },
+    /**
+     * 2.0.0-beta11: this listener is Cloudflare Tunnel's origin ([com.kilon.agentvscreen.host.Cloudflared]). cloudflared
+     * cannot add our bridge header, so every request here is public by where it arrived: incoming X-AVS-* and tailnet
+     * headers are dropped, the bridge header is set, and the source is Cloudflare's Cf-Connecting-IP. Another app on
+     * this phone could connect here too, but it would only reach the public surface (OAuth pairing on this phone);
+     * at most it could pick its own rate-limit bucket.
+     */
+    private val cloudflareOrigin: Boolean = false,
 ) {
     private val TAG = "PublicServer"
     private val pool = ThreadPoolExecutor(
@@ -50,10 +58,10 @@ class PublicServer(
     @Volatile var boundPort: Int = 0; private set
     val running: Boolean get() = server?.isClosed == false
 
-    fun start(preferredPort: Int = DEFAULT_PORT): Int = synchronized(bindLock) {
+    fun start(preferredPort: Int = DEFAULT_PORT, span: Int = PORT_SPAN): Int = synchronized(bindLock) {
         if (running && boundPort > 0) return@synchronized boundPort
         stopLocked()
-        for (p in preferredPort until (preferredPort + PORT_SPAN).coerceAtMost(65536)) {
+        for (p in preferredPort until (preferredPort + span).coerceAtMost(65536)) {
             val ss = ServerSocket()
             try {
                 ss.reuseAddress = true
@@ -116,7 +124,7 @@ class PublicServer(
                 val inp = BufferedInputStream(sock.getInputStream())
                 val out = sock.getOutputStream()
                 synchronized(reading) { reading[sock] = System.currentTimeMillis() }
-                val req = try {
+                val req0 = try {
                     HttpCore.readRequest(inp)
                 } catch (e: HttpError) {
                     HttpCore.writeResponse(out, ApiServer.Resp.err(e.status, e.code, e.message ?: e.code), apiServer.cliVersion())
@@ -133,6 +141,7 @@ class PublicServer(
                 } finally {
                     synchronized(reading) { reading.remove(sock) }
                 } ?: return
+                val req = if (cloudflareOrigin) fromCloudflare(req0) else req0
                 req.peer = sock.inetAddress
                 req.sock = sock
                 sock.soTimeout = 0
@@ -147,6 +156,16 @@ class PublicServer(
             }.onFailure { if (it !is SocketException && it !is java.io.IOException) AppLogger.warning(TAG, "serve: ${it.message}") }
         }
         afterSend?.let { quiet("pub-after-send") { it() } }
+    }
+
+    /** A request that came through the Cloudflare tunnel, as if the bridge had forwarded it (see [cloudflareOrigin]). */
+    internal fun fromCloudflare(r: ApiServer.Req): ApiServer.Req {
+        val h = r.headers.filterKeys { k -> !k.startsWith("x-avs-") && k != "x-vscreen-tailnet" }.toMutableMap()
+        h["x-avs-public"] = secretProvider()
+        // Only an IP literal (never resolved as a name).
+        r.headers["cf-connecting-ip"]?.trim()?.takeIf { ip -> ip.length in 2..45 && ip.all { c -> c.isDigit() || c in 'a'..'f' || c in 'A'..'F' || c == '.' || c == ':' } }
+            ?.let { h["x-avs-public-src"] = it }
+        return ApiServer.Req(r.method, r.target, r.query, h, r.body)
     }
 
     /** Route one public request; directly testable without opening a socket. */
@@ -184,6 +203,14 @@ class PublicServer(
                 if (r.method == "GET") PublicOAuth.handleAuthorizeStatus(r)
                 else methodNotAllowed("GET")
 
+            "/oauth/device_authorization" ->
+                if (r.method == "POST") PublicOAuth.handleDeviceAuthorization(ctx, r, base)
+                else methodNotAllowed("POST")
+
+            "/oauth/device" ->
+                if (r.method == "GET") PublicOAuth.devicePageHtml()
+                else methodNotAllowed("GET")
+
             "/oauth/token" ->
                 if (r.method == "POST") PublicOAuth.handleToken(r, base)
                 else methodNotAllowed("POST")
@@ -203,7 +230,9 @@ class PublicServer(
 
         val srcBucket = PublicOAuth.sourceBucket(r.headers["x-avs-public-src"])
         val srcFailKey = "public-src:$srcBucket"
-        apiServer.failLimiter.checkLocked(srcFailKey, remote = true)?.let { return it }
+        // 2.0.0-beta11 (test P7: ten bad Bearers from one address locked the paired client there out for 5 minutes):
+        // the source lock stops guessing, so it applies to requests without a valid credential only. A valid token
+        // (random, 256 bits) is not a guess; its own client still has its own lock.
 
         val prmUrl = "${base.trimEnd('/')}/.well-known/oauth-protected-resource"
         val wwwAuth = mapOf("WWW-Authenticate" to """Bearer resource_metadata="$prmUrl"""")
@@ -225,6 +254,7 @@ class PublicServer(
                 chk.auth
             }
             is PublicOAuth.AccessCheck.Invalid -> {
+                apiServer.failLimiter.checkLocked(srcFailKey, remote = true)?.let { return it }
                 // Section I: unknown Bearer counts ONLY against source bucket (never global lockout);
                 // known client's invalid/expired/wrong-resource token counts by client_id.
                 val failKey = chk.knownClientId?.let { "public-client:$it" } ?: srcFailKey
@@ -242,6 +272,7 @@ class PublicServer(
         }
 
         r.publicClientId = access.clientId
+        r.publicScope = access.scope
         r.auth = ApiServer.Auth(access.token, signed = false, nonce = null)
         Tokens.used(access.token.id)
         wakeService()

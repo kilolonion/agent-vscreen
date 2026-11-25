@@ -54,6 +54,7 @@ def run(*argv, timeout=90, check_rc=True):
     p = subprocess.run(argv, text=True, timeout=timeout, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     out = (p.stdout or "").strip()
     if check_rc and p.returncode != 0:
+        print("FAILED", " ".join(map(str, argv)), "->", out[-800:], flush=True)
         raise subprocess.CalledProcessError(p.returncode, argv, output=out)
     return p.returncode, out
 

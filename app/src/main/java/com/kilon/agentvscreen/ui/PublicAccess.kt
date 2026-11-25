@@ -73,13 +73,18 @@ fun PublicAccessPage() {
     var revokeConfirm by remember { mutableStateOf(false) }
 
     val publicClients = remember(tokens) { tokens.filter { it.publicOnly } }
-    val mcpUrl = remember(ts.dnsName) { PublicAccess.mcpUrl() }
+    val channel by PublicAccess.channelFlow.collectAsState()
+    val cfCfg by com.kilon.agentvscreen.host.Cloudflared.config.collectAsState()
+    val ngCfg by com.kilon.agentvscreen.host.Ngrok.config.collectAsState()
+    val mcpUrl = remember(ts.dnsName, channel, cfCfg, ngCfg) { PublicAccess.mcpUrl() }
 
     MiuixPage(
         title = tr("云端（公网 MCP）", "Cloud (Public MCP)"),
-        subtitle = tr("通过 Tailscale Funnel 供云端 MCP 客户端连接", "For cloud MCP clients via Tailscale Funnel"),
+        subtitle = tr("供云端 MCP 客户端连接 · ${channel.title}", "For cloud MCP clients · ${channel.title}"),
         resetScrollKey = enabled,
     ) {
+        PublicChannelPicker()
+        if (enabled) Footnote(tr("切换通道会先关闭当前的公网接入；已授权的客户端需要用新地址重新配对。", "Switching channel turns the current public access off; authorized clients need to pair again with the new address."))
         if (enabled) {
             PublicRunningSection(
                 ts = ts,
@@ -138,6 +143,36 @@ fun PublicAccessPage() {
     }
 }
 
+/** 2.0.0-beta11: the public channels, each with its own guide (the public page and the connect wizard). */
+@Composable
+fun PublicChannelPicker() {
+    val actx = LocalContext.current.applicationContext
+    val nav = LocalNav.current
+    val channel by PublicAccess.channelFlow.collectAsState()
+    Group(tr("公网通道", "Public channel")) {
+        top.yukonga.miuix.kmp.preference.RadioButtonPreference(
+            title = PublicAccess.Channel.TAILSCALE.title,
+            summary = tr("无需域名；地址为 *.ts.net；需要官方 Tailscale 账号", "No domain needed; a *.ts.net address; needs an official Tailscale account"),
+            selected = channel == PublicAccess.Channel.TAILSCALE,
+            onClick = { PublicAccess.setChannel(actx, PublicAccess.Channel.TAILSCALE) },
+        )
+        top.yukonga.miuix.kmp.preference.RadioButtonPreference(
+            title = PublicAccess.Channel.CLOUDFLARE.title,
+            summary = tr("使用你自己的域名；需要 Cloudflare 账号；也适用于 Headscale", "Uses your own domain; needs a Cloudflare account; also works with Headscale"),
+            selected = channel == PublicAccess.Channel.CLOUDFLARE,
+            onClick = { PublicAccess.setChannel(actx, PublicAccess.Channel.CLOUDFLARE) },
+        )
+        top.yukonga.miuix.kmp.preference.RadioButtonPreference(
+            title = PublicAccess.Channel.NGROK.title,
+            summary = tr("无需域名；免费账号送一个固定域名；需要 ngrok 账号；也适用于 Headscale", "No domain needed; free accounts get one static domain; needs an ngrok account; also works with Headscale"),
+            selected = channel == PublicAccess.Channel.NGROK,
+            onClick = { PublicAccess.setChannel(actx, PublicAccess.Channel.NGROK) },
+        )
+        ArrowPreference(title = tr("设置指南", "Setup guide"), summary = tr("${channel.title} 的开通步骤和常见问题", "${channel.title}: steps and common problems"),
+            onClick = { nav.go(Route.PublicGuide(channel.key)) })
+    }
+}
+
 /** Wrappable monospace box whose trailing copy button sits beside the text, never overlapping it (F.5). */
 @Composable
 fun WrappableCode(text: String, onCopy: () -> Unit) {
@@ -180,8 +215,10 @@ fun PublicRunningSection(
         runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
     }
 
+    val channel by PublicAccess.channelFlow.collectAsState()
     Group(tr("运行状态", "Status")) {
-        when (ts.funnel) {
+        val tunnel = channel.tunnel
+        if (tunnel != null) TunnelRunning(tunnel, mcpUrl) else when (ts.funnel) {
             "on" -> {
                 InfoCard(
                     Palette.takeover,
@@ -311,8 +348,13 @@ fun PublicChecklistSection(
         }
     }
 
-    val checklist = remember(mode, controlUrl, ts, funnelCheck, funnelChecking, deviceSecure, recheckTick) {
-        PublicAccess.evaluateChecklist(
+    val channel by PublicAccess.channelFlow.collectAsState()
+    val cfCfg by com.kilon.agentvscreen.host.Cloudflared.config.collectAsState()
+    val ngCfg by com.kilon.agentvscreen.host.Ngrok.config.collectAsState()
+    val checklist = remember(mode, controlUrl, ts, funnelCheck, funnelChecking, deviceSecure, recheckTick, channel, cfCfg, ngCfg) {
+        if (channel == PublicAccess.Channel.CLOUDFLARE) PublicAccess.cloudflareChecklist(cfCfg, deviceSecure)
+        else if (channel == PublicAccess.Channel.NGROK) PublicAccess.ngrokChecklist(ngCfg, deviceSecure)
+        else PublicAccess.evaluateChecklist(
             tailnetMode = mode,
             controlUrl = controlUrl,
             tsStatus = ts,
@@ -350,6 +392,8 @@ fun PublicChecklistSection(
         }
     }
 
+    if (channel == PublicAccess.Channel.CLOUDFLARE) CloudflareSetupSection()
+    if (channel == PublicAccess.Channel.NGROK) NgrokSetupSection()
     Group(tr("开启前提清单", "Prerequisites")) {
         checklist.items.forEach { item ->
             ChecklistRow(
@@ -412,7 +456,18 @@ fun PublicChecklistSection(
                     "4. Access defaults to \"look\" only; \"system\" scope is never exposed to the public internet.",
                 ),
             )
-            warnings.forEach { w ->
+            val shown = when (channel) {
+                PublicAccess.Channel.CLOUDFLARE -> warnings + tr(
+                    "5. 走 Cloudflare 时，HTTPS 在 Cloudflare 的服务器上解开再转发到手机，Cloudflare 技术上看得到请求内容；隧道令牌只保存在本机，泄露后请在 Cloudflare 刷新。",
+                    "5. With Cloudflare, HTTPS is decrypted on Cloudflare's servers and forwarded to the phone, so Cloudflare can technically see requests; the tunnel token stays on this phone, refresh it in Cloudflare if it leaks.",
+                )
+                PublicAccess.Channel.NGROK -> warnings + tr(
+                    "5. 走 ngrok 时，HTTPS 在 ngrok 的服务器上解开再转发到手机，ngrok 技术上看得到请求内容；authtoken 只保存在本机，泄露后请在 ngrok 后台重置。",
+                    "5. With ngrok, HTTPS is decrypted on ngrok's servers and forwarded to the phone, so ngrok can technically see requests; the authtoken stays on this phone, reset it in the ngrok dashboard if it leaks.",
+                )
+                PublicAccess.Channel.TAILSCALE -> warnings
+            }
+            shown.forEach { w ->
                 Text(w, fontSize = 13.5.sp, lineHeight = 20.sp, color = MiuixTheme.colorScheme.onSurface)
             }
             if (!consentAccepted) {
@@ -462,7 +517,7 @@ fun PublicChecklistSection(
             }
             if (!checklist.allOk) {
                 Text(
-                    tr("请先完成上方全部 5 项前提条件，回到 App 会自动重查。", "Complete all 5 items above first; returning to the app rechecks automatically."),
+                    tr("请先完成上方全部 ${checklist.items.size} 项前提条件，回到 App 会自动重查。", "Complete all ${checklist.items.size} items above first; returning to the app rechecks automatically."),
                     fontSize = 12.5.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )

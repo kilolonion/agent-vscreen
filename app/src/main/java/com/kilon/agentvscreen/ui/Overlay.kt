@@ -158,6 +158,8 @@ object Overlay {
     internal val barShown = mutableStateOf(false)
     /** 1.4.2-beta6: the small window parked in the top right corner (tap to open it large). */
     internal val mini = mutableStateOf(false)
+    /** The background screen the window was last opened for (a different one opens by the built-in rule). */
+    private var openedFor: Int? = null
     /** 1.4.2-beta6: a drag has the finger in the top right corner: letting go there makes the small window. */
     internal val cornerHot = mutableStateOf(false)
     /** The width before the window became small (what the orientation's width key keeps meanwhile). */
@@ -398,9 +400,16 @@ object Overlay {
         val p = prefs()
         shownLandscape = aspect() > 1f
         widthPx.floatValue = clampWidth(p.getFloat(widthKey(shownLandscape), defaultWidth(shownLandscape)))
-        docked.value = p.getBoolean("docked", false)
+        // 2.0.0-beta11 (rainbow: whether it opened large or small depended on how it was left last time; use a built-in
+        // rule). A new background screen always opens as the small window in the top right corner: the agent works on
+        // its own and the user's view stays free; a tap opens it large. While the same screen is up, coming back after
+        // a full-screen page or a host change keeps what the user made of it (size, small, folded to the edge).
+        val disp = BackgroundOperation.state.value.displayId
+        val fresh = disp != openedFor
+        openedFor = disp
+        docked.value = if (fresh) false else p.getBoolean("docked", false)
         dockRight.value = p.getBoolean("dock_right", true)
-        mini.value = p.getBoolean("mini", false)
+        mini.value = if (fresh) true else p.getBoolean("mini", false)
         fullWidth = widthPx.floatValue
         if (mini.value) widthPx.floatValue = miniWidth()
         val l = WindowManager.LayoutParams(

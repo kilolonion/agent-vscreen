@@ -81,7 +81,17 @@ object UserAsk {
     /** The user has taken this question into a lesson (getting ready, recording or saving). */
     fun taken(a: Ask) = bound(a)
 
-    private fun publish() { _open.value = asks.filter { it.live && it.id != heldId } }
+    /** Republishes [open] when the earliest unanswered question runs out of time (see [ExpiryWake]). */
+    private val expiry = ExpiryWake("ask") { synchronized(lock) { prune(System.currentTimeMillis()); publish(); lock.notifyAll() } }
+    /** When the next shown question runs out of time, or null when none is shown (tests). */
+    internal val nextExpiryAt: Long? get() = expiry.dueAt
+
+    /** The only writer of [open]: publishes the shown questions and arms the wake for the earliest expiry. */
+    private fun publish() {
+        val shown = asks.filter { it.live && it.id != heldId }
+        _open.value = shown
+        expiry.at(shown.minOfOrNull { it.at + it.validMs }, System.currentTimeMillis())
+    }
 
     private fun prune(now: Long) {
         val gone = asks.filter { !bound(it) && now - it.at > it.validMs && (it.answer == null || now - it.answeredAt > it.validMs) }

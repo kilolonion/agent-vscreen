@@ -167,6 +167,8 @@ ${ApiConfig.mcpJson(base, token)}
 1. 如果你能自己改 MCP 配置（比如 Claude Code、Codex），把这段加进去（streamable HTTP，不要加令牌或 Authorization 头，公网用 OAuth）：
 ${ApiConfig.mcpJsonPublic(url)}
 第一次连接时会打开一个授权页，我会在手机上核对配对码并批准；拿到授权码后马上换取访问令牌（授权码 10 分钟内有效，只能用一次）。
+没有浏览器（云端主机、命令行）时用标准设备码流程（RFC 8628，地址见 $url/.well-known/oauth-authorization-server 的 device_authorization_endpoint）：注册时 grant_types 填 ["urn:ietf:params:oauth:grant-type:device_code","refresh_token"]，拿到 user_code 告诉我，我在手机弹出的卡片上核对后批准，你按 interval 轮询 /oauth/token。
+如果连 443 时 TCP 能连上、TLS 握手却收到 0 字节就断开（SSL_ERROR_SYSCALL / UNEXPECTED_EOF），基本就是手机上的公网接入没开或手机不在线，直接提醒我检查，不用再换 IP 或 TLS 版本试。
 如果你的 MCP 连接器只能由我在网页设置里添加（比如 claude.ai 的自定义连接器），我已经加好了，跳过这一步。
 
 2. 把下面这段话存进你的长期记忆（或建成一个 skill / 规则，用你自己保存长期信息的方式）。这是我的要求：以后的新对话里，你也要知道自己有这个能力，我让你在手机上做事时直接用它。
@@ -179,6 +181,8 @@ Please connect Agent-VScreen so that from now on you can open and operate apps o
 1. If you can edit your own MCP config (e.g. Claude Code, Codex), add this (streamable HTTP; no token and no Authorization header, public access uses OAuth):
 ${ApiConfig.mcpJsonPublic(url)}
 The first connection opens an approval page; I check the pairing code on the phone and approve. Exchange the authorization code right away (it is valid for 10 minutes and only once).
+Without a browser (cloud VM, CLI) use the standard device flow (RFC 8628, device_authorization_endpoint in $url/.well-known/oauth-authorization-server): register with grant_types ["urn:ietf:params:oauth:grant-type:device_code","refresh_token"], tell me the user_code, I check it on the card the phone shows and approve, and you poll /oauth/token every interval seconds.
+If TCP to port 443 connects but the TLS handshake gets 0 bytes and closes (SSL_ERROR_SYSCALL / UNEXPECTED_EOF), public access is off on the phone or the phone is offline: tell me to check it instead of trying other IPs or TLS versions.
 If your MCP connectors can only be added by me in your web settings (e.g. custom connectors on claude.ai), I have already added it: skip this step.
 
 2. Save the text below in your long-term memory (or as a skill / rule, whatever you use to keep things across conversations). This is my request: in future conversations you should know you have this ability and use it directly when I ask you to do something on my phone.
@@ -212,7 +216,7 @@ If your MCP connectors can only be added by me in your web settings (e.g. custom
         "schedule" to listOf("schedule"),
         "keep" to listOf("watch"),
         "screen" to listOf("look", "park", "sound"),
-        "safety" to listOf("ask", "handoff", "trouble"),
+        "safety" to listOf("ask", "elevate", "handoff", "trouble"),
         "codes" to emptyList(),
     )
 
@@ -223,7 +227,7 @@ If your MCP connectors can only be added by me in your web settings (e.g. custom
         "schedule" to listOf("schedule"),
         "keep" to listOf("keep", "events"),
         "screen" to listOf("look", "spots", "tasks", "launch", "sound", "stop", "release", "done", "title"),
-        "safety" to listOf("ask", "handoff", "status", "fix", "diag"),
+        "safety" to listOf("ask", "permissions", "elevate", "handoff", "status", "fix", "diag"),
         "codes" to emptyList(),
     )
 
@@ -237,7 +241,7 @@ If your MCP connectors can only be added by me in your web settings (e.g. custom
             "schedule" to "定时任务预约手机就绪窗口",
             "keep" to "后台长期盯条件（notify / wake）与 events",
             "screen" to "主动要图、局部放大、录像回看、切应用/暂存与静音",
-            "safety" to "用户确认、隐私与接力、排障 status/fix/diag",
+            "safety" to "用户确认、申请提权、隐私与接力、排障 status/fix/diag",
             "codes" to "全部结果代码与 next 处理方式",
         )
         val descEn = mapOf(
@@ -247,7 +251,7 @@ If your MCP connectors can only be added by me in your web settings (e.g. custom
             "schedule" to "book phone readiness windows for timed tasks",
             "keep" to "background watches (notify / wake) and events",
             "screen" to "pictures, zoom, replay, switching/parking apps and sound",
-            "safety" to "user confirmation, privacy, handoff and status/fix/diag",
+            "safety" to "user confirmation, asking for permission, privacy, handoff and status/fix/diag",
             "codes" to "all result codes and next actions",
         )
         return tr("### 主题帮助（`vscreen help <主题>`）\n", "### Topic help (`vscreen help <topic>`)\n") +

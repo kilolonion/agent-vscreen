@@ -217,6 +217,26 @@ internal object Gesture {
      * 2.0.0-beta8 (C6): search the entire [frame] for [patchHalf] in overlapping tiles sized so
      * [VScreenGame.track] always uses exact step=1 at 0.5x scale (never skipping odd coordinates).
      */
+    /**
+     * 2.0.0-beta11 (G5): how many places on [frame] look like the dragged item. Rows of tabs/cards look alike,
+     * so "found somewhere" is no evidence the item moved; one copy fewer than before is evidence it went away.
+     * Hits closer than [PATCH] px are one place.
+     */
+    internal fun countPatch(patchHalf: VScreenGame.Patch, frame: Bitmap): Int {
+        val radius = 150
+        val stride = 120 // each tile reports only its best match, so tiles are dense enough for one item per tile
+        val xs = if (frame.width <= 360) listOf(frame.width / 2) else generateSequence(180) { it + stride }.takeWhile { it - 180 < frame.width }.toList()
+        val ys = if (frame.height <= 360) listOf(frame.height / 2) else generateSequence(180) { it + stride }.takeWhile { it - 180 < frame.height }.toList()
+        val centers = ArrayList<Pair<Int, Int>>()
+        for (cy in ys) for (cx in xs) {
+            val shifted = shiftPatch(patchHalf, cx.coerceIn(0, frame.width - 1), cy.coerceIn(0, frame.height - 1), frame.width, frame.height)
+            val hit = VScreenGame.track(shifted, frame, radius = radius) ?: continue
+            val c = hit.first.centerX() to hit.first.centerY()
+            if (centers.none { hypot((it.first - c.first).toDouble(), (it.second - c.second).toDouble()) < PATCH }) centers += c
+        }
+        return centers.size
+    }
+
     private fun findPatchAnywhere(patchHalf: VScreenGame.Patch, frame: Bitmap): Pair<Rect, Double>? {
         val radius = 150 // 360x360 tile -> 180x180 = 32,400 <= 40,000 at 0.5x -> guaranteed step=1
         val stride = 240 // >= 60px overlap between adjacent tiles
@@ -346,16 +366,23 @@ internal object Gesture {
             val wholeUnchanged = wholeScreenUnchanged(preFrame, settleFrame, mask, excludeRects = listOf(startRect, endRect))
             val startChanged = Change.ratio(preFrame, settleFrame, startRect) >= Change.REGION_CHANGED
             val endChanged = Change.ratio(preFrame, settleFrame, endRect) >= Change.REGION_CHANGED
+            // 2.0.0-beta11 (G5, Edge tab closed reported as "stayed"/"elsewhere"): when the item has look-alikes (a row
+            // of tabs or cards), a change at the drop point (the row closing up) and a match somewhere (a neighbour)
+            // are no evidence it is still there; one copy fewer than before is evidence it went away. A unique item
+            // keeps the plain frame-difference rule (it may be restyled where it lands).
+            val preCopies = patchHalf?.let { countPatch(it, preFrame) } ?: 0
+            val fewerCopies = preCopies >= 2 && countPatch(patchHalf!!, settleFrame) < preCopies
             when {
                 pickedUp == true && !startChanged && wholeUnchanged -> AFTER_SNAPPED_BACK
-                startChanged && endChanged -> AFTER_STAYED
+                startChanged && endChanged && !fewerCopies -> AFTER_STAYED
                 startChanged && !endChanged && wholeUnchanged -> AFTER_DISAPPEARED
-                startChanged && !endChanged && !wholeUnchanged -> {
+                startChanged -> {
                     // 2.0.0-beta8 (C6): a wide tab/card extends past startRect so wholeUnchanged can be false
-                    // even when the item was swiped away. Only classify as ELSEWHERE if the dragged patch still
-                    // appears somewhere on settleFrame; otherwise it disappeared (swiped away / deleted).
-                    val foundElsewhere = patchHalf != null && findPatchAnywhere(patchHalf, settleFrame) != null
-                    if (foundElsewhere || patchHalf == null) AFTER_ELSEWHERE else AFTER_DISAPPEARED
+                    // even when the item was swiped away.
+                    if (patchHalf == null) AFTER_ELSEWHERE
+                    else if (fewerCopies) AFTER_DISAPPEARED
+                    else if (findPatchAnywhere(patchHalf, settleFrame) != null) AFTER_ELSEWHERE
+                    else AFTER_DISAPPEARED
                 }
                 else -> AFTER_UNKNOWN
             }
@@ -922,7 +949,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
     val path: List<Pair<Int, Int>>
     if (step.kind == StepKind.PRESS) {
         val t = target(sid, d, step.target!!, ctx)
-        payGuard(sid, d, t.label, t.x, t.y)
+        payGuard(sid, d, t.atPoint, t.x, t.y)
         pressTarget = t
         val start = if (hu != null) hu.drift(t.x to t.y, Gesture.HUMAN_START_DRIFT_PX, d.width, d.height) else (t.x to t.y)
         path = listOf(start)

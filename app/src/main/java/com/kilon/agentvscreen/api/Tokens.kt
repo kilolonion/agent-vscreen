@@ -280,6 +280,18 @@ object Tokens {
         val allowed = if (cur.publicOnly) PUBLIC_LEVELS else LEVELS
         if (level !in allowed) return
         save(_list.value.map { if (it.id == id) it.with(level = level, custom = custom) else it })
+        dropWidenings(cur, _list.value.firstOrNull { it.id == id })
+    }
+
+    /**
+     * 2.0.0-beta11 (review): the user's latest explicit tightening wins. A row (or the level) made stricter here ends
+     * the temporary elevations that would still lift it ([StrongConfirm.effectiveAct]); before, the row said
+     * "not allowed" while a "this turn" elevation kept allowing it.
+     */
+    private fun dropWidenings(before: Token, after: Token?) {
+        after ?: return
+        val narrowed = Policy.ROWS.map { it.key }.filter { k -> after.act(k).rank < before.act(k).rank }
+        if (narrowed.isNotEmpty()) com.kilon.agentvscreen.host.StrongConfirm.dropElevations(after.id, narrowed)
     }
 
     /** Change one row of this agent's table (kept on top of its preset, so "restore preset" can drop it). */
@@ -289,6 +301,7 @@ object Tokens {
         val a = Policy.clamp(key, act)
         val next = if (cur.level != Policy.CUSTOM && base[key] == a) cur.custom - key else cur.custom + (key to a)
         save(_list.value.map { if (it.id == id) it.with(custom = next) else it })
+        dropWidenings(cur, _list.value.firstOrNull { it.id == id })
     }
     /** [minutes] 0 ends the period now. */
     @Synchronized fun trust(id: String, minutes: Int) =

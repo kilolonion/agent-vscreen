@@ -57,7 +57,9 @@ object StrongConfirm {
     enum class Range(val key: String, val zh: String, val en: String) {
         ONCE("once", "仅此一次", "Just this once"),
         ROUND("round", "本轮任务内", "This turn"),
-        TODAY("today", "今天内", "Today");
+        TODAY("today", "今天内", "Today"),
+        /** 2.0.0-beta11: an elevation the user makes permanent (the agent's table changes); never for payments. */
+        ALWAYS("always", "永久", "Permanently");
         val title: String get() = tr(zh, en)
         companion object { fun of(k: String?): Range = entries.firstOrNull { it.key == k } ?: ONCE }
     }
@@ -66,6 +68,32 @@ object StrongConfirm {
     @Volatile internal var roundIdleMs: () -> Long = { runCatching { com.kilon.agentvscreen.api.Turns.quietMs }.getOrDefault(10 * 60_000L).coerceAtLeast(60_000L) }
     const val GRANT_PREFIX = "GRANT:"
     fun grantKey(kind: String, pkg: String): String = "$GRANT_PREFIX$kind:$pkg"
+
+    /**
+     * 2.0.0-beta11 (rainbow: can an agent ask for a temporary or permanent elevation, confirmed from a notification).
+     * A temporary elevation is a grant, never a change to the agent's table: "row" lifts one class to Allowed, "level"
+     * lifts the whole table to a preset's. Both end with their range and show under the agent's 有效的临时许可.
+     */
+    const val ROW_GRANT = "row"
+    const val LEVEL_GRANT = "level"
+
+    /**
+     * The one answer to "how is [key] handled for [tok] right now": its table, raised by any temporary elevation in
+     * force. Every check (command scope, consent classes, rate) reads this, so a grant means the same everywhere.
+     */
+    fun effectiveAct(tok: Tokens.Token, key: String, nowMs: Long = clock(), touch: Boolean = true): com.kilon.agentvscreen.api.Policy.Act {
+        var best = tok.act(key)
+        if (best == com.kilon.agentvscreen.api.Policy.Act.ALLOW) return best
+        // Payments are never lifted by a row grant; a level grant can at most make them "ask" (each payment confirmed).
+        if (key != com.kilon.agentvscreen.api.Policy.MONEY && hasGrant(tok.id, grantKey(ROW_GRANT, key), nowMs, touch)) return com.kilon.agentvscreen.api.Policy.clamp(key, com.kilon.agentvscreen.api.Policy.Act.ALLOW)
+        for (lv in listOf(Tokens.FREE_SYSTEM, Tokens.FREE, Tokens.CAREFUL)) {
+            if (tok.publicOnly && lv !in Tokens.PUBLIC_LEVELS) continue
+            if (!hasGrant(tok.id, grantKey(LEVEL_GRANT, lv), nowMs, touch)) continue
+            val a = com.kilon.agentvscreen.api.Policy.table(lv, emptyMap(), tok.publicOnly)[key] ?: continue
+            if (a.rank > best.rank) best = a
+        }
+        return com.kilon.agentvscreen.api.Policy.clamp(key, best)
+    }
 
     data class Approval(
         val risk: String,
@@ -137,6 +165,8 @@ object StrongConfirm {
         @Volatile var answeredBy: String? = null
         @Volatile var answeredAt: Long = 0L
         @Volatile var used: Boolean = false
+        /** The range the user picked when allowing. */
+        @Volatile var chosenRange: Range? = null
 
         fun liveAt(nowMs: Long): Boolean = answer == null && nowMs - at < validMs
         val live: Boolean get() = liveAt(clock())
@@ -161,8 +191,35 @@ object StrongConfirm {
     private val _pending = MutableStateFlow<List<Request>>(emptyList())
     val pending: StateFlow<List<Request>> = _pending.asStateFlow()
 
+    /** Application context for work that runs off any caller (the expiry wake's notification clean-up). */
+    @Volatile private var appCtx: Context? = null
+
+    /** Republishes [pending] when the earliest waiting request runs out of time (see [ExpiryWake]). */
+    private val expiry = ExpiryWake("confirm") { expireDue() }
+    /** When the next waiting request runs out of time, or null when none is waiting (tests). */
+    internal val nextExpiryAt: Long? get() = expiry.dueAt
+
     fun init(ctx: Context) {
+        appCtx = ctx.applicationContext ?: ctx
         initFile(File(ctx.filesDir, APPROVALS_REL))
+    }
+
+    /**
+     * Time ran out for at least one waiting request: drop it from [pending] and its notification. Runs from the
+     * expiry wake, and from any screen that finds a request expired, so an expired request can never stay listed.
+     */
+    internal fun expireDue() {
+        val gone: List<Request>
+        synchronized(lock) {
+            val now = clock()
+            gone = requests.filter { it.answer == null && now - it.at >= it.validMs }
+            pruneRequestsLocked(now)
+            publishPendingLocked(now)
+        }
+        val ctx = appCtx ?: return
+        if (gone.isEmpty()) return
+        if (gone.any { it.pairingCode != null }) refreshPublicPairingNotification(ctx)
+        gone.filter { it.pairingCode == null }.forEach { cancelNotification(ctx, it.id) }
     }
 
     internal fun initFile(file: File) {
@@ -275,17 +332,18 @@ object StrongConfirm {
      * 2.0.0-beta8 (feedback 3): an allow the user gave for a range (this run / today). A "this run" allow ends after
      * a turn length without use and is extended each time it covers a step.
      */
-    fun hasGrant(tokenId: String, key: String, nowMs: Long = clock()): Boolean = synchronized(lock) {
+    fun hasGrant(tokenId: String, key: String, nowMs: Long = clock(), touch: Boolean = true): Boolean = synchronized(lock) {
         val i = approvalList.indexOfFirst { it.risk == key && it.token == tokenId && it.activeAt(nowMs) }
         if (i < 0) return@synchronized false
         val g = approvalList[i]
-        if (g.by.endsWith(":" + Range.ROUND.key)) approvalList[i] = g.copy(until = nowMs + roundIdleMs())
+        // [touch] false: only looking (the agent reading its permissions) does not extend a "this turn" allow.
+        if (touch && g.by.endsWith(":" + Range.ROUND.key)) approvalList[i] = g.copy(until = nowMs + roundIdleMs())
         true
     }
 
     internal fun putGrantLocked(tokenId: String, key: String, range: Range, by: String, nowMs: Long) {
         val until = when (range) {
-            Range.ONCE -> return
+            Range.ONCE, Range.ALWAYS -> return
             Range.ROUND -> nowMs + roundIdleMs()
             Range.TODAY -> java.time.LocalDate.now().plusDays(1).atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
         }
@@ -318,6 +376,21 @@ object StrongConfirm {
         if (removed) {
             Audit.security("approval_revoked", "risk=${approval.risk} token=${approval.token} client=${approval.client}")
         }
+    }
+
+    /**
+     * 2.0.0-beta11 (review): the user made [rows] stricter for [tokenId]: end the row elevations of those rows and every
+     * level elevation (a level lifts all rows), so the stricter rule applies now. Returns how many were ended.
+     */
+    fun dropElevations(tokenId: String, rows: Collection<String>): Int {
+        val keys = rows.map { grantKey(ROW_GRANT, it) }.toSet()
+        val gone = synchronized(lock) {
+            val drop = approvalList.filter { it.token == tokenId && (it.risk in keys || it.risk.startsWith("$GRANT_PREFIX$LEVEL_GRANT:")) }
+            if (drop.isNotEmpty()) { approvalList.removeAll(drop.toSet()); saveLocked(); publishApprovalsLocked() }
+            drop
+        }
+        gone.forEach { Audit.security("approval_revoked", "risk=${it.risk} token=$tokenId reason=tightened") }
+        return gone.size
     }
 
     /** 2.0.0-beta8 (feedback 5): many tokens, one write. */
@@ -603,8 +676,9 @@ object StrongConfirm {
      * Reuses any pending request for the same key (no duplicate notification), waits up to [WAIT_MS],
      * and throws `USER_DENIED` or `NEEDS_CONFIRM` (with structured `confirm` listing `risk` + `risks`).
      */
-    internal fun requireForRisks(ctx: Context, call: Call, risks: List<Risk>, commandName: String, targetLevel: String? = null) {
-        val list = risks.distinct().ifEmpty { return }
+    internal fun requireForRisks(ctx: Context, call: Call, risks: List<Risk>, commandName: String, targetLevel: String? = null,
+                                 detail: String = "", prefer: Range? = null): Range? {
+        val list = risks.distinct().ifEmpty { return null }
         // Feedback 3: only a high action rate alone is a light (tap) confirmation; a new agent or a higher level takes a fingerprint.
         val light = list.all { it == Risk.RATE }
         val primary = list.first()
@@ -622,7 +696,7 @@ object StrongConfirm {
             tokenScope = tokenScope,
             client = client,
             commandName = commandName,
-            detail = "",
+            detail = detail,
             validMs = VALID_MS,
             reusable = false,
             allowHold = call.source != Call.Source.PUBLIC,
@@ -630,8 +704,18 @@ object StrongConfirm {
             strength = if (light) Risk.Strength.TAP else Risk.Strength.BIOMETRIC,
             // A high rate asked together with a new agent: the one fingerprint also covers the rate for this run,
             // so the command does not stop again right after for a second (tap) confirmation.
-            ranges = if (light) listOf(Range.ROUND, Range.TODAY) else if (Risk.RATE in list) listOf(Range.ROUND) else listOf(Range.ONCE),
-            grantKey = if (Risk.RATE in list) grantKey("rate", "*") else null,
+            // An elevation (LEVEL_UP) is temporary unless the user picks 永久; the agent's preference goes first.
+            ranges = when {
+                Risk.LEVEL_UP in list && targetLevel != null -> elevationRanges(prefer)
+                light -> listOf(Range.ROUND, Range.TODAY)
+                Risk.RATE in list -> listOf(Range.ROUND)
+                else -> listOf(Range.ONCE)
+            },
+            grantKey = when {
+                Risk.LEVEL_UP in list && targetLevel != null -> elevationGrantKey(targetLevel)
+                Risk.RATE in list -> grantKey("rate", "*")
+                else -> null
+            },
             targetLevel = targetLevel,
         )
         if (created) notify(ctx, req)
@@ -641,7 +725,7 @@ object StrongConfirm {
         when (req.answer) {
             true -> {
                 synchronized(lock) { req.used = true; publishPendingLocked(clock()) }
-                return
+                return req.chosenRange
             }
             false -> {
                 synchronized(lock) { req.used = true; publishPendingLocked(clock()) }
@@ -663,7 +747,9 @@ object StrongConfirm {
                         .put("risk", primary.name)
                         .put("risks", risksArr)
                         .put("id", req.id)
-                        .put("expires_in_s", leftSec),
+                        .put("expires_in_s", leftSec)
+                        // 2.0.0-beta11: what an elevation asks for ("row:<class>" or a level), so the agent can say it.
+                        .also { c -> targetLevel?.let { c.put("asks_for", it) } },
                 )
                 throw ActionError(
                     "NEEDS_CONFIRM",
@@ -772,7 +858,7 @@ object StrongConfirm {
         }
     }
 
-    private fun getOrCreateRequest(
+    internal fun getOrCreateRequest(
         risk: Risk,
         key: String,
         tokenId: String,
@@ -860,11 +946,13 @@ object StrongConfirm {
                             val client = if (r.client.startsWith("public:")) r.client else Risk.CLIENT_ANY
                             putApprovalLocked(Approval(rk.name, r.tokenId, client, now, 0L, by)); saved = true
                         }
-                        Risk.LEVEL_UP -> r.targetLevel?.let { levelChange = r.tokenId to it }
+                        Risk.LEVEL_UP -> r.targetLevel?.takeIf { (range.takeIf { x -> x in r.ranges } ?: r.ranges.first()) == Range.ALWAYS }
+                            ?.let { levelChange = r.tokenId to it }
                         else -> {}
                     }
                 }
                 val chosen = range.takeIf { it in r.ranges } ?: r.ranges.first()
+                r.chosenRange = chosen
                 if (r.grantKey != null && chosen != Range.ONCE) { putGrantLocked(r.tokenId, r.grantKey, chosen, by, now); saved = true }
                 if (saved) {
                     saveLocked()
@@ -932,6 +1020,16 @@ object StrongConfirm {
         return true
     }
 
+    /** Ranges for an elevation: temporary first (the agent's [prefer] leads), 永久 last unless preferred. */
+    internal fun elevationRanges(prefer: Range?): List<Range> {
+        val all = listOf(Range.ROUND, Range.TODAY, Range.ALWAYS)
+        return if (prefer != null && prefer in all) listOf(prefer) + (all - prefer) else all
+    }
+
+    /** "row:<key>" → the row grant; a level name → the level grant. */
+    internal fun elevationGrantKey(target: String): String =
+        if (target.startsWith("row:")) grantKey(ROW_GRANT, target.removePrefix("row:")) else grantKey(LEVEL_GRANT, target)
+
     private fun pruneRequestsLocked(nowMs: Long) {
         requests.removeAll { r ->
             val expiredPending = r.answer == null && nowMs - r.at >= r.validMs
@@ -940,8 +1038,11 @@ object StrongConfirm {
         }
     }
 
+    /** The only writer of [pending]: publishes the live requests and arms the wake for the earliest expiry. */
     private fun publishPendingLocked(nowMs: Long) {
-        _pending.value = requests.filter { it.liveAt(nowMs) }.sortedByDescending { it.at }
+        val live = requests.filter { it.liveAt(nowMs) }
+        _pending.value = live.sortedByDescending { it.at }
+        expiry.at(live.minOfOrNull { it.at + it.validMs }, nowMs)
     }
 
     private fun newId(): String {
@@ -1139,7 +1240,7 @@ object StrongConfirm {
             waitMsOverride = null
             postNotification = true
             _approvals.value = emptyList()
-            _pending.value = emptyList()
+            publishPendingLocked(clock())
         }
     }
 }

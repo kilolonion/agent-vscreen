@@ -47,14 +47,26 @@ object Consent {
         val call = Call.current()
         val name = call?.tokenName ?: "main"; val session = call?.session ?: "default"
         val act = actFor(kind, call)
+        if (act == com.kilon.agentvscreen.api.Policy.Act.DENY && call != null && kind != MONEY && kind != APP) {
+            // 2.0.0-beta11: a class set to Not allowed asks for an elevation (the same card as `elevate`): this turn,
+            // today or permanently, by fingerprint. Payments are never elevated.
+            val risks = buildList {
+                if (!StrongConfirm.hasAgentApproval(call.tokenId, Risk.clientOf(call))) add(Risk.NEW_CLIENT)
+                add(Risk.LEVEL_UP)
+            }
+            StrongConfirm.requireForRisks(ctx, call, risks, kind, targetLevel = "row:$kind", detail = title)
+            Audit.consent(name, session, "$title — $detail", "elevated")
+            return
+        }
         if (act == com.kilon.agentvscreen.api.Policy.Act.DENY) {
             Audit.consent(name, session, "$title — $detail", "not allowed")
             val row = com.kilon.agentvscreen.api.Policy.row(kind)?.title ?: kind
             throw ActionError("SCOPE_DENIED", tr("用户给这个 agent 定的规则里，“$row”是不允许：$title 没有做。不要换别的办法绕过；需要的话请用户在 Agent-VScreen › 接入 › 这个 agent 里改",
                 "The user's rules for this agent say \"$row\" is not allowed: $title was not done. Don't work around it; if needed, ask the user to change it in Agent-VScreen › Connect › this agent"))
         }
-        // "Payments allowed for a while" (the agent page) passes every class; the user's own app rule still asks.
-        if (call?.trusted == true && kind != APP) { Audit.consent(name, session, "$title — $detail", "pre-authorized"); return }
+        // "Payments allowed for a while" (the agent page) passes payments only, as its card says. 2.0.0-beta11 (review):
+        // it used to pass every class, so an irreversible step set to ask went through without asking too.
+        if (call?.trusted == true && kind == MONEY) { Audit.consent(name, session, "$title — $detail", "pre-authorized"); return }
         if (act == com.kilon.agentvscreen.api.Policy.Act.ALLOW) {
             Audit.consent(name, session, "$title — $detail", "automatic"); return
         }
@@ -65,7 +77,7 @@ object Consent {
     fun actFor(kind: String, call: Call?): com.kilon.agentvscreen.api.Policy.Act {
         if (kind == APP) return com.kilon.agentvscreen.api.Policy.Act.ASK
         val t = com.kilon.agentvscreen.api.Tokens.byId(call?.tokenId ?: com.kilon.agentvscreen.api.Tokens.MAIN)
-        return t?.act(kind) ?: com.kilon.agentvscreen.api.Policy.table(com.kilon.agentvscreen.api.Tokens.FREE, emptyMap())[kind] ?: com.kilon.agentvscreen.api.Policy.Act.ASK
+        return t?.let { StrongConfirm.effectiveAct(it, kind) } ?: com.kilon.agentvscreen.api.Policy.table(com.kilon.agentvscreen.api.Tokens.FREE, emptyMap())[kind] ?: com.kilon.agentvscreen.api.Policy.Act.ASK
     }
 
     /** Feedback 3: money is allowed one step at a time; the other classes can be allowed for this run (and the milder ones, today). */
