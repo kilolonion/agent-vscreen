@@ -38,6 +38,17 @@ object Changes {
     /** Releases ordered newest first. Add a new [Release] entry whenever versionCode bumps. */
     val releases: List<Release> = listOf(
         Release(
+            versionCode = 69,
+            versionName = "2.0.0-beta12",
+            items = listOf(
+                Item(Kind.IMPROVED, Audience.USER, "公网设置指南里直接填写",
+                    "Cloudflare 和 ngrok 指南的每一步里就能粘贴令牌和域名，复制后回来点“粘贴并保存”，不用退出指南。",
+                    "Fill in right in the public setup guide",
+                    "In the Cloudflare and ngrok guides, paste the token and domain in the step that asks for them: copy, come back and press Paste and save, without leaving the guide.",
+                    Route.PublicAccess),
+            ),
+        ),
+        Release(
             versionCode = 68,
             versionName = "2.0.0-beta11",
             items = listOf(
