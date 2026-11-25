@@ -105,6 +105,12 @@ hold on|off：按当前 agent 保存默认是否开启 act --hold（默认 off�
 
 权限范围: `operate`
 
+### `permissions`
+
+这个 agent 现在的权限：每类操作是允许、每次确认还是不允许，临时许可何时结束，哪些应用每次确认、禁止或只读，以及固定边界。任务开始前看一次，按它规划；用户问起时照此转告。手机在每条命令执行前按同一张表检查。
+
+权限范围: `look`
+
 ### `elevate <类别|档位> [--why <原因>] [--for <round|today|always>]`
 
 提前向用户申请更高的许可，写明原因：手机上弹出确认（通知 → 指纹），用户选择本轮任务内、今天内或永久。类别 caution/destroy/system/operate/rate，档位 careful/free/free_system。
@@ -484,6 +490,12 @@ scope: `look` · runs in the screen queue
 show what you are doing on the floating window (up to 40 characters, for the user; no text = clear; cleared when this turn ends).
 
 scope: `operate`
+
+### `permissions`
+
+this agent's permissions now: whether each class of action is allowed, confirmed each time or not allowed, when temporary allows end, which apps confirm every time, are blocked or read-only, and the fixed limits. Read it once before a task and plan by it; pass it on when the user asks. The phone checks every command against the same table before it runs.
+
+scope: `look`
 
 ### `elevate <class|level> [--why <reason>] [--for <round|today|always>]`
 

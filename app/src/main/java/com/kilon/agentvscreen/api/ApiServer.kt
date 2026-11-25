@@ -704,7 +704,10 @@ class ApiServer(private val ctx: Context) {
             val res0 = handler.handle(NativeOffloadRequest(listOf("vscreen") + argv, session))
             // 1.3 beta4: the agent's note is for an older version: what changed, and how to refresh it (AgentNews).
             val notice = AgentNews.notice(com.kilon.agentvscreen.cmd.Call.current()?.tokenId ?: "main", fresh, com.kilon.agentvscreen.cmd.Call.current()?.via ?: Abilities.Via.CLI)
-            val res = if (notice != null) res0.copy(output = notice + "\n" + res0.output) else res0
+            // 2.0.0-beta11: the agent's permissions changed since its last reply (host/Permissions).
+            val permNote = com.kilon.agentvscreen.host.Permissions.changeNotice(com.kilon.agentvscreen.cmd.Call.current())
+            val res1 = if (permNote != null) res0.copy(output = permNote + "\n" + res0.output) else res0
+            val res = if (notice != null) res1.copy(output = notice + "\n" + res1.output) else res1
             if (notice != null) return res
             // First call after a long silence (likely a new conversation): one line pointing at the short usage.
             if (!fresh || argv.first() == "help") return res

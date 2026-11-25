@@ -42,6 +42,7 @@ class V200Beta11ElevateTest {
         StrongConfirm.roundIdleMs = { 10 * 60_000L }
         Risk.resetForTests(); Risk.clock = { now.get() }
         Consent.reset()
+        com.kilon.agentvscreen.host.Permissions.resetForTests()
     }
 
     @After fun tearDown() { StrongConfirm.resetForTests(); Risk.resetForTests() }
@@ -101,6 +102,32 @@ class V200Beta11ElevateTest {
         assertEquals("INVALID_ARGS", elevate(call, "destroy").first)
         assertEquals(null, elevate(call, "operate", "--why", "x").first) // already allowed: nothing asked
         assertTrue(StrongConfirm.pending.value.isEmpty())
+        Tokens.revoke(t.id)
+    }
+
+    @Test fun permissionsAreReadFromWhatIsEnforcedAndChangesAreAnnounced() {
+        val P = com.kilon.agentvscreen.host.Permissions
+        val (t, _) = Tokens.createLevel("agent-q", Tokens.FREE)
+        StrongConfirm.grantAgent(t.id)
+        val call = Call("s1", tokenId = t.id, tokenName = t.name)
+        val o = P.json(call)
+        val rows = (0 until o.getJSONArray("classes").length()).map { o.getJSONArray("classes").getJSONObject(it) }.associateBy { it.getString("class") }
+        val tok = Tokens.byId(t.id)!!
+        Policy.ROWS.forEach { r -> assertEquals(StrongConfirm.effectiveAct(tok, r.key).key, rows.getValue(r.key).getString("handling")) }
+        assertTrue(P.text(call).contains("不可撤销操作"))
+        assertEquals(null, P.changeNotice(call)) // first reply only sets the baseline
+        assertEquals(null, P.changeNotice(call))
+        Tokens.setAct(t.id, Policy.CAUTION, Act.DENY)
+        val note = P.changeNotice(call)!!
+        assertTrue(note, note.contains("敏感操作") && note.contains("不允许"))
+        assertEquals(null, P.changeNotice(call))
+        // A temporary allow shows as raised, and reading does not extend a "this turn" allow.
+        val (_, id) = elevate(call, "caution", "--why", "x")
+        StrongConfirm.approve(ctx, id!!, StrongConfirm.BY_BIOMETRIC, range = StrongConfirm.Range.ROUND)
+        val raised = P.json(call).getJSONArray("classes").let { a -> (0 until a.length()).map { a.getJSONObject(it) } }.first { it.getString("class") == Policy.CAUTION }
+        assertEquals("allow", raised.getString("handling")); assertTrue(raised.has("raised_by"))
+        now.addAndGet(9 * 60_000L); P.json(call); now.addAndGet(2 * 60_000L)
+        assertEquals(Act.DENY, StrongConfirm.effectiveAct(Tokens.byId(t.id)!!, Policy.CAUTION))
         Tokens.revoke(t.id)
     }
 }

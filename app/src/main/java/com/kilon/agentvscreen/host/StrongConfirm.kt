@@ -81,14 +81,14 @@ object StrongConfirm {
      * The one answer to "how is [key] handled for [tok] right now": its table, raised by any temporary elevation in
      * force. Every check (command scope, consent classes, rate) reads this, so a grant means the same everywhere.
      */
-    fun effectiveAct(tok: Tokens.Token, key: String, nowMs: Long = clock()): com.kilon.agentvscreen.api.Policy.Act {
+    fun effectiveAct(tok: Tokens.Token, key: String, nowMs: Long = clock(), touch: Boolean = true): com.kilon.agentvscreen.api.Policy.Act {
         var best = tok.act(key)
         if (best == com.kilon.agentvscreen.api.Policy.Act.ALLOW) return best
         // Payments are never lifted by a row grant; a level grant can at most make them "ask" (each payment confirmed).
-        if (key != com.kilon.agentvscreen.api.Policy.MONEY && hasGrant(tok.id, grantKey(ROW_GRANT, key), nowMs)) return com.kilon.agentvscreen.api.Policy.clamp(key, com.kilon.agentvscreen.api.Policy.Act.ALLOW)
+        if (key != com.kilon.agentvscreen.api.Policy.MONEY && hasGrant(tok.id, grantKey(ROW_GRANT, key), nowMs, touch)) return com.kilon.agentvscreen.api.Policy.clamp(key, com.kilon.agentvscreen.api.Policy.Act.ALLOW)
         for (lv in listOf(Tokens.FREE_SYSTEM, Tokens.FREE, Tokens.CAREFUL)) {
             if (tok.publicOnly && lv !in Tokens.PUBLIC_LEVELS) continue
-            if (!hasGrant(tok.id, grantKey(LEVEL_GRANT, lv), nowMs)) continue
+            if (!hasGrant(tok.id, grantKey(LEVEL_GRANT, lv), nowMs, touch)) continue
             val a = com.kilon.agentvscreen.api.Policy.table(lv, emptyMap(), tok.publicOnly)[key] ?: continue
             if (a.rank > best.rank) best = a
         }
@@ -332,11 +332,12 @@ object StrongConfirm {
      * 2.0.0-beta8 (feedback 3): an allow the user gave for a range (this run / today). A "this run" allow ends after
      * a turn length without use and is extended each time it covers a step.
      */
-    fun hasGrant(tokenId: String, key: String, nowMs: Long = clock()): Boolean = synchronized(lock) {
+    fun hasGrant(tokenId: String, key: String, nowMs: Long = clock(), touch: Boolean = true): Boolean = synchronized(lock) {
         val i = approvalList.indexOfFirst { it.risk == key && it.token == tokenId && it.activeAt(nowMs) }
         if (i < 0) return@synchronized false
         val g = approvalList[i]
-        if (g.by.endsWith(":" + Range.ROUND.key)) approvalList[i] = g.copy(until = nowMs + roundIdleMs())
+        // [touch] false: only looking (the agent reading its permissions) does not extend a "this turn" allow.
+        if (touch && g.by.endsWith(":" + Range.ROUND.key)) approvalList[i] = g.copy(until = nowMs + roundIdleMs())
         true
     }
 
@@ -731,7 +732,9 @@ object StrongConfirm {
                         .put("risk", primary.name)
                         .put("risks", risksArr)
                         .put("id", req.id)
-                        .put("expires_in_s", leftSec),
+                        .put("expires_in_s", leftSec)
+                        // 2.0.0-beta11: what an elevation asks for ("row:<class>" or a level), so the agent can say it.
+                        .also { c -> targetLevel?.let { c.put("asks_for", it) } },
                 )
                 throw ActionError(
                     "NEEDS_CONFIRM",

@@ -223,7 +223,7 @@ If your MCP connectors can only be added by me in your web settings (e.g. custom
         "schedule" to listOf("schedule"),
         "keep" to listOf("keep", "events"),
         "screen" to listOf("look", "spots", "tasks", "launch", "sound", "stop", "release", "done", "title"),
-        "safety" to listOf("ask", "elevate", "handoff", "status", "fix", "diag"),
+        "safety" to listOf("ask", "permissions", "elevate", "handoff", "status", "fix", "diag"),
         "codes" to emptyList(),
     )
 

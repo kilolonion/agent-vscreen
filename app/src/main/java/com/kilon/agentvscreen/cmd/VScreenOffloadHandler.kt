@@ -56,7 +56,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         }
 
         /** Commands that do not read the app on the screen themselves (act and launch check the app rules per step). */
-        internal val RULE_FREE = setOf("status", "apps", "sound", "release", "stop", "fix", "help", "handoff", "note", "keep", "schedule", "ask", "teach", "launch", "act", "events", "done", "title", "task", "tasks", "diag", "elevate")
+        internal val RULE_FREE = setOf("status", "apps", "sound", "release", "stop", "fix", "help", "handoff", "note", "keep", "schedule", "ask", "teach", "launch", "act", "events", "done", "title", "task", "tasks", "diag", "elevate", "permissions")
 
         /**
          * 1.2: the screen queue. There is one background screen; commands that work on it run one at a time, in the
@@ -296,6 +296,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
             "done" -> doneCmd(sid)
             "title" -> titleCmd(sid, args)
             "elevate" -> elevateCmd(args)
+            "permissions" -> NativeOffloadResult(0, com.kilon.agentvscreen.host.Permissions.text(Call.current()), data = com.kilon.agentvscreen.host.Permissions.json(Call.current()))
             "spots" -> spotsCmd(sid, args)
             "look" -> lookCmd(sid, args)
             "zoom" -> lookCmd(sid, args, "zoom")
