@@ -26,6 +26,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.kilon.agentvscreen.host.Cloudflared
+import com.kilon.agentvscreen.host.Ngrok
+import com.kilon.agentvscreen.host.PublicTunnel
+import com.kilon.agentvscreen.host.TunnelSelfTest
+import com.kilon.agentvscreen.host.TunnelState
 import com.kilon.agentvscreen.host.PublicAccess
 import com.kilon.agentvscreen.tr
 import top.yukonga.miuix.kmp.basic.BasicComponent
@@ -46,7 +50,11 @@ fun PublicGuidePage(channelKey: String) {
         title = tr("设置指南", "Setup guide"),
         subtitle = channel.title,
     ) {
-        if (channel == PublicAccess.Channel.CLOUDFLARE) CloudflareGuide() else TailscaleGuide()
+        when (channel) {
+            PublicAccess.Channel.CLOUDFLARE -> CloudflareGuide()
+            PublicAccess.Channel.NGROK -> NgrokGuide()
+            PublicAccess.Channel.TAILSCALE -> TailscaleGuide()
+        }
     }
 }
 
@@ -112,7 +120,7 @@ private fun TailscaleGuide() {
         Problem(tr("清单提示未开启 HTTPS", "Checklist says HTTPS is off"), tr("完成第 2 步，回到 App 会自动重查。", "Do step 2; returning to the app rechecks."))
         Problem(tr("提示 Funnel 未授权或 443 不可用", "Funnel not allowed or port 443 unavailable"), tr("完成第 3 步；改完策略后关闭再开启公网接入。", "Do step 3; after changing the policy turn public access off and on."))
         Problem(tr("一直显示正在申请证书", "Stuck requesting the certificate"), tr("首次可能需要一分钟以上；超过 3 分钟请关闭再开启。开着代理 VPN 时，把 Agent-VScreen 设为直连。", "The first one can take over a minute; after 3 minutes turn it off and on. With a proxy VPN on, let Agent-VScreen bypass it."))
-        Problem(tr("用的是 Headscale", "Using Headscale"), tr("Headscale 没有 Funnel，请改用 Cloudflare Tunnel。", "Headscale has no Funnel; use Cloudflare Tunnel instead."))
+        Problem(tr("用的是 Headscale", "Using Headscale"), tr("Headscale 没有 Funnel，请改用 Cloudflare Tunnel 或 ngrok。", "Headscale has no Funnel; use Cloudflare Tunnel or ngrok instead."))
     }
     Footnote(tr("Tailscale 管理页的菜单名称以其当前界面为准。", "Menu names in the Tailscale admin may change; follow what it shows now."))
 }
@@ -191,35 +199,37 @@ fun CloudflareSetupSection() {
     }
 }
 
-/** Live state of the tunnel and the self-test, while Cloudflare public access is on. */
+/** Live state of the tunnel and the self-test, while a tunnel channel (Cloudflare, ngrok) is on. */
 @Composable
-fun CloudflareRunning(mcpUrl: String?) {
+fun TunnelRunning(t: PublicTunnel, mcpUrl: String?) {
     val host = LocalHost.current
-    val st by Cloudflared.status.collectAsState()
-    val test by Cloudflared.selfTest.collectAsState()
+    val st by t.status.collectAsState()
+    val test by t.selfTest.collectAsState()
     var raw by remember { mutableStateOf(false) }
+    val p = t.provider
+    val where = listOfNotNull(if (st.connections > 1) tr("${st.connections} 条连接", "${st.connections} connections") else null, st.location).joinToString(" · ")
     val (title, color) = when (st.state) {
-        Cloudflared.State.CONNECTED -> tr("已连上 Cloudflare（${st.connections} 条连接${st.location?.let { " · $it" } ?: ""}）", "Connected to Cloudflare (${st.connections} connections${st.location?.let { " · $it" } ?: ""})") to Palette.takeover
-        Cloudflared.State.STARTING -> tr("正在连接 Cloudflare…", "Connecting to Cloudflare…") to Palette.standby
-        Cloudflared.State.ERROR -> tr("没有连上 Cloudflare", "Not connected to Cloudflare") to Palette.stopped
-        Cloudflared.State.OFF -> tr("未运行", "Not running") to Palette.stopped
+        TunnelState.CONNECTED -> tr("已连上 $p", "Connected to $p") + (if (where.isNotEmpty()) tr("（$where）", " ($where)") else "") to Palette.takeover
+        TunnelState.STARTING -> tr("正在连接 $p…", "Connecting to $p…") to Palette.standby
+        TunnelState.ERROR -> tr("没有连上 $p", "Not connected to $p") to Palette.stopped
+        TunnelState.OFF -> tr("未运行", "Not running") to Palette.stopped
     }
     BasicComponent(title = tr("隧道连接", "Tunnel connection"), summary = title + (st.problem?.let { "\n$it" } ?: ""), endActions = { Dot(color, 8.dp) },
         onClick = if (st.raw != null) ({ raw = !raw }) else null)
     if (raw && st.raw != null) WrappableCode(st.raw!!) { host.copy(tr("详情", "Details"), st.raw!!) }
-    val (tTitle, tColor) = when (val t = test) {
+    val (tTitle, tColor) = when (val r = test) {
         null -> tr("连上后自动检查", "Runs once connected") to MiuixTheme.colorScheme.onSurfaceVariantSummary
-        Cloudflared.SelfTest.Running -> tr("正在从公网访问本机…", "Reaching this phone from the internet…") to Palette.standby
-        Cloudflared.SelfTest.Ok -> tr("通过：外网已能访问这台手机", "Passed: the internet reaches this phone") to Palette.takeover
-        is Cloudflared.SelfTest.Failed -> "${t.title}\n${t.fix}" to Palette.stopped
+        TunnelSelfTest.Running -> tr("正在从公网访问本机…", "Reaching this phone from the internet…") to Palette.standby
+        TunnelSelfTest.Ok -> tr("通过：外网已能访问这台手机", "Passed: the internet reaches this phone") to Palette.takeover
+        is TunnelSelfTest.Failed -> "${r.title}\n${r.fix}" to Palette.stopped
     }
     BasicComponent(title = tr("公网地址自检", "Public address self-test"), summary = tTitle, endActions = { Dot(tColor, 8.dp) })
-    if (st.state == Cloudflared.State.CONNECTED) Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-        SoftButton(onClick = { Thread({ Cloudflared.selfTest() }, "vscreen-cf-test").apply { isDaemon = true }.start() }, modifier = Modifier.fillMaxWidth()) {
+    if (st.state == TunnelState.CONNECTED) Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        SoftButton(onClick = { Thread({ t.runSelfTest() }, "vscreen-tunnel-test").apply { isDaemon = true }.start() }, modifier = Modifier.fillMaxWidth()) {
             Text(tr("重新自检", "Run the self-test again"), color = MiuixTheme.colorScheme.primary)
         }
     }
-    if (mcpUrl != null && test == Cloudflared.SelfTest.Ok) {
+    if (mcpUrl != null && test == TunnelSelfTest.Ok) {
         WrappableCode(mcpUrl) { host.copy(tr("MCP 地址", "MCP URL"), mcpUrl) }
         Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
             PrimaryButton(onClick = { host.copy(tr("MCP 地址", "MCP URL"), mcpUrl) }, modifier = Modifier.fillMaxWidth(), color = MiuixTheme.colorScheme.primary) {
@@ -228,5 +238,65 @@ fun CloudflareRunning(mcpUrl: String?) {
         }
     } else if (mcpUrl != null) {
         Footnote(tr("地址：$mcpUrl（自检通过后再交给客户端）", "Address: $mcpUrl (give it to the client after the self-test passes)"))
+    }
+}
+
+@Composable
+private fun NgrokGuide() {
+    val open = openUrl()
+    Group(tr("适合谁", "Who it suits"), padded = true) {
+        Text(tr("没有自己的域名、不想折腾 DNS，也不用 Tailscale；或者用的是 Headscale。注册 ngrok 免费账号即可，免费账号自带一个固定域名，地址形如 https://名字.ngrok-free.app/mcp。手机主动连到 ngrok，不需要公网 IP，也不用开端口。",
+            "You have no domain, don't want to deal with DNS, and don't use Tailscale; or you use Headscale. A free ngrok account is enough: it comes with one static domain, so the address looks like https://name.ngrok-free.app/mcp. The phone dials out to ngrok: no public IP, no open port."),
+            fontSize = 13.5.sp, lineHeight = 20.sp)
+        Text(tr("要知道：ngrok 会在它的服务器上解开 HTTPS 再转发，技术上看得到请求内容。配对、OAuth 和权限检查仍在手机上进行。免费账号有流量和请求数上限，个人使用一般够用；同一账号同时只能有一个 ngrok 在线。在中国大陆，连接速度因网络而异。",
+            "Note: ngrok decrypts HTTPS on its servers before forwarding, so it can technically see requests. Pairing, OAuth and permission checks still happen on the phone. Free accounts have traffic and request limits, usually enough for personal use, and allow one ngrok online at a time. In mainland China, speed varies by network."),
+            fontSize = 12.5.sp, lineHeight = 18.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+    }
+    Group(tr("步骤", "Steps")) {
+        Step(1, tr("注册 ngrok 账号", "Sign up for ngrok"),
+            tr("用邮箱或 GitHub、Google 账号注册（免费），按提示完成验证。不需要下载或安装 ngrok：代理就在这台手机上。", "Sign up with email, GitHub or Google (free) and finish the verification it asks for. No need to download or install ngrok: the agent is this phone."),
+            buttons = listOf(Btn(tr("打开 ngrok 注册", "Open ngrok sign-up")) { open(Ngrok.SIGNUP_URL) }))
+        Step(2, tr("复制 authtoken", "Copy your authtoken"),
+            tr("后台左侧 Getting Started › Your Authtoken，点复制，粘贴到公网页面的“authtoken”。粘贴整条 ngrok config add-authtoken 命令也可以。", "In the dashboard, Getting Started › Your Authtoken, press copy and paste it into Authtoken on the public page. Pasting the whole ngrok config add-authtoken command works too."),
+            buttons = listOf(Btn(tr("打开 Your Authtoken", "Open Your Authtoken")) { open(Ngrok.TOKEN_URL) }))
+        Step(3, tr("复制你的固定域名", "Copy your static domain"),
+            tr("后台左侧 Universal Gateway › Domains（旧版界面在 Cloud Edge › Domains）。免费账号已自动分配一个，形如 名字.ngrok-free.app；列表为空时点“新建域名”领取。把它粘贴到“固定域名”。", "In the dashboard, Universal Gateway › Domains (older screens: Cloud Edge › Domains). Free accounts already have one, like name.ngrok-free.app; if the list is empty, create one. Paste it into Static domain."),
+            buttons = listOf(Btn(tr("打开 Domains", "Open Domains")) { open(Ngrok.DOMAINS_URL) }))
+        Step(4, tr("保存并开启", "Save and turn it on"),
+            tr("保存后清单全部 ✓，同意风险说明，点“开启公网接入”并验证指纹。", "After saving, when the checklist is all ✓, accept the risk note, press Turn on public access and confirm with your fingerprint."))
+        Step(5, tr("等两项变绿，再交给客户端", "Wait for two green rows, then give it to the client"),
+            tr("“隧道连接”显示已连上、“公网地址自检”通过，就可以复制 MCP 地址添加到云端客户端。第一次连接时在手机上核对配对码并批准。在浏览器里打开配对页时，ngrok 可能先显示一个提示页，点 Visit Site 继续即可。", "When Tunnel connection shows connected and Public address self-test passes, copy the MCP address into the cloud client. On the first connection check the pairing code on the phone and approve. If a browser opens the pairing page, ngrok may show a notice first; press Visit Site to continue."))
+    }
+    Group(tr("常见问题", "Common problems")) {
+        Problem(tr("不认这个 authtoken（ERR_NGROK_105）", "Authtoken not accepted (ERR_NGROK_105)"), tr("重新从 Your Authtoken 复制。在后台重置过令牌后，旧令牌会失效。", "Copy it again from Your Authtoken. Resetting it in the dashboard invalidates the old one."))
+        Problem(tr("已有代理在线（ERR_NGROK_108）", "An agent is already online (ERR_NGROK_108)"), tr("免费账号同时只能一个 ngrok 在线：关掉电脑等其它地方的 ngrok，或在后台 Agents 页面断开。", "Free accounts allow one ngrok online at a time: stop ngrok elsewhere, or disconnect it under Agents in the dashboard."))
+        Problem(tr("域名不属于这个账号", "Domain not on this account"), tr("填写的域名必须是这个账号 Domains 页面里列出的那个，注意拼写。", "The domain must be the one listed under Domains for this account; check the spelling."))
+        Problem(tr("自检：地址离线（ERR_NGROK_3200）", "Self-test: address offline (ERR_NGROK_3200)"), tr("等“隧道连接”变为已连上再自检；一直离线时检查 authtoken 和域名是否属于同一个账号。", "Wait for Tunnel connection to show connected; if it stays offline, check the authtoken and domain are on the same account."))
+        Problem(tr("一直连不上 ngrok", "Never connects to ngrok"), tr("开着代理 VPN 时把 Agent-VScreen 设为直连；部分网络会拦截 ngrok，换个网络试试。", "With a proxy VPN, let Agent-VScreen bypass it; some networks block ngrok, try another."))
+    }
+    Footnote(tr("authtoken 相当于这个 ngrok 账号的钥匙，只保存在本机。怀疑泄露时，在 ngrok 后台重置，再把新令牌粘贴进来。ngrok 后台的菜单名称以其当前界面为准。",
+        "The authtoken is the key to this ngrok account and is kept only on this phone. If it may have leaked, reset it in the dashboard and paste the new one. ngrok's menu names may change; follow what it shows now."))
+}
+
+/** The ngrok settings the user fills in (authtoken, static domain). */
+@Composable
+fun NgrokSetupSection() {
+    val host = LocalHost.current
+    val cfg by Ngrok.config.collectAsState()
+    var token by rememberSaveable { mutableStateOf("") }
+    var domain by rememberSaveable(cfg.domain) { mutableStateOf(cfg.domain.orEmpty()) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    Group("ngrok") {
+        TextField(value = token, onValueChange = { token = it }, label = if (cfg.token != null) tr("authtoken（已保存，粘贴新的可替换）", "Authtoken (saved; paste a new one to replace)") else tr("authtoken：从 ngrok 后台复制", "Authtoken: copy it from the ngrok dashboard"),
+            useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
+        TextField(value = domain, onValueChange = { domain = it.take(253) }, label = tr("固定域名，例如 name.ngrok-free.app", "Static domain, e.g. name.ngrok-free.app"),
+            useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp))
+        problem?.let { Text(it, fontSize = 12.5.sp, lineHeight = 18.sp, color = MiuixTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) }
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+            SoftButton(onClick = {
+                problem = Ngrok.save(token.takeIf { it.isNotBlank() }, domain.takeIf { it.isNotBlank() })
+                if (problem == null) { token = ""; host.say(tr("已保存", "Saved")) }
+            }, modifier = Modifier.fillMaxWidth()) { Text(tr("保存", "Save"), color = MiuixTheme.colorScheme.primary) }
+        }
     }
 }

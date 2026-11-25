@@ -141,13 +141,14 @@ fun ConnectPage(tab: Boolean = false, bottom: androidx.compose.ui.unit.Dp = 0.dp
                 summary = remember(ts) { Tailnet.line(ctx) },
                 onClick = { nav.go(Route.Remote) },
             )
-            val cfState by com.kilon.agentvscreen.host.Cloudflared.status.collectAsState()
             val pubChannel by com.kilon.agentvscreen.host.PublicAccess.channelFlow.collectAsState()
-            val cf = pubChannel == com.kilon.agentvscreen.host.PublicAccess.Channel.CLOUDFLARE
+            val tunnel = pubChannel.tunnel
+            val tunnelState = tunnel?.status?.collectAsState()?.value?.state
+            val cf = tunnel != null
             val pubStatus = when {
                 !pubOn -> tr("未开启", "Off")
-                cf && cfState.state == com.kilon.agentvscreen.host.Cloudflared.State.CONNECTED -> tr("已开启", "On")
-                cf && cfState.state == com.kilon.agentvscreen.host.Cloudflared.State.ERROR -> tr("连接失败", "Failed")
+                cf && tunnelState == com.kilon.agentvscreen.host.TunnelState.CONNECTED -> tr("已开启", "On")
+                cf && tunnelState == com.kilon.agentvscreen.host.TunnelState.ERROR -> tr("连接失败", "Failed")
                 cf -> tr("启动中", "Starting")
                 ts.funnel == "on" -> tr("已开启", "On")
                 ts.funnel == "cert" -> tr("申请证书中", "Cert…")
@@ -156,14 +157,14 @@ fun ConnectPage(tab: Boolean = false, bottom: androidx.compose.ui.unit.Dp = 0.dp
             }
             ArrowPreference(
                 title = tr("云端（公网 MCP）", "Cloud (Public MCP)"),
-                summary = if (pubOn) com.kilon.agentvscreen.host.PublicAccess.mcpUrl() ?: tr("通过 Tailscale Funnel 连接", "Via Tailscale Funnel")
-                    else tr("供云端 MCP 客户端连接（Tailscale 或 Cloudflare）", "For cloud MCP clients (Tailscale or Cloudflare)"),
+                summary = if (pubOn) com.kilon.agentvscreen.host.PublicAccess.mcpUrl() ?: tr("通过 ${pubChannel.title} 连接", "Via ${pubChannel.title}")
+                    else tr("供云端 MCP 客户端连接（Tailscale、Cloudflare 或 ngrok）", "For cloud MCP clients (Tailscale, Cloudflare or ngrok)"),
                 endActions = {
                     Value(
                         pubStatus,
                         when {
-                            pubOn && cf && cfState.state == com.kilon.agentvscreen.host.Cloudflared.State.CONNECTED -> Palette.takeover
-                            pubOn && cf && cfState.state == com.kilon.agentvscreen.host.Cloudflared.State.ERROR -> Palette.stopped
+                            pubOn && cf && tunnelState == com.kilon.agentvscreen.host.TunnelState.CONNECTED -> Palette.takeover
+                            pubOn && cf && tunnelState == com.kilon.agentvscreen.host.TunnelState.ERROR -> Palette.stopped
                             pubOn && !cf && ts.funnel == "on" -> Palette.takeover
                             pubOn && !cf && ts.funnel == "error" -> Palette.stopped
                             pubOn -> Palette.standby
@@ -257,7 +258,8 @@ fun NewAgentPage() {
     val remoteReady = where == 1 && remoteBase != null
     val pubChannel by com.kilon.agentvscreen.host.PublicAccess.channelFlow.collectAsState()
     val cfCfg by com.kilon.agentvscreen.host.Cloudflared.config.collectAsState()
-    val cloudUrl = remember(ts.dnsName, pubChannel, cfCfg) { com.kilon.agentvscreen.host.PublicAccess.mcpUrl() }
+    val ngCfg by com.kilon.agentvscreen.host.Ngrok.config.collectAsState()
+    val cloudUrl = remember(ts.dnsName, pubChannel, cfCfg, ngCfg) { com.kilon.agentvscreen.host.PublicAccess.mcpUrl() }
     val base = if (where == 1 && remoteBase != null) remoteBase else ApiConfig.baseUrl
     val canCopyLocal = where == 0 || remoteReady
     val canAdvanceWhere = where == 0 || remoteReady || where == 2
@@ -365,7 +367,7 @@ fun NewAgentPage() {
             }
             RadioButtonPreference(
                 title = tr("云端（公网 MCP）", "Cloud (Public MCP)"),
-                summary = tr("Claude、ChatGPT 等云端客户端，通过 Tailscale Funnel 或 Cloudflare Tunnel 配对连接", "Cloud MCP clients via Tailscale Funnel or Cloudflare Tunnel with on-phone pairing"),
+                summary = tr("Claude、ChatGPT 等云端客户端，通过 Tailscale Funnel、Cloudflare Tunnel 或 ngrok 配对连接", "Cloud MCP clients via Tailscale Funnel, Cloudflare Tunnel or ngrok with on-phone pairing"),
                 selected = where == 2,
                 onClick = { where = 2 },
             )

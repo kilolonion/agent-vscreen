@@ -5,6 +5,7 @@ import com.kilon.agentvscreen.api.ApiServer
 import com.kilon.agentvscreen.api.PublicServer
 import com.kilon.agentvscreen.host.Cloudflared
 import com.kilon.agentvscreen.host.PublicAccess
+import com.kilon.agentvscreen.host.TunnelSelfTest
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -77,9 +78,9 @@ class V200Beta11CloudflareTest {
         assertTrue(Cloudflared.explain("ERR Unable to reach the origin service. dial tcp 127.0.0.1:18790: connect: connection refused")!!.contains("127.0.0.1:18790"))
         assertNull(Cloudflared.explain("INF Starting metrics server"))
         val base = "https://phone.example.com"
-        assertEquals(Cloudflared.SelfTest.Ok, Cloudflared.judge(base, 200, """{"resource":"$base/mcp"}"""))
-        assertTrue((Cloudflared.judge(base, 530, "error code: 1033") as Cloudflared.SelfTest.Failed).title.contains("未连接"))
-        assertTrue((Cloudflared.judge(base, 502, "Bad gateway") as Cloudflared.SelfTest.Failed).fix.contains("18790"))
-        assertTrue(Cloudflared.judge(base, 200, """{"resource":"https://other/mcp"}""") is Cloudflared.SelfTest.Failed)
+        assertEquals(TunnelSelfTest.Ok, Cloudflared.judge(base, 200, """{"resource":"$base/mcp"}"""))
+        assertTrue((Cloudflared.judge(base, 530, "error code: 1033") as TunnelSelfTest.Failed).title.contains("未连接"))
+        assertTrue((Cloudflared.judge(base, 502, "Bad gateway") as TunnelSelfTest.Failed).fix.contains("18790"))
+        assertTrue(Cloudflared.judge(base, 200, """{"resource":"https://other/mcp"}""") is TunnelSelfTest.Failed)
     }
 }

@@ -107,17 +107,22 @@ fun SettingsTab(bottom: Dp) {
                     WayLine(w, onClick = { if (i == 0) nav.go(Route.Connect) else nav.go(Route.Remote) })
                 }
                 if (ways.size == 1) WayLine(null, onClick = { nav.go(Route.Remote) })
+                val pubChannel by com.kilon.agentvscreen.host.PublicAccess.channelFlow.collectAsState()
+                val tunnelState = pubChannel.tunnel?.status?.collectAsState()?.value?.state
                 WayLine(
                     com.kilon.agentvscreen.host.Access.Way(
                         name = tr("云端（公网 MCP）", "Cloud (Public MCP)"),
                         state = when {
-                            !pubOn -> tr("默认关闭 · Tailscale Funnel", "Off · Tailscale Funnel")
+                            !pubOn -> tr("默认关闭 · ${pubChannel.title}", "Off · ${pubChannel.title}")
+                            tunnelState == com.kilon.agentvscreen.host.TunnelState.CONNECTED -> tr("已开启", "On")
+                            tunnelState == com.kilon.agentvscreen.host.TunnelState.ERROR -> tr("连接失败", "Failed")
+                            tunnelState != null -> tr("启动中…", "Starting…")
                             ts.funnel == "on" -> tr("已开启", "On")
                             ts.funnel == "cert" -> tr("申请证书中…", "Fetching cert…")
                             ts.funnel == "error" -> tr("启动失败", "Failed")
                             else -> tr("启动中…", "Starting…")
                         },
-                        ok = pubOn && ts.funnel == "on",
+                        ok = pubOn && (if (tunnelState != null) tunnelState == com.kilon.agentvscreen.host.TunnelState.CONNECTED else ts.funnel == "on"),
                         inUse = false,
                     ),
                     onClick = { nav.go(Route.PublicAccess) },
@@ -433,8 +438,8 @@ fun Footnote(t: String) = Text(t, fontSize = 12.sp, lineHeight = 17.sp, color = 
 
 /** The long words. 1.4: all of them on the Help page (and nowhere else), one paragraph per setting. */
 internal object H {
-    val where get() = tr("本机运行的 agent（Termux、Minis、Operit 等）直接连接 127.0.0.1:${ApiConfig.port}，无需额外配置。\n\n电脑、云服务器或其他手机上的 agent 通过 Tailscale 连接：仅允许你的 Tailscale 网络内的设备访问，流量经加密隧道传输，局域网和公网均无法直接访问，且仍需令牌。“内置”模式无需安装 Tailscale App；“外部 App”模式使用本机已安装的 Tailscale。\n\n云端 agent 若不在你的 Tailscale 网络内，可使用公网 MCP（Tailscale Funnel + OAuth 配对），默认关闭。",
-        "Agents on this phone (Termux, Minis, Operit, ...) connect to 127.0.0.1:${ApiConfig.port} directly; no setup is needed.\n\nAgents on a computer, a cloud server or another phone connect through Tailscale: only devices in your Tailscale network can reach the service, over an encrypted tunnel; the local network and the internet cannot, and a token is still required. Built-in mode needs no Tailscale app; External app mode uses the Tailscale app on this phone.\n\nCloud agents outside your Tailscale network can use public MCP (Tailscale Funnel + OAuth pairing), which is off by default.")
+    val where get() = tr("本机运行的 agent（Termux、Minis、Operit 等）直接连接 127.0.0.1:${ApiConfig.port}，无需额外配置。\n\n电脑、云服务器或其他手机上的 agent 通过 Tailscale 连接：仅允许你的 Tailscale 网络内的设备访问，流量经加密隧道传输，局域网和公网均无法直接访问，且仍需令牌。“内置”模式无需安装 Tailscale App；“外部 App”模式使用本机已安装的 Tailscale。\n\n云端 agent 若不在你的 Tailscale 网络内，可使用公网 MCP（Tailscale Funnel、Cloudflare Tunnel 或 ngrok，均经手机上的 OAuth 配对），默认关闭。",
+        "Agents on this phone (Termux, Minis, Operit, ...) connect to 127.0.0.1:${ApiConfig.port} directly; no setup is needed.\n\nAgents on a computer, a cloud server or another phone connect through Tailscale: only devices in your Tailscale network can reach the service, over an encrypted tunnel; the local network and the internet cannot, and a token is still required. Built-in mode needs no Tailscale app; External app mode uses the Tailscale app on this phone.\n\nCloud agents outside your Tailscale network can use public MCP (Tailscale Funnel, Cloudflare Tunnel or ngrok, all with OAuth pairing on the phone), which is off by default.")
     val how get() = tr("命令行：适用于带终端的 agent。将“给 agent 的话”发送给它，它会安装 vscreen 命令，并把这项能力写入长期记忆，供之后的新对话使用；只提供安装命令时，多数 agent 不会保留这项能力。\n\nMCP：适用于支持 MCP 的 agent。“给 agent 的话”包含 MCP 配置（streamable HTTP，每条命令对应一个工具，截图随结果返回）和能力说明。\n\nHTTP：适用于自行编写调用代码的 agent 应用。返回 JSON（ok、code、next、text、images、steps、screen、notes），完整说明见 GET /v2/help。\n\n能力说明也可以直接粘贴到 agent 的“自定义指令”或“记忆”设置中。",
         "Shell: agents with a terminal. Send them the message: it installs the vscreen command and has the agent save \"I can operate apps on the phone in the background\" in its long-term memory, so new conversations use it too. With only the install command, most agents forget it.\n\nMCP: agents with MCP. The message has the MCP config (streamable HTTP, one tool per command, screenshots attached) and the ability note.\n\nHTTP: agent apps that write their own calls. Replies are JSON (ok, code, next, text, images, steps, screen, notes); full reference at GET /v2/help.\n\nYou can also paste the ability note into the agent's custom instructions or memory setting.")
     val token get() = tr("令牌是 agent 的访问凭据，持有令牌即可在副屏上操作你的应用，请只提供给信任的 agent。服务只接受本机请求（开启远程后还接受你 Tailscale 网络内的设备），拒绝所有网页发起的调用。重新生成主令牌后旧令牌立即失效，使用它的 agent 需重新接入。",
