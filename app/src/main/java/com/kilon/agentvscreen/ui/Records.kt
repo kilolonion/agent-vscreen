@@ -2,6 +2,7 @@ package com.kilon.agentvscreen.ui
 
 import androidx.compose.ui.Alignment
 
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.heightIn
 
@@ -136,7 +137,8 @@ fun RecordsTab(bottom: Dp) {
         if (whoList.size > 1) Row(Modifier.padding(end = 12.dp).clip(RoundedCornerShape(50)).background(if (who != null) MiuixTheme.colorScheme.primary.copy(alpha = 0.14f) else MiuixTheme.colorScheme.surfaceContainer)
             .clickable { picking = true }.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(who?.let { com.kilon.agentvscreen.api.Agents.name(it) } ?: tr("所有 agent", "Every agent"), fontSize = 13.sp,
-                color = if (who != null) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface, maxLines = 1)
+                color = if (who != null) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface, maxLines = 1, softWrap = false,
+                modifier = Modifier.widthIn(max = 200.dp).scrollIfLong())
             Text(" ▾", fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
         }
     }) {

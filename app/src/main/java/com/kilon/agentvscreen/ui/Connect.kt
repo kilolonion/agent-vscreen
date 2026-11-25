@@ -810,7 +810,7 @@ private fun AgentCard(id: String, l: AgentLedger.Snapshot, edit: () -> Unit) {
     Column(Modifier.fillMaxWidth().clickable(onClick = edit).padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(com.kilon.agentvscreen.api.Agents.name(id), fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                Text(com.kilon.agentvscreen.api.Agents.name(id), fontSize = 16.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false, modifier = Modifier.scrollIfLong())
                 Text(way, fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
             Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
