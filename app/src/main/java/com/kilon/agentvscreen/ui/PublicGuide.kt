@@ -192,12 +192,12 @@ private fun CloudflareGuide() {
                 "Open Cloudflare Zero Trust (the first time, follow the prompts: free plan, team name), go to Networks › Tunnels › Create a tunnel, choose Cloudflared, name it (e.g. agent-vscreen) and save."),
             buttons = listOf(Btn(tr("打开 Zero Trust", "Open Zero Trust")) { open(Cloudflared.DASHBOARD_URL) }))
         Step(3, tr("复制令牌，粘贴到本 App", "Copy the token into this app"),
-            tr("在“安装并运行连接器”页面，任选一个系统，复制显示的整条命令（其中 eyJ 开头的长串就是令牌），回来点“粘贴并保存”。不需要在电脑上运行这条命令：连接器就在这台手机上。",
-                "On Install and run a connector, pick any system and copy the whole command shown (the long string starting with eyJ is the token), come back and press Paste and save. Don't run it on a computer: the connector is this phone."),
+            tr("在“安装并运行连接器”页面，任选一个系统，复制显示的整条命令（其中 eyJ 开头的长串就是令牌），回来点“粘贴并保存”。不需要在电脑上运行这条命令：连接器就在这台手机上。那一页下面的“连接状态”会一直转圈、“继续”是灰的：连接器要等第 5 步开启公网才上线，这是正常的，保存令牌后直接离开那一页。",
+                "On Install and run a connector, pick any system and copy the whole command shown (the long string starting with eyJ is the token), come back and press Paste and save. Don't run it on a computer: the connector is this phone. Connection status on that page keeps spinning and Continue stays grey: the connector comes online only when you turn public access on in step 5. That is expected; once the token is saved, just leave that page."),
             field = { GuideField(tr("隧道令牌或整条安装命令", "Tunnel token or the whole install command"), cf.tunnelId?.let { tr("隧道令牌已保存", "Tunnel token saved") }) { Cloudflared.save(it, null) } })
         Step(4, tr("添加公网域名，指向手机", "Add the public hostname, pointing at the phone"),
-            tr("下一步“公共主机名”（新版界面可能叫“已发布的应用路由”）：子域名填如 phone，域名选你的域名，路径留空；服务类型选 HTTP，URL 填下面这个地址（不要写 localhost，也不要改端口），保存。",
-                "Next, Public Hostname (newer screens may call it Published application routes): subdomain e.g. phone, pick your domain, leave the path empty; service type HTTP, URL exactly as below (not localhost, same port), then save."),
+            tr("回到 网络 › 隧道，点刚建的隧道 › 编辑，打开“已发布的应用路由”（旧版叫“公共主机名”），添加一条：子域名填如 phone，域名选你的域名，路径留空；服务类型选 HTTP，URL 填下面这个地址（不要写 localhost，也不要改端口），保存。隧道显示未连接没关系，开启公网后会变成已连接。",
+                "Go back to Networks › Tunnels, open the tunnel you made › Edit, then Published application routes (Public Hostname on older screens) and add one: subdomain e.g. phone, pick your domain, leave the path empty; service type HTTP, URL exactly as below (not localhost, same port), then save. The tunnel showing not connected is fine: it connects once public access is on."),
             code = Cloudflared.ORIGIN_URL.removePrefix("http://"), codeLabel = tr("服务地址", "Service URL"))
         Step(5, tr("填写域名并开启", "Enter the hostname and turn it on"),
             tr("在下面填刚才的完整域名（如 phone.example.com）。然后回到公网页面：清单全部 ✓ 后同意风险说明，点“开启公网接入”并验证指纹。",

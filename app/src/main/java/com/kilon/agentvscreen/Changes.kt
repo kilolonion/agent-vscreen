@@ -38,6 +38,17 @@ object Changes {
     /** Releases ordered newest first. Add a new [Release] entry whenever versionCode bumps. */
     val releases: List<Release> = listOf(
         Release(
+            versionCode = 70,
+            versionName = "2.0.0-beta13",
+            items = listOf(
+                Item(Kind.IMPROVED, Audience.USER, "Cloudflare 指南说明更清楚",
+                    "说明了 Cloudflare 安装页的“连接状态”为什么一直转圈（连接器在手机里，开启公网后才上线），以及之后去哪里添加域名。",
+                    "Clearer Cloudflare guide",
+                    "Explains why Connection status on Cloudflare's install page keeps spinning (the connector is this phone and comes online when public access is on), and where to add the hostname next.",
+                    Route.PublicAccess),
+            ),
+        ),
+        Release(
             versionCode = 69,
             versionName = "2.0.0-beta12",
             items = listOf(
