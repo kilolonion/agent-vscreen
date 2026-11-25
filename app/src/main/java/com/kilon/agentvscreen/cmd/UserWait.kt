@@ -48,6 +48,19 @@ internal object UserWait {
         return r.commandName to ((r.at + r.validMs - now) / 1000L).coerceAtLeast(1L)
     }
 
+    /**
+     * 2.0.0-beta15 (test W5: a teach reply said "valid for 15 minutes" and then "valid for 10 minutes"): the time left
+     * of the caller's own newest open request on the phone, so the waiting block and expires_in_s say what the request
+     * itself says (a demonstration waits 15 minutes, a question 10).
+     */
+    private fun askLeftOf(tokenId: String?, kind: Kind): Long? {
+        val now = System.currentTimeMillis()
+        val teach = kind == Kind.LESSON
+        return com.kilon.agentvscreen.host.UserAsk.open.value
+            .filter { it.live && (tokenId == null || it.token == tokenId) && (it.kind == com.kilon.agentvscreen.host.UserAsk.Kind.TEACH) == teach }
+            .maxByOrNull { it.at }?.let { ((it.at + it.validMs - now) / 1000L).coerceAtLeast(1L) }
+    }
+
     /** [r] with the waiting block and `user_action` added when its code waits on the user's phone; else [r] as it is. */
     fun attach(r: NativeOffloadResult, command: String?, tokenId: String?): NativeOffloadResult {
         if (r.exitCode == 0) return r
@@ -55,7 +68,7 @@ internal object UserWait {
         // A refusal that never put a request on the phone (a rule may not tap a pay button) has nothing to wait for.
         val confirm = if (kind == Kind.CONFIRM) confirmOf(tokenId) ?: return r else null
         val leftS = confirm?.second ?: r.data?.optJSONObject("confirm")?.optLong("expires_in_s")?.takeIf { it > 0 }
-            ?: (com.kilon.agentvscreen.host.UserAsk.VALID_MS / 1000L)
+            ?: askLeftOf(tokenId, kind) ?: (com.kilon.agentvscreen.host.UserAsk.VALID_MS / 1000L)
         val say = tellUser(kind, confirm?.first)
         val text = block(say, leftS)
         val data = (r.data ?: JSONObject()).put("user_action", JSONObject()

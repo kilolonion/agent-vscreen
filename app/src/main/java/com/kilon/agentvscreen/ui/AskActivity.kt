@@ -152,7 +152,7 @@ class AskActivity : PageActivity() {
                 Column(Modifier.weight(1f)) {
                     Text(AskWords.who(a), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     @Suppress("UNUSED_EXPRESSION") now
-                    Text(tr("会话 ${a.session} · 还剩 ${AskWords.left(a)}", "Session ${a.session} · ${AskWords.left(a)} left"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(tr("会话 ${a.session} · 还剩 ${AskWords.left(a, now)}", "Session ${a.session} · ${AskWords.left(a, now)} left"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 IconButton(onClick = { back() }) { Icon(Icons.Filled.Close, tr("稍后回答", "Answer later")) }
             }

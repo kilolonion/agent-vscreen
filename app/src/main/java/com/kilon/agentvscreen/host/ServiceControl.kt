@@ -121,12 +121,6 @@ object ServiceControl {
     }
 
     @Volatile private var exitWatch = false
-    /** A page of this app (or its floating window) is on screen. */
-    private fun seen(): Boolean = runCatching {
-        val info = android.app.ActivityManager.RunningAppProcessInfo()
-        android.app.ActivityManager.getMyMemoryState(info)
-        info.importance <= android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
-    }.getOrDefault(true)
     private var startedPages = 0
 
     /**
@@ -137,14 +131,20 @@ object ServiceControl {
         val a = app as? android.app.Application ?: return
         val main = android.os.Handler(android.os.Looper.getMainLooper())
         fun check() {
-            if (!Prefs.blocked(app) || startedPages > 0 || HostService.isAlive || seen()) return
+            // 2.0.0-beta15 (test B8: after 关闭 and HOME the same process stayed, still listed in recents): the process
+            // importance used here never fell below "visible" while the accessibility service is bound by the system,
+            // so the process never ended. Whether a page is open is now our own count of started pages, and the app's
+            // tasks leave the recents list before the process ends. (With accessibility on, Android starts the process
+            // again for that service alone; nothing else runs until the user turns the service back on.)
+            if (!Prefs.blocked(app) || startedPages > 0 || AppFront.visible || HostService.isAlive) return
             AppLogger.info("ServiceControl", "off: no page open, process ends")
+            runCatching { app.getSystemService(android.app.ActivityManager::class.java)?.appTasks?.forEach { t -> runCatching { t.finishAndRemoveTask() } } }
             android.os.Process.killProcess(android.os.Process.myPid())
         }
         main.post {
             if (!exitWatch) {
                 exitWatch = true
-                startedPages = if (seen()) 1 else 0
+                startedPages = if (AppFront.visible) 1 else 0
                 a.registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
                     override fun onActivityStarted(act: android.app.Activity) { startedPages++ }
                     override fun onActivityStopped(act: android.app.Activity) {

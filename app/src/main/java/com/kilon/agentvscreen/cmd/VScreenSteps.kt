@@ -439,8 +439,11 @@ internal object Steps {
                     val maxWait = capMs(raw, untilMs ?: defaultWait, maxCap, withValue = false).coerceAtLeast(100L)
                     Step(raw, StepKind.DRAG, points = pts, ms = if (loop == Loop.HOLD) (ms ?: 600L).coerceIn(50L, 10_000L) else null, until = until, untilMs = maxWait, loop = loop)
                 } else {
-                    val ms = args.lastOrNull()?.takeIf { it.any { c -> c.isLetter() } }?.let { duration(it) ?: bad(raw, tr("时长写成 300ms / 1s", "write the duration as 300ms / 1s")) }
-                    val nums = numbers(if (ms != null) args.dropLast(1) else args) ?: bad(raw, run { val more = if (isDrag) " [x3 y3 …]" else ""; tr("坐标写成数字：$verb x1 y1 x2 y2$more [时长]", "coordinates are numbers: $verb x1 y1 x2 y2$more [duration]") })
+                    var ms = args.lastOrNull()?.takeIf { it.any { c -> c.isLetter() } }?.let { duration(it) ?: bad(raw, tr("时长写成 300ms / 1s", "write the duration as 300ms / 1s")) }
+                    var nums = numbers(if (ms != null) args.dropLast(1) else args) ?: bad(raw, run { val more = if (isDrag) " [x3 y3 …]" else ""; tr("坐标写成数字：$verb x1 y1 x2 y2$more [时长]", "coordinates are numbers: $verb x1 y1 x2 y2$more [duration]") })
+                    // 2.0.0-beta15 (test: `swipe 1100 1830 1100 1660 450` was refused, the 450 read as a fifth coordinate): an odd
+                    // last bare number after at least two points is the duration in ms, as in `adb shell input swipe`.
+                    if (ms == null && nums.size >= 5 && nums.size % 2 == 1) { ms = nums.last().toLong(); nums = nums.dropLast(1) }
                     if (nums.size < 4 || nums.size % 2 != 0) bad(raw, run { val more = if (isDrag) " [x3 y3 …]" else ""; tr("$verb 要成对的坐标：x1 y1 x2 y2$more（收到 ${nums.size} 个数）", "$verb needs coordinate pairs: x1 y1 x2 y2$more (got ${nums.size} numbers)") })
                     if (!isDrag && nums.size != 4) bad(raw, tr("swipe 只有起点和终点；经过多个点用 drag", "swipe has only a start and an end; use drag to pass through more points"))
                     val pts = nums.chunked(2).map { it[0] to it[1] }

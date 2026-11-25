@@ -1781,6 +1781,7 @@ private fun VScreenOffloadHandler.doAction(
             }
             StepKind.TYPE -> {
                 val slow = step.ms
+                val typeBefore = dd.latestFrame()?.let { VScreenPerception.small(it) }
                 val f = if (slow != null) {
                     // 1.4.0-beta13: one character at a time with a gap (code points, so an emoji is one), first as asked
                     // (replace or add), then added; each character is its own input event for the app's listeners.
@@ -1812,11 +1813,17 @@ private fun VScreenOffloadHandler.doAction(
                     tf
                 }
                 val where = f.bounds?.let { b -> " [${b.left},${b.top},${b.right},${b.bottom}]" + (f.fieldId?.let { tr("（$it）", " ($it)") } ?: "") } ?: ""
+                // 2.0.0-beta15 (test B6: a browser address box took the URL and loaded it while the reply said TYPE_FAILED /
+                // no focused input box): the accessibility tree of some apps shows no focused box even while one has the
+                // keys. "No box" is a failure only when the picture also stayed as it was; a picture that changed while
+                // typing is "unconfirmed", as for a box that cannot be read.
+                val pictureMoved = if (f.field == null && f.checked) typeBefore?.let { b -> pictureStill(dd, b).not() } ?: false
+                    else { typeBefore?.recycle(); false }
                 when {
                     // 1.4.0-beta3: only a reading that saw no focused box is a failure. When the box could not be read at
                     // all (a web page, a self-drawn box) the text often did go in (beta2 test: the words reached the
                     // suggestions while the reply said TYPE_FAILED); that is "unconfirmed", said in the step, not a miss.
-                    f.field == null && f.checked -> {
+                    f.field == null && f.checked && !pictureMoved -> {
                         missCode = "TYPE_FAILED"
                         miss = tr("没有获得焦点的输入框，字很可能没进去。先点输入框（【现在】里标“可输入”的），等它标“有焦点”再 type", "No input box has focus, so the text most likely did not go in. Tap the input box first (marked \"input\" in [Now]) and type once it is marked \"focused\"")
                         tr("按 ${f.method} 发了 ${step.text.length} 个字；没有获得焦点的输入框", "sent ${step.text.length} characters by ${f.method}; no focused input box")
@@ -1839,8 +1846,18 @@ private fun VScreenOffloadHandler.doAction(
                 }
             }
             StepKind.KEY -> {
-                okOr(VScreenShell.key(dd.displayId, step.text!!))
-                tr("按了 ${step.text}", "pressed ${step.text}")
+                val k = step.text!!.lowercase()
+                // 2.0.0-beta15 (test B1 on HONOR: `key esc` on a settings sub-page was sent and nothing happened, while
+                // `key back` went back): many apps ignore Esc, and Android only turns an unhandled Esc into Back on some
+                // builds. Where no text box has focus (Esc there may clear or close the box), an Esc that leaves the
+                // picture untouched is followed by Back, and the reply says so.
+                val escToBack = (k == "esc" || k == "escape") && com.kilon.agentvscreen.core.VScreenTyping.focusedFieldKey(dd.displayId) == null
+                val before = if (escToBack) dd.latestFrame()?.let { VScreenPerception.small(it) } else null
+                okOr(VScreenShell.key(dd.displayId, step.text))
+                if (before != null && pictureStill(dd, before)) {
+                    okOr(VScreenShell.key(dd.displayId, "back"))
+                    tr("按了 ${step.text}，这页没反应（这个应用不处理 Esc），接着按了 back", "pressed ${step.text}; this page ignored it (the app does not handle Esc), so pressed back")
+                } else tr("按了 ${step.text}", "pressed ${step.text}")
             }
             else -> throw StepRefused("INVALID_STEP", tr("不是动作：${step.raw}", "not an action: ${step.raw}"))
         }
@@ -1849,6 +1866,20 @@ private fun VScreenOffloadHandler.doAction(
     if (pts.isNotEmpty()) BackgroundOperation.actionLog(sid, 1).lastOrNull()?.trackN?.let { VScreenRecorder.setPoints(d.displayId, it, pts) }
     return Done(fact, miss, missCode, typeVerified, dragRecord)
 }
+
+/** Whether the picture stayed as [before] for [ESC_WAIT_MS] (an Esc that did nothing, keys that showed nothing); [before] is recycled. */
+private fun pictureStill(d: VScreenDisplay, before: android.graphics.Bitmap): Boolean = try {
+    val end = SystemClock.elapsedRealtime() + ESC_WAIT_MS
+    var seen = d.version
+    var same = true
+    val mask = VScreenPerception.mask(d.displayId)
+    while (same && SystemClock.elapsedRealtime() < end) {
+        d.awaitNewFrame(seen, 120, urgent = true); seen = d.version
+        same = d.latestFrame()?.let { VScreenPerception.small(it) }?.let { a -> try { Change.same(before, a, Change.Level.TINY, skip = mask?.rectsIn(a.width, a.height).orEmpty()) } finally { a.recycle() } } ?: false
+    }
+    same
+} finally { before.recycle() }
+private const val ESC_WAIT_MS = 450L
 
 internal fun bounds(d: VScreenDisplay, pts: List<Pair<Int, Int>>) {
     pts.firstOrNull { it.first !in 0 until d.width || it.second !in 0 until d.height }?.let {
