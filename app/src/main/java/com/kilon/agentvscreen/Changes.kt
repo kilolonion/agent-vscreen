@@ -38,6 +38,22 @@ object Changes {
     /** Releases ordered newest first. Add a new [Release] entry whenever versionCode bumps. */
     val releases: List<Release> = listOf(
         Release(
+            versionCode = 67,
+            versionName = "2.0.0-beta10",
+            items = listOf(
+                Item(Kind.IMPROVED, Audience.USER, "设置重新分组",
+                    "设置按 接入、权限、副屏、识别与录制、通用、更新、记录与诊断 分组；agent 页的分项权限默认收起。",
+                    "Settings regrouped",
+                    "Settings are grouped into Connections, Permissions, Background screen, Recognition and recording, General, Updates, Records and diagnostics; the per-action table on an agent page is folded by default.",
+                    null),
+                Item(Kind.IMPROVED, Audience.USER, "用语更规范",
+                    "权限类别改为 应用操作、敏感操作、不可撤销操作、支付、系统操作、高频操作；帮助、确认页和通知的说明同步改写。",
+                    "Clearer wording",
+                    "Permission rows are now App actions, Sensitive, Irreversible, Payments, System and High action rate; help, confirmation and notification texts rewritten to match.",
+                    Route.Security),
+            ),
+        ),
+        Release(
             versionCode = 66,
             versionName = "2.0.0-beta9",
             items = listOf(
