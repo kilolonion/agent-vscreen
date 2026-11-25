@@ -96,9 +96,22 @@ fun ConnectPage(tab: Boolean = false, bottom: androidx.compose.ui.unit.Dp = 0.dp
     val ts by Tailnet.status.collectAsState()
     val pubOn by com.kilon.agentvscreen.host.PublicAccess.enabledFlow.collectAsState()
     val svcState = ServiceControl.now(ctx)
+    val pend by com.kilon.agentvscreen.host.StrongConfirm.pending.collectAsState()
+    val pairings = remember(pend) { pend.filter { it.pairingCode != null } }
     // 2.0.0-beta9 (feedback 6): a lazy list; only the agents on screen are composed.
     val shown = remember(tokens, agents) { tokens.filter { t -> agents[t.id]?.used == true || t.id != com.kilon.agentvscreen.api.Tokens.MAIN } }
     MiuixLazyPage(tr("接入", "Connect"), back = !tab, bottom = bottom) {
+        // 2.0.0-beta11 (rainbow: left the wizard while the agent was still connecting; nothing showed here). A cloud agent
+        // exists only once its pairing is approved, so a pairing still waiting is listed here, above the connected ones.
+        if (pairings.isNotEmpty()) item(key = "pairing") {
+            Group(tr("等待批准 · ${pairings.size}", "Waiting for approval · ${pairings.size}")) {
+                pairings.forEach { r ->
+                    ArrowPreference(title = r.publicClientName ?: r.tokenName,
+                        summary = tr("云端（公网 MCP） · 配对码 ${r.pairingCode}", "Cloud (Public MCP) · pairing code ${r.pairingCode}"),
+                        onClick = { StrongConfirmActivity.open(ctx, r.id) })
+                }
+            }
+        }
         if (shown.isEmpty()) item(key = "empty") { Column(Modifier.padding(horizontal = 12.dp)) { EmptyState(androidx.compose.material.icons.Icons.Outlined.AddLink, tr("还没有接入 agent", "No agent connected yet"),
             tr("接入后，每个 agent 的记录、任务和提问各归各的", "Once connected, each agent's records, tasks and questions stay apart")) } }
         else cardItems(tr("已经接入的 · ${shown.size}", "Connected · ${shown.size}"), shown, key = { it.id }) { t ->
@@ -240,6 +253,8 @@ fun NewAgentPage() {
     val canAdvanceWhere = where == 0 || remoteReady || where == 2
     val canAdvanceHow = if (where == 2) (pubEnabled && !cloudUrl.isNullOrBlank()) else canCopyLocal
 
+    /** When this wizard opened: a cloud agent that pairs or calls after this moment is the one being connected. */
+    val openedAt = rememberSaveable { System.currentTimeMillis() }
     var step by rememberSaveable { mutableIntStateOf(0) }
     val steps = listOf(tr("起名", "Name"), tr("运行位置", "Where"), tr("连接方式", "How"), tr("发给它", "Send"))
 
@@ -407,6 +422,7 @@ fun NewAgentPage() {
                         }
                     }
                     Footnote(tr("第一次连接时会打开授权页，在这台手机上核对配对码批准；不需要令牌。", "The first connection opens an approval page; check the pairing code on this phone and approve. No token is needed."))
+                    WizardStatus(where, null, openedAt)
                     Group(tr("预览", "Preview")) {
                         ArrowPreference(title = tr("完整消息", "Full message"), endActions = { Value(if (raw) tr("收起", "Hide") else tr("查看", "Show")) }, onClick = { raw = !raw })
                         AnimatedVisibility(raw) { Code(msg) { host.copy(tr("给 agent 的话", "Message for your agent"), msg) } }
@@ -439,6 +455,7 @@ fun NewAgentPage() {
                             Text(tr("复制给 agent 的话", "Copy message for your agent"), color = MiuixTheme.colorScheme.onPrimary)
                         }
                     }
+                    WizardStatus(where, madeId, openedAt)
                     Footnote(tr("每个 agent 使用独立的消息，其记录、任务和提问分别归属。", "One message per agent: their records, tasks and questions stay apart."))
                     Group(tr("预览与分段复制", "Preview & pieces")) {
                         val pieceText = remember(how, base, tok) {
@@ -468,6 +485,39 @@ fun NewAgentPage() {
             }
         }
     }
+}
+
+/**
+ * 2.0.0-beta11 (rainbow: the agent needed a while to connect; with no finish button they left unsure, and the result
+ * did not show). The last step says what is happening with this agent, seen not guessed, and always offers 完成:
+ * leaving early loses nothing, because a local agent's entry already exists and a cloud pairing waits in 接入 and 等你处理.
+ */
+@Composable
+private fun WizardStatus(where: Int, madeId: String?, openedAt: Long) {
+    val nav = LocalNav.current
+    val ctx = LocalContext.current
+    val agents by AgentLedger.agents.collectAsState()
+    val tokens by com.kilon.agentvscreen.api.Tokens.list.collectAsState()
+    val pend by com.kilon.agentvscreen.host.StrongConfirm.pending.collectAsState()
+    val pairing = pend.firstOrNull { it.pairingCode != null && it.at >= openedAt }
+    val joined: String? = if (where == 2) {
+        tokens.filter { it.publicOnly && !it.revoked && (it.createdAt >= openedAt || (agents[it.id]?.lastCallAt ?: 0L) >= openedAt) }
+            .maxByOrNull { it.createdAt }?.id
+    } else madeId?.takeIf { (agents[it]?.lastCallAt ?: 0L) > 0L }
+    val (text, color) = when {
+        joined != null -> tr("已连上：${com.kilon.agentvscreen.api.Agents.name(joined)}", "Connected: ${com.kilon.agentvscreen.api.Agents.name(joined)}") to Palette.takeover
+        pairing != null -> tr("收到配对请求，待你批准", "Pairing request received; waiting for your approval") to Palette.standby
+        else -> tr("等待 agent 连接", "Waiting for the agent to connect") to MiuixTheme.colorScheme.onSurfaceVariantSummary
+    }
+    Group(tr("连接状态", "Status")) {
+        BasicComponent(title = text, summary = if (joined == null) tr("agent 完成配置可能需要一些时间；可以先点“完成”，连上后会出现在接入列表中。",
+            "The agent may need a while to set up. You can tap Done now; it appears in the Connect list once it connects.") else null,
+            endActions = { Dot(color, 8.dp) })
+        if (pairing != null && joined == null) BasicComponent(title = tr("核对配对码并批准", "Check the pairing code and approve"),
+            summary = tr("配对码 ${pairing.pairingCode}", "Pairing code ${pairing.pairingCode}"),
+            onClick = { StrongConfirmActivity.open(ctx, pairing.id) })
+    }
+    CardAction(tr("完成", "Done"), primary = false) { nav.back() }
 }
 
 /**
