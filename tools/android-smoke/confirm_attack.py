@@ -266,6 +266,32 @@ def wait_gate_and_selftest(secs=120):
     return False
 
 
+def dismiss_anr():
+    """Tap "Wait" on a system "isn't responding" dialog, if one is up.
+
+    On the API 34 emulator the stock launcher sometimes ANRs under CI load; its dialog (package "android") then covers
+    StrongConfirmActivity and every later step that touches the confirm button fails for a reason that has nothing to
+    do with the app (seen in the logcat of the failing runs: "ANR in com.google.android.apps.nexuslauncher").
+    """
+    _, d = shell("uiautomator", "dump", "/data/local/tmp/anr.xml", check_rc=False)
+    if "dumped" not in d.lower():
+        return False
+    _, xml_txt = shell("cat", "/data/local/tmp/anr.xml", check_rc=False)
+    try:
+        root = ET.fromstring(xml_txt)
+    except Exception:
+        return False
+    for node in root.iter("node"):
+        a = node.attrib
+        label = (a.get("text") or a.get("content-desc", "")).strip()
+        if a.get("package") == "android" and label in ("Wait", "等待"):
+            tap_bounds(a["bounds"])
+            print("dismissed a system ANR dialog (Wait)", flush=True)
+            time.sleep(0.5)
+            return True
+    return False
+
+
 def ci_hook(extra_key, extra_val, out_file, wait_secs=15):
     if IS_ROOT_ADB:
         shell("rm", "-f", f"/data/data/{APP}/{out_file}", check_rc=False)
@@ -621,6 +647,7 @@ def run_suite(sdk: int, out_dir: Path):
     # ── 6) StrongConfirmActivity on d0: act type/scroll, a11y CLICK/LONG_CLICK, adb swipe 3500 ─
     shell("input", "keyevent", "KEYCODE_WAKEUP", check_rc=False)
     shell("wm", "dismiss-keyguard", check_rc=False)
+    dismiss_anr()
     ci_hook("attack", f"open_confirm:{cid1}", "files/ci-attack.txt")
     btn_pos = find_confirm_button_center(want_id=cid1, want_bio=False)
     check("located StrongConfirmActivity confirm button on display 0", btn_pos is not None, str(btn_pos))
@@ -643,6 +670,7 @@ def run_suite(sdk: int, out_dir: Path):
         shell("settings", "put", "secure", "accessibility_enabled", "1", check_rc=False)
         conn = wait_atk_event("attack_a11y_connected", t_ac, timeout=12.0)
         # Re-ensure StrongConfirmActivity is top on d0.
+        dismiss_anr()
         ci_hook("attack", f"open_confirm:{cid1}", "files/ci-attack.txt")
         time.sleep(0.8)
         t_ck = latest_atk_t()
@@ -667,6 +695,7 @@ def run_suite(sdk: int, out_dir: Path):
     # 6c) No-lockscreen adb shell input swipe x y x y 3500 -> rejected + strong_confirm_l6_ignored audit (6.8).
     if btn_pos is not None:
         bx, by, _ = btn_pos
+        dismiss_anr()
         ci_hook("attack", f"open_confirm:{cid1}", "files/ci-attack.txt")
         time.sleep(0.6)
         shell("input", "-d", "0", "swipe", str(bx), str(by), str(bx), str(by), "3500", check_rc=False)
@@ -706,6 +735,7 @@ def run_suite(sdk: int, out_dir: Path):
         time.sleep(1.0)
         pin_approved_rec = None
         try:
+            dismiss_anr()
             ci_hook("attack", f"open_confirm:{cid2}", "files/ci-attack.txt")
             pbtn = find_confirm_button_center(want_id=cid2, want_bio=True) or btn_pos
             print(f"PIN confirm button: {pbtn}", flush=True)
@@ -762,6 +792,7 @@ def run_suite(sdk: int, out_dir: Path):
     # ── 8) Positive no-lockscreen 3.5s sendevent real-touch hold (API 30 & 34, 6.10 #1) ─
     shell("input", "keyevent", "KEYCODE_WAKEUP", check_rc=False)
     shell("wm", "dismiss-keyguard", check_rc=False)
+    dismiss_anr()
     ci_hook("attack", f"open_confirm:{cid1}", "files/ci-attack.txt")
     hbtn = find_confirm_button_center(want_id=cid1, want_bio=False) or btn_pos
     w0, h0 = display0_size()
@@ -824,6 +855,7 @@ def run_suite(sdk: int, out_dir: Path):
     if dev is not None and hbtn is not None:
         shell("input", "keyevent", "KEYCODE_WAKEUP", check_rc=False)
         shell("wm", "dismiss-keyguard", check_rc=False)
+        dismiss_anr()
         ci_hook("attack", f"open_confirm:{cid1}", "files/ci-attack.txt")
         hbtn = find_confirm_button_center(want_id=cid1, want_bio=False) or hbtn
         time.sleep(0.5)

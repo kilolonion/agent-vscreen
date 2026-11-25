@@ -102,7 +102,7 @@ jobs:
           profile: pixel_6
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; python3 tools/android-smoke/agent_e2e.py test-apks/app-debug.apk 2>&1 | tee e2e.log; grep -q '^SUMMARY all passed' e2e.log || { adb logcat -d > logcat.txt; exit 1; }
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; python3 tools/android-smoke/agent_e2e.py test-apks/app-debug.apk 2>&1 | tee e2e.log; grep -q '^SUMMARY all passed' e2e.log || { adb logcat -d > logcat.txt; exit 1; }
       - if: failure()
         uses: actions/upload-artifact@v5
         with:
@@ -141,7 +141,7 @@ jobs:
           profile: pixel_6
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; python3 tools/android-smoke/agent_e2e.py test-apks/app-debug.apk --${{ matrix.mode }} 2>&1 | tee e2e.log; grep -q '^SUMMARY all passed' e2e.log || { adb logcat -d > logcat.txt; exit 1; }
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; python3 tools/android-smoke/agent_e2e.py test-apks/app-debug.apk --${{ matrix.mode }} 2>&1 | tee e2e.log; grep -q '^SUMMARY all passed' e2e.log || { adb logcat -d > logcat.txt; exit 1; }
       - if: failure()
         uses: actions/upload-artifact@v5
         with:
@@ -185,7 +185,7 @@ jobs:
           disable-animations: true
           # On failure keep the whole logcat: the API 30 "dialog gone but still NEED_PERMISSION" case needs the
           # app's ShizukuBackend "permission result" lines to tell a missed callback from a denied grant.
-          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; python3 tools/android-smoke/shizuku.py ${{ matrix.path }} || { adb logcat -d > logcat.txt; exit 1; }
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; python3 tools/android-smoke/shizuku.py ${{ matrix.path }} || { adb logcat -d > logcat.txt; exit 1; }
       - if: failure()
         uses: actions/upload-artifact@v5
         with:
@@ -221,7 +221,7 @@ jobs:
           profile: pixel_6
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; mkdir -p eval-out && { python3 tools/eval/run.py --apk test-apks/torture-debug.apk --out eval-out --repeat-check --beta8-checks > eval-out/eval.log 2>&1; rc=$?; adb logcat -d > eval-out/logcat.txt; cat eval-out/eval.log; exit "$rc"; }
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; mkdir -p eval-out && { python3 tools/eval/run.py --apk test-apks/torture-debug.apk --out eval-out --repeat-check --beta8-checks > eval-out/eval.log 2>&1; rc=$?; adb logcat -d > eval-out/logcat.txt; cat eval-out/eval.log; exit "$rc"; }
       - if: always()
         uses: actions/upload-artifact@v5
         with:
@@ -278,7 +278,7 @@ jobs:
           profile: ${{ matrix.profile }}
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; python3 tools/android-smoke/gate.py test-apks/app-debug.apk ${{ matrix.flag }} 2>&1 | tee gate.log; grep -q '^SUMMARY all passed' gate.log || { adb logcat -d > logcat.txt; exit 1; }
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; python3 tools/android-smoke/gate.py test-apks/app-debug.apk ${{ matrix.flag }} 2>&1 | tee gate.log; grep -q '^SUMMARY all passed' gate.log || { adb logcat -d > logcat.txt; exit 1; }
       - if: failure()
         uses: actions/upload-artifact@v5
         with:
@@ -325,7 +325,7 @@ jobs:
           profile: ${{ matrix.profile }}
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; mkdir -p confirm-out && { python3 tools/android-smoke/confirm_attack.py test-apks/app-debug.apk --out confirm-out > confirm-out/confirm-attack.log 2>&1; rc=$?; adb logcat -d > confirm-out/logcat.txt; cat confirm-out/confirm-attack.log; grep -q '^SUMMARY all passed' confirm-out/confirm-attack.log || exit 1; exit "$rc"; }
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; mkdir -p confirm-out && { python3 tools/android-smoke/confirm_attack.py test-apks/app-debug.apk --out confirm-out > confirm-out/confirm-attack.log 2>&1; rc=$?; adb logcat -d > confirm-out/logcat.txt; cat confirm-out/confirm-attack.log; grep -q '^SUMMARY all passed' confirm-out/confirm-attack.log || exit 1; exit "$rc"; }
       - if: always()
         uses: actions/upload-artifact@v5
         with:
@@ -359,7 +359,7 @@ jobs:
           profile: pixel_6
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; mkdir -p public-out && { python3 tools/android-smoke/public_local.py test-apks/app-debug.apk > public-out/public-local.log 2>&1; rc=$?; adb logcat -d > public-out/logcat.txt; cat public-out/public-local.log; grep -q '^SUMMARY all passed' public-out/public-local.log || exit 1; exit "$rc"; }
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; mkdir -p public-out && { python3 tools/android-smoke/public_local.py test-apks/app-debug.apk > public-out/public-local.log 2>&1; rc=$?; adb logcat -d > public-out/logcat.txt; cat public-out/public-local.log; grep -q '^SUMMARY all passed' public-out/public-local.log || exit 1; exit "$rc"; }
       - if: always()
         uses: actions/upload-artifact@v5
         with:
