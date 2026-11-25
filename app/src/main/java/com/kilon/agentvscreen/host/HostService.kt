@@ -59,6 +59,7 @@ class HostService : Service() {
         private val pending get() = pendingAt > 0 && android.os.SystemClock.elapsedRealtime() - pendingAt < 10_000L
 
         fun start(ctx: Context) {
+            if (ThermalGuard.locked) return
             val i = Intent(ctx, HostService::class.java)
             stopWhenUp = false
             if (!isAlive) pendingAt = android.os.SystemClock.elapsedRealtime()
@@ -82,7 +83,7 @@ class HostService : Service() {
             Thread({
                 val until = android.os.SystemClock.elapsedRealtime() + 60_000L
                 while (!Privileged.isReady() && android.os.SystemClock.elapsedRealtime() < until) Thread.sleep(1_000)
-                if (!Privileged.isReady() || isAlive) return@Thread
+                if (!Privileged.isReady() || isAlive || ThermalGuard.locked) return@Thread
                 val r = runCatching {
                     com.kilon.agentvscreen.core.VScreenShell.run(arrayOf("am", "start-foreground-service", "-n", "${app.packageName}/${HostService::class.java.name}"), 6_000L)
                 }.getOrNull()

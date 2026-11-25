@@ -611,7 +611,7 @@ object BackgroundOperation {
         if (com.kilon.agentvscreen.cmd.Teach.lesson.value is com.kilon.agentvscreen.cmd.Lesson.Recording)
             runCatching { com.kilon.agentvscreen.cmd.Teach.endRecording(appContext, byDone = false, screenGone = true, endWaitMs = 800L) }
         // 1.4.2: the open task keeps the screen as it is left (the home page's resting picture), before it goes.
-        _state.value.ownerSessionId?.let { TaskLog.captureNow(it) }
+        if (!com.kilon.agentvscreen.host.ThermalGuard.locked) _state.value.ownerSessionId?.let { TaskLog.captureNow(it) }
         val d = synchronized(lock) { display.also { display = null } }
         clearParking()
         if (d == null) return
@@ -903,6 +903,7 @@ object BackgroundOperation {
     }
 
     private fun acquireOwned(sid: String, create: Boolean, landscape: Boolean?, scale: Double): VScreenDisplay {
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) throw BackgroundOperation.ActionError("THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
         val s0 = _state.value
         if (!s0.enabled) throw ActionError("DISABLED", tr("Agent-VScreen 的服务已被用户关闭。请用户打开 Agent-VScreen 点“启动服务”", "The user turned off the Agent-VScreen service. Ask the user to open Agent-VScreen and turn the service on"))
         if (s0.connection != Connection.READY) {
@@ -916,6 +917,7 @@ object BackgroundOperation {
             }
         }
         synchronized(lock) {
+            if (com.kilon.agentvscreen.host.ThermalGuard.locked) throw BackgroundOperation.ActionError("THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
             val cur = display
             val s = _state.value
             if (cur != null && !cur.released) {
@@ -944,6 +946,7 @@ object BackgroundOperation {
             }
         }
         synchronized(lock) {
+            if (com.kilon.agentvscreen.host.ThermalGuard.locked) throw BackgroundOperation.ActionError("THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
             val cur = display
             val s = _state.value
             if (cur != null && !cur.released) {

@@ -126,6 +126,7 @@ internal object VScreenRules {
 
     /** Caller holds live while checking limits and publishing the entry. */
     private fun register(spec: Spec): Live {
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) throw BackgroundOperation.ActionError("THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
         if (live.values.count { it.spec.agentId == spec.agentId } >= MAX) {
             throw IllegalStateException(tr("最多同时盯 $MAX 个条件，先 keep off 一个", "At most $MAX conditions can be watched at once; turn one off with keep off first"))
         }
@@ -162,6 +163,7 @@ internal object VScreenRules {
 
     /** Start again the watches that were running when the app went down and still have time left. Their count. */
     fun restore(): Int {
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return 0
         val factory = hostFactory ?: return 0
         val ctx = appContext ?: return 0
         val restored = mutableListOf<Pair<Live, Host>>()
@@ -216,6 +218,8 @@ internal object VScreenRules {
         ended.removeAll { it.spec.agentId == agentId && (name == null || it.spec.name == name) }
         before - ended.size
     }
+
+    internal fun discardForHeat(reason: String) { stopAll(reason); persist() }
 
     fun stopAll(reason: String = tr("已按要求停止", "stopped as asked")): Int {
         val all = running()
@@ -330,7 +334,7 @@ internal object VScreenRules {
                 stopAll(tr("用户在通知里点了全部停止", "The user tapped Stop all in the notification"))
                 stopSelfSafely(); return START_NOT_STICKY
             }
-            if (running().isEmpty()) { stopSelfSafely(); return START_NOT_STICKY }
+            if (com.kilon.agentvscreen.host.ThermalGuard.locked || running().isEmpty()) { stopSelfSafely(); return START_NOT_STICKY }
             if (wake == null) runCatching {
                 wake = (getSystemService(Context.POWER_SERVICE) as PowerManager)
                     .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "agentvscreen:rules").apply { setReferenceCounted(false); acquire(12 * 3_600_000L + 60_000L) }

@@ -359,6 +359,9 @@ class VScreenDisplay private constructor(
             // Always acquire, and never hold more than one image (the pending one):
             // the queue must never fill up.
             val img = runCatching { r.acquireLatestImage() }.getOrNull() ?: return@setOnImageAvailableListener
+            if (com.kilon.agentvscreen.host.ThermalGuard.limited || (VScreenAwake.screenOff && !BackgroundOperation.needsAwake())) {
+                img.close(); return@setOnImageAvailableListener
+            }
             val now = SystemClock.elapsedRealtime()
             lastFrameAtMs = now
             if (colorWatches.isNotEmpty()) sampleColors(img, now)

@@ -566,6 +566,7 @@ private fun ShieldSheet(show: Boolean, close: () -> Unit) {
             Text(ServiceControl.title(ctx) + (ServiceControl.sub(ctx)?.let { " · $it" } ?: ""), fontSize = 13.sp,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 12.dp))
             fun pick(to: ServiceControl.State) {
+                if (to != ServiceControl.State.BLOCKED && com.kilon.agentvscreen.host.ThermalGuard.locked && !com.kilon.agentvscreen.host.ThermalGuard.resumeFromPowerSheet()) { host.say(com.kilon.agentvscreen.host.ThermalGuard.reason()); return }
                 // 1.3.0: a flip back within 1.5 s is ignored (each flip restarts the Tailscale node).
                 val now = android.os.SystemClock.elapsedRealtime()
                 if (now - lastFlip < 1_500L) { host.say(tr("稍等一下再切换", "Wait a moment before switching again")); return }

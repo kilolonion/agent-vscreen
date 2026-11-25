@@ -286,6 +286,7 @@ internal object VScreenOcr {
     @Volatile var selfTestReport: String? = null; private set
 
     fun maybeStartSelfTest(ctx: android.content.Context): Boolean {
+        if (com.kilon.agentvscreen.host.ThermalGuard.limited) return false
         val app = ctx.applicationContext
         recoverIfNeeded(app)
         synchronized(selfTestLock) {
@@ -327,6 +328,7 @@ internal object VScreenOcr {
     }
 
     private fun runSelfTest(ctx: android.content.Context, manual: Boolean): String = synchronized(selfTestRunLock) {
+        if (com.kilon.agentvscreen.host.ThermalGuard.limited) return@synchronized "THERMAL_LIMIT"
         val ver = versionCodeProvider()
         val p = selfTestPrefs(ctx)
         if (manual) {
@@ -431,6 +433,7 @@ internal object VScreenOcr {
      * it is not loaded in this versionCode and the other engine takes over.
      */
     fun recognize(displayId: Int, frame: Bitmap, version: Long, accurate: Boolean = false): Result {
+        if (com.kilon.agentvscreen.host.ThermalGuard.limited) return Result(emptyList(), displayId, version, 0L, "THERMAL_LIMIT")
         val ctx = BackgroundOperation.appContextOrNull()
         if (ctx != null) recoverIfNeeded(ctx)
         if (mlkitCrashed && paddleCrashed) {
@@ -487,6 +490,7 @@ internal object VScreenOcr {
 
     /** OCR of [r0] alone: enlarged (small regions up to 3×) and set on a plain margin of its own edge colour. */
     fun readCrop(frame: Bitmap, r0: Rect): List<Item> {
+        if (com.kilon.agentvscreen.host.ThermalGuard.limited) return emptyList()
         val r = Rect(r0)
         if (!r.intersect(0, 0, frame.width, frame.height) || r.width() < 4 || r.height() < 4) return emptyList()
         val zoom = (160.0 / minOf(r.width(), r.height())).coerceIn(1.0, 3.0)

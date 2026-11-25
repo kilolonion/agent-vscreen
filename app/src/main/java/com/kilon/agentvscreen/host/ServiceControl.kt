@@ -37,6 +37,7 @@ object ServiceControl {
     @Volatile var wokeBy: String? = null; private set
 
     fun now(ctx: Context): State = when {
+        ThermalGuard.locked -> State.BLOCKED
         Prefs.serviceOn(ctx) -> State.ON
         Prefs.blocked(ctx) -> State.BLOCKED
         else -> State.HIDDEN
@@ -51,6 +52,7 @@ object ServiceControl {
     fun hhmm(at: Long): String = java.text.SimpleDateFormat("HH:mm", java.util.Locale.ROOT).format(java.util.Date(at))
 
     fun turnOn(ctx: Context, why: String) {
+        if (ThermalGuard.locked) return
         Prefs.setServiceOn(ctx, true); Prefs.setBlocked(ctx, false)
         HostService.start(ctx)
         now(ctx)
@@ -59,6 +61,7 @@ object ServiceControl {
 
     /** Out of the shade and the background; still woken by whatever needs it. */
     fun hide(ctx: Context, why: String) {
+        if (ThermalGuard.locked) return
         Prefs.setServiceOn(ctx, false); Prefs.setBlocked(ctx, false)
         HostService.ensureServer(ctx)
         BackgroundOperation.stopAndRelease(tr("服务改成按需（agent 用到时会再叫醒）", "The service is on demand now (an agent wakes it when needed)"))
@@ -83,6 +86,7 @@ object ServiceControl {
 
     /** From blocked back to hidden (woken on demand) without turning it on. */
     fun allow(ctx: Context, why: String) {
+        if (ThermalGuard.locked) return
         Prefs.setBlocked(ctx, false); now(ctx)
         HostService.ensureServer(ctx)
         AppLogger.info("ServiceControl", "allowed (hidden): $why")
@@ -130,7 +134,7 @@ object ServiceControl {
         State.ON -> null
         State.HIDDEN -> if (HostService.isAlive) tr("用完会自己收起", "It hides again when done")
             else tr("agent 用到时自动唤起，用完再收起", "Woken when an agent needs it, hidden again after")
-        State.BLOCKED -> tr("什么都叫不醒它，点右上角的电源键恢复", "Nothing wakes it; the power button at the top resumes it")
+        State.BLOCKED -> if (ThermalGuard.locked) ThermalGuard.reason() else tr("什么都叫不醒它，点右上角的电源键恢复", "Nothing wakes it; the power button at the top resumes it")
     }
 
     /** The full story behind the "?" next to the status line. */

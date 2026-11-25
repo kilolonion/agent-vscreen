@@ -96,6 +96,7 @@ class ApiServer(private val ctx: Context) {
      * Tailscale node keeps answering on the set port and forwards to wherever the service is. Nobody is killed.
      */
     fun start(port: Int) {
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return
         if (starting && wantedPort == port) return
         wantedPort = port
         if (!com.kilon.agentvscreen.host.Privileged.isReady()) {
@@ -565,6 +566,7 @@ class ApiServer(private val ctx: Context) {
         val auth = when (val a = authenticate(r)) { is Auth -> a; is Resp -> return a; else -> return Resp.err(401, "BAD_TOKEN", "?") }
         r.auth = auth
         Tokens.used(auth.token.id)
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return Resp.err(503, "THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
         // 1.4.0-beta5: on demand, the server stays up in the app's process while the service sleeps (no notification,
         // no foreground service). A signed request is the agent needing the phone: wake the service and wait for it,
         // so any client (curl, Operit, MCP) wakes it, not only one with Android's `am` at hand.
@@ -724,6 +726,7 @@ class ApiServer(private val ctx: Context) {
      */
     fun runFor(r: Req, argv: List<String>, session: String, requestId: String?, onStep: ((String) -> Unit)? = null): Pair<NativeOffloadResult, Boolean> {
         val auth = r.auth ?: return NativeOffloadResult(1, "", "BAD_TOKEN") to false
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return NativeOffloadResult(1, "", "THERMAL_STOP: " + com.kilon.agentvscreen.host.ThermalGuard.reason()) to false
         val t = Tokens.byId(auth.token.id) ?: auth.token
         val via = when {
             r.path.startsWith("/mcp") -> Abilities.Via.MCP

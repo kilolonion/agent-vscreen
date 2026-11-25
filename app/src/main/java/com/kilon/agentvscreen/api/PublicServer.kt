@@ -59,6 +59,7 @@ class PublicServer(
     val running: Boolean get() = server?.isClosed == false
 
     fun start(preferredPort: Int = DEFAULT_PORT, span: Int = PORT_SPAN): Int = synchronized(bindLock) {
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return@synchronized -1
         if (running && boundPort > 0) return@synchronized boundPort
         stopLocked()
         for (p in preferredPort until (preferredPort + span).coerceAtMost(65536)) {

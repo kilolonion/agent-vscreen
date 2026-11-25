@@ -15,6 +15,7 @@ class VScreenApp : Application() {
             runCatching { BackgroundOperation.state.value.ownerSessionId?.let { BackgroundOperation.previewDisplayFor(it) }?.let { it.width to it.height } }.getOrNull()
         }
         AppLogger.init(this)
+        ThermalGuard.init(this)
         AppFront.init(this)
         ExitInfo.init(this)
         com.kilon.agentvscreen.I18n.init(this)
@@ -33,6 +34,7 @@ class VScreenApp : Application() {
         quiet("token-cleanup") { com.kilon.agentvscreen.api.Agents.finishCleanup() }
         Privileged.init(this)
         BackgroundOperation.init(this)
+        ThermalGuard.runtimeReady()
         val st = ServiceControl.now(this)
         val alreadyUp = HostService.server?.let { it.running || it.starting } == true
         if (shouldStartServerEarly(st, Privileged.isReady(), alreadyUp)) {

@@ -111,6 +111,7 @@ object VScreenPerception {
 
     /** Start (or keep alive) the watcher for [d]. Cheap to call on every command. */
     fun ensure(d: VScreenDisplay) {
+        if (com.kilon.agentvscreen.host.ThermalGuard.limited || (VScreenAwake.screenOff && !BackgroundOperation.needsAwake())) return
         synchronized(watchers) {
             if (d.released) return
             val w = watchers[d.displayId]
@@ -371,6 +372,7 @@ object VScreenPerception {
         var pkg: String? = null; var pkgAt = 0L
         var seen = -1L
         while (w.running && !d.released && SystemClock.elapsedRealtime() - w.lastUse < IDLE_STOP_MS) {
+            if (com.kilon.agentvscreen.host.ThermalGuard.limited || (VScreenAwake.screenOff && !BackgroundOperation.needsAwake())) break
             val t0 = SystemClock.elapsedRealtime()
             if (d.parked) { Thread.sleep(500); continue }
             if (d.colorFastMode) {

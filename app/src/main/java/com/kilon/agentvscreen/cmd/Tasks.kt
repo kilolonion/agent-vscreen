@@ -36,6 +36,7 @@ internal object Tasks {
     fun start(h: VScreenOffloadHandler, sid: String, sub: String, argv: List<String>): NativeOffloadResult {
         val parent = Call.current()
         val t = synchronized(tasks) {
+            if (com.kilon.agentvscreen.host.ThermalGuard.locked) throw ActionError("THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
             prune()
             if (tasks.values.count { it.result == null } >= MAX_RUNNING) throw ActionError("BUSY", tr("已经有 $MAX_RUNNING 个任务在运行：task 看列表，等一个做完或 task cancel", "$MAX_RUNNING tasks are already running: task lists them; wait for one or task cancel"))
             val id = "t" + (++seq) + "-" + java.lang.Long.toString((Math.random() * 46656).toLong(), 36)
@@ -201,5 +202,7 @@ internal object Tasks {
     private const val RECAP_MAX_CLICKABLES = 8
 
     /** For status / diag: running tasks, without their arguments. */
+    internal fun cancelForHeat() = synchronized(tasks) { tasks.values.filter { it.result == null }.forEach { it.call.cancelled = true } }
+
     fun running(): Int = synchronized(tasks) { tasks.values.count { it.result == null } }
 }

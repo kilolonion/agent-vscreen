@@ -305,6 +305,7 @@ object Tailnet {
     }
 
     @Synchronized fun sync(ctx: Context) {
+        if (ThermalGuard.locked) return
         if (ApiConfig.tailnetMode == Mode.BUILTIN) start(ctx.applicationContext)
         else {
             if (PublicAccess.enabled && PublicAccess.channel == PublicAccess.Channel.TAILSCALE) PublicAccess.disable(ctx.applicationContext, "tailnet_mode_${ApiConfig.tailnetMode.key}")
