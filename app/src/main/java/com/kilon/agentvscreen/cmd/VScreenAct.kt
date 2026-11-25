@@ -1320,7 +1320,33 @@ internal class ActCtx(val sid: String) {
 }
 
 /** A resolved target: the point, the words there, and (for #N) whether the element had moved. */
-internal class Target(val x: Int, val y: Int, val label: String?, val moved: String? = null, val box: Rect? = null)
+internal class Target(val x: Int, val y: Int, val label: String?, val moved: String? = null, val box: Rect? = null,
+    /** What is at the point itself, for the payment / irreversible check (differs from [label] for a point beside words). */
+    val atPoint: String? = label)
+
+/**
+ * 2.0.0-beta11 (test R14: `tap 1012 2688` on a checkout page pressed 立即支付 with no confirmation, `tap 自己付款` asked):
+ * what is at a point, for the reply and for the payment / irreversible check. Before, a tap by coordinates took the
+ * words only from the agent's last list, and a list the page had moved on from gave none, so the check saw no words
+ * and let the tap through. Now: the last list when it is still this page; else the accessibility tree read now; else
+ * a full read of the screen now (OCR, for buttons an app draws itself). A point whose words cannot be known at all is
+ * the only unchecked case.
+ */
+internal fun VScreenOffloadHandler.wordsAt(sid: String, d: VScreenDisplay, x: Int, y: Int): String? {
+    val set = synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] }
+    val current = set?.takeIf { it.generation == d.generation && !pageChangedSince(d, it, runCatching { com.kilon.agentvscreen.core.VScreenShell.topActivity(d.displayId) }.getOrNull()) }
+    if (current != null) return labelAt(current.list, x, y)
+    runCatching { labelAt(mergeElements(d, a11yRaw(d), null).filter { !it.placeholder }, x, y) }.getOrNull()?.let { return it }
+    return runCatching { labelAt(snapshot(d).els.filter { !it.placeholder }, x, y) }.getOrNull()
+}
+
+/** The words of the smallest element with words under (x, y), or of one within a finger's width of it. */
+internal fun labelAt(list: List<El>, x: Int, y: Int): String? {
+    val worded = list.filter { it.label.isNotBlank() }
+    worded.filter { it.box.contains(x, y) }.minByOrNull { it.box.width().toLong() * it.box.height() }?.let { return it.label }
+    return worded.filter { Rect(it.box).apply { inset(-24, -24) }.contains(x, y) }
+        .minByOrNull { Math.hypot((it.box.centerX() - x).toDouble(), (it.box.centerY() - y).toDouble()) }?.label
+}
 
 /**
  * 1.3.0-beta18: the places on the screen that [text] names, in reading order (top to bottom, then left to right), the
@@ -1368,10 +1394,7 @@ internal fun VScreenOffloadHandler.target(sid: String, d: VScreenDisplay, t: Ste
             throw StepRefused("OUT_OF_BOUNDS", tr("(${t.x},${t.y}) 在副屏 ${d.width}x${d.height} 外面", "(${t.x},${t.y}) is outside the ${d.width}x${d.height} screen"))
         // 1.3 beta8: the words at a point come from the list of the page that is on the screen now; a list from an
         // earlier page named what used to be there ("which is …" from the previous page).
-        val label = synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] }
-            ?.takeIf { set -> set.generation == d.generation && !pageChangedSince(d, set, runCatching { com.kilon.agentvscreen.core.VScreenShell.topActivity(d.displayId) }.getOrNull()) }?.list
-            ?.filter { it.box.contains(t.x, t.y) }?.minByOrNull { it.box.width().toLong() * it.box.height() }?.label
-        Target(t.x, t.y, label)
+        Target(t.x, t.y, wordsAt(sid, d, t.x, t.y))
     }
     is StepTarget.Ref -> {
         val set = synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] }
@@ -1425,7 +1448,7 @@ internal fun VScreenOffloadHandler.target(sid: String, d: VScreenDisplay, t: Ste
                 val x = e.box.centerX() + t.dx; val y = e.box.centerY() + t.dy
                 if (x !in 0 until d.width || y !in 0 until d.height)
                     throw StepRefused("OUT_OF_BOUNDS", tr("「${e.label.orEmpty().take(24)}」在 (${e.box.centerX()},${e.box.centerY()})，偏移后 ($x,$y) 在副屏 ${d.width}x${d.height} 外面；百分比偏移按整屏宽高算", "\"${e.label.orEmpty().take(24)}\" is at (${e.box.centerX()},${e.box.centerY()}); with the offset ($x,$y) is outside the ${d.width}x${d.height} screen; % offsets are shares of the whole screen"))
-                Target(x, y, tr("「${e.label.orEmpty().take(24)}」旁", "beside \"${e.label.orEmpty().take(24)}\""))
+                Target(x, y, tr("「${e.label.orEmpty().take(24)}」旁", "beside \"${e.label.orEmpty().take(24)}\""), atPoint = wordsAt(sid, d, x, y))
             }
         fun choose(hits: List<El>): El? = if (t.nth != 0) hits.getOrNull(if (t.nth > 0) t.nth - 1 else hits.size + t.nth)
             else hits.singleOrNull() ?: hits.filter { it.clickable || it.editable }.singleOrNull()
@@ -1614,6 +1637,7 @@ private fun VScreenOffloadHandler.doAction(
     appRule(d, step, fromRule = fromRule)
     if (fromRule || step.kind in setOf(StepKind.TAP, StepKind.PRESS, StepKind.SWIPE, StepKind.DRAG, StepKind.SCROLL, StepKind.TYPE, StepKind.KEY)) {
         com.kilon.agentvscreen.host.Risk.recordInputAction(Call.current()?.tokenId)
+        try { com.kilon.agentvscreen.host.Risk.checkRate(context, Call.current()) } catch (e: ActionError) { throw StepRefused(e.code, e.message ?: e.code) }
     }
     ctx.point = null
     var miss: String? = null
@@ -1630,7 +1654,7 @@ private fun VScreenOffloadHandler.doAction(
         when (step.kind) {
             StepKind.TAP -> {
                 val t = target(sid, dd, step.target!!, ctx)
-                payGuard(sid, dd, t.label, t.x, t.y, fromRule = fromRule)
+                payGuard(sid, dd, t.atPoint, t.x, t.y, fromRule = fromRule)
                 ctx.focusBefore = com.kilon.agentvscreen.core.VScreenTyping.focusedFieldKey(dd.displayId)
                 val (x, y) = hu?.near(t.x, t.y, t.box, dd.width, dd.height) ?: (t.x to t.y)
                 okOr(if (hu != null) VScreenShell.tap(dd.displayId, x, y, hu.holdMs()) else VScreenShell.tap(dd.displayId, x, y)); pts += intArrayOf(x, y); ctx.point = x to y
@@ -1638,7 +1662,7 @@ private fun VScreenOffloadHandler.doAction(
             }
             StepKind.PRESS -> {
                 val t = target(sid, dd, step.target!!, ctx)
-                payGuard(sid, dd, t.label, t.x, t.y, fromRule = fromRule)
+                payGuard(sid, dd, t.atPoint, t.x, t.y, fromRule = fromRule)
                 val (x, y) = hu?.near(t.x, t.y, t.box, dd.width, dd.height) ?: (t.x to t.y)
                 val ms = hu?.vary(step.ms ?: 800L, 0.15) ?: (step.ms ?: 800L)
                 okOr(VScreenShell.longPress(dd.displayId, x, y, ms.toInt())); pts += intArrayOf(x, y); ctx.point = x to y

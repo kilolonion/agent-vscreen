@@ -43,7 +43,15 @@ internal object CommandSpec {
                * stop --force and handoff in reach beyond the background screen). Null = [scope].
                */
               val scopeOf: ((OffloadArgs) -> Scope)? = null,
-              private val scopeNoteZh: String = "", private val scopeNoteEn: String = "") {
+              private val scopeNoteZh: String = "", private val scopeNoteEn: String = "",
+              /**
+               * 2.0.0-beta11 (review): the lowest level that may call it and whether it changes anything are two things.
+               * `elevate` is callable while looking only (else a viewer could never ask), yet it notifies the phone and
+               * may change the agent's table, so it is not read-only.
+               */
+              val sideEffects: Boolean = false) {
+        /** For MCP's readOnlyHint: callable while looking only and changes nothing. */
+        val readOnly: Boolean get() = scope == Scope.LOOK && !sideEffects
         val scopeNote: String get() = tr(scopeNoteZh, scopeNoteEn)
         fun scopeFor(args: OffloadArgs): Scope = scopeOf?.invoke(args) ?: scope
         val positional: String get() = tr(posZh, posEn)
@@ -199,7 +207,7 @@ internal object CommandSpec {
                 "A temporary permission ends by itself; payments cannot be asked for (each payment is confirmed on its own). A command that meets a Not allowed class brings up the same confirmation."),
             listOf(Opt("why", Kind.VALUE, "原因", "reason", "为什么需要（用户在确认卡上看到，最多 120 字）", "why you need it (shown on the card, up to 120 characters)"),
                 Opt("for", Kind.VALUE, "round|today|always", "round|today|always", "希望的范围（默认 round；用户可以改）", "the range you hope for (default round; the user may pick another)")),
-            scope = Scope.LOOK, screen = false, sumZh = "向用户申请临时或永久的更高许可（手机上指纹确认）", sumEn = "ask the user for temporary or permanent extra permission (fingerprint on the phone)"),
+            scope = Scope.LOOK, screen = false, sumZh = "向用户申请临时或永久的更高许可（手机上指纹确认）", sumEn = "ask the user for temporary or permanent extra permission (fingerprint on the phone)", sideEffects = true),
         Cmd("done", "", "",
             listOf("这一轮做完了：副屏马上省电暂停、页面保留 10 分钟，别的会话可以接手（不 done 的话安静满 N 分钟自动结束，N 在 App 里设）。"),
             listOf("this turn is finished: the screen pauses to save power at once, the page is kept 10 minutes, and other sessions can take over (without done, it ends after N quiet minutes, set in the app).")),

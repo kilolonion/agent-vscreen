@@ -64,8 +64,9 @@ object Consent {
             throw ActionError("SCOPE_DENIED", tr("用户给这个 agent 定的规则里，“$row”是不允许：$title 没有做。不要换别的办法绕过；需要的话请用户在 Agent-VScreen › 接入 › 这个 agent 里改",
                 "The user's rules for this agent say \"$row\" is not allowed: $title was not done. Don't work around it; if needed, ask the user to change it in Agent-VScreen › Connect › this agent"))
         }
-        // "Payments allowed for a while" (the agent page) passes every class; the user's own app rule still asks.
-        if (call?.trusted == true && kind != APP) { Audit.consent(name, session, "$title — $detail", "pre-authorized"); return }
+        // "Payments allowed for a while" (the agent page) passes payments only, as its card says. 2.0.0-beta11 (review):
+        // it used to pass every class, so an irreversible step set to ask went through without asking too.
+        if (call?.trusted == true && kind == MONEY) { Audit.consent(name, session, "$title — $detail", "pre-authorized"); return }
         if (act == com.kilon.agentvscreen.api.Policy.Act.ALLOW) {
             Audit.consent(name, session, "$title — $detail", "automatic"); return
         }

@@ -203,6 +203,14 @@ class PublicServer(
                 if (r.method == "GET") PublicOAuth.handleAuthorizeStatus(r)
                 else methodNotAllowed("GET")
 
+            "/oauth/device_authorization" ->
+                if (r.method == "POST") PublicOAuth.handleDeviceAuthorization(ctx, r, base)
+                else methodNotAllowed("POST")
+
+            "/oauth/device" ->
+                if (r.method == "GET") PublicOAuth.devicePageHtml()
+                else methodNotAllowed("GET")
+
             "/oauth/token" ->
                 if (r.method == "POST") PublicOAuth.handleToken(r, base)
                 else methodNotAllowed("POST")
@@ -222,7 +230,9 @@ class PublicServer(
 
         val srcBucket = PublicOAuth.sourceBucket(r.headers["x-avs-public-src"])
         val srcFailKey = "public-src:$srcBucket"
-        apiServer.failLimiter.checkLocked(srcFailKey, remote = true)?.let { return it }
+        // 2.0.0-beta11 (test P7: ten bad Bearers from one address locked the paired client there out for 5 minutes):
+        // the source lock stops guessing, so it applies to requests without a valid credential only. A valid token
+        // (random, 256 bits) is not a guess; its own client still has its own lock.
 
         val prmUrl = "${base.trimEnd('/')}/.well-known/oauth-protected-resource"
         val wwwAuth = mapOf("WWW-Authenticate" to """Bearer resource_metadata="$prmUrl"""")
@@ -244,6 +254,7 @@ class PublicServer(
                 chk.auth
             }
             is PublicOAuth.AccessCheck.Invalid -> {
+                apiServer.failLimiter.checkLocked(srcFailKey, remote = true)?.let { return it }
                 // Section I: unknown Bearer counts ONLY against source bucket (never global lockout);
                 // known client's invalid/expired/wrong-resource token counts by client_id.
                 val failKey = chk.knownClientId?.let { "public-client:$it" } ?: srcFailKey
@@ -261,6 +272,7 @@ class PublicServer(
         }
 
         r.publicClientId = access.clientId
+        r.publicScope = access.scope
         r.auth = ApiServer.Auth(access.token, signed = false, nonce = null)
         Tokens.used(access.token.id)
         wakeService()

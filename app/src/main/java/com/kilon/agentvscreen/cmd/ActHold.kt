@@ -710,10 +710,16 @@ internal object ActHold {
         // Single batched shell invocation reading cgroup v2 events (works in Shizuku, root-su2000, root-uid0)
         // plus fallback /proc/<pid>/wchan and existence probe.
         val script = buildString {
+            // 2.0.0-beta11: vendors mount the app hierarchy elsewhere (HONOR MagicOS has no /sys/fs/cgroup/uid_<uid>),
+            // so each process's own cgroup v2 path is read from /proc/<pid>/cgroup ("0::<path>") first.
             append("if [ -d /sys/fs/cgroup/uid_$uid ]; then echo CGDIR=1; else echo CGDIR=0; fi; ")
             append("for p in $pidList; do ")
             append("ev=''; exists=0; wc=''; ")
-            append("if [ -r /sys/fs/cgroup/uid_$uid/pid_\$p/cgroup.events ]; then ")
+            append("cg=\$(sed -n 's/^0:://p' /proc/\$p/cgroup 2>/dev/null | head -n 1); ")
+            append("f=/sys/fs/cgroup\$cg/cgroup.events; ")
+            append("if [ -n \"\$cg\" ] && [ -r \"\$f\" ]; then echo CGDIR=1; ")
+            append("exists=1; ev=\$(tr '\\n' ' ' < \"\$f\" 2>/dev/null); ")
+            append("elif [ -r /sys/fs/cgroup/uid_$uid/pid_\$p/cgroup.events ]; then ")
             append("exists=1; ev=\$(tr '\\n' ' ' < /sys/fs/cgroup/uid_$uid/pid_\$p/cgroup.events 2>/dev/null); ")
             append("elif [ -d /proc/\$p ]; then ")
             append("exists=1; wc=\$(cat /proc/\$p/wchan 2>/dev/null); ")
@@ -728,7 +734,7 @@ internal object ActHold {
         for (line in stdout.lineSequence()) {
             val t = line.trim()
             if (t == "CGDIR=1") { cgAvail = true; continue }
-            if (t == "CGDIR=0") { cgAvail = false; continue }
+            if (t == "CGDIR=0") continue
             if (!t.startsWith("PID=")) continue
             val parts = t.split('|')
             val pid = parts.getOrNull(0)?.removePrefix("PID=")?.toIntOrNull() ?: continue

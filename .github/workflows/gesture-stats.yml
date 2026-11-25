@@ -78,7 +78,7 @@ jobs:
           profile: pixel_6
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: mkdir -p gesture-out && { python3 tools/eval/run.py --apk test-apks/torture-debug.apk --out gesture-out --gesture-stats --s04-runs "${{ inputs.s04_runs || '40' }}" --s10-runs "${{ inputs.s10_runs || '20' }}" --s11-runs "${{ inputs.s11_runs || '20' }}" --s05-runs "${{ inputs.s05_runs || '20' }}" > gesture-out/gesture-stats.log 2>&1; rc=$?; adb logcat -d > gesture-out/logcat.txt; cat gesture-out/gesture-stats.log; if [ -f gesture-out/gesture-stats.md ] && [ -n "$GITHUB_STEP_SUMMARY" ]; then cat gesture-out/gesture-stats.md >> "$GITHUB_STEP_SUMMARY"; fi; exit "$rc"; }
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; mkdir -p gesture-out && { python3 tools/eval/run.py --apk test-apks/torture-debug.apk --out gesture-out --gesture-stats --s04-runs "${{ inputs.s04_runs || '40' }}" --s10-runs "${{ inputs.s10_runs || '20' }}" --s11-runs "${{ inputs.s11_runs || '20' }}" --s05-runs "${{ inputs.s05_runs || '20' }}" > gesture-out/gesture-stats.log 2>&1; rc=$?; adb logcat -d > gesture-out/logcat.txt; cat gesture-out/gesture-stats.log; if [ -f gesture-out/gesture-stats.md ] && [ -n "$GITHUB_STEP_SUMMARY" ]; then cat gesture-out/gesture-stats.md >> "$GITHUB_STEP_SUMMARY"; fi; exit "$rc"; }
       - if: always()
         uses: actions/upload-artifact@v5
         with:

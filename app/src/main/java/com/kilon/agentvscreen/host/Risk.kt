@@ -168,6 +168,22 @@ enum class Risk(
             }
         }
 
+        /**
+         * 2.0.0-beta11 (test R16: 160 taps in 56 s at the careful level, never asked): the rate was checked only when a
+         * command started, so four 40-step acts counted 0, 40, 80 and 120 at their starts and never went over. Now every
+         * input step counts itself and checks the window right then, before it acts; a stretch that crosses the limit
+         * stops there and asks.
+         */
+        internal fun checkRate(ctx: Context, call: Call?) {
+            if (call == null) return
+            val now = clock()
+            val n = inputActionCount(call.tokenId, now)
+            if (n <= RATE_MAX_PER_MIN) return
+            if (!rateAsks(call)) { noteRate(call, n, now); return }
+            if (StrongConfirm.hasGrant(call.tokenId, StrongConfirm.grantKey("rate", "*"), now)) return
+            StrongConfirm.requireForRisks(ctx, call, listOf(RATE), "act")
+        }
+
         /** Test helper: reset in-memory rate counters and clock. */
         internal fun resetForTests() {
             synchronized(rateLock) { rateBuckets.clear(); rateNoted.clear() }

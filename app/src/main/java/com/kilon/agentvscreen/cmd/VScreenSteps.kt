@@ -96,9 +96,27 @@ internal class TextPat(raw: String) {
     private val glob: Regex? = if ('*' in key) Regex(key.split('*').joinToString(".*") { if (it.isEmpty()) "" else Regex.escape(it) }) else null
     val wild: Boolean get() = glob != null
     /** Counts as these words (for conditions, and a target when nothing is exactly so). */
-    fun hit(text: String): Boolean { val n = com.kilon.agentvscreen.core.VScreenOcr.norm(text); return glob?.matches(n) ?: n.contains(key) }
+    fun hit(text: String): Boolean { val n = com.kilon.agentvscreen.core.VScreenOcr.norm(text); return glob?.matches(n) ?: containsNumberSafe(n, key) }
     /** Exactly these words (a pattern: matches the whole text). */
     fun exact(text: String): Boolean { val n = com.kilon.agentvscreen.core.VScreenOcr.norm(text); return glob?.matches(n) ?: (n == key) }
+}
+
+/**
+ * 2.0.0-beta11 (test G2: `seek until text:75%` stopped at 275%): words inside longer text, except that a number is not
+ * found inside a longer number: where [key] begins or ends with a digit, the text next to it must not be a digit there
+ * (75% is not in 275%, 1 is not in 10; 第1页 is still in 第1页共5页).
+ */
+internal fun containsNumberSafe(text: String, key: String): Boolean {
+    if (key.isEmpty()) return true
+    var i = text.indexOf(key)
+    while (i >= 0) {
+        val beforeOk = !key.first().isDigit() || i == 0 || !text[i - 1].isDigit()
+        val end = i + key.length
+        val afterOk = !key.last().isDigit() || end >= text.length || !text[end].isDigit()
+        if (beforeOk && afterOk) return true
+        i = text.indexOf(key, i + 1)
+    }
+    return false
 }
 
 internal object Steps {

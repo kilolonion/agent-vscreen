@@ -33,11 +33,9 @@ internal fun VScreenOffloadHandler.elevateCmd(args: OffloadArgs): NativeOffloadR
     if (row == null && level == null) throw ActionError("INVALID_ARGS", tr("不认识「$raw」。类别：${rowNames()}；档位：${levelNames()}",
         "Unknown \"$raw\". Classes: ${rowNames()}; levels: ${levelNames()}"))
 
-    if (row?.key == Policy.MONEY) throw ActionError("SCOPE_DENIED", tr(
-        "支付不能提前申请：每次付款时手机都会单独确认。需要一段时间内付款免确认，请用户在 Agent-VScreen › 接入 › 这个 agent 里开启「临时免确认支付」",
-        "Payments cannot be asked for ahead: each payment is confirmed on the phone. For a while without confirmations, the user can turn on Payments without confirmation in Agent-VScreen › Connect › this agent"))
+    row?.let { r -> com.kilon.agentvscreen.host.Permissions.refusal(r.key, public)?.let { throw ActionError("SCOPE_DENIED", it) } }
     if (level == Policy.CUSTOM) throw ActionError("INVALID_ARGS", tr("「自定义」不是可以申请的档位；请申请具体的类别", "Custom is not a level you can ask for; ask for a class"))
-    if (public && (row?.key == Policy.SYSTEM || (level != null && level !in Tokens.PUBLIC_LEVELS))) throw ActionError("SCOPE_DENIED", tr(
+    if (public && level != null && level !in Tokens.PUBLIC_LEVELS) throw ActionError("SCOPE_DENIED", tr(
         "公网 MCP 不开放系统操作，这是固定的边界，不能申请", "System actions are never available over public MCP; this cannot be asked for"))
 
     // Already covered: say so instead of asking the user for nothing.

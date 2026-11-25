@@ -18,7 +18,22 @@ object I18n {
     fun init(ctx: Context) {
         prefs = ctx.getSharedPreferences("agent_vscreen_api", Context.MODE_PRIVATE)
         cached = Lang.entries.firstOrNull { it.key == prefs?.getString("lang", null) } ?: Lang.AUTO
+        agentCached = if (prefs?.getString("agent_lang", null) == AGENT_AUTO) AGENT_AUTO else AGENT_EN
     }
+
+    /**
+     * 2.0.0-beta11 (rainbow: agent replies default English, a setting can change it): the language of what agents
+     * read (replies, errors, guide, status, diag) when the caller names none. "en" (default) or "auto" (the app's
+     * language). Screen text, OCR words and the user's own text are never translated. The UI follows [choice].
+     */
+    @Volatile private var agentCached: String = AGENT_EN
+    const val AGENT_EN = "en"
+    const val AGENT_AUTO = "auto"
+    var agentLang: String
+        get() = agentCached
+        set(v) { agentCached = if (v == AGENT_AUTO) AGENT_AUTO else AGENT_EN; prefs?.edit()?.putString("agent_lang", agentCached)?.apply() }
+    /** The reply language for an agent request that named none: "en", or null for the app's language. */
+    fun agentDefault(): String? = if (agentCached == AGENT_AUTO) null else "en"
 
     var choice: Lang
         get() = cached

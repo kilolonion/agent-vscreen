@@ -191,6 +191,11 @@ fun SettingsTab(bottom: Dp) {
                         host.recreateForLanguage()
                     }
                 })
+            // 2.0.0-beta11: what agents read is separate from the UI language (screen text is never translated).
+            OverlayDropdownPreference(items = listOf(tr("英文（推荐）", "English (recommended)"), tr("跟随界面语言", "Same as the app")),
+                selectedIndex = if (I18n.agentLang == I18n.AGENT_AUTO) 1 else 0,
+                title = tr("给 agent 的回复语言", "Language of replies to agents"),
+                onSelectedIndexChange = { i -> I18n.agentLang = if (i == 1) I18n.AGENT_AUTO else I18n.AGENT_EN })
         }
 
         Group(tr("更新", "Updates")) {

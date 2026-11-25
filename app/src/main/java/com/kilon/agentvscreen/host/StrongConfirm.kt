@@ -378,6 +378,21 @@ object StrongConfirm {
         }
     }
 
+    /**
+     * 2.0.0-beta11 (review): the user made [rows] stricter for [tokenId]: end the row elevations of those rows and every
+     * level elevation (a level lifts all rows), so the stricter rule applies now. Returns how many were ended.
+     */
+    fun dropElevations(tokenId: String, rows: Collection<String>): Int {
+        val keys = rows.map { grantKey(ROW_GRANT, it) }.toSet()
+        val gone = synchronized(lock) {
+            val drop = approvalList.filter { it.token == tokenId && (it.risk in keys || it.risk.startsWith("$GRANT_PREFIX$LEVEL_GRANT:")) }
+            if (drop.isNotEmpty()) { approvalList.removeAll(drop.toSet()); saveLocked(); publishApprovalsLocked() }
+            drop
+        }
+        gone.forEach { Audit.security("approval_revoked", "risk=${it.risk} token=$tokenId reason=tightened") }
+        return gone.size
+    }
+
     /** 2.0.0-beta8 (feedback 5): many tokens, one write. */
     fun revokeAllForTokens(ids: Set<String>) {
         if (ids.isEmpty()) return
