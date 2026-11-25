@@ -161,8 +161,35 @@ object StrongConfirm {
     private val _pending = MutableStateFlow<List<Request>>(emptyList())
     val pending: StateFlow<List<Request>> = _pending.asStateFlow()
 
+    /** Application context for work that runs off any caller (the expiry wake's notification clean-up). */
+    @Volatile private var appCtx: Context? = null
+
+    /** Republishes [pending] when the earliest waiting request runs out of time (see [ExpiryWake]). */
+    private val expiry = ExpiryWake("confirm") { expireDue() }
+    /** When the next waiting request runs out of time, or null when none is waiting (tests). */
+    internal val nextExpiryAt: Long? get() = expiry.dueAt
+
     fun init(ctx: Context) {
+        appCtx = ctx.applicationContext ?: ctx
         initFile(File(ctx.filesDir, APPROVALS_REL))
+    }
+
+    /**
+     * Time ran out for at least one waiting request: drop it from [pending] and its notification. Runs from the
+     * expiry wake, and from any screen that finds a request expired, so an expired request can never stay listed.
+     */
+    internal fun expireDue() {
+        val gone: List<Request>
+        synchronized(lock) {
+            val now = clock()
+            gone = requests.filter { it.answer == null && now - it.at >= it.validMs }
+            pruneRequestsLocked(now)
+            publishPendingLocked(now)
+        }
+        val ctx = appCtx ?: return
+        if (gone.isEmpty()) return
+        if (gone.any { it.pairingCode != null }) refreshPublicPairingNotification(ctx)
+        gone.filter { it.pairingCode == null }.forEach { cancelNotification(ctx, it.id) }
     }
 
     internal fun initFile(file: File) {
@@ -772,7 +799,7 @@ object StrongConfirm {
         }
     }
 
-    private fun getOrCreateRequest(
+    internal fun getOrCreateRequest(
         risk: Risk,
         key: String,
         tokenId: String,
@@ -940,8 +967,11 @@ object StrongConfirm {
         }
     }
 
+    /** The only writer of [pending]: publishes the live requests and arms the wake for the earliest expiry. */
     private fun publishPendingLocked(nowMs: Long) {
-        _pending.value = requests.filter { it.liveAt(nowMs) }.sortedByDescending { it.at }
+        val live = requests.filter { it.liveAt(nowMs) }
+        _pending.value = live.sortedByDescending { it.at }
+        expiry.at(live.minOfOrNull { it.at + it.validMs }, nowMs)
     }
 
     private fun newId(): String {
@@ -1139,7 +1169,7 @@ object StrongConfirm {
             waitMsOverride = null
             postNotification = true
             _approvals.value = emptyList()
-            _pending.value = emptyList()
+            publishPendingLocked(clock())
         }
     }
 }

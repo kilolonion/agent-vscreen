@@ -373,6 +373,8 @@ class StrongConfirmActivity : ComponentActivity() {
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp, vertical = 16.dp),
         ) {
+            // An expired request seen here leaves 等你处理 and its notification at once, not at the next event.
+            androidx.compose.runtime.LaunchedEffect(req?.id) { if (req != null && req.answer == null && !req.live) StrongConfirm.expireDue() }
             if (req == null || !req.live) {
                 Column(
                     Modifier
