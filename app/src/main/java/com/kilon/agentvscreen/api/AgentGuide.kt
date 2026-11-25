@@ -76,8 +76,7 @@ object AgentGuide {
         tr("- 每次任务开头调用 vscreen，命令填 guide（一页用法）；提示缺令牌时，请用户在 Agent-VScreen › 接入 › 新建接入（或 设置 › 令牌）里生成令牌，再用 vscreen_configure 保存。\n",
             "- At the start of each task call vscreen with the command guide (one page of usage); if it says the token is missing, ask the user to create one in Agent-VScreen › Connect › Connect an agent (or Settings › Tokens), then save it with vscreen_configure.\n") +
         "- " + loop() + "\n" +
-        tr("- 付款等高风险步骤由用户在手机上确认（CONFIRM_PENDING：请用户去手机上确认再重发；USER_DENIED：不要重试）；USER_STOPPED 时停下并转告怎么解除。\n",
-            "- High-risk steps such as paying are confirmed by the user on the phone (CONFIRM_PENDING: ask the user to confirm there, then send again; USER_DENIED: don't retry); on USER_STOPPED stop and pass on how to undo it.\n") +
+        userSection().lines().drop(1).filter { it.isNotBlank() }.joinToString("\n") + "\n" +
         tr("遇到这些情况：\n", "When:\n") +
         Abilities.all.joinToString("\n") { "- " + it.whenText + " → " + Abilities.forVia(it.can, Abilities.Via.MCP) }
 
@@ -114,7 +113,7 @@ Then run vscreen guide to read the usage once, and tell me where you saved the n
 请帮我接入 Agent-VScreen，让你以后能在我的手机上后台打开和操作应用（不打扰我正在用的屏幕）。
 
 1. 它的接口：POST $base/v2/run，内容 {"cmd": "status"}。令牌：$token（只给你用）。${httpAuth(base)}。先发一次 status 确认能连上，再发 {"cmd": "guide"} 读用法。把地址和令牌保存好。
-   回复是 JSON：ok（是否按预期做完）、code、next（出问题时该怎么办：look 先看画面 / fix_command 改命令 / ask_user 问我 / retry_later 稍后重试）、text、images、steps、screen、notes。可带 "request_id"：同一个 id 重发不会重复执行。
+   回复是 JSON：ok（是否按预期做完）、code、next（出问题时该怎么办：look 先看画面 / fix_command 改命令 / user_on_phone 请求在手机上等我、把回复里的 tell_user 发给我 / ask_user 问我 / retry_later 稍后重试）、text、images、steps、screen、notes。可带 "request_id"：同一个 id 重发不会重复执行。
 
 2. 把下面这段话存进你的长期记忆（或建成一个 skill / 规则）。这是我的要求：以后的新对话里，你也要知道自己有这个能力，我让你在手机上做事时直接用它。
 「${memoryHttp(base)}」
@@ -124,7 +123,7 @@ Then run vscreen guide to read the usage once, and tell me where you saved the n
 Please connect Agent-VScreen so that from now on you can open and operate apps on my phone in the background (without disturbing the screen I'm using).
 
 1. Its API: POST $base/v2/run with body {"cmd": "status"}. Token: $token (for you alone). ${httpAuth(base).replaceFirstChar { it.uppercase() }}. Send status once to check the connection, then {"cmd": "guide"} to read the usage. Keep the address and token.
-   The reply is JSON: ok (did it go as expected), code, next (what to do when it did not: look at the screen / fix_command / ask_user / retry_later), text, images, steps, screen, notes. You may send "request_id": resending the same id never runs the command twice.
+   The reply is JSON: ok (did it go as expected), code, next (what to do when it did not: look at the screen / fix_command / user_on_phone: a request waits for me on the phone, send me the reply's tell_user / ask_user / retry_later), text, images, steps, screen, notes. You may send "request_id": resending the same id never runs the command twice.
 
 2. Save the text below in your long-term memory (or as a skill / rule). This is my request: in future conversations you should know you have this ability and use it directly when I ask you to do something on my phone.
 "${memoryHttp(base)}"
@@ -156,40 +155,69 @@ ${ApiConfig.mcpJson(base, token)}
 """).trim()
 
     /**
-     * 2.0.0-beta9 (feedback 1): onboarding for a cloud client over public MCP. The same memory note and `remembered` as
-     * the local MCP message; the config has only the address (public MCP uses OAuth: no token, no header), and the
-     * message covers both kinds of client: one that edits its own MCP config, and one whose connector the user adds in
-     * its web settings (then step 1 is already done).
+     * What the user sends a cloud agent to connect over public MCP. 2.0.0-beta13 (rainbow: a weaker model spent a long
+     * time on it and even tried to make up a token): the rules come first (a token only ever comes from pairing on
+     * the phone; a 401 means not paired yet), then one path per kind of client, chosen by what the agent can do, with
+     * the exact URLs and a working request for the no-browser path, and an explicit way out ("tell me you can't").
      */
-    fun onboardPublic(url: String): String = tr("""
-请帮我接入 Agent-VScreen，让你以后能在我的手机上后台打开和操作应用（不打扰我正在用的屏幕）。按顺序做这三步：
+    fun onboardPublic(url: String): String {
+        val base = url.removeSuffix("/mcp").trimEnd('/')
+        val call = """curl -s -X POST $url -H "Authorization: Bearer <access_token>" -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"vscreen","arguments":{"command":"guide"}}}'"""
+        return tr("""
+请帮我接入 Agent-VScreen（我手机上的工具），让你以后能在我的手机上后台打开和操作应用。地址：$url
 
-1. 如果你能自己改 MCP 配置（比如 Claude Code、Codex），把这段加进去（streamable HTTP，不要加令牌或 Authorization 头，公网用 OAuth）：
+先记住两条规矩：
+- 访问令牌只能通过“在我手机上批准配对”拿到。不要自己编、猜或拼令牌，也不要用别处看到的 avs_ 开头的令牌；乱试的令牌会被拒绝，多次会被暂时封锁。
+- 收到 401 就是还没配对，不是出错：按下面的办法配对。哪一种都做不到时，直接告诉我“我接不了”，不要绕。
+
+按你的情况选一种（只选一种）：
+A. 我要在你的网页设置里添加连接器（比如 claude.ai、ChatGPT 的自定义连接器）：告诉我“请把 $url 添加为连接器”，我加好并在手机上批准后，你直接用 vscreen 工具。
+B. 你能自己改 MCP 配置（比如 Claude Code、Codex、Cursor）：加入下面这段（streamable HTTP，不要写令牌或 Authorization 头），连接时会打开授权页，我在手机上核对配对码并批准：
 ${ApiConfig.mcpJsonPublic(url)}
-第一次连接时会打开一个授权页，我会在手机上核对配对码并批准；拿到授权码后马上换取访问令牌（授权码 10 分钟内有效，只能用一次）。
-没有浏览器（云端主机、命令行）时用标准设备码流程（RFC 8628，地址见 $url/.well-known/oauth-authorization-server 的 device_authorization_endpoint）：注册时 grant_types 填 ["urn:ietf:params:oauth:grant-type:device_code","refresh_token"]，拿到 user_code 告诉我，我在手机弹出的卡片上核对后批准，你按 interval 轮询 /oauth/token。
-如果连 443 时 TCP 能连上、TLS 握手却收到 0 字节就断开（SSL_ERROR_SYSCALL / UNEXPECTED_EOF），基本就是手机上的公网接入没开或手机不在线，直接提醒我检查，不用再换 IP 或 TLS 版本试。
-如果你的 MCP 连接器只能由我在网页设置里添加（比如 claude.ai 的自定义连接器），我已经加好了，跳过这一步。
+C. 你没有浏览器、但能发 HTTP 请求（云端主机、命令行）：用设备码配对（RFC 8628），按顺序做：
+  1) POST $base/oauth/register，JSON：{"client_name":"<你的名字>","grant_types":["urn:ietf:params:oauth:grant-type:device_code","refresh_token"],"token_endpoint_auth_method":"none"}，记下 client_id。
+  2) POST $base/oauth/device_authorization，表单：client_id=<client_id>&resource=$url&scope=operate，记下 device_code、user_code、interval。
+  3) 把 user_code 告诉我，等我在手机上核对并批准。
+  4) 每 interval 秒 POST $base/oauth/token，表单：grant_type=urn:ietf:params:oauth:grant-type:device_code&device_code=<device_code>&client_id=<client_id>&resource=$url。回 authorization_pending 就继续等；拿到 access_token 和 refresh_token 后保存好（过期时用 grant_type=refresh_token 换新的）。
+  5) 调用工具，例如：
+  $call
+D. 以上都做不到（比如你只能聊天、不能联网调用接口）：告诉我你接不了，就到这里。
 
-2. 把下面这段话存进你的长期记忆（或建成一个 skill / 规则，用你自己保存长期信息的方式）。这是我的要求：以后的新对话里，你也要知道自己有这个能力，我让你在手机上做事时直接用它。
+连不上时：如果 443 端口 TCP 能连上，但 TLS 握手收到 0 字节就断开（SSL_ERROR_SYSCALL / UNEXPECTED_EOF），基本就是我手机上的公网接入没开或手机不在线，直接提醒我检查，不用换 IP 或 TLS 版本再试。
+
+接好以后：
+1. 把下面这段话存进你的长期记忆（或建成一个 skill / 规则）。这是我的要求：以后的新对话里你也要知道自己有这个能力，我让你在手机上做事时直接用它。
 「${memoryMcp()}」
-
-3. 存好以后调用 vscreen，命令填 remembered <你存在了哪里>，然后告诉我你把它存在了哪里。
+2. 存好以后调用 vscreen，命令填 remembered <你存在了哪里>，然后告诉我你把它存在了哪里。
 """, """
-Please connect Agent-VScreen so that from now on you can open and operate apps on my phone in the background (without disturbing the screen I'm using). Do these three steps in order:
+Please connect Agent-VScreen (a tool on my phone) so that from now on you can open and operate apps on my phone in the background. Address: $url
 
-1. If you can edit your own MCP config (e.g. Claude Code, Codex), add this (streamable HTTP; no token and no Authorization header, public access uses OAuth):
+Two rules first:
+- An access token only ever comes from me approving the pairing on my phone. Never make up, guess or assemble a token, and don't use any avs_ token you may have seen elsewhere; made-up tokens are refused, and repeated ones get you locked out for a while.
+- A 401 means you are not paired yet, not that something is broken: pair as below. If none of the ways works for you, tell me "I can't connect" instead of working around it.
+
+Pick the one way that fits you:
+A. I add connectors in your web settings (e.g. custom connectors on claude.ai or ChatGPT): tell me "please add $url as a connector"; once I have added it and approved on the phone, just use the vscreen tool.
+B. You can edit your own MCP config (e.g. Claude Code, Codex, Cursor): add the block below (streamable HTTP; no token and no Authorization header). Connecting opens an approval page; I check the pairing code on the phone and approve:
 ${ApiConfig.mcpJsonPublic(url)}
-The first connection opens an approval page; I check the pairing code on the phone and approve. Exchange the authorization code right away (it is valid for 10 minutes and only once).
-Without a browser (cloud VM, CLI) use the standard device flow (RFC 8628, device_authorization_endpoint in $url/.well-known/oauth-authorization-server): register with grant_types ["urn:ietf:params:oauth:grant-type:device_code","refresh_token"], tell me the user_code, I check it on the card the phone shows and approve, and you poll /oauth/token every interval seconds.
-If TCP to port 443 connects but the TLS handshake gets 0 bytes and closes (SSL_ERROR_SYSCALL / UNEXPECTED_EOF), public access is off on the phone or the phone is offline: tell me to check it instead of trying other IPs or TLS versions.
-If your MCP connectors can only be added by me in your web settings (e.g. custom connectors on claude.ai), I have already added it: skip this step.
+C. You have no browser but can send HTTP requests (cloud VM, command line): pair with the device flow (RFC 8628), in order:
+  1) POST $base/oauth/register with JSON {"client_name":"<your name>","grant_types":["urn:ietf:params:oauth:grant-type:device_code","refresh_token"],"token_endpoint_auth_method":"none"}; keep client_id.
+  2) POST $base/oauth/device_authorization with form client_id=<client_id>&resource=$url&scope=operate; keep device_code, user_code and interval.
+  3) Tell me the user_code and wait while I check it on the phone and approve.
+  4) Every interval seconds POST $base/oauth/token with form grant_type=urn:ietf:params:oauth:grant-type:device_code&device_code=<device_code>&client_id=<client_id>&resource=$url. On authorization_pending keep waiting; once you get access_token and refresh_token, keep them (when it expires, get a new one with grant_type=refresh_token).
+  5) Call the tool, for example:
+  $call
+D. None of these is possible for you (e.g. you can only chat and cannot call web APIs): tell me you can't connect, and stop there.
 
-2. Save the text below in your long-term memory (or as a skill / rule, whatever you use to keep things across conversations). This is my request: in future conversations you should know you have this ability and use it directly when I ask you to do something on my phone.
+If it won't connect: when TCP to port 443 connects but the TLS handshake gets 0 bytes and closes (SSL_ERROR_SYSCALL / UNEXPECTED_EOF), public access is off on my phone or the phone is offline: tell me to check it instead of trying other IPs or TLS versions.
+
+Once connected:
+1. Save the text below in your long-term memory (or as a skill / rule). This is my request: in future conversations you should know you have this ability and use it directly when I ask you to do something on my phone.
 "${memoryMcp()}"
-
-3. When it is saved, call vscreen with the command remembered <where you saved it>, then tell me where you saved it.
+2. When it is saved, call vscreen with the command remembered <where you saved it>, then tell me where you saved it.
 """).trim()
+    }
+
 
     /** `vscreen guide`: the one page, without the install line (whoever runs it is installed). */
     fun guide(): String = prompt().lines().filterNot { it.contains("/cli | ") }.joinToString("\n") + "\n"
@@ -202,6 +230,20 @@ If your MCP connectors can only be added by me in your web settings (e.g. custom
         "---\nname: agent-vscreen\ndescription: 在手机上后台打开、查看、操作任何应用（点、滑、输入、截图、盯守）时使用。用 vscreen 命令在 Agent-VScreen 的看不见的副屏上操作，不占用户主屏。不要自己建虚拟屏，也不要为此去连 adb、配无线调试或用 am/input/screencap。\n---\n\n",
         "---\nname: agent-vscreen\ndescription: Use to open, view or operate any app on the phone in the background (tap, swipe, type, screenshot, watch). The vscreen command works on Agent-VScreen's invisible second screen without taking the user's screen. Do not build your own virtual display, and do not reach for adb, wireless debugging or am/input/screencap for this.\n---\n\n"
     ) + prompt(skill = true).lines().filterNot { it.contains("/cli | ") }.joinToString("\n") + "\n"
+
+    /**
+     * 2.0.0-beta13 (rainbow: agents spent their time getting around requests the user never saw). When to turn to the
+     * user, generated from the code table: the codes that leave a request on the phone ([Codes.Next.PHONE]) and the
+     * ones only the user can lift ([Codes.Next.USER]).
+     */
+    fun userSection(): String {
+        val phone = com.kilon.agentvscreen.cmd.Codes.all.filter { it.next == com.kilon.agentvscreen.cmd.Codes.Next.PHONE && it.name != "CONFIRM_REQUIRED" }.joinToString(" / ") { it.name }
+        return tr("### 什么时候找用户\n", "### When to turn to the user\n") + tr(
+            "- next=`user_on_phone`（$phone）：请求已在手机上，用户多半没看到（通知常静音）：立刻把回复里的 tell_user 发给用户，等他说好了再原样重发，不要绕。\n" +
+                "- next=`ask_user`：只有用户能解决：停下告诉用户原因，不要重试或绕，被拒的事不要再问；权限不够用 `elevate` 申请。\n",
+            "- next=`user_on_phone` ($phone): the request is on the phone and the user most likely hasn't seen it (notifications are often silent). Send the user the reply's tell_user line now, wait until they say it's done, then resend unchanged; don't go around it or keep resending.\n" +
+                "- next=`ask_user`: only the user can lift it: stop and tell them why; don't retry, go around, or ask again what was refused. For more permission ask with `elevate`.\n")
+    }
 
     /** 2.0.0-beta3 (3.8): core guide budget (Meter.estTokens, checked in both ZH and EN). */
     const val CORE_GUIDE_MAX_TOKENS = 1500
@@ -280,6 +322,7 @@ If your MCP connectors can only be added by me in your web settings (e.g. custom
                     "Notes: until text: must match text that newly appears after the action (pre-existing text does not count); repeat max is 50; --fast skips waits only between actions, while each repeat iteration still waits on until/stable.\n\n",
                 ))
             }
+            if (key == "safety") append(userSection()).append('\n')
             if (key == "keep") {
                 append(tr(
                     "关于 act --hold：Android 15 起，暂停正在频繁刷新的应用时，系统可能直接结束它。\n\n",
@@ -330,7 +373,7 @@ If your MCP connectors can only be added by me in your web settings (e.g. custom
 ```
 完整回复（出错、没写 until、出现弹窗等意外或 `--full` 时）：第一行 `第 N 轮 · P编号 标题`，随后【做了什么】、【这段时间】（事件/弹出/toast）、【现在】（图与元素，旧页只列差异）、【注意】（代码与提示）。
 
-""" + topicSection() + """完整说明：`vscreen help all`；单条命令：`vscreen help act`。
+""" + userSection() + "\n" + topicSection() + """完整说明：`vscreen help all`；单条命令：`vscreen help act`。
 """, """
 ## Phone background screen (Agent-VScreen)
 1. **Write `until` on every action — when it matches, you get a short reply**: add `until <expected>` (e.g. `until text:Connected`; `text:` must appear after the action) after each action; when every step matches with no surprises, the reply is a short summary with no image. **Short replies are the phone's judgment — whenever anything feels off, ask for the full reply, never guess**: `vscreen act --full` (with no steps, replays the last stretch with full screen + all elements), `vscreen look` (picture), `vscreen look --last` (recording). Always full: `vscreen note reply full` (default quiet).
@@ -357,6 +400,6 @@ Full reply: act --full; picture: look; replay: look --last
 ```
 Full reply (on error, missing until, popup/surprise, or `--full`): line 1 `Turn N · Pid Title`, then [Done], [Meanwhile] (events/popups/toasts), [Now] (picture + elements, diff-only on recent cards), [Notes] (codes).
 
-""" + topicSection() + """Full reference: `vscreen help all`; one command: `vscreen help act`.
+""" + userSection() + "\n" + topicSection() + """Full reference: `vscreen help all`; one command: `vscreen help act`.
 """).trim()
 }

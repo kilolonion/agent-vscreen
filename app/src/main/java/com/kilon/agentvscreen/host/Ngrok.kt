@@ -27,6 +27,7 @@ object Ngrok : PublicTunnel {
     const val SIGNUP_URL = "https://dashboard.ngrok.com/signup"
     const val TOKEN_URL = "https://dashboard.ngrok.com/get-started/your-authtoken"
     const val DOMAINS_URL = "https://dashboard.ngrok.com/domains"
+    const val DOCS_URL = "https://ngrok.com/docs/start"
 
     data class Config(val token: String? = null, val domain: String? = null) {
         val complete: Boolean get() = token != null && domain != null

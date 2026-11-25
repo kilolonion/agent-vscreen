@@ -148,7 +148,7 @@ class V200Beta6Test {
         }
         assertNotNull(err1)
         assertEquals("NEEDS_CONFIRM", err1!!.code)
-        assertEquals("ask_user", Codes.next("NEEDS_CONFIRM"))
+        assertEquals("user_on_phone", Codes.next("NEEDS_CONFIRM"))
         val c1 = err1.data!!.getJSONObject("confirm")
         assertEquals("NEW_CLIENT", c1.getString("risk"))
         val cid = c1.getString("id")

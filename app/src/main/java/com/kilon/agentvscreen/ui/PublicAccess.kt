@@ -168,7 +168,7 @@ fun PublicChannelPicker() {
             selected = channel == PublicAccess.Channel.NGROK,
             onClick = { PublicAccess.setChannel(actx, PublicAccess.Channel.NGROK) },
         )
-        ArrowPreference(title = tr("设置指南", "Setup guide"), summary = tr("${channel.title} 的开通步骤和常见问题", "${channel.title}: steps and common problems"),
+        ArrowPreference(title = tr("适合谁和常见问题", "Who it suits and common problems"), summary = tr("${channel.title}：开通步骤就在下面", "${channel.title}: the setup steps are right below"),
             onClick = { nav.go(Route.PublicGuide(channel.key)) })
     }
 }
@@ -392,8 +392,7 @@ fun PublicChecklistSection(
         }
     }
 
-    if (channel == PublicAccess.Channel.CLOUDFLARE) CloudflareSetupSection()
-    if (channel == PublicAccess.Channel.NGROK) NgrokSetupSection()
+    PublicChannelSteps(channel, here = true)
     Group(tr("开启前提清单", "Prerequisites")) {
         checklist.items.forEach { item ->
             ChecklistRow(

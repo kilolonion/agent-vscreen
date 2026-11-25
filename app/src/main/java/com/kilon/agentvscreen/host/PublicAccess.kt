@@ -43,6 +43,8 @@ object PublicAccess {
 
     const val ADMIN_DNS_URL = "https://login.tailscale.com/admin/dns"
     const val ADMIN_ACL_URL = "https://login.tailscale.com/admin/acls/file"
+    const val DOCS_HTTPS_URL = "https://tailscale.com/docs/how-to/set-up-https-certificates"
+    const val DOCS_FUNNEL_URL = "https://tailscale.com/kb/1223/funnel"
     const val FUNNEL_NODE_ATTRS_SNIPPET = """"nodeAttrs": [
   { "target": ["autogroup:member"], "attr": ["funnel"] }
 ]"""

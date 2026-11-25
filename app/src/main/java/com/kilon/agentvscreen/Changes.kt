@@ -38,6 +38,29 @@ object Changes {
     /** Releases ordered newest first. Add a new [Release] entry whenever versionCode bumps. */
     val releases: List<Release> = listOf(
         Release(
+            versionCode = 70,
+            versionName = "2.0.0-beta13",
+            items = listOf(
+                Item(Kind.IMPROVED, Audience.USER, "公网设置步骤直接显示在页面上",
+                    "选好公网通道后，开通步骤直接列在页面上，令牌和域名就在对应步骤里填。每步都有直达后台页面的按钮和官方文档链接；Cloudflare 步骤配了标注截图（点开可放大），并说明了不要进“网络 › 路由”、安装页一直转圈是正常的。",
+                    "Public setup steps right on the page",
+                    "Once a public channel is picked, its setup steps are listed on the page with the token and domain fields inside their steps. Every step has a button straight to the dashboard page and a link to the official docs; the Cloudflare steps have annotated screenshots (tap to enlarge) and say not to use Networking › Routes and that the spinning install page is expected.",
+                    Route.PublicAccess),
+                Item(Kind.NEW, Audience.USER, "Agent 在等你时，屏幕顶部会提示",
+                    "Agent 发来确认、提问或示教请求时，除了通知，手机屏幕顶部还会出现一个紫色提示条“Agent 在等你处理”，通知静音时也看得到；点它打开首页的“待处理”。",
+                    "A bar at the top when an agent waits for you",
+                    "When an agent sends a confirmation, question or lesson request, besides the notification a purple bar \"An agent is waiting for you\" shows at the top of the screen, visible even with silent notifications; tap it to open Waiting for you on the home page."),
+                Item(Kind.IMPROVED, Audience.USER, "云端 agent 的接入说明更清楚",
+                    "给云端 agent 的接入的话改写了：先讲清令牌只能在手机上批准配对后拿到、不能自己编，401 只是还没配对；再按 agent 能做什么分成四种接法（网页添加连接器 / 自己改配置 / 设备码配对，带完整地址和示例请求 / 做不到就直说）。",
+                    "Clearer connect message for cloud agents",
+                    "The message for cloud agents is rewritten: first that a token only comes from approving the pairing on the phone and must never be made up, and that a 401 just means not paired yet; then four ways by what the agent can do (connector added in web settings / own config / device pairing with every URL and a sample request / say it can't)."),
+                Item(Kind.IMPROVED, Audience.AGENT, "请求在手机上等用户时，回复会直接说明",
+                    "需要用户在手机上确认、回答或演示时，回复的 next 是 user_on_phone，并带【等用户】一段和 user_action：说明请求已发到手机、用户可能没看到通知，给出一句可直接发给用户的话（告诉他点哪里），然后等用户说好了再原样重发，不要绕。guide 新增“什么时候找用户”。",
+                    "Replies say when a request waits for the user on the phone",
+                    "When the user must confirm, answer or demonstrate on the phone, next is user_on_phone and the reply carries a [Waiting for the user] block and user_action: the request is on the phone, the user may not have seen the notification, here is a line to send them (saying where to tap); wait until they say it's done, then resend unchanged instead of going around it. The guide has a new When to turn to the user section."),
+            ),
+        ),
+        Release(
             versionCode = 69,
             versionName = "2.0.0-beta12",
             items = listOf(

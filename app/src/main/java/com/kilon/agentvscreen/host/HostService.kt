@@ -142,6 +142,7 @@ class HostService : Service() {
         ensureServer(applicationContext).onChange = { renotify() }
         startGateBeat()
         Overlay.attach(applicationContext)
+        WaitingPill.attach(applicationContext)
         Presence.start(applicationContext)
         A11yHeal.maybeHeal(applicationContext, "service start")
         Tailnet.sync(applicationContext)
@@ -262,6 +263,7 @@ class HostService : Service() {
         PublicAccess.onServiceDestroyed(applicationContext)
         com.kilon.agentvscreen.host.quiet("HostService:167") { getSystemService(NotificationManager::class.java)?.cancel(STOP_NOTE_ID) }
         Overlay.detach()
+        WaitingPill.detach()
         Presence.stop()
         // On demand the server (and Gate) stay so the next request wakes the service; off (BLOCKED), dropServer stops Gate too.
         if (ServiceControl.now(this) == ServiceControl.State.BLOCKED) dropServer() else server?.onChange = null

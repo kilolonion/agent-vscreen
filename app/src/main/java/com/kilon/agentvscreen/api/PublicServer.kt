@@ -241,7 +241,7 @@ class PublicServer(
         val authHeader = r.headers["authorization"]?.trim()
         if (authHeader.isNullOrEmpty()) {
             // Standard initial unauthenticated discovery probe (RFC 9728): 401 + WWW-Authenticate without lockout penalty.
-            return ApiServer.Resp.err(401, "BAD_TOKEN", tr("需要 OAuth 访问令牌", "OAuth Bearer access token required")).plus(wwwAuth)
+            return ApiServer.Resp.err(401, "BAD_TOKEN", tr("还没配对：这个地址用 OAuth。访问令牌只能在用户手机上批准配对后拿到，不能自己编或猜。按 $prmUrl 找到授权服务器，用浏览器授权或设备码流程（RFC 8628）配对；做不到就告诉用户你接不了。", "Not paired yet: this address uses OAuth. An access token only comes from the user approving the pairing on the phone; it cannot be made up or guessed. Find the authorization server from $prmUrl and pair with the browser flow or the device flow (RFC 8628); if you can't, tell the user you can't connect.")).plus(wwwAuth)
         }
         val bearer = if (authHeader.startsWith("Bearer ", ignoreCase = true)) {
             authHeader.substring(7).trim()
@@ -265,7 +265,7 @@ class PublicServer(
                     remote = true,
                     path = r.path,
                     code = "BAD_TOKEN",
-                    msg = tr("公网访问令牌无效、已过期或目标地址不匹配", "Public access token is invalid, expired, or bound to another resource"),
+                    msg = tr("公网访问令牌无效、已过期或目标地址不匹配。令牌只能由手机上的配对发放，不能自己编或猜，乱试会被暂时封锁：过期就用 refresh_token 换新的，否则重新配对（$prmUrl）。", "Public access token is invalid, expired, or bound to another resource. Tokens only come from pairing on the phone and cannot be made up or guessed; repeated guesses get locked out. If it expired use the refresh_token, otherwise pair again ($prmUrl)."),
                     status = 401,
                     // RFC 6750 §3.1: a token that was sent and refused says so, so a client knows to refresh or re-pair.
                     headers = mapOf("WWW-Authenticate" to """Bearer error="invalid_token", resource_metadata="$prmUrl""""),
