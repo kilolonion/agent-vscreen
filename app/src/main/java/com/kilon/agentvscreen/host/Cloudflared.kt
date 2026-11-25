@@ -37,9 +37,11 @@ object Cloudflared : PublicTunnel {
     /** The fixed local address the tunnel's public hostname must point at (set in the Cloudflare dashboard). */
     const val ORIGIN_PORT = 18790
     const val ORIGIN_URL = "http://127.0.0.1:$ORIGIN_PORT"
-    const val DASHBOARD_URL = "https://one.dash.cloudflare.com/"
     const val ADD_SITE_URL = "https://dash.cloudflare.com/"
-    const val DOCS_URL = "https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/create-remote-tunnel/"
+    /** Deep link straight to Networking › Tunnels of whichever account the user picks (2.0.0-beta13). */
+    const val TUNNELS_URL = "https://dash.cloudflare.com/?to=/:account/tunnels"
+    const val DOCS_URL = "https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/get-started/create-remote-tunnel/"
+    const val DOCS_ROUTES_URL = "https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/routing-to-tunnel/"
 
     private var prefs: SharedPreferences? = null
     private val flows = TunnelFlows()
