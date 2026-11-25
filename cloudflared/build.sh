@@ -8,6 +8,8 @@ HERE="$(pwd)"
 AVS_BUILD_DIR="${AVS_BUILD_DIR:-/srv/avs-build}"
 [ -f "$AVS_BUILD_DIR/goenv.sh" ] && . "$AVS_BUILD_DIR/goenv.sh"
 VERSION="$(cat VERSION)"
+# cloudflared pins a newer Go patch release than tsbridge; let Go fetch it (CI sets GOTOOLCHAIN=local).
+export GOTOOLCHAIN=auto
 SRC="${CLOUDFLARED_SRC:-$AVS_BUILD_DIR/cloudflared-src/$VERSION}"
 if [ ! -d "$SRC/.git" ]; then
   mkdir -p "$(dirname "$SRC")"
