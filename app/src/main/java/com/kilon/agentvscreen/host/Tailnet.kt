@@ -307,7 +307,7 @@ object Tailnet {
     @Synchronized fun sync(ctx: Context) {
         if (ApiConfig.tailnetMode == Mode.BUILTIN) start(ctx.applicationContext)
         else {
-            if (PublicAccess.enabled) PublicAccess.disable(ctx.applicationContext, "tailnet_mode_${ApiConfig.tailnetMode.key}")
+            if (PublicAccess.enabled && PublicAccess.channel == PublicAccess.Channel.TAILSCALE) PublicAccess.disable(ctx.applicationContext, "tailnet_mode_${ApiConfig.tailnetMode.key}")
             stop("mode ${ApiConfig.tailnetMode}")
         }
     }
@@ -427,7 +427,7 @@ object Tailnet {
         // An auth key is only needed until the node is registered; it is dropped as soon as the node runs.
         ApiConfig.tailnetAuthKey?.let { env["TSB_AUTHKEY"] = it }
         // 2.0.0-beta7 (7.1, 7.7): enable Tailscale Funnel on official Tailscale with a freshly rotated secret (never logged).
-        if (PublicAccess.enabled && ApiConfig.tailnetControlUrl == null) {
+        if (PublicAccess.enabled && PublicAccess.channel == PublicAccess.Channel.TAILSCALE && ApiConfig.tailnetControlUrl == null) {
             val pubSrv = PublicAccess.ensureServer(ctx)
             val pubPort = pubSrv.boundPort.takeIf { it > 0 } ?: PublicAccess.boundPort
             env["TSB_FUNNEL"] = "1"
@@ -516,7 +516,7 @@ object Tailnet {
      * VPN and its DNS may be unreachable for this app (bypassed in the proxy); Wi-Fi's or mobile data's still are.
      * The bridge asks all of them at once (tsbridge/dns.go), so a dead one costs nothing.
      */
-    private fun dnsServers(ctx: Context): List<String> = runCatching {
+    internal fun dnsServers(ctx: Context): List<String> = runCatching {
         val cm = ctx.getSystemService(ConnectivityManager::class.java)
         @Suppress("DEPRECATION") val nets = listOfNotNull(cm.activeNetwork) + cm.allNetworks.filter { it != cm.activeNetwork }
         nets.flatMap { n -> runCatching { cm.getLinkProperties(n)?.dnsServers.orEmpty().mapNotNull { it.hostAddress } }.getOrDefault(emptyList()) }

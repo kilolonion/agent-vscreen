@@ -121,6 +121,7 @@ sealed interface Route : NavKey {
     @Serializable data class Agent(val id: String) : Route
     @Serializable data object Remote : Route
     @Serializable data object PublicAccess : Route
+    @Serializable data class PublicGuide(val channel: String) : Route
     @Serializable data object Security : Route
     @Serializable data object FloatingWindow : Route
     @Serializable data object Tokens : Route
@@ -235,6 +236,7 @@ fun AppRoot(host: AppHost, firstPage: Route?, snack: SnackbarHostState, firstTab
                 entry<Route.Connect>(swipeDismiss = swipe) { ConnectPage() }
                 entry<Route.Remote>(swipeDismiss = swipe) { RemotePage() }
                 entry<Route.PublicAccess>(swipeDismiss = swipe) { PublicAccessPage() }
+                entry<Route.PublicGuide>(swipeDismiss = swipe) { PublicGuidePage(it.channel) }
                 entry<Route.Security>(swipeDismiss = swipe) { SecurityPage() }
                 entry<Route.FloatingWindow>(swipeDismiss = swipe) { FloatingWindowPage() }
                 entry<Route.NewAgent>(swipeDismiss = swipe) { NewAgentPage() }

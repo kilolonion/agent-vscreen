@@ -40,6 +40,7 @@ jobs:
           cache-dependency-path: tsbridge/go.sum
       - uses: gradle/actions/setup-gradle@v5
       - run: ./tsbridge/build.sh
+      - run: CLOUDFLARED_SRC="$RUNNER_TEMP/cloudflared-src" ./cloudflared/build.sh
       - run: ./gradlew --no-daemon :app:assembleDebug :torture:assembleDebug
       - uses: actions/upload-artifact@v5
         with:

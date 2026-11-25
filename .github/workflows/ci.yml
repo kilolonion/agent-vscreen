@@ -54,6 +54,9 @@ jobs:
       - name: Built-in Tailscale node (tsbridge)
         run: ./tsbridge/build.sh
 
+      - name: Cloudflare tunnel client (cloudflared)
+        run: CLOUDFLARED_SRC="$RUNNER_TEMP/cloudflared-src" ./cloudflared/build.sh
+
       - name: tsbridge unit tests
         run: (cd tsbridge && go test -v ./...)
 
