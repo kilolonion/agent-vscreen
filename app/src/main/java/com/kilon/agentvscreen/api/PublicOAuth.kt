@@ -255,6 +255,8 @@ object PublicOAuth {
                     }
                     pruneExpiredLocked(nowMs())
                 }.onFailure { AppLogger.warning(TAG, "load store failed: ${it.message}") }
+                // 2.0.0-beta14: names cut at 16 characters by earlier versions get their full client_name back.
+                clients.values.forEach { c -> c.tokenId?.let { runCatching { Tokens.restorePublicName(it, c.clientName) } } }
             }
         }
     }

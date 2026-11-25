@@ -38,6 +38,22 @@ object Changes {
     /** Releases ordered newest first. Add a new [Release] entry whenever versionCode bumps. */
     val releases: List<Release> = listOf(
         Release(
+            versionCode = 71,
+            versionName = "2.0.0-beta14",
+            items = listOf(
+                Item(Kind.IMPROVED, Audience.USER, "agent 的名字不再被截断",
+                    "agent 自己报的名字现在完整保存（之前公网接入的超过 16 个字会被截掉，已自动补回）；地方不够时单行滚动显示。",
+                    "Agent names are no longer cut",
+                    "The name an agent gives itself is now kept in full (public ones were cut at 16 characters before and have been restored); where space is short it scrolls on one line.",
+                    Route.Connect),
+                Item(Kind.IMPROVED, Audience.USER, "Cloudflare 第 4 步配上了截图",
+                    "添加公网域名这一步配了三张标注截图：隧道里的“路由”标签和“添加路由”、选“已发布的应用程序”、表单每一格填什么。",
+                    "Screenshots for Cloudflare step 4",
+                    "The add-hostname step now has three annotated screenshots: the tunnel's Routes tab and Add route, picking Published application, and what goes in each field.",
+                    Route.PublicAccess),
+            ),
+        ),
+        Release(
             versionCode = 70,
             versionName = "2.0.0-beta13",
             items = listOf(

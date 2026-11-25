@@ -192,6 +192,13 @@ object Tokens {
         return (1..n).map { abc[r.nextInt(abc.length)] }.joinToString("")
     }
 
+    /**
+     * 2.0.0-beta14: the longest agent name kept, the same cap as an OAuth client_name. Names were cut at 16 (public)
+     * or 24 (local) characters, so names like "Doubao Agent (cloud)" lost their tail; the UI wraps or ellipsizes.
+     */
+    const val NAME_MAX = 64
+    const val PUBLIC_PREFIX = "公网·"
+
     /** A new token; the second value is the token text, shown to the user once and never stored. */
     @Synchronized fun create(name: String, scope: String): Pair<Token, String> =
         createLevel(name, defaultLevelFor(if (scope in SCOPES) scope else "operate"))
@@ -202,7 +209,7 @@ object Tokens {
         do { id = random(6).lowercase() } while (_list.value.any { it.id == id })
         val secret = random(28)
         val lv = if (level in LEVELS) level else FREE
-        val t = Token(id, name.trim().take(24).ifEmpty { "agent-$id" }, sha256(secret), Policy.scopeOf(Policy.table(lv, custom)), System.currentTimeMillis(), level = lv, custom = custom)
+        val t = Token(id, name.trim().take(NAME_MAX).ifEmpty { "agent-$id" }, sha256(secret), Policy.scopeOf(Policy.table(lv, custom)), System.currentTimeMillis(), level = lv, custom = custom)
         save(_list.value + t)
         return t to "avs_${id}_$secret"
     }
@@ -215,7 +222,7 @@ object Tokens {
     @Synchronized fun createPublic(clientName: String, scope: String): Token {
         var id: String
         do { id = random(6).lowercase() } while (_list.value.any { it.id == id })
-        val label = "公网·" + clientName.trim().ifEmpty { "MCP" }.take(16)
+        val label = PUBLIC_PREFIX + clientName.trim().ifEmpty { "MCP" }.take(NAME_MAX)
         val safeScope = if (scope == "operate") "operate" else "look"
         val t = Token(id, label, "", safeScope, System.currentTimeMillis(), publicOnly = true, level = defaultLevelFor(safeScope))
         save(_list.value + t)
@@ -248,7 +255,19 @@ object Tokens {
     }
 
     /** 1.4.0-beta7: each connected agent has its own token; its name is how the app shows that agent. */
-    @Synchronized fun rename(id: String, name: String) { val n = name.trim().take(24); if (n.isNotEmpty()) save(_list.value.map { if (it.id == id) it.with(name = n) else it }) }
+    @Synchronized fun rename(id: String, name: String) { val n = name.trim().take(NAME_MAX); if (n.isNotEmpty()) save(_list.value.map { if (it.id == id) it.with(name = n) else it }) }
+    /**
+     * 2.0.0-beta14: give a public identity back the full name its client registered, if it still carries the name
+     * cut at 16 characters by an earlier version (a name the user changed is left alone).
+     */
+    @Synchronized fun restorePublicName(id: String, clientName: String) {
+        val full = clientName.trim()
+        if (full.length <= 16) return
+        val t = _list.value.firstOrNull { it.id == id && it.publicOnly } ?: return
+        if (t.name != PUBLIC_PREFIX + full.take(16)) return
+        save(_list.value.map { if (it.id == id) it.with(name = PUBLIC_PREFIX + full.take(NAME_MAX)) else it })
+    }
+
     @Synchronized fun revoke(id: String) {
         if (id != MAIN) {
             save(_list.value.filter { it.id != id })
