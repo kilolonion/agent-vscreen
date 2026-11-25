@@ -402,7 +402,11 @@ def main():
             break
     st_v6_same64, _, _ = http_req(PUB_LOCAL_PORT, "POST", "/mcp", dict(mcp_hdr_2, **{"X-AVS-Public-Src": "2001:db8:aaaa:1111::99"}), json.dumps({"jsonrpc": "2.0", "id": 140, "method": "tools/list"}))
     st_v6_other64, _, _ = http_req(PUB_LOCAL_PORT, "POST", "/mcp", dict(mcp_hdr_2, **{"X-AVS-Public-Src": "2001:db8:aaaa:2222::1"}), json.dumps({"jsonrpc": "2.0", "id": 141, "method": "tools/list"}))
-    check("per_source_lockout_ipv6_64", v6_locked and st_v6_same64 == 429 and st_v6_other64 == 200, f"locked={v6_locked} same64={st_v6_same64} other64={st_v6_other64}")
+    # 2.0.0-beta11 (P7): the lock stops guessing, not a client that holds a valid token behind the same egress.
+    bad_same64 = dict(pub_hdr, **{"X-AVS-Public-Src": "2001:db8:aaaa:1111::99", "Authorization": "Bearer unknown_v6_token_x", "Content-Type": "application/json"})
+    st_v6_same64_bad, _, _ = http_req(PUB_LOCAL_PORT, "POST", "/mcp", bad_same64, json.dumps({"jsonrpc": "2.0", "id": 142, "method": "tools/list"}))
+    check("per_source_lockout_ipv6_64", v6_locked and st_v6_same64_bad == 429 and st_v6_same64 == 200 and st_v6_other64 == 200,
+          f"locked={v6_locked} same64_bad={st_v6_same64_bad} same64_valid={st_v6_same64} other64={st_v6_other64}")
     send_public_hook("clear_lockout")
 
     # Reuse retired refresh_1 -> revokes ALL tokens of this client (access_2 AND refresh_2 stop working!)
