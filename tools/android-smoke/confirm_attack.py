@@ -544,7 +544,8 @@ def run_suite(sdk: int, out_dir: Path):
         c_new == 200
         and b_new.get("ok") is False
         and b_new.get("code") == "NEEDS_CONFIRM"
-        and b_new.get("next") == "ask_user"
+        and b_new.get("next") == "user_on_phone"
+        and bool((b_new.get("user_action") or {}).get("tell_user"))
         and conf1.get("risk") == "NEW_CLIENT"
         and cid1.startswith("c_")
         and int(conf1.get("expires_in_s", 0)) > 0,
