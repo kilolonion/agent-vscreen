@@ -359,7 +359,8 @@ object Wake {
 
     /** Work out every entry's next window and set one alarm for the earliest. Called on change, boot, app start and after each alarm. */
     @Synchronized fun arm(ctx: Context) {
-        if (ThermalGuard.locked) { ctx.getSystemService(AlarmManager::class.java)?.cancel(alarmIntent(ctx)); return }
+        // 2.0.0-beta12: off (blocked) leaves no alarm behind either; turning it back on re-arms (HostService start).
+        if (ThermalGuard.locked || Prefs.blocked(ctx)) { ctx.getSystemService(AlarmManager::class.java)?.cancel(alarmIntent(ctx)); return }
         load(ctx)
         val am = ctx.getSystemService(AlarmManager::class.java) ?: return
         val now = System.currentTimeMillis()

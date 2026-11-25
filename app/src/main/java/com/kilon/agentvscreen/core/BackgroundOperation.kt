@@ -327,10 +327,10 @@ object BackgroundOperation {
     fun unpark(d: VScreenDisplay): String? {
         mainHandler.removeCallbacks(idlePark)
         if (!d.parked) return null
-        val r = d.unpark()
+        val res = d.unparkResult()
         _state.update { it.copy(powerSaving = false) }
-        wakeNote = d.displayId to r
-        return r
+        wakeNote = d.displayId to res
+        return d.resumeText(res)
     }
 
     /**
@@ -339,8 +339,11 @@ object BackgroundOperation {
      * reached only the app's own window. Now the next reply on that screen carries it, whichever path woke it (the
      * turn starting, or the command itself).
      */
-    @Volatile private var wakeNote: Pair<Int, String>? = null
-    fun takeWakeNote(displayId: Int): String? = wakeNote?.takeIf { it.first == displayId }?.let { wakeNote = null; it.second }
+    @Volatile private var wakeNote: Pair<Int, VScreenDisplay.Resume>? = null
+    /** Worded now, in the language of the reply that carries it. */
+    fun takeWakeNote(displayId: Int): String? = wakeNote?.takeIf { it.first == displayId }?.let { n ->
+        wakeNote = null; display?.takeIf { it.displayId == displayId }?.resumeText(n.second)
+    }
 
     /** The settings switch: turning it off wakes a paused screen at once. */
     fun setIdlePowerSave(on: Boolean) {

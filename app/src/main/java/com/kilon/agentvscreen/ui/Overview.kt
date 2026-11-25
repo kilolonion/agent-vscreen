@@ -586,7 +586,7 @@ private fun ShieldSheet(show: Boolean, close: () -> Unit) {
                 else tr("平时不在后台；本机 agent 或预约时间到了才叫醒，用完自己收起", "Not in the background; woken by an agent here or a booked time, then put away again"),
                 st == ServiceControl.State.HIDDEN) { pick(ServiceControl.State.HIDDEN) }
             ServiceChoice(Icons.Filled.Block, tr("关闭", "Off"),
-                tr("马上停下并退出通知栏，什么都叫不醒它，直到你回来选别的", "Stops now and leaves the shade; nothing wakes it until you choose again here"),
+                tr("全部停下，公网和远程也关，离开应用后不留后台；再打开时公网自动恢复", "Everything stops, public and remote access too, nothing stays in the background once you leave; public access comes back when you turn it on"),
                 st == ServiceControl.State.BLOCKED, danger = true) { pick(ServiceControl.State.BLOCKED) }
             HostService.server?.lastError?.let { e -> Note(e, Palette.stopped, Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) }
             if (HostService.server?.lastError == null) HostService.server?.portNote?.let { n -> Note(n, MiuixTheme.colorScheme.onSurfaceVariantSummary, Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) }

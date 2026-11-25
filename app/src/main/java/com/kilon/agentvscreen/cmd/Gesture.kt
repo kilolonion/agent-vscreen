@@ -439,6 +439,60 @@ internal object Gesture {
         pkg: String?,
         pollMsP50: Long? = null,
         pollMsMax: Long? = null,
+        /** 2.0.0-beta12: the screen's elements (accessibility, frame pixels) read before the finger went down. */
+        before: List<El>? = null,
+    ): GestureRecord {
+        val pixels = evaluateDragFrames(d, startPt, midPt, endPt, preDownAt, downAt, midAt, preUpAt, upAt, upElapsed, pkg, pollMsP50, pollMsMax)
+        if (before.isNullOrEmpty()) return pixels
+        val after = runCatching { a11yRaw(d).filter { !it.placeholder } }.getOrNull() ?: return pixels
+        val byElements = elementAfter(before, after, startPt, endPt) ?: return pixels
+        return pixels.copy(afterRelease = byElements)
+    }
+
+    /**
+     * 2.0.0-beta12 (test F7: closing Edge tabs by dragging gave "disappeared", "moved elsewhere" or nothing at all, for
+     * the same action; three identical 新建标签页 tabs fooled the picture match): what the screen's elements say
+     * happened to the dragged one. The element under the start point is named by its words; then
+     *  - fewer elements with those words than before: it went away (closed, deleted, swiped off);
+     *  - one with those words now at the drop point and none left where it was: it stayed where it was dropped;
+     *  - still where it was, as many as before: it went back (or never moved).
+     * Null when the start point has no element with words, or the elements do not settle it (the picture decides).
+     */
+    internal fun elementAfter(before: List<El>, after: List<El>, start: Pair<Int, Int>, end: Pair<Int, Int>): String? {
+        fun key(e: El) = com.kilon.agentvscreen.core.VScreenOcr.norm(e.label)
+        val worded = before.filter { key(it).isNotEmpty() }
+        val item = worded.filter { it.box.contains(start.first, start.second) }.minByOrNull { it.box.width().toLong() * it.box.height() }
+            ?: return null
+        val k = key(item)
+        val was = worded.count { key(it) == k }
+        val now = after.filter { key(it) == k }
+        if (now.size < was) return AFTER_DISAPPEARED
+        fun near(r: Rect, x: Int, y: Int, pad: Int) = Rect(r).apply { inset(-pad, -pad) }.contains(x, y)
+        val atStart = now.any { kotlin.math.abs(it.box.centerX() - item.box.centerX()) <= 24 && kotlin.math.abs(it.box.centerY() - item.box.centerY()) <= 24 }
+        val atEnd = now.any { near(it.box, end.first, end.second, 48) }
+        val moved = kotlin.math.hypot((end.first - start.first).toDouble(), (end.second - start.second).toDouble()) > minOf(item.box.width(), item.box.height()) / 2.0
+        return when {
+            !moved -> null
+            atEnd && !atStart -> AFTER_STAYED
+            atStart && now.size == was -> AFTER_SNAPPED_BACK
+            else -> null
+        }
+    }
+
+    private fun evaluateDragFrames(
+        d: VScreenDisplay,
+        startPt: Pair<Int, Int>,
+        midPt: Pair<Int, Int>,
+        endPt: Pair<Int, Int>,
+        preDownAt: Long,
+        downAt: Long,
+        midAt: Long,
+        preUpAt: Long,
+        upAt: Long,
+        upElapsed: Long,
+        pkg: String?,
+        pollMsP50: Long?,
+        pollMsMax: Long?,
     ): GestureRecord {
         val targetElapsed = upElapsed + SETTLE_MS
         val call = Call.current()
@@ -1112,6 +1166,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
     var seekStartLabel: String? = null
     var seekMissReason: String? = null
     var seekNotRead = false
+    var beforeEls: List<El>? = null
 
     try {
         Gesture.checkLoopInterrupts(d, call)
@@ -1120,6 +1175,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
         }
         if (isDrag) {
             d.latestWithVersion()?.let { (bmp, ver) -> VScreenRecorder.offerFresh(d, bmp, ver, pkg) }
+            beforeEls = runCatching { a11yRaw(d).filter { !it.placeholder } }.getOrNull()
         }
         preDownAt = System.currentTimeMillis()
         tStart = SystemClock.elapsedRealtime()
@@ -1317,6 +1373,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
 
     val record = if (isDrag) {
         Gesture.evaluateDragRecord(
+            before = beforeEls,
             d = d,
             startPt = startPt,
             midPt = midPt,

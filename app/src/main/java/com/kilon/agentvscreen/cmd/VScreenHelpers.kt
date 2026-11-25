@@ -218,10 +218,29 @@ internal fun tabBarBoxes(els: List<El>, screenW: Int, screenH: Int): List<Rect> 
     return out + els.filter { e -> out.any { it.contains(e.box.centerX(), e.box.centerY()) } }.map { Rect(it.box) }
 }
 
-/** 1.3, pure: boxes that are at the same place in two looks taken before and after a scroll (fixed bars). */
-internal fun fixedBoxes(before: List<El>, after: List<El>): List<Rect> =
-    after.filter { a -> before.any { b -> b.kind == a.kind && Math.abs(b.box.centerX() - a.box.centerX()) <= 12 && Math.abs(b.box.centerY() - a.box.centerY()) <= 12 &&
+/**
+ * 1.3, pure: boxes that are at the same place in two looks taken before and after a scroll (fixed bars).
+ *
+ * 2.0.0-beta12 (test: `collect --from-top` in Settings left out WLAN, 蓝牙, 移动网络 and one more row of the first
+ * screen): a swipe that first collapses a big title barely moves the rows, and every row then sat "at the same place"
+ * and was taken for a bar. Staying put shows a bar only when the page did scroll: some words moved by a real
+ * distance, or most of the words are new. Without that, nothing is called fixed.
+ */
+internal fun fixedBoxes(before: List<El>, after: List<El>): List<Rect> {
+    val shifts = after.mapNotNull { a ->
+        before.filter { b -> b.text == a.text && b.text.isNotBlank() && Math.abs(b.box.centerX() - a.box.centerX()) <= 12 }
+            .minByOrNull { b -> Math.abs(b.box.centerY() - a.box.centerY()) }?.let { b -> Math.abs(b.box.centerY() - a.box.centerY()) }
+    }
+    val worded = after.filter { it.text.isNotBlank() }
+    val fresh = worded.count { a -> before.none { it.text == a.text } }
+    val scrolled = shifts.any { it >= SCROLL_SEEN_PX } || (worded.isNotEmpty() && fresh * 2 >= worded.size)
+    if (!scrolled) return emptyList()
+    return after.filter { a -> before.any { b -> b.kind == a.kind && Math.abs(b.box.centerX() - a.box.centerX()) <= 12 && Math.abs(b.box.centerY() - a.box.centerY()) <= 12 &&
         Math.abs(b.box.height() - a.box.height()) <= 16 } }.map { Rect(it.box) }
+}
+
+/** A word that moved this far between two looks shows the page scrolled. */
+internal const val SCROLL_SEEN_PX = 60
 
 /** `collect [--pages N] [--until 文字]`: scroll down page by page and gather the entries (de-duplicated). */
 internal fun VScreenOffloadHandler.collectCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {

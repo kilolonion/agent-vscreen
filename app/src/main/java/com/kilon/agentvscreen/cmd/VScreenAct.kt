@@ -165,6 +165,16 @@ internal class Probe(
         return Change.ratio(a, b, c?.let { scaled(it, a) }, skip).coerceAtLeast(0.0)
     }
 
+    /** 2.0.0-beta12: a small but clear change outside the areas already moving, in frame pixels (whole-screen `change` only). */
+    private fun smallChange(a: Bitmap, b: Bitmap, c: Cond): Rect? {
+        if (c.area != null) return null
+        val m = mask
+        if (m != null && m.share > Mask.MOSTLY) return null
+        val r = Change.localChange(a, b, m?.rectsIn(a.width, a.height).orEmpty()) ?: return null
+        val k = d.width.toDouble() / a.width
+        return Rect((r.left * k).toInt(), (r.top * k).toInt(), (r.right * k).toInt(), (r.bottom * k).toInt())
+    }
+
     private fun where(c: Cond) = c.area?.let { tr("区域 [${Report.box(it)}]", "region [${Report.box(it)}]") } ?: tr("画面", "the screen")
 
     /** Readings count from: this probe's start, or (after an action) the moment the change calmed down. */
@@ -198,6 +208,21 @@ internal class Probe(
         return items
     }
 
+    /**
+     * 2.0.0-beta12 (test: on Bilibili `gone:排行榜` stayed false and `if text:排行榜` was true on the 推荐 page): the
+     * accessibility tree also lists words the app keeps but does not show (a page left under the one on top, a pager
+     * page off to the side), and "visible to user" does not see that. An accessibility hit counts only when its box is
+     * on the screen and the picture does not show other words in that place ([pictureAgrees]).
+     */
+    private fun shownA11y(snap: com.kilon.agentvscreen.core.A11yTree.Snapshot, pat: TextPat, recheck: Boolean): List<Pair<String, Rect>>? {
+        val raw = snap.find(pat::hit, recheck = recheck) ?: return null
+        val onScreen = raw.map { it.first to d.toFrame(it.second) }
+            .filter { (_, b) -> b.width() > 0 && b.height() > 0 && b.centerX() in 0 until d.width && b.centerY() in 0 until d.height }
+        if (onScreen.isEmpty() || cropOnly) return onScreen
+        val ocr = VScreenPerception.readingWithVersion(d.displayId, readFrom(), 0)?.result?.items ?: return onScreen
+        return onScreen.filter { (_, b) -> pictureAgrees(b, pat, ocr) }
+    }
+
     /** The words of [q] seen now (accessibility first, then an OCR reading taken late enough or crop OCR), as [counts] allows. */
     private fun seen(q: String, area: Rect? = null, full: Bitmap? = null): String? {
         val pat = TextPat(q)
@@ -208,22 +233,19 @@ internal class Probe(
         val a11ySnap = runCatching { com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId) }.getOrNull()
         if (a11ySnap != null && a11ySnap.readable) {
             if (a11ySnap.texts(1)?.isNotEmpty() == true) hadPostActionA11y = true
-            val a11yMatches = if ((!afterAction || actionAt == 0L) && area == null) null
-                else a11ySnap.find(pat::hit, recheck = recheck)
+            val a11yMatches = shownA11y(a11ySnap, pat, recheck)
             val a11yHit = when {
-                (!afterAction || actionAt == 0L) && area == null ->
-                    a11ySnap.shows(pat::hit, recheck)?.takeIf { it.isNotEmpty() }
                 !afterAction || actionAt == 0L ->
-                    a11yMatches?.firstOrNull { inArea(d.toFrame(it.second)) }?.first
+                    a11yMatches?.firstOrNull { inArea(it.second) }?.first
                 else ->
-                    a11yMatches?.firstOrNull { ok(d.toFrame(it.second)) }?.first
+                    a11yMatches?.firstOrNull { ok(it.second) }?.first
             }
             if (a11yHit != null) {
                 lastObsId = ++a11yObsSeq
                 return a11yHit
             }
             if (afterAction && actionAt > 0L && before.isNotEmpty() && a11yMatches != null &&
-                a11yMatches.any { inArea(d.toFrame(it.second)) && !counts(d.toFrame(it.second), before, exclude, pageAt > 0) }) {
+                a11yMatches.any { inArea(it.second) && !counts(it.second, before, exclude, pageAt > 0) }) {
                 sawPreExisting += pat.key
             }
         }
@@ -280,11 +302,7 @@ internal class Probe(
         val a11ySnap = runCatching { com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId) }.getOrNull()
         if (a11ySnap != null && a11ySnap.readable) {
             if (a11ySnap.texts(1)?.isNotEmpty() == true) hadPostActionA11y = true
-            val present = if (area == null) {
-                !a11ySnap.shows(pat::hit, recheck).isNullOrEmpty()
-            } else {
-                a11ySnap.find(pat::hit, recheck = recheck)?.any { inArea(d.toFrame(it.second)) } == true
-            }
+            val present = shownA11y(a11ySnap, pat, recheck)?.any { inArea(it.second) } == true
             if (present) {
                 lastObsId = ++a11yObsSeq
                 lastObsEpochMs = null
@@ -451,7 +469,8 @@ internal class Probe(
                 val hit: String? = when (c.kind) {
                     CondKind.TEXT -> if (!wordsOk) null else seen(c.text!!, c.area, full)?.let { tr("看到“$it”", "saw \"$it\"") }
                     CondKind.GONE -> if (!wordsOk) null else if (gone(c.text!!, c.area, full)) tr("画面上没有“${c.text}”了", "\"${c.text}\" is gone from the screen") else null
-                    CondKind.CHANGE -> { val b = base; if (b != null && cur != null) diff(b, cur, c).takeIf { it >= Change.CHANGED }?.let { tr("${where(c)}变了（${(it * 100).roundToInt()}% 的取样点不同）", "${where(c)} changed (${(it * 100).roundToInt()}% of sample points differ)") } else null }
+                    CondKind.CHANGE -> { val b = base; if (b != null && cur != null) diff(b, cur, c).takeIf { it >= Change.CHANGED }?.let { tr("${where(c)}变了（${(it * 100).roundToInt()}% 的取样点不同）", "${where(c)} changed (${(it * 100).roundToInt()}% of sample points differ)") }
+                        ?: smallChange(b, cur, c)?.let { r -> tr("画面有一小块变了（[${Report.box(r)}] 附近）", "a small part of the screen changed (around [${Report.box(r)}])") } else null }
                     CondKind.STILL -> {
                         val p = prev
                         if (p != null && cur != null && diff(p, cur, c) <= Change.Level.STILL.max) stillMs[i] = (stillMs[i] ?: 0L) + dt else stillMs[i] = 0L
@@ -543,11 +562,35 @@ internal fun formatTextTimeout(text: String, kind: TextTimeoutKind, ocrBusy: Boo
         "“$text”一直在画面上（动作前就有），不能说明这一步起了作用；换一个只在目标页出现的字，或用 until change",
         "\"$text\" was already on the screen before the action, so it cannot show this step worked; use text that only appears on the target page, or use until change",
     )
-    TextTimeoutKind.NOT_READ -> if (ocrBusy) {
+    TextTimeoutKind.NOT_READ -> if (com.kilon.agentvscreen.host.ThermalGuard.limitedOrFalse()) {
+        tr("手机发热，文字识别为降温暂停了，没读到动作后的画面上的字（不是故障，看截图）", "the phone is hot and text recognition is paused to cool it down, so words after the action were not read (not a fault; look at the screenshot)")
+    } else if (ocrBusy) {
         tr("读屏没跟上（OCR 忙），没读到动作后的画面", "screen reading did not keep up (OCR busy); no post-action reading was obtained")
     } else {
         tr("读屏没跟上，没读到动作后的画面", "screen reading did not keep up; no post-action reading was obtained")
     }
+}
+
+/**
+ * 2.0.0-beta12, pure: whether the picture's reading [ocr] agrees that words matching [pat] are drawn at [box]. It
+ * disagrees only when it read other words there (the place is covered by something else) and none of them is
+ * these words or close to them; nothing read there (an icon, a picture, words the reading missed) is no evidence.
+ */
+internal fun pictureAgrees(box: Rect, pat: TextPat, ocr: List<com.kilon.agentvscreen.core.VScreenOcr.Item>): Boolean {
+    val there = ocr.filter { val c = Rect(it.box); Rect.intersects(c, box) && (box.contains(c.centerX(), c.centerY()) || c.contains(box.centerX(), box.centerY())) }
+    if (there.isEmpty()) return true
+    if (there.any { pat.hit(it.text) }) return true
+    if (pat.hit(there.sortedBy { it.box.left }.joinToString("") { it.text })) return true
+    val key = pat.key
+    if (key.isEmpty() || pat.wild) return true
+    // A misread of the same words (one or two characters wrong) still agrees.
+    return there.any { similar(com.kilon.agentvscreen.core.VScreenOcr.norm(it.text), key) }
+}
+
+private fun similar(a: String, key: String): Boolean {
+    if (a.isEmpty()) return false
+    val common = key.count { it in a }
+    return common * 2 >= key.length && common >= 1 && (key.length <= 2 || common >= key.length - 2)
 }
 
 /**
@@ -1686,6 +1729,7 @@ private fun VScreenOffloadHandler.doAction(
                 val pkg = runCatching { VScreenShell.topPackage(dd.displayId) }.getOrNull()
                 dd.boost(ms + Gesture.BOOST_EXTRA_MS)
                 dd.latestWithVersion()?.let { (bmp, ver) -> VScreenRecorder.offerFresh(dd, bmp, ver, pkg) }
+                val beforeEls = runCatching { a11yRaw(dd).filter { !it.placeholder } }.getOrNull()
                 val preDownAt = System.currentTimeMillis()
                 val downAt = preDownAt
                 // 2.0.0-beta1 & 2.0.0-beta4 (4.7): a straight drag stays one server-timed gesture via VScreenShell.drag
@@ -1697,6 +1741,7 @@ private fun VScreenOffloadHandler.doAction(
                 val midAt = if (path.size == 2) downAt + ms / 2 else downAt + Gesture.DRAG_DOWN_HOLD_MS + ms / 2
                 val preUpAt = (upAt - DRAG_END_HOLD_MS).coerceAtLeast(midAt)
                 val rec = Gesture.evaluateDragRecord(
+                    before = beforeEls,
                     d = dd,
                     startPt = path.first(),
                     midPt = Gesture.pointAtHalfPath(path),

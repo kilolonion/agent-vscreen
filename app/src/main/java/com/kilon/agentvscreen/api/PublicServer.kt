@@ -267,7 +267,8 @@ class PublicServer(
                     code = "BAD_TOKEN",
                     msg = tr("公网访问令牌无效、已过期或目标地址不匹配", "Public access token is invalid, expired, or bound to another resource"),
                     status = 401,
-                    headers = wwwAuth,
+                    // RFC 6750 §3.1: a token that was sent and refused says so, so a client knows to refresh or re-pair.
+                    headers = mapOf("WWW-Authenticate" to """Bearer error="invalid_token", resource_metadata="$prmUrl""""),
                 )
             }
         }

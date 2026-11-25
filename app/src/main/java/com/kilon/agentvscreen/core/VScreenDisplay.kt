@@ -655,8 +655,24 @@ class VScreenDisplay private constructor(
     }
 
     /** Give the surface back and wait (max ~3 s) for the first new frame. Returns a short note. */
-    fun unpark(): String {
-        if (!parked || released) { parked = false; return tr("副屏在运行", "screen running") }
+    fun unpark(): String = unparkResult().let { resumeText(it) }
+
+    /** How a wake from the power-save pause went: kept as facts so the note is worded in the reader's language. */
+    data class Resume(val kind: Int, val ms: Long)
+
+    fun resumeText(r: Resume): String = when (r.kind) {
+        RESUME_RUNNING -> tr("副屏在运行", "screen running")
+        RESUME_WOKE -> tr("副屏刚从省电暂停中恢复（${r.ms}ms）。暂停时应用不在前台，有的应用（游戏、视频、录音）会自己暂停或弹出菜单：以下面的画面为准，不要按上次看到的操作", "The screen just resumed from its power-save pause (${r.ms}ms). While paused the app was not in front, and some apps (games, video, recorders) pause themselves or show a menu then: go by the picture below, not by what you saw last time")
+        RESUME_NO_FRAME -> tr("副屏已从省电暂停中恢复，但还没收到新画面（静止页面可能不重绘）；先 read 确认", "The screen resumed from its power-save pause but no new frame arrived yet (a still page may not redraw); check with read first")
+        else -> tr("副屏从省电暂停恢复失败：画面可能不更新。用 release 后重新 launch", "Resuming the screen from its power-save pause failed: the picture may not update. release, then launch again")
+    }
+
+    /**
+     * 2.0.0-beta12 (test: one SCREEN_RESUMED note in Chinese in an English reply): the wake can happen on a thread
+     * that is not the agent's request (the turn starting), and the note was worded there, in the app's language.
+     */
+    fun unparkResult(): Resume {
+        if (!parked || released) { parked = false; return Resume(RESUME_RUNNING, 0L) }
         val t0 = SystemClock.elapsedRealtime()
         fun attach(): Boolean = if (shellOwned) VScreenRemoteDisplay.setSurface(displayId, reader.surface).isSuccess
             else runCatching { virtualDisplay?.surface = reader.surface; true }.getOrDefault(false)
@@ -671,9 +687,9 @@ class VScreenDisplay private constructor(
         }
         val woke = lastFrameAtMs >= t0
         return when {
-            woke -> tr("副屏刚从省电暂停中恢复（${SystemClock.elapsedRealtime() - t0}ms）。暂停时应用不在前台，有的应用（游戏、视频、录音）会自己暂停或弹出菜单：以下面的画面为准，不要按上次看到的操作", "The screen just resumed from its power-save pause (${SystemClock.elapsedRealtime() - t0}ms). While paused the app was not in front, and some apps (games, video, recorders) pause themselves or show a menu then: go by the picture below, not by what you saw last time")
-            ok -> tr("副屏已从省电暂停中恢复，但还没收到新画面（静止页面可能不重绘）；先 read 确认", "The screen resumed from its power-save pause but no new frame arrived yet (a still page may not redraw); check with read first")
-            else -> tr("副屏从省电暂停恢复失败：画面可能不更新。用 release 后重新 launch", "Resuming the screen from its power-save pause failed: the picture may not update. release, then launch again")
+            woke -> Resume(RESUME_WOKE, SystemClock.elapsedRealtime() - t0)
+            ok -> Resume(RESUME_NO_FRAME, 0L)
+            else -> Resume(RESUME_FAILED, 0L)
         }
     }
 
@@ -736,6 +752,10 @@ class VScreenDisplay private constructor(
     }
 
     companion object {
+        const val RESUME_RUNNING = 0
+        const val RESUME_WOKE = 1
+        const val RESUME_NO_FRAME = 2
+        const val RESUME_FAILED = 3
         private const val TAG = "VScreenDisplay"
         const val DEFAULT_FRAME_INTERVAL_MS = 120L
         private var generationCounter = 0L
