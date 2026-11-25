@@ -92,13 +92,14 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
         val t0 = android.os.SystemClock.elapsedRealtime()
         val call = Call.current()
+        val argv = request.argv.drop(1)
         val r = try {
-            handleCommand(request)
+            // 2.0.0-beta13: a reply that leaves a request waiting on the phone says so and gives the line for the user.
+            UserWait.attach(handleCommand(request), argv.firstOrNull(), call?.tokenId)
         } catch (t: Throwable) {
             AppLogger.error(TAG, "vscreen command crashed", t)
             err("INTERNAL_ERROR", run { val why = "${t.javaClass.simpleName}: ${(t.cause?.message ?: t.message ?: "").take(300)}"; tr("工具内部错误（$why），命令没有执行完。vscreen diag 能导出诊断，交给开发者", "Internal tool error ($why); the command did not finish. vscreen diag exports a diagnostic bundle for the developer") })
         }
-        val argv = request.argv.drop(1)
         val sid = request.sessionId?.takeIf { it.isNotBlank() } ?: DEFAULT_SESSION
         if (argv.firstOrNull() != "release") com.kilon.agentvscreen.api.Turns.bumpTurn(sid)
         if (argv.firstOrNull() !in setOf(null, "help", "--help", "-h"))

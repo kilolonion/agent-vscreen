@@ -314,10 +314,10 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `NO_CHANGE` | `look` | 这一步做了，但之后画面没有可见的变化（可能没点中，或这里本来就不会变）。 |
 | `UNPROVEN` | `look` | 这一步做在画面上一直自己在动的地方，之后的变化可能只是动画，不能说明它生效了。看图核对。 |
 | `SCREEN_RESUMED` | `look` | 副屏刚从省电暂停中恢复；暂停期间应用不在前台，可能自己暂停或弹出菜单。以这次回复的画面为准。 |
-| `NEEDS_CONFIRM` | `ask_user` | 需要用户在手机上的 Agent-VScreen 里强确认（风控维度）。已发通知。请用户打开强确认页完成验证后，把这条命令原样重发。这一步没有做。 |
-| `CONFIRM_PENDING` | `ask_user` | 这一步要用户在手机上的 Agent-VScreen 强确认页里确认（付费/不可撤销/用户设为每次确认的应用/会影响主屏的操作），用户还没答复，没做。请用户点通知打开强确认页确认，然后把这一段重发一遍。 |
+| `NEEDS_CONFIRM` | `user_on_phone` | 需要用户在手机上的 Agent-VScreen 里强确认（风控维度，或你用 elevate 申请的权限）。这一步没有做。用户可能没看到通知：把回复里【等用户】的那句话发给用户，等用户说好了，再把这条命令原样重发。 |
+| `CONFIRM_PENDING` | `user_on_phone` | 这一步要用户在手机上确认（付费/不可撤销/用户设为每次确认的应用/会影响主屏的操作），用户还没答复，没做。用户可能没看到通知：把回复里【等用户】的那句话发给用户，等用户说好了，再把这一段重发一遍。规则（--on）碰到这种按钮时不会发请求，整条 act 中止，这时没有【等用户】，要你自己来做这一步。 |
 | `USER_DENIED` | `ask_user` | 用户在手机上拒绝了这一步。不要重试，问用户想怎么办。 |
-| `CONFIRM_REQUIRED` | `ask_user` | 同 CONFIRM_PENDING（旧名字）。 |
+| `CONFIRM_REQUIRED` | `user_on_phone` | 同 CONFIRM_PENDING（旧名字）。 |
 | `APP_BLOCKED` | `ask_user` | 用户禁止后台操作这个应用。不要绕过，也不要从别的入口进同一个应用。 |
 | `APP_IN_USE` | `ask_user` | 用户正在主屏上用这个应用。先 ask 用户，同意后 launch --asked（另开一份）或 handoff in（接着他的页面）。 |
 | `APP_WITH_USER` | `ask_user` | 你在用的应用现在在用户手上（主屏）。等 handback 事件，或 launch 别的应用。 |
@@ -359,7 +359,7 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `MAIN_SCREEN_TASK` | `none` | 这个任务在主屏上，没有动它。 |
 | `SCHEDULE_LIMIT` | `fix_command` | 预约到上限了（8 条）：先 schedule off 一条。 |
 | `NOT_READY` | `ask_user` | Agent-VScreen 没有响应或还没准备好（被系统冻结、服务没开、Shizuku / Root 没运行）。命令行已经试过唤醒一次。把原因告诉用户；定时任务请先用 schedule 预约时间。 |
-| `ASK_PENDING` | `ask_user` | 问题已经显示在手机上，用户还没回答。告诉用户去手机上回答；之后把同一个 ask 原样再发一次就能拿到答案（10 分钟内有效）。 |
+| `ASK_PENDING` | `user_on_phone` | 问题（或 teach 的演示请求）已经显示在手机上，用户还没做。用户可能没看到通知：把回复里【等用户】的那句话发给用户，等用户说好了，再把同一条 ask / teach 原样再发一次就能拿到结果（10 分钟内有效）。 |
 | `ASK_DECLINED` | `ask_user` | 用户选择不回答这个问题。不要再问同一个问题，换个方式或告诉用户你停在了哪里。 |
 | `USER_FEEDBACK` | `ask_user` | 用户没有照你问的方式回答，而是说了一句话（在 feedback 里，原话）。多半是你问错了、页面不对或理解偏了：按这句话调整，不要原样再问。 |
 | `NOT_AT_START` | `look` | 示教段是从某个页面开始录的，副屏现在不在那里，所以一步都没做。回执写了起点的样子：先自己走到那个页面，再 use。 |
@@ -701,10 +701,10 @@ scope: `look`
 | `NO_CHANGE` | `look` | The step was done but the picture did not visibly change afterwards (the tap may have missed, or nothing changes here). |
 | `UNPROVEN` | `look` | The step acted where the screen keeps moving by itself; the change afterwards may be only the animation and does not show the step worked. Check the picture. |
 | `SCREEN_RESUMED` | `look` | The screen just resumed from its power-save pause; while paused the app was not in front and may have paused itself or shown a menu. Go by this reply's picture. |
-| `NEEDS_CONFIRM` | `ask_user` | The user must confirm this in Agent-VScreen on the phone (risk control). A notification was sent. Ask the user to complete strong confirmation, then resend the exact same command. This step was not done. |
-| `CONFIRM_PENDING` | `ask_user` | This step needs the user's strong confirmation in Agent-VScreen on the phone (payment / irreversible / an app set to ask every time / something that affects the main screen); the user has not answered and it was not done. Ask the user to tap the notification to open strong confirmation, then send this stretch again. |
+| `NEEDS_CONFIRM` | `user_on_phone` | The user must confirm this in Agent-VScreen on the phone (risk control, or a permission you asked for with elevate). This step was not done. The user may not have seen the notification: send them the line under [Waiting for the user], and once they say it's done, resend the exact same command. |
+| `CONFIRM_PENDING` | `user_on_phone` | This step needs the user's confirmation on the phone (payment / irreversible / an app set to ask every time / something that affects the main screen); the user has not answered and it was not done. The user may not have seen the notification: send them the line under [Waiting for the user], and once they say it's done, send this stretch again. A rule (--on) meeting such a button sends no request and aborts the act; then there is no [Waiting for the user] and the step is yours to do. |
 | `USER_DENIED` | `ask_user` | The user denied this step on the phone. Don't retry; ask the user what they want. |
-| `CONFIRM_REQUIRED` | `ask_user` | Same as CONFIRM_PENDING (old name). |
+| `CONFIRM_REQUIRED` | `user_on_phone` | Same as CONFIRM_PENDING (old name). |
 | `APP_BLOCKED` | `ask_user` | The user blocked background operation of this app. Don't get around it or enter the same app another way. |
 | `APP_IN_USE` | `ask_user` | The user is using this app on the main screen. Ask the user first; once they agree, launch --asked (a separate copy) or handoff in (from their page). |
 | `APP_WITH_USER` | `ask_user` | The app you were using is with the user (main screen). Wait for the handback event, or launch another app. |
@@ -746,7 +746,7 @@ scope: `look`
 | `MAIN_SCREEN_TASK` | `none` | This task is on the main screen; it was left alone. |
 | `SCHEDULE_LIMIT` | `fix_command` | Too many schedules (8): remove one with schedule off. |
 | `NOT_READY` | `ask_user` | Agent-VScreen did not answer or is not ready (frozen by the system, service off, Shizuku / root not running). The CLI already tried to wake it once. Tell the user why; for timed tasks, book the time with schedule first. |
-| `ASK_PENDING` | `ask_user` | The question is on the phone and the user has not answered yet. Tell the user to answer on the phone; then send the same ask again to get the answer (valid for 10 minutes). |
+| `ASK_PENDING` | `user_on_phone` | The question (or teach's request to demonstrate) is on the phone and the user has not done it yet. The user may not have seen the notification: send them the line under [Waiting for the user], and once they say it's done, send the same ask / teach again to get the result (valid for 10 minutes). |
 | `ASK_DECLINED` | `ask_user` | The user chose not to answer. Don't ask the same again; go another way or tell the user where you stopped. |
 | `USER_FEEDBACK` | `ask_user` | The user did not answer the way you asked but said something instead (in feedback, verbatim). Most likely the question, the page or your reading was off: adjust to it; don't ask the same again. |
 | `NOT_AT_START` | `look` | The lesson was recorded from a certain page and the screen is not there now, so nothing was done. The reply describes the starting page: get there first, then use it. |

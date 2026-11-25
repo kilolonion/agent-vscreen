@@ -76,8 +76,7 @@ object AgentGuide {
         tr("- 每次任务开头调用 vscreen，命令填 guide（一页用法）；提示缺令牌时，请用户在 Agent-VScreen › 接入 › 新建接入（或 设置 › 令牌）里生成令牌，再用 vscreen_configure 保存。\n",
             "- At the start of each task call vscreen with the command guide (one page of usage); if it says the token is missing, ask the user to create one in Agent-VScreen › Connect › Connect an agent (or Settings › Tokens), then save it with vscreen_configure.\n") +
         "- " + loop() + "\n" +
-        tr("- 付款等高风险步骤由用户在手机上确认（CONFIRM_PENDING：请用户去手机上确认再重发；USER_DENIED：不要重试）；USER_STOPPED 时停下并转告怎么解除。\n",
-            "- High-risk steps such as paying are confirmed by the user on the phone (CONFIRM_PENDING: ask the user to confirm there, then send again; USER_DENIED: don't retry); on USER_STOPPED stop and pass on how to undo it.\n") +
+        userSection().lines().drop(1).filter { it.isNotBlank() }.joinToString("\n") + "\n" +
         tr("遇到这些情况：\n", "When:\n") +
         Abilities.all.joinToString("\n") { "- " + it.whenText + " → " + Abilities.forVia(it.can, Abilities.Via.MCP) }
 
@@ -114,7 +113,7 @@ Then run vscreen guide to read the usage once, and tell me where you saved the n
 请帮我接入 Agent-VScreen，让你以后能在我的手机上后台打开和操作应用（不打扰我正在用的屏幕）。
 
 1. 它的接口：POST $base/v2/run，内容 {"cmd": "status"}。令牌：$token（只给你用）。${httpAuth(base)}。先发一次 status 确认能连上，再发 {"cmd": "guide"} 读用法。把地址和令牌保存好。
-   回复是 JSON：ok（是否按预期做完）、code、next（出问题时该怎么办：look 先看画面 / fix_command 改命令 / ask_user 问我 / retry_later 稍后重试）、text、images、steps、screen、notes。可带 "request_id"：同一个 id 重发不会重复执行。
+   回复是 JSON：ok（是否按预期做完）、code、next（出问题时该怎么办：look 先看画面 / fix_command 改命令 / user_on_phone 请求在手机上等我、把回复里的 tell_user 发给我 / ask_user 问我 / retry_later 稍后重试）、text、images、steps、screen、notes。可带 "request_id"：同一个 id 重发不会重复执行。
 
 2. 把下面这段话存进你的长期记忆（或建成一个 skill / 规则）。这是我的要求：以后的新对话里，你也要知道自己有这个能力，我让你在手机上做事时直接用它。
 「${memoryHttp(base)}」
@@ -124,7 +123,7 @@ Then run vscreen guide to read the usage once, and tell me where you saved the n
 Please connect Agent-VScreen so that from now on you can open and operate apps on my phone in the background (without disturbing the screen I'm using).
 
 1. Its API: POST $base/v2/run with body {"cmd": "status"}. Token: $token (for you alone). ${httpAuth(base).replaceFirstChar { it.uppercase() }}. Send status once to check the connection, then {"cmd": "guide"} to read the usage. Keep the address and token.
-   The reply is JSON: ok (did it go as expected), code, next (what to do when it did not: look at the screen / fix_command / ask_user / retry_later), text, images, steps, screen, notes. You may send "request_id": resending the same id never runs the command twice.
+   The reply is JSON: ok (did it go as expected), code, next (what to do when it did not: look at the screen / fix_command / user_on_phone: a request waits for me on the phone, send me the reply's tell_user / ask_user / retry_later), text, images, steps, screen, notes. You may send "request_id": resending the same id never runs the command twice.
 
 2. Save the text below in your long-term memory (or as a skill / rule). This is my request: in future conversations you should know you have this ability and use it directly when I ask you to do something on my phone.
 "${memoryHttp(base)}"
@@ -203,6 +202,20 @@ If your MCP connectors can only be added by me in your web settings (e.g. custom
         "---\nname: agent-vscreen\ndescription: Use to open, view or operate any app on the phone in the background (tap, swipe, type, screenshot, watch). The vscreen command works on Agent-VScreen's invisible second screen without taking the user's screen. Do not build your own virtual display, and do not reach for adb, wireless debugging or am/input/screencap for this.\n---\n\n"
     ) + prompt(skill = true).lines().filterNot { it.contains("/cli | ") }.joinToString("\n") + "\n"
 
+    /**
+     * 2.0.0-beta13 (rainbow: agents spent their time getting around requests the user never saw). When to turn to the
+     * user, generated from the code table: the codes that leave a request on the phone ([Codes.Next.PHONE]) and the
+     * ones only the user can lift ([Codes.Next.USER]).
+     */
+    fun userSection(): String {
+        val phone = com.kilon.agentvscreen.cmd.Codes.all.filter { it.next == com.kilon.agentvscreen.cmd.Codes.Next.PHONE && it.name != "CONFIRM_REQUIRED" }.joinToString(" / ") { it.name }
+        return tr("### 什么时候找用户\n", "### When to turn to the user\n") + tr(
+            "- next=`user_on_phone`（$phone）：请求已在手机上，用户多半没看到（通知常静音）：立刻把回复里的 tell_user 发给用户，等他说好了再原样重发，不要绕。\n" +
+                "- next=`ask_user`：只有用户能解决：停下告诉用户原因，不要重试或绕，被拒的事不要再问；权限不够用 `elevate` 申请。\n",
+            "- next=`user_on_phone` ($phone): the request is on the phone and the user most likely hasn't seen it (notifications are often silent). Send the user the reply's tell_user line now, wait until they say it's done, then resend unchanged; don't go around it or keep resending.\n" +
+                "- next=`ask_user`: only the user can lift it: stop and tell them why; don't retry, go around, or ask again what was refused. For more permission ask with `elevate`.\n")
+    }
+
     /** 2.0.0-beta3 (3.8): core guide budget (Meter.estTokens, checked in both ZH and EN). */
     const val CORE_GUIDE_MAX_TOKENS = 1500
 
@@ -280,6 +293,7 @@ If your MCP connectors can only be added by me in your web settings (e.g. custom
                     "Notes: until text: must match text that newly appears after the action (pre-existing text does not count); repeat max is 50; --fast skips waits only between actions, while each repeat iteration still waits on until/stable.\n\n",
                 ))
             }
+            if (key == "safety") append(userSection()).append('\n')
             if (key == "keep") {
                 append(tr(
                     "关于 act --hold：Android 15 起，暂停正在频繁刷新的应用时，系统可能直接结束它。\n\n",
@@ -330,7 +344,7 @@ If your MCP connectors can only be added by me in your web settings (e.g. custom
 ```
 完整回复（出错、没写 until、出现弹窗等意外或 `--full` 时）：第一行 `第 N 轮 · P编号 标题`，随后【做了什么】、【这段时间】（事件/弹出/toast）、【现在】（图与元素，旧页只列差异）、【注意】（代码与提示）。
 
-""" + topicSection() + """完整说明：`vscreen help all`；单条命令：`vscreen help act`。
+""" + userSection() + "\n" + topicSection() + """完整说明：`vscreen help all`；单条命令：`vscreen help act`。
 """, """
 ## Phone background screen (Agent-VScreen)
 1. **Write `until` on every action — when it matches, you get a short reply**: add `until <expected>` (e.g. `until text:Connected`; `text:` must appear after the action) after each action; when every step matches with no surprises, the reply is a short summary with no image. **Short replies are the phone's judgment — whenever anything feels off, ask for the full reply, never guess**: `vscreen act --full` (with no steps, replays the last stretch with full screen + all elements), `vscreen look` (picture), `vscreen look --last` (recording). Always full: `vscreen note reply full` (default quiet).
@@ -357,6 +371,6 @@ Full reply: act --full; picture: look; replay: look --last
 ```
 Full reply (on error, missing until, popup/surprise, or `--full`): line 1 `Turn N · Pid Title`, then [Done], [Meanwhile] (events/popups/toasts), [Now] (picture + elements, diff-only on recent cards), [Notes] (codes).
 
-""" + topicSection() + """Full reference: `vscreen help all`; one command: `vscreen help act`.
+""" + userSection() + "\n" + topicSection() + """Full reference: `vscreen help all`; one command: `vscreen help act`.
 """).trim()
 }
