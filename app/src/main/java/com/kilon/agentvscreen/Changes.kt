@@ -38,6 +38,32 @@ object Changes {
     /** Releases ordered newest first. Add a new [Release] entry whenever versionCode bumps. */
     val releases: List<Release> = listOf(
         Release(
+            versionCode = 72,
+            versionName = "2.0.0-beta15",
+            items = listOf(
+                Item(Kind.IMPROVED, Audience.USER, "待处理的倒计时会走了",
+                    "首页和提问页上“还剩几分钟”之前一直停在打开时的数字，现在每秒更新。",
+                    "The waiting countdown runs",
+                    "The time left on the home page and the question page stayed at the number shown when it opened; it now updates every second.",
+                    null),
+                Item(Kind.IMPROVED, Audience.USER, "“关闭”服务后 App 真正退出",
+                    "首页电源按钮选“关闭”并离开 App 后，进程会结束、从最近任务里消失。开着无障碍时，系统会马上为它单独拉起一个空闲进程，不运行任何服务。",
+                    "Turning the service off really ends the app",
+                    "After Off and leaving the app, its process ends and it leaves the recents list. With accessibility on, Android starts an idle process for that alone; no service runs.",
+                    null),
+                Item(Kind.IMPROVED, Audience.USER, "权限说明更准确",
+                    "说清了支付和“临时免确认支付”的关系、“每次确认”的应用也能选本轮或今天内，以及经公网接入的 agent 任何档位都不能做系统操作。",
+                    "Clearer permission notes",
+                    "Says how payments relate to Payments without confirmation, that confirm-every-time apps also take This turn / Today, and that agents over the public internet never get system actions.",
+                    Route.Security),
+                Item(Kind.IMPROVED, Audience.AGENT, "esc、输入和等待时限的回复更准",
+                    "key esc 在不处理 Esc 的页面上会接着按 back 并说明；输入后读不到输入框但画面变了时，回复“未确认”而不是 TYPE_FAILED；等用户时写的有效期和请求本身一致（演示 15 分钟）；swipe/drag 末尾的裸数字当作毫秒时长。",
+                    "Truer replies for esc, typing and waiting times",
+                    "key esc on a page that ignores Esc goes on to press back and says so; when no input box can be read after typing but the picture changed, the reply says unconfirmed instead of TYPE_FAILED; the waiting block gives the request's own expiry (a demonstration waits 15 minutes); a last bare number in swipe/drag is the duration in ms.",
+                    null),
+            ),
+        ),
+        Release(
             versionCode = 71,
             versionName = "2.0.0-beta14",
             items = listOf(
