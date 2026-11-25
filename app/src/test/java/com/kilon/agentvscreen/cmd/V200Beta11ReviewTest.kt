@@ -217,7 +217,7 @@ class V200Beta11ReviewTest {
     // OAuth report: TLS 0-byte EOF means public access is off; the onboarding text says so.
     @Test fun onboardingNamesDeviceFlowAndTlsEof() {
         val zh = com.kilon.agentvscreen.api.AgentGuide.onboardPublic("https://p.ts.net")
-        assertTrue("device_authorization_endpoint" in zh && "UNEXPECTED_EOF" in zh)
+        assertTrue("/oauth/device_authorization" in zh && "UNEXPECTED_EOF" in zh && "https://p.ts.net/oauth/token" in zh)
         I18n.choice = I18n.Lang.EN
         val en = com.kilon.agentvscreen.api.AgentGuide.onboardPublic("https://p.ts.net")
         assertTrue("RFC 8628" in en && "UNEXPECTED_EOF" in en)

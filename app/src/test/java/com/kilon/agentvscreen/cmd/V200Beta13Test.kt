@@ -54,4 +54,12 @@ class V200Beta13Test {
         assertTrue(AgentGuide.guide().contains(s.lines().first()))
         assertTrue(AgentGuide.topic("safety")!!.contains(s.lines().first()))
     }
+
+    @Test fun thePublicConnectMessageForbidsMadeUpTokensAndOffersAWayOut() {
+        val m = AgentGuide.onboardPublic("https://p.example.com/mcp")
+        assertTrue(m.contains("不要自己编") && m.contains("我接不了") && m.contains("401"))
+        // The no-browser path names every URL with the right base and ends in a working call.
+        listOf("https://p.example.com/oauth/register", "https://p.example.com/oauth/device_authorization", "https://p.example.com/oauth/token", "resource=https://p.example.com/mcp", "tools/call").forEach { assertTrue(it, m.contains(it)) }
+        assertFalse(m.contains("/mcp/oauth"))
+    }
 }
