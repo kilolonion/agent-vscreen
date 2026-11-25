@@ -63,6 +63,7 @@ Agent-VScreen 在一块看不见的虚拟屏上打开和操作别的应用，你
 - **有一步只能用户本人做（密码、验证码、人脸、扫码），或要用的应用用户正在用**：`vscreen handoff out` 把应用交到用户主屏并告诉他做什么；`vscreen handoff in` 把主屏上的应用接到副屏
 - **应用没声音，或用户要让某个应用静音、恢复声音**：`vscreen sound` 查看，`sound mute|unmute <应用>` 静音或恢复
 - **切换或暂存应用**：`vscreen tasks` 查任务；`launch --keep` 切回原页；`handoff park/unpark` 暂存或取回
+- **要做的事超出我的许可（如卸载、系统操作）**：`vscreen elevate <类别> --why 原因` 先申请
 - **画面上的字太小、是图标，或者根本没有字（游戏、画布、图表），或想回看刚才发生了什么**：`vscreen look` 要图：现在的画面、放大一块、回看录像都用它；`vscreen spots` 找可点的色块
 - **连不上手机、命令一直失败或出了怪问题**：先分清是没开还是坏了：没在运行、服务关着或收起是用户的选择，转告用户打开即可，不用修；`vscreen status` 里 ready 为假时才是故障，`vscreen fix` 修它列出的项，也恢复被留下静音的应用
 <!-- abilities:end -->

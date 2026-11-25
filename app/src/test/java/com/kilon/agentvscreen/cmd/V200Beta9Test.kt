@@ -126,10 +126,10 @@ class V200Beta9Test {
         assertEquals(Act.ASK, Consent.actFor(Consent.APP, call)) // the user's app rule always asks
         // caution passes without a question.
         Call.with(call) { Consent.require(ctx, "c1", "强制结束", "x", kind = Consent.CAUTION, pkg = "com.example.a") }
-        // A row set to "not allowed" is refused, not asked.
+        // 2.0.0-beta11: a row set to "not allowed" asks for an elevation (fingerprint), it is not run silently.
         Tokens.setAct(t.id, Policy.DESTROY, Act.DENY)
         val code = Call.with(call) { try { Consent.require(ctx, "d1", "卸载", "x", kind = Consent.DESTROY, pkg = "com.example.a"); null } catch (e: ActionError) { e.code } }
-        assertEquals("SCOPE_DENIED", code)
+        assertEquals("NEEDS_CONFIRM", code)
         assertEquals(listOf(StrongConfirm.Range.ONCE), Consent.rangesFor(Consent.MONEY))
         assertFalse(StrongConfirm.Range.TODAY in Consent.rangesFor(Consent.DESTROY))
         Tokens.revoke(t.id)

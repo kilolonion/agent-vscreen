@@ -539,8 +539,8 @@ fun FloatingWindowPage() {
             text = {
                 Text(
                     tr(
-                        "• 显示悬浮窗：有副屏时在最上层显示实时画面。\n\n• 小窗显示按钮：开启后，右上角小窗也显示标题、全屏、关闭和停止 AI 按钮。\n\n• 点小窗自动放大：默认开启；关闭后轻点小窗不再居中放大，只保留拖动、贴边折叠和长按操作。",
-                        "• Show floating window: displays the live background screen above other apps.\n\n• Show buttons on mini window: when on, the compact corner window also shows title, fullscreen, close, and stop-AI buttons.\n\n• Tap mini window to expand: on by default; turn off so tapping the mini window stays compact instead of expanding to center.",
+                        "• 打开方式：每次有新的副屏时，悬浮窗以右上角小窗打开，轻点放大；同一副屏期间，沿用你调整后的大小和位置。\n\n• 显示悬浮窗：有副屏时在最上层显示实时画面。\n\n• 小窗显示按钮：默认开启，右上角小窗也显示标题、全屏、关闭和停止 AI 按钮。\n\n• 点小窗自动放大：默认开启；关闭后轻点小窗不再居中放大，只保留拖动、贴边折叠和长按操作。",
+                        "• How it opens: each new background screen opens as the small window in the top right corner; tap to enlarge. While the same screen is up, your size and position are kept.\n\n• Show floating window: displays the live background screen above other apps.\n\n• Show buttons on mini window: on by default; the compact corner window also shows title, fullscreen, close, and stop-AI buttons.\n\n• Tap mini window to expand: on by default; turn off so tapping the mini window stays compact instead of expanding to center.",
                     ),
                     fontSize = 13.5.sp,
                     lineHeight = 20.sp,

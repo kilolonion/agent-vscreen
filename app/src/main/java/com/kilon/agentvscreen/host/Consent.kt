@@ -47,6 +47,17 @@ object Consent {
         val call = Call.current()
         val name = call?.tokenName ?: "main"; val session = call?.session ?: "default"
         val act = actFor(kind, call)
+        if (act == com.kilon.agentvscreen.api.Policy.Act.DENY && call != null && kind != MONEY && kind != APP) {
+            // 2.0.0-beta11: a class set to Not allowed asks for an elevation (the same card as `elevate`): this turn,
+            // today or permanently, by fingerprint. Payments are never elevated.
+            val risks = buildList {
+                if (!StrongConfirm.hasAgentApproval(call.tokenId, Risk.clientOf(call))) add(Risk.NEW_CLIENT)
+                add(Risk.LEVEL_UP)
+            }
+            StrongConfirm.requireForRisks(ctx, call, risks, kind, targetLevel = "row:$kind", detail = title)
+            Audit.consent(name, session, "$title — $detail", "elevated")
+            return
+        }
         if (act == com.kilon.agentvscreen.api.Policy.Act.DENY) {
             Audit.consent(name, session, "$title — $detail", "not allowed")
             val row = com.kilon.agentvscreen.api.Policy.row(kind)?.title ?: kind
@@ -65,7 +76,7 @@ object Consent {
     fun actFor(kind: String, call: Call?): com.kilon.agentvscreen.api.Policy.Act {
         if (kind == APP) return com.kilon.agentvscreen.api.Policy.Act.ASK
         val t = com.kilon.agentvscreen.api.Tokens.byId(call?.tokenId ?: com.kilon.agentvscreen.api.Tokens.MAIN)
-        return t?.act(kind) ?: com.kilon.agentvscreen.api.Policy.table(com.kilon.agentvscreen.api.Tokens.FREE, emptyMap())[kind] ?: com.kilon.agentvscreen.api.Policy.Act.ASK
+        return t?.let { StrongConfirm.effectiveAct(it, kind) } ?: com.kilon.agentvscreen.api.Policy.table(com.kilon.agentvscreen.api.Tokens.FREE, emptyMap())[kind] ?: com.kilon.agentvscreen.api.Policy.Act.ASK
     }
 
     /** Feedback 3: money is allowed one step at a time; the other classes can be allowed for this run (and the milder ones, today). */

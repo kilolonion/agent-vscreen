@@ -648,12 +648,16 @@ fun AgentPage(id: String) {
 internal fun grantTitle(key: String): String {
     val rest = key.removePrefix(com.kilon.agentvscreen.host.StrongConfirm.GRANT_PREFIX)
     val kind = rest.substringBefore(':'); val pkg = rest.substringAfter(':', "*")
-    val app = if (pkg == "*") "" else (com.kilon.agentvscreen.core.VScreenKnowledge.label(pkg) ?: pkg)
+    val elevation = kind == com.kilon.agentvscreen.host.StrongConfirm.ROW_GRANT || kind == com.kilon.agentvscreen.host.StrongConfirm.LEVEL_GRANT
+    val app = if (pkg == "*" || elevation) "" else (com.kilon.agentvscreen.core.VScreenKnowledge.label(pkg) ?: pkg)
     val what = when (kind) {
         com.kilon.agentvscreen.host.Consent.DESTROY -> tr("不可撤销操作", "Irreversible actions")
         com.kilon.agentvscreen.host.Consent.CAUTION -> tr("敏感操作", "Sensitive actions")
         com.kilon.agentvscreen.host.Consent.APP -> tr("在“每次确认”的应用中操作", "Actions in a confirm-every-time app")
         "rate" -> tr("高频操作", "High action rate")
+        // 2.0.0-beta11: temporary elevations the agent asked for.
+        com.kilon.agentvscreen.host.StrongConfirm.ROW_GRANT -> tr("临时允许：", "Temporarily allowed: ") + (com.kilon.agentvscreen.api.Policy.row(pkg)?.title ?: pkg)
+        com.kilon.agentvscreen.host.StrongConfirm.LEVEL_GRANT -> tr("临时提升至：", "Temporarily raised to: ") + com.kilon.agentvscreen.api.Policy.levelTitle(pkg)
         else -> kind
     }
     return if (app.isEmpty()) what else "$what · $app"

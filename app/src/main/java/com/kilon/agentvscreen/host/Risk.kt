@@ -110,7 +110,7 @@ enum class Risk(
 
         /** Feedback 4: a high rate asks only when this agent's table says "ask"; otherwise it is logged and shown. */
         fun rateAsks(call: Call?): Boolean =
-            (Tokens.byId(call?.tokenId)?.act(com.kilon.agentvscreen.api.Policy.RATE) ?: com.kilon.agentvscreen.api.Policy.Act.ASK) == com.kilon.agentvscreen.api.Policy.Act.ASK
+            (Tokens.byId(call?.tokenId)?.let { StrongConfirm.effectiveAct(it, com.kilon.agentvscreen.api.Policy.RATE) } ?: com.kilon.agentvscreen.api.Policy.Act.ASK) == com.kilon.agentvscreen.api.Policy.Act.ASK
 
         /**
          * Pure evaluation: every dimension that stops this command now, or an empty list when it may run.

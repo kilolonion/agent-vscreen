@@ -65,7 +65,7 @@ object BackgroundOperation {
         val enabled: Boolean = false,
         val showPreview: Boolean = true,
         /** 2.0.0-beta8 (K.5): when true, the top-right mini window also renders title/fullscreen/close/stop buttons. */
-        val miniShowControls: Boolean = false,
+        val miniShowControls: Boolean = true,
         /** 2.0.0-beta8 (K.5): when true (default), tapping the mini window expands it to center preview. */
         val miniTapToExpand: Boolean = true,
         /** 精确 OCR: read / tap --text use PP-OCRv6 (on-device); ML Kit stays for fast paths. */
@@ -409,7 +409,7 @@ object BackgroundOperation {
             it.copy(
                 enabled = prefs.getBoolean(K_ENABLED, false),
                 showPreview = prefs.getBoolean(K_PREVIEW, true),
-                miniShowControls = prefs.getBoolean(K_MINI_CONTROLS, false),
+                miniShowControls = prefs.getBoolean(K_MINI_CONTROLS, true),
                 miniTapToExpand = prefs.getBoolean(K_MINI_TAP_EXPAND, true),
                 accurateOcr = prefs.getBoolean(K_ACCURATE_OCR, true),
                 recording = prefs.getBoolean(K_RECORDING, true),

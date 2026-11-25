@@ -212,7 +212,7 @@ If your MCP connectors can only be added by me in your web settings (e.g. custom
         "schedule" to listOf("schedule"),
         "keep" to listOf("watch"),
         "screen" to listOf("look", "park", "sound"),
-        "safety" to listOf("ask", "handoff", "trouble"),
+        "safety" to listOf("ask", "elevate", "handoff", "trouble"),
         "codes" to emptyList(),
     )
 
@@ -223,7 +223,7 @@ If your MCP connectors can only be added by me in your web settings (e.g. custom
         "schedule" to listOf("schedule"),
         "keep" to listOf("keep", "events"),
         "screen" to listOf("look", "spots", "tasks", "launch", "sound", "stop", "release", "done", "title"),
-        "safety" to listOf("ask", "handoff", "status", "fix", "diag"),
+        "safety" to listOf("ask", "elevate", "handoff", "status", "fix", "diag"),
         "codes" to emptyList(),
     )
 
@@ -237,7 +237,7 @@ If your MCP connectors can only be added by me in your web settings (e.g. custom
             "schedule" to "定时任务预约手机就绪窗口",
             "keep" to "后台长期盯条件（notify / wake）与 events",
             "screen" to "主动要图、局部放大、录像回看、切应用/暂存与静音",
-            "safety" to "用户确认、隐私与接力、排障 status/fix/diag",
+            "safety" to "用户确认、申请提权、隐私与接力、排障 status/fix/diag",
             "codes" to "全部结果代码与 next 处理方式",
         )
         val descEn = mapOf(
@@ -247,7 +247,7 @@ If your MCP connectors can only be added by me in your web settings (e.g. custom
             "schedule" to "book phone readiness windows for timed tasks",
             "keep" to "background watches (notify / wake) and events",
             "screen" to "pictures, zoom, replay, switching/parking apps and sound",
-            "safety" to "user confirmation, privacy, handoff and status/fix/diag",
+            "safety" to "user confirmation, asking for permission, privacy, handoff and status/fix/diag",
             "codes" to "all result codes and next actions",
         )
         return tr("### 主题帮助（`vscreen help <主题>`）\n", "### Topic help (`vscreen help <topic>`)\n") +

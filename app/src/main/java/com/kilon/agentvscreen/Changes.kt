@@ -38,6 +38,27 @@ object Changes {
     /** Releases ordered newest first. Add a new [Release] entry whenever versionCode bumps. */
     val releases: List<Release> = listOf(
         Release(
+            versionCode = 68,
+            versionName = "2.0.0-beta11",
+            items = listOf(
+                Item(Kind.NEW, Audience.USER, "agent 申请提权",
+                    "agent 可以说明原因，申请临时或永久的更高许可；手机上指纹确认，可选本轮任务内、今天内或永久。命令遇到“不允许”的类别时也用同一张确认卡，不再直接永久放开。",
+                    "Agents ask for permission",
+                    "An agent can ask, with a reason, for temporary or permanent extra permission; you confirm by fingerprint and pick this turn, today or permanently. A command that meets a Not allowed class uses the same card instead of widening permanently.",
+                    null),
+                Item(Kind.IMPROVED, Audience.USER, "过期的请求自动消失",
+                    "等你处理里过期的确认和提问会按时自动移除。",
+                    "Expired requests leave on their own",
+                    "Expired confirmations and questions now leave 等你处理 on time.",
+                    null),
+                Item(Kind.IMPROVED, Audience.USER, "接入向导显示连接状态",
+                    "最后一步显示等待连接、待批准配对或已连上，并有“完成”按钮；接入页列出等待批准的云端配对。",
+                    "Connect wizard shows status",
+                    "The last step shows waiting, pairing to approve or connected, with a Done button; the Connect page lists cloud pairings waiting for approval.",
+                    null),
+            ),
+        ),
+        Release(
             versionCode = 67,
             versionName = "2.0.0-beta10",
             items = listOf(
