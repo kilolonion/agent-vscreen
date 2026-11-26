@@ -228,8 +228,12 @@ fun SettingsTab(bottom: Dp) {
         Group(tr("记录与诊断", "Records and diagnostics")) {
             ArrowPreference(title = tr("事件广播", "Event broadcast"), endActions = { Value(ApiConfig.eventTarget ?: tr("不广播", "Off")) }, onClick = { eventDialog = true })
             ArrowPreference(title = tr("操作日志", "Activity log"), summary = tr("agent 发送的全部命令及结果", "Every command agents sent, with results"), onClick = { nav.go(Route.Log) })
-            ArrowPreference(title = tr("诊断", "Diagnostics"), onClick = { nav.go(Route.Diag) })
+            ArrowPreference(title = tr("诊断与反馈", "Diagnostics and feedback"), onClick = { nav.go(Route.Diag) })
             ArrowPreference(title = tr("帮助", "Help"), summary = tr("各设置项说明", "What each setting does"), onClick = { nav.go(Route.Help) })
+            // 2.0.1 (rainbow): the project page.
+            ArrowPreference(title = tr("关于项目", "About"), summary = "GitHub · kilolonion/agent-vscreen",
+                endActions = { Value(BuildConfig.VERSION_NAME) },
+                onClick = { runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(com.kilon.agentvscreen.host.Feedback.REPO)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } })
         }
         Text("Agent-VScreen ${BuildConfig.VERSION_NAME}", fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 16.dp))
