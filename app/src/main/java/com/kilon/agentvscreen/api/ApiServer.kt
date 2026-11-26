@@ -849,7 +849,11 @@ class ApiServer(private val ctx: Context) {
         val cli = r.headers["x-vscreen-client"] == "cli"
         val shots = if (!v2) all else ImagePolicy.pick(res, all)
         val text = ShotStore.IN_TEXT.replace(res.output) { m -> val n = m.groupValues[1]; if (n in shots) shotUrl(n, r, v2) else ImagePolicy.leftOut() }
-        val meter = com.kilon.agentvscreen.core.Meter.of(text, com.kilon.agentvscreen.core.Meter.sentDimensions(ctx, res, shots, fullSize = cli || !v2))
+        val meter = com.kilon.agentvscreen.core.Meter.of(
+            text,
+            com.kilon.agentvscreen.core.Meter.sentDimensions(ctx, res, shots, fullSize = cli || !v2),
+            structured = if (v2) res.data?.toString() else null,
+        )
         val exit = if (!v2 && res.softFail) 0 else res.exitCode
         val code = if (!v2 && res.softFail) "OK" else res.codeOrDefault
         val o = JSONObject()

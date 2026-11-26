@@ -41,9 +41,11 @@ internal object Mcp {
                 .put("session", JSONObject().put("type", "string").put("description", tr("可选：会话名（副屏同一时间属于一个会话）", "Optional: session name (the screen belongs to one session at a time)"))))
             .put("required", JSONArray().put("command")))
 
-    private fun typedTools(): List<JSONObject> = CommandSpec.commands.map { c ->
+    internal fun toolsList(): JSONArray = JSONArray(listOf(lineTool()) + typedTools())
+
+    private fun typedTools(): List<JSONObject> = CommandSpec.commands.filterNot { it.hidden }.map { c ->
         JSONObject().put("name", PREFIX + c.name)
-            .put("description", c.summary + "\n" + c.body.joinToString("\n"))
+            .put("description", c.description)
             .put("inputSchema", CommandSpec.inputSchema(c))
             .put("annotations", JSONObject().put("readOnlyHint", c.readOnly))
     }
@@ -104,7 +106,7 @@ internal object Mcp {
                         "Agent-VScreen: a background screen on this phone. To open, view or operate apps on the phone use these tools; they work on an invisible second screen, never disturb the user's screen, and need no adb.\n\n") + AgentGuide.guide().replace("`vscreen ", "`")))
             }
             "ping" -> result(id, JSONObject())
-            "tools/list" -> result(id, JSONObject().put("tools", JSONArray(listOf(lineTool()) + typedTools())))
+            "tools/list" -> result(id, JSONObject().put("tools", toolsList()))
             "tools/call" -> {
                 val name = p.optString("name")
                 val a = p.optJSONObject("arguments") ?: JSONObject()
@@ -138,14 +140,18 @@ internal object Mcp {
             val f = ShotStore.file(server.ctxFiles(), ImagePolicy.sendName(server.ctxFiles(), res, n)) ?: continue
             content.put(JSONObject().put("type", "image").put("mimeType", "image/jpeg").put("data", Base64.encodeToString(f.readBytes(), Base64.NO_WRAP)))
         }
-        val meter = com.kilon.agentvscreen.core.Meter.of(text, com.kilon.agentvscreen.core.Meter.sentDimensions(server.ctxFiles(), res, sent))
         val structured = JSONObject()
         res.data?.let { d -> for (k in d.keys()) structured.put(k, d.get(k)) }
         structured.put("ok", res.exitCode == 0).put("code", res.codeOrDefault).put("exit", res.exitCode)
             .put("next", if (res.exitCode == 0) "none" else com.kilon.agentvscreen.cmd.Codes.next(res.codeOrDefault))
-            .put("meter", meter.json())
             .put("returned_at", res.data?.optLong("returned_at")?.takeIf { it > 0L } ?: System.currentTimeMillis())
         if (replayed) structured.put("replayed", true)
+        val meter = com.kilon.agentvscreen.core.Meter.of(
+            text,
+            com.kilon.agentvscreen.core.Meter.sentDimensions(server.ctxFiles(), res, sent),
+            structured = structured.toString(),
+        )
+        structured.put("meter", meter.json())
         return JSONObject().put("content", content).put("structuredContent", structured).put("isError", res.exitCode != 0)
     }
 

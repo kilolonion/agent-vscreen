@@ -82,7 +82,7 @@ object Setup {
         val out = ArrayList<String>()
         fun step(label: String, argv: Array<String>) {
             val r = runCatching { VScreenShell.run(argv, 6_000L) }.getOrNull()
-            out += if (r != null && r.exitCode == 0) "✓ $label" else "✗ $label：${r?.combined?.take(80) ?: tr("失败", "failed")}"
+            out += if (r != null && r.exitCode == 0) "✓ $label" else "✗ $label${tr("：", ": ")}${r?.combined?.take(80) ?: tr("失败", "failed")}"
         }
         if (!Settings.canDrawOverlays(ctx)) step(tr("悬浮窗", "Floating window"), arrayOf("appops", "set", pkg, "SYSTEM_ALERT_WINDOW", "allow"))
         if (Build.VERSION.SDK_INT >= 33 && ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)

@@ -32,6 +32,37 @@ internal fun VScreenOffloadHandler.freshFrameOf(d: VScreenDisplay): Bitmap {
     return d.latestFrame() ?: throw ActionError("NO_FRAME", tr("副屏还没有画面", "the screen has no picture yet"))
 }
 
+internal data class SpotFilterResult(val kept: List<VScreenSpots.Spot>, val skippedText: Int)
+
+/**
+ * 2.0.0-beta16 (Item 7), pure: filter out colour blobs that sit on text, using both OCR word boxes and
+ * accessibility text node boxes (using inner [El.textBoxes] when present so icons beside text in a row stay).
+ */
+internal fun filterSpotsOnText(
+    spots: List<VScreenSpots.Spot>,
+    ocrBoxes: List<Rect>,
+    a11yEls: List<El>,
+    limit: Int = 60,
+): SpotFilterResult {
+    val textBoxes = ArrayList<Rect>(ocrBoxes.size + a11yEls.size)
+    textBoxes.addAll(ocrBoxes)
+    for (e in a11yEls) {
+        if (!e.fromA11y || e.kind != ElKind.TEXT || e.text.isBlank() || e.scrollable) continue
+        if (e.textBoxes.isNotEmpty()) textBoxes.addAll(e.textBoxes)
+        else textBoxes.add(e.box)
+    }
+    fun isText(b: Rect): Boolean {
+        val bArea = b.width().toLong() * b.height()
+        if (bArea <= 0L) return false
+        return textBoxes.any { w ->
+            val i = Rect(b)
+            i.intersect(w) && i.width().toLong() * i.height() * 2L >= bArea
+        }
+    }
+    val keptAll = spots.filter { !isText(it.box) }
+    return SpotFilterResult(keptAll.take(limit), spots.size - keptAll.size)
+}
+
 /** `spots [x1,y1,x2,y2] [--color #RRGGBB]`: colour blobs found on the device (no model), numbered S1…, with centres. */
 internal fun VScreenOffloadHandler.spotsCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {
     val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
@@ -40,12 +71,8 @@ internal fun VScreenOffloadHandler.spotsCmd(sid: String?, args: OffloadArgs): Na
     return BackgroundOperation.agentAction(s, null, isRead = true, describe = tr("找色块", "find color spots")) { d ->
         val snap = snapshot(d)
         val frame = snap.frame ?: throw ActionError("NO_FRAME", tr("副屏还没有画面", "the screen has no picture yet"))
-        // v0.5: blobs that are letters (inside an OCR word box) are not targets: left out, and counted.
-        val words = snap.items.orEmpty().map { it.box }
-        fun isText(b: Rect): Boolean = words.any { w -> val i = Rect(b); i.intersect(w) && i.width().toLong() * i.height() * 2 >= b.width().toLong() * b.height() }
         val found = VScreenSpots.find(frame, region = region, color = color, limit = 120)
-        val list = found.filter { !isText(it.box) }.take(60)
-        val textual = found.size - found.count { !isText(it.box) }
+        val (list, textual) = filterSpotsOnText(found, snap.items.orEmpty().map { it.box }, snap.els, limit = 60)
         if (list.isEmpty()) return@agentAction text(tr("没找到色块", "No color spots found") + (region?.let { tr("（区域 ${Report.box(it)}）", " (region ${Report.box(it)})") } ?: "") + if (textual > 0) tr("（有 $textual 个是文字，已略过）", " ($textual on text were skipped)") else "")
         val sb = StringBuilder(tr("色块（本地按颜色找的，不是识别；tap 用括号里的坐标）", "Color spots (found locally by color, not recognized; tap the coordinates in brackets)") + (if (textual > 0) tr("，另有 $textual 个落在文字上的已略过", "; $textual more on text were skipped") else "") + tr("：\n", ":\n"))
         list.forEachIndexed { i, sp ->

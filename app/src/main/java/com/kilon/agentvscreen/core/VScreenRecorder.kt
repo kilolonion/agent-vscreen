@@ -33,7 +33,7 @@ object VScreenRecorder {
     private const val MAX_BYTES = 60L * 1024 * 1024
     private const val STRICT_START_GRACE_MS = 1_500L
 
-    class Frame(val atMs: Long, val file: File, val bytes: Long)
+    class Frame(val atMs: Long, val file: File, val bytes: Long, val clearChange: Boolean = true)
 
     /** Something drawn on the track: an action (with its points) or an event. */
     class Mark(val n: Int, val atMs: Long, val kind: String, val label: String, val pts: List<IntArray>) {
@@ -50,6 +50,8 @@ object VScreenRecorder {
         var lastAt = 0L
         var markSeq = 0
         var closed = false // under the track lock
+        /** 2.0.0-beta16 (Item 6): 160px thumbnail of the last frame tagged clearChange=true, for the same filter as Meanwhile. */
+        var lastClearThumb: Bitmap? = null
         @Volatile var on = true
         val startedAt = System.currentTimeMillis()
     }
@@ -96,12 +98,28 @@ object VScreenRecorder {
             val k = MAX_SIDE.toDouble() / maxOf(frame.width, frame.height)
             val small = if (k >= 1.0) frame else Bitmap.createScaledBitmap(frame, maxOf(1, (frame.width * k).roundToInt()), maxOf(1, (frame.height * k).roundToInt()), true)
             val f = File(t.dir, "${now}_${version}.jpg")
-            try { Pictures.write(small, f, Pictures.Use.RECORDING, fit = false) }
-            finally { if (small !== frame) small.recycle() }
+            var tiny: Bitmap? = null
+            try {
+                tiny = VScreenPerception.small(small, 160)
+                Pictures.write(small, f, Pictures.Use.RECORDING, fit = false)
+            } catch (e: Throwable) {
+                tiny?.recycle()
+                throw e
+            } finally {
+                if (small !== frame) small.recycle()
+            }
+            val mask = VScreenPerception.mask(d.displayId)
             synchronized(t) {
-                if (t.closed) { f.delete(); return }
+                if (t.closed) { f.delete(); tiny.recycle(); return }
+                val clear = t.lastClearThumb == null || VScreenActivity.isClearChange(t.lastClearThumb, tiny, mask)
+                if (clear) {
+                    t.lastClearThumb?.recycle()
+                    t.lastClearThumb = tiny
+                } else {
+                    tiny.recycle()
+                }
                 t.lastVersion = version; t.lastAt = now
-                t.frames.addLast(Frame(now, f, f.length())); t.bytes += f.length()
+                t.frames.addLast(Frame(now, f, f.length(), clearChange = clear)); t.bytes += f.length()
                 prune(t, now)
             }
         }.onFailure { AppLogger.warning(TAG, "offer: ${it.message}") }
@@ -243,7 +261,11 @@ object VScreenRecorder {
     fun stop(displayId: Int) { synchronized(tracks) { tracks.remove(displayId) }?.let { drop(it) } }
 
     private fun drop(t: Track) {
-        synchronized(t) { t.closed = true }
+        synchronized(t) {
+            t.closed = true
+            t.lastClearThumb?.recycle()
+            t.lastClearThumb = null
+        }
         runCatching { t.dir.deleteRecursively() }
     }
 

@@ -49,7 +49,9 @@ internal object CommandSpec {
                * `elevate` is callable while looking only (else a viewer could never ask), yet it notifies the phone and
                * may change the agent's table, so it is not read-only.
                */
-              val sideEffects: Boolean = false) {
+              val sideEffects: Boolean = false,
+              /** 2.0.0-beta16 (Item 2): kept for CLI compatibility, omitted from MCP tools/list and help command lists. */
+              val hidden: Boolean = false) {
         /** For MCP's readOnlyHint: callable while looking only and changes nothing. */
         val readOnly: Boolean get() = scope == Scope.LOOK && !sideEffects
         val scopeNote: String get() = tr(scopeNoteZh, scopeNoteEn)
@@ -57,6 +59,16 @@ internal object CommandSpec {
         val positional: String get() = tr(posZh, posEn)
         val body: List<String> get() = if (I18n.en) en else zh
         val summary: String get() = tr(sumZh, sumEn).ifEmpty { body.firstOrNull().orEmpty() }
+        /** 2.0.0-beta16 (Item 2): full description for MCP tools; prepends summary only when a distinct summary is set. */
+        val description: String get() {
+            val sum = tr(sumZh, sumEn)
+            val bodyText = body.joinToString("\n")
+            return when {
+                sum.isEmpty() || body.firstOrNull() == sum -> bodyText
+                bodyText.isEmpty() -> sum
+                else -> "$sum\n$bodyText"
+            }
+        }
         /** Every option the command takes (its own, `--async` when it may run as a task). */
         val allOpts: List<Opt> get() = if (long) opts + ASYNC else opts
         fun usageLine(): String = (name + " " + positional).trim() + allOpts.filter { !it.deprecated }.joinToString("") { " [${it.usage()}]" }
@@ -281,11 +293,11 @@ internal object CommandSpec {
         Cmd("frames", "", "",
             listOf("look --last … 的旧写法：回看录像，默认是上一次返回的【这段时间】。"),
             listOf("old form of look --last …: look back at the recording, by default the [Meanwhile] of the last reply."),
-            lookOpts(), scope = Scope.LOOK),
+            lookOpts(), scope = Scope.LOOK, hidden = true),
         Cmd("zoom", "x1,y1,x2,y2", "x1,y1,x2,y2",
             listOf("look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐标）。"), listOf("old form of look x1,y1,x2,y2: zoom into a region (screen coordinates on the picture's edges)."),
             listOf(Opt("scale", Kind.VALUE, "倍数", "factor", "放大倍数（默认按区域大小定）", "zoom factor (default follows the region size)"),
-                detailOpt, marksOpt), scope = Scope.LOOK),
+                detailOpt, marksOpt), scope = Scope.LOOK, hidden = true),
         Cmd("collect", "", "",
             listOf("从当前位置往下一页页滚，收集每一条（一张卡片或一行列表算一条，去重）。上面还有内容时会说；--from-top 先回到顶部。"), listOf("scroll down page by page from here and collect every item (a card or list row is one item, deduplicated). Says when there is more above; --from-top goes to the top first."),
             listOf(Opt("pages", Kind.VALUE, "页数", "count", "最多翻几页（默认 8，最多 40）", "pages to go through at most (default 8, at most 40)"),
@@ -370,7 +382,7 @@ internal object CommandSpec {
     /** `help all`. */
     fun fullHelp(): String = buildString {
         append(head).append('\n')
-        commands.forEach { c -> c.help().forEach { append(it).append('\n') } }
+        commands.filterNot { it.hidden }.forEach { c -> c.help().forEach { append(it).append('\n') } }
         append("  guide\n        ").append(tr("用法速查（一页）。", "the one-page quick usage.")).append('\n')
         append("  help [all|codes|<").append(tr("主题", "topic")).append(">|<").append(tr("命令", "command")).append(">]\n        ").append(tr("完整说明 / 代码表 / 主题 / 单条命令。", "the full reference / the code table / a topic / one command.")).append('\n')
         append('\n').append(rules)
@@ -388,7 +400,7 @@ internal object CommandSpec {
         append(tr("vscreen — Agent-VScreen：在看不见的副屏里操作应用，不占用户主屏（完整说明：help all；单条：help act；代码表：help codes）",
             "vscreen — Agent-VScreen: operate apps on an invisible background screen without taking the user's screen (full guide: help all; one command: help act; codes: help codes)")).append('\n')
         for (c in commands) {
-            if (c.name in OLD_FORMS) continue
+            if (c.hidden || c.name in OLD_FORMS) continue
             val use = (c.name + " " + c.positional).trim()
             append("  ").append(use.padEnd(24)).append("  ").append(c.summary.substringBefore(tr("。", ". ")).trimEnd('.', '。')).append('\n')
             if (c.name == "act") {

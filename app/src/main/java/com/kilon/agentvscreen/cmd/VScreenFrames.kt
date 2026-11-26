@@ -40,15 +40,51 @@ private class Pick(val frame: VScreenRecorder.Frame, val tag: StringBuilder = St
  * room, the latest are kept and [Picked.leftOut] says how many earlier ones are not shown. [every] (ms) samples at
  * fixed ticks instead.
  */
-internal class Picked(val cells: List<Cell>, val leftOut: Int, val distinct: Int, val actions: Int)
+internal class Picked(
+    val cells: List<Cell>,
+    val leftOut: Int,
+    val distinct: Int,
+    val actions: Int,
+    /** 2.0.0-beta16 (Item 6): number of frames inside (from, to] with a clear visual change (same filter as Meanwhile). */
+    val clearChanges: Int = (distinct - 1).coerceAtLeast(0),
+)
 
-internal fun pickCells(displayId: Int, from: Long, to: Long, max: Int, maxSide: Int, every: Long? = null): Picked {
-    val all = VScreenRecorder.frames(displayId, from - 120_000L, to)
-    if (all.isEmpty() || max <= 0) return Picked(emptyList(), 0, 0, 0)
-    val acts = VScreenRecorder.marks(displayId, from, to).filter { it.kind == "action" }.sortedBy { it.atMs }
+internal data class SelectedFrame(
+    val index: Int,
+    val frame: VScreenRecorder.Frame,
+    val tag: String,
+    val marks: List<VScreenRecorder.Mark>,
+    val nums: List<Int>,
+)
+
+internal data class SelectedFrames(
+    val picks: List<SelectedFrame>,
+    val leftOut: Int,
+    val distinct: Int,
+    val actions: Int,
+    val clearChanges: Int,
+)
+
+/**
+ * 2.0.0-beta16 (Item 6), pure: choose frames for a replay sheet of [from]..[to].
+ * Only frames tagged [VScreenRecorder.Frame.clearChange] count toward [SelectedFrames.distinct] /
+ * [SelectedFrames.clearChanges] and toward filling remaining slots (blinking cursors and tiny animations do not).
+ * When a stretch has no clear changes and no actions, only start and end (at most 2 frames) are returned.
+ */
+internal fun selectFrames(
+    all: List<VScreenRecorder.Frame>,
+    acts: List<VScreenRecorder.Mark>,
+    from: Long,
+    to: Long,
+    max: Int,
+    every: Long? = null,
+): SelectedFrames {
+    if (all.isEmpty() || max <= 0) return SelectedFrames(emptyList(), 0, 0, 0, 0)
+    val sortedActs = acts.sortedBy { it.atMs }
     fun idxAt(t: Long): Int = all.indexOfLast { it.atMs <= t }.coerceAtLeast(0)
     val start = idxAt(from)
     val inside = all.indices.filter { all[it].atMs in (from + 1)..to }
+    val clearInside = inside.filter { all[it].clearChange }
     val picks = sortedMapOf<Int, Pick>()
     fun pick(i: Int) = picks.getOrPut(i) { Pick(all[i]) }
     var leftOut = 0
@@ -57,12 +93,12 @@ internal fun pickCells(displayId: Int, from: Long, to: Long, max: Int, maxSide: 
         while (t <= to && picks.size < max) { val i = idxAt(t); if (i != last) { pick(i); last = i }; t += every }
     } else {
         val room = (max - 1).coerceAtLeast(1)
-        val kept = if (acts.size > room) acts.takeLast(room) else acts
-        leftOut = acts.size - kept.size
+        val kept = if (sortedActs.size > room) sortedActs.takeLast(room) else sortedActs
+        leftOut = sortedActs.size - kept.size
         pick(start).tag.append(tr("开头", "start"))
         kept.forEach { a ->
             val p = pick(idxAt(a.atMs - 1))
-            val n = acts.indexOf(a) + 1
+            val n = sortedActs.indexOf(a) + 1
             p.marks += a; p.nums += n
             if (p.tag.isNotEmpty()) p.tag.append(" · ")
             p.tag.append(tr("动作$n 前 ", "before action $n ")).append(caption(a.label))
@@ -75,16 +111,39 @@ internal fun pickCells(displayId: Int, from: Long, to: Long, max: Int, maxSide: 
             val r = idxAt(until)
             if (all[r].atMs > a.atMs) pick(r)
         }
-        val rest = inside.filter { it !in picks }
-        val free = max - picks.size
-        if (free > 0) (if (rest.size <= free) rest else (0 until free).map { k -> rest[(k * (rest.size - 1)) / maxOf(1, free - 1)] }).forEach { pick(it) }
+        if (clearInside.isEmpty()) {
+            // 2.0.0-beta16 (Item 6): no clear visual change in this stretch; keep only start + end when there are no actions.
+            if (kept.isEmpty() && picks.size < max) {
+                val end = idxAt(to)
+                if (end != start) pick(end).tag.append(tr("结尾", "end"))
+            }
+        } else {
+            val rest = clearInside.filter { it !in picks }
+            val free = max - picks.size
+            if (free > 0 && rest.isNotEmpty()) {
+                (if (rest.size <= free) rest else (0 until free).map { k -> rest[(k * (rest.size - 1)) / maxOf(1, free - 1)] }).forEach { pick(it) }
+            }
+        }
     }
-    // A frame after an action that is not drawn on any cell: say which action it follows.
-    val cells = picks.values.take(max).mapNotNull { p ->
-        if (p.tag.isEmpty()) acts.lastOrNull { it.atMs <= p.frame.atMs }?.let { a -> p.tag.append(tr("动作${acts.indexOf(a) + 1} 后 +${s1(p.frame.atMs - a.atMs)}", "action ${acts.indexOf(a) + 1} +${s1(p.frame.atMs - a.atMs)}")) }
-        VScreenRecorder.decode(p.frame, maxSide)?.let { Cell(p.frame.atMs, it, p.tag.toString(), p.marks, p.nums) }
+    val selected = picks.entries.take(max).map { (idx, p) ->
+        if (p.tag.isEmpty()) sortedActs.lastOrNull { it.atMs <= p.frame.atMs }?.let { a ->
+            p.tag.append(tr("动作${sortedActs.indexOf(a) + 1} 后 +${s1(p.frame.atMs - a.atMs)}", "action ${sortedActs.indexOf(a) + 1} +${s1(p.frame.atMs - a.atMs)}"))
+        }
+        SelectedFrame(idx, p.frame, p.tag.toString(), p.marks.toList(), p.nums.toList())
     }
-    return Picked(cells, leftOut, inside.size + 1, acts.size)
+    val clearCount = clearInside.size
+    return SelectedFrames(selected, leftOut, clearCount + 1, sortedActs.size, clearCount)
+}
+
+internal fun pickCells(displayId: Int, from: Long, to: Long, max: Int, maxSide: Int, every: Long? = null): Picked {
+    val all = VScreenRecorder.frames(displayId, from - 120_000L, to)
+    if (all.isEmpty() || max <= 0) return Picked(emptyList(), 0, 0, 0, 0)
+    val acts = VScreenRecorder.marks(displayId, from, to).filter { it.kind == "action" }
+    val sel = selectFrames(all, acts, from, to, max, every)
+    val cells = sel.picks.mapNotNull { p ->
+        VScreenRecorder.decode(p.frame, maxSide)?.let { Cell(p.frame.atMs, it, p.tag, p.marks, p.nums) }
+    }
+    return Picked(cells, sel.leftOut, sel.distinct, sel.actions, sel.clearChanges)
 }
 
 private fun spoken(ms: Long) = if (ms >= 60_000 && ms % 60_000 == 0L) "${ms / 60_000} 分钟" else "${(ms + 500) / 1000} 秒"
@@ -140,6 +199,38 @@ internal fun drawCells(c: Canvas, x0: Int, y0: Int, cells: List<Cell>, cols: Int
 internal const val CELL_PAD = 6
 internal const val CAPTION = 38
 
+/**
+ * 2.0.0-beta16 (Item 6), pure: summary line for `look --last` / `frames`.
+ * When [clearChanges] == 0 (no clear visual change, matching [Meanwhile]), uses the same wording and notes start+end.
+ */
+internal fun formatFramesSummary(
+    distinct: Int,
+    clearChanges: Int,
+    actions: Int,
+    shownCount: Int,
+    leftOut: Int,
+    every: Long?,
+): String = buildString {
+    if (every == null && clearChanges == 0) {
+        val shownPart = if (actions == 0 && shownCount == 2) tr("首尾 2 张", "start and end (2)") else tr("$shownCount 张", "$shownCount")
+        append(tr(
+            "这段画面没有明显变化（光标、细小动画这类小变动不算），$actions 个动作，给出$shownPart",
+            "no clear change in the picture (cursors and tiny animations don't count), $actions actions; showing $shownPart",
+        ))
+        if (leftOut > 0) append(tr("；前 $leftOut 个动作没放进来，用 --from 往前看或加大 --count", "; the first $leftOut actions are not shown: look earlier with --from or raise --count"))
+        if (actions > 0) append(tr("。圈和编号是动作的位置，画在动作之前的那张上；它带来的变化看下一张", ". Rings and numbers are where actions touched, drawn on the frame just before each; what it led to is the next frame"))
+        append('\n')
+        return@buildString
+    }
+    append(tr(
+        "这段录到 $distinct 张不同的画面、$actions 个动作（有明显变化才计入，最快约每 0.15 秒一张；更短的闪动可能没录到），给出 $shownCount 张",
+        "$distinct different pictures and $actions actions in it (only clear changes count, at most about one per 0.15 s; shorter flashes may be missing); showing $shownCount",
+    ))
+    if (every != null) append(tr("，每 ${s1(every)} 取一张（和上一张一样的不重复）", ", one every ${s1(every)} (repeats left out)"))
+    if (leftOut > 0) append(tr("；前 $leftOut 个动作没放进来，用 --from 往前看或加大 --count", "; the first $leftOut actions are not shown: look earlier with --from or raise --count"))
+    append(tr("。圈和编号是动作的位置，画在动作之前的那张上；它带来的变化看下一张\n", ". Rings and numbers are where actions touched, drawn on the frame just before each; what it led to is the next frame\n"))
+}
+
 /** `frames [--last 30s | --from T [--to T]] [--count N] [--every D] [--big]`. */
 internal fun VScreenOffloadHandler.framesCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {
     val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
@@ -180,11 +271,7 @@ internal fun VScreenOffloadHandler.framesCmd(sid: String?, args: OffloadArgs): N
         if (picked.cells.isEmpty()) return@agentAction text(tr("这段时间里没有录像", "No recording in that stretch"))
         sb.append(tr("回看 $said：${clock(from)} → ${clock(to)}（${s1(to - from)}，最后一刻是 ${Report.ago(to, now)}）\n", "Looking back at $said: ${clock(from)} → ${clock(to)} (${s1(to - from)}, ending ${Report.ago(to, now)})\n"))
         if (from < oldest) sb.append(tr("开头早于最早的录像（${clock(oldest)}），从那里开始\n", "The start is before the oldest frame kept (${clock(oldest)}); starting there\n"))
-        sb.append(tr("这段录到 ${picked.distinct} 张不同的画面、${picked.actions} 个动作（画面变了才录一张，最快约每 0.15 秒一张；更短的闪动可能没录到），给出 ${picked.cells.size} 张",
-            "${picked.distinct} different pictures and ${picked.actions} actions in it (a frame is kept when the picture changes, at most about one per 0.15 s; shorter flashes may be missing); showing ${picked.cells.size}"))
-        if (every != null) sb.append(tr("，每 ${s1(every)} 取一张（和上一张一样的不重复）", ", one every ${s1(every)} (repeats left out)"))
-        if (picked.leftOut > 0) sb.append(tr("；前 ${picked.leftOut} 个动作没放进来，用 --from 往前看或加大 --count", "; the first ${picked.leftOut} actions are not shown: look earlier with --from or raise --count"))
-        sb.append(tr("。圈和编号是动作的位置，画在动作之前的那张上；它带来的变化看下一张\n", ". Rings and numbers are where actions touched, drawn on the frame just before each; what it led to is the next frame\n"))
+        sb.append(formatFramesSummary(picked.distinct, picked.clearChanges, picked.actions, picked.cells.size, picked.leftOut, every))
         val (fw, fh) = VScreenRecorder.frameSize(d.displayId) ?: (d.width to d.height)
         val landscape = fw > fh
         val big = detail == Detail.HIGH

@@ -94,7 +94,7 @@ object AgentNews {
         if (abilities.isEmpty() && changeItems.isEmpty()) return null
         if (!AgentLedger.nudgeDue(tokenId, freshStretch)) return null
         val lines = buildList {
-            changeItems.forEach { (_, item) -> add("- ${item.title}：${item.detail}") }
+            changeItems.forEach { (_, item) -> add("- ${item.title}${tr("：", ": ")}${item.detail}") }
             abilities.mapNotNull { a -> a.news.takeIf { it.isNotEmpty() }?.let { "- $it" } }.forEach { add(it) }
         }
         val was = if (ack <= 0) tr("你确认过的版本未知", "the version your note is for is unknown") else tr("你的说明是 ${nameOf(ack)} 时记下的", "your note is from ${nameOf(ack)}")

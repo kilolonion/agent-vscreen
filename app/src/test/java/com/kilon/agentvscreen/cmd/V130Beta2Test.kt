@@ -25,13 +25,13 @@ class V130Beta2Test {
     @Test fun untilTextCountsOnlyWordsTheActionBrought() {
         val wlanBefore = listOf(Rect(40, 400, 400, 460))
         // Same place, same page: the old page's words (tap 蓝牙 until text:WLAN met at 0.0 s in 1.2).
-        assertFalse(counts(Rect(42, 402, 398, 458), wlanBefore, null, newPage = false))
+        assertEquals(CountDecision.PRE_EXISTING, counts(Rect(42, 402, 398, 458), wlanBefore, null, newPage = false))
         // Moved (the new page's title repeats the tapped row's words): counts.
-        assertTrue(counts(Rect(40, 100, 400, 160), wlanBefore, null, newPage = false))
+        assertEquals(CountDecision.COUNTED, counts(Rect(40, 100, 400, 160), wlanBefore, null, newPage = false))
         // A new page: whatever it shows counts.
-        assertTrue(counts(Rect(42, 402, 398, 458), wlanBefore, null, newPage = true))
+        assertEquals(CountDecision.COUNTED, counts(Rect(42, 402, 398, 458), wlanBefore, null, newPage = true))
         // Inside the field typed into: never (type 地图导航 until text:导航).
-        assertFalse(counts(Rect(100, 200, 300, 240), emptyList(), Rect(0, 180, 1080, 260), newPage = true))
+        assertEquals(CountDecision.IN_TYPED_FIELD, counts(Rect(100, 200, 300, 240), emptyList(), Rect(0, 180, 1080, 260), newPage = true))
     }
 
     @Test fun numbersBelongToOnePage() {

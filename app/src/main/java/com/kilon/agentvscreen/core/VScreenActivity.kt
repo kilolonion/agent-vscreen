@@ -12,8 +12,23 @@ import kotlin.math.roundToInt
 object VScreenActivity {
     const val COLS = 24
     private const val CELL_SHARE = 0.04
+    /** 2.0.0-beta16 (Item 6): single changed-cell share threshold shared by [Meanwhile] and recording frame classification. */
+    const val CLEAR_CHANGE_SHARE = 0.01
 
     fun rowsFor(w: Int, h: Int): Int = (COLS.toDouble() * h / maxOf(1, w)).roundToInt().coerceIn(6, 60)
+
+    /** 2.0.0-beta16 (Item 6), pure: share of grid cells that changed from [a] to [b] outside [mask] (1.0 when incomparable). */
+    fun clearChangeShare(a: Bitmap?, b: Bitmap?, mask: Mask? = null): Double {
+        if (a == null || b == null || a.isRecycled || b.isRecycled || a.width != b.width || a.height != b.height) return 1.0
+        val cols = mask?.cols ?: COLS
+        val rows = mask?.rows ?: rowsFor(a.width, a.height)
+        val c = cells(a, b, cols, rows)?.let { cc -> mask?.minus(cc) ?: cc } ?: return 0.0
+        return share(c)
+    }
+
+    /** 2.0.0-beta16 (Item 6), pure: whether [b] shows a clear visual change from [a] (cursors/tiny animations return false). */
+    fun isClearChange(a: Bitmap?, b: Bitmap?, mask: Mask? = null): Boolean =
+        clearChangeShare(a, b, mask) >= CLEAR_CHANGE_SHARE
 
     /** Which cells of a cols x rows grid changed between two frames of the same size (null: not comparable). */
     fun cells(a: Bitmap?, b: Bitmap?, cols: Int, rows: Int): BooleanArray? {

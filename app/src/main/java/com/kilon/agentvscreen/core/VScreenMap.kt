@@ -40,9 +40,11 @@ internal object VScreenMap {
                   /** 1.4.0-beta13 (test B8): the user showed it (a lesson), as opposed to an agent writing it with note save. */
                   val taught: Boolean = false,
                   /** 1.4.0-beta13 (test B6): the teach request it answered ("what:name"), so the same teach finds it again. */
-                  val asked: String? = null) {
+                  val asked: String? = null,
+                  /** 2.0.0-beta16 (Item 4): epoch ms when this segment was last replayed via `use`. */
+                  var lastUsedAt: Long = 0L) {
         fun json(): JSONObject = JSONObject().put("name", name).put("steps", steps).put("at", at).put("uses", uses).also { o -> start?.let { o.put("start", it) }; by?.let { o.put("by", it) }
-            if (taught) o.put("taught", true); asked?.let { o.put("asked", it) } }
+            if (taught) o.put("taught", true); asked?.let { o.put("asked", it) }; if (lastUsedAt > 0L) o.put("last_used_at", lastUsedAt) }
     }
 
     class AppMap(val pkg: String) {
@@ -73,7 +75,7 @@ internal object VScreenMap {
             m.seq = o.optInt("seq")
             arr(o, "notes").forEach { n -> m.notes += Note(n.getInt("id"), n.getString("text"), n.optLong("at"), n.optString("by").ifEmpty { null }, n.optString("app_version").ifEmpty { null }) }
             arr(o, "segments").forEach { s -> m.segments += Segment(s.getString("name"), s.getString("steps"), s.optLong("at"), s.optInt("uses"), s.optJSONObject("start"), s.optString("by").takeIf { it.isNotEmpty() },
-                s.optBoolean("taught"), s.optString("asked").takeIf { it.isNotEmpty() }) }
+                s.optBoolean("taught"), s.optString("asked").takeIf { it.isNotEmpty() }, s.optLong("last_used_at", 0L)) }
             o.optJSONObject("profile")?.let { p -> p.keys().forEach { k0 ->
                 val k = LEGACY_KEYS[k0] ?: k0
                 PROFILE_KEYS[k]?.invoke(p.optString(k0))?.let { v -> if (k !in m.profile || k == k0) m.profile[k] = v } } }
@@ -193,13 +195,13 @@ internal object VScreenMap {
         val i = m.segments.indexOfFirst { it.name == name }.takeIf { it >= 0 } ?: return
         val s = m.segments[i]
         if (s.start != null) return
-        m.segments[i] = Segment(s.name, s.steps, s.at, s.uses, start, s.by, s.taught, s.asked)
+        m.segments[i] = Segment(s.name, s.steps, s.at, s.uses, start, s.by, s.taught, s.asked, s.lastUsedAt)
         save(m)
     }
 
     @Synchronized fun markUsed(pkg: String, name: String) {
         val m = load(pkg)
-        m.segments.firstOrNull { it.name == name }?.let { it.uses++; save(m) }
+        m.segments.firstOrNull { it.name == name }?.let { it.uses++; it.lastUsedAt = System.currentTimeMillis(); save(m) }
     }
 
     @Synchronized fun deleteSegment(pkg: String, name: String): Boolean {
