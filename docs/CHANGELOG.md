@@ -1,32 +1,78 @@
 # Earlier releases
 
-For [1.4.2-beta3 (versionCode 54)](../README.md#whats-new-in-142-beta3), see the current beta notes. Changes on `main` since then come first.
+Current `main` version highlights are in [README.md](../README.md#whats-new). Full release history follows newest first.
 
-## 2.0.0-beta8 (`v2.0` branch)
+## 2.0.1-beta1 (versionCode 75)
+
+- **Long lists fold**: connected agents, tokens, temporary allowances, bookings, and watches show their first few rows when long; connected agents sort by most recently used.
+- **About & quick feedback**: new Settings › About row opening the GitHub repository, and one-tap redacted diagnostics reporting from the diagnostics page.
+
+## 2.0.0 (versionCode 74)
+
+- **Keep screen on during tasks**: optional setting (off by default) preventing the phone screen from timing out while an agent task is running and releasing immediately when it ends.
+- **Screen-off running on more phones**: refusing the always-unlocked display option no longer drops the background screen's own power group; diagnostics and status list any system-refused display options.
+
+## 2.0.0-beta16 (versionCode 73)
+
+- Cleaner `until text:` typing-wait diagnostics, leaner MCP `tools/list` (hiding deprecated `zoom`/`frames` aliases), shown-only `structuredContent` elements with structured byte metering, recent-5 segment listing on `launch`, OCR icon-noise absorption in clickable rows, `look --last` replay dedup matching `[Meanwhile]`, screen-scaled `spots`, compact `task recap`, English punctuation fixes, and two-tier soft OCR thermal throttling.
+
+## 2.0.0-beta15 (versionCode 72)
+
+- Live ticking countdowns on Waiting-for-you cards; turning the service Off ends the app process cleanly; clearer payment / temporary-allow / public no-system permission wording; improved `key esc` fallback, unconfirmed typing diagnostics, and trailing duration syntax for `swipe`/`drag`.
+
+## 2.0.0-beta14 (versionCode 71)
+
+- Full self-reported agent names preserved without 16-character truncation; annotated screenshots for Cloudflare Tunnel step 4 (Routes tab, Published application, Service URL form).
+
+## 2.0.0-beta13 (versionCode 70)
+
+- Inline public channel setup steps with deep links and official docs; top-of-screen bar when an agent waits for you (`user_on_phone` + `[Waiting for the user]` reply block); rewritten cloud agent onboarding covering web connectors, own MCP config, and RFC 8628 device flow.
+
+## 2.0.0-beta12 (versionCode 69)
+
+- Paste-and-save fields inline inside Cloudflare and ngrok setup steps; service Off stops public/remote access, schedules, and display service cleanly; thermal overheat protection; more reliable Back navigation, OCR stability, and `repeat N:` / unquoted offset step forms.
+
+## 2.0.0-beta11 (versionCode 68)
+
+- Agent elevation requests (`elevate` / `permissions`) with temporary or permanent fingerprint approval; Cloudflare Tunnel and ngrok public MCP channels with live self-test; RFC 8628 browserless device-code pairing; English agent replies by default (configurable in Settings › General); stricter payment checks on coordinate taps, mid-stretch rate checks, and effective public scope clamping.
+
+## 2.0.0-beta10 (versionCode 67)
+
+- Settings regrouped by Connections, Permissions, Background screen, Recognition & recording, General, Updates, and Records & diagnostics; standardized 6-row permission wording (App actions, Sensitive, Irreversible, Payments, System, High action rate).
+
+## 2.0.0-beta9 (versionCode 66)
+
+- Per-agent 6-row permission table (`Policy`: Look only / Steady / Easy / Full / Custom) where widening requires biometric confirmation and narrowing applies immediately; lighter one-tap confirmations for non-payment / non-widening prompts with this-turn / today ranges; 10-minute auth-code lifetime and source address in diagnostics.
+
+## 2.0.0-beta8 (versionCode 65)
 
 - Fixed built-in Tailscale (`GOOS=android`) missing the LocalAPI `cert/` route causing Funnel TLS handshake 404s, with active cert verification before reporting ready (`cert` intermediate state); reworked public access onboarding into a 5-item prerequisite checklist (`funnel-check`, one-tap fixes with `QueryFeature` URL / admin fallback + copyable `nodeAttrs`, auto-recheck on resume, once-only versioned risk consent); bucketed public rate limits and pairing caps by real client source (`ipn.FunnelConn.Src` → `X-AVS-Public-Src`, IPv4 `/32`, IPv6 `/64`) with coalesced pairing notifications; batched all unapproved strong-confirmation risk dimensions into one prompt with Standard (default) / Strict security levels, onboarding scope grant, and editable agent permissions; made `--hold` freeze and verify via `cgroup.events`/`wchan` before replying with upfront `HOLD_REFUSED` for system/persistent/IME/system-media processes and per-app circuit breaking; separated `until text:` timeout reasons (absent / pre-existing / `NOT_READ`); routed real Android Toast accessibility events into `Loud.TOAST` and removed OCR toast guessing; replaced open-loop `seek` with closed-loop numeric/adaptive search with start pre-check and per-read timeout; unified ONNX Runtime onto a shared non-spinning global pool with always-on 50-record diagnostics and 3-run detector verification sentinel; promoted peer connection methods, fixed display-cutout landscape floating window geometry, seamless fullscreen return, and mini-window toggles; added an in-app post-upgrade changelog bottom sheet shared with `AgentNews`; added `guide <topic>`, removed deprecated command suggestions, and excluded icon buttons from page titles.
 
-## 2.0.0-beta7 (`v2.0` branch)
+## 2.0.0-beta7 (versionCode 64)
 
-- Added public MCP access over official Tailscale Funnel (Headscale rejected upfront): dedicated loopback `PublicServer` (`127.0.0.1:18785`, constant-time `X-AVS-Public`, `/mcp` and OAuth 2.1 endpoints only), RFC 9728/8414/7591/8707 discovery and dynamic registration, PKCE S256 with 8-char pairing code and biometric/PIN strong confirmation (default `look`, `system` never granted, hold-to-confirm disabled), 1 h access tokens and 30 d rotating refresh tokens with reuse full-revocation, 4-point risk warning flow, ongoing Off notification, 24 h idle auto-close, auto-reset on app update, and prompt-injection notice in core `guide`.
+- Added public MCP access over official Tailscale Funnel (Headscale rejected upfront): dedicated loopback `PublicServer` (`127.0.0.1:18785`, constant-time `X-AVS-Public`, `/mcp` and OAuth 2.1 endpoints only), RFC 9728/8414/7591/8707 discovery and dynamic registration, PKCE S256 with 8-char pairing code and biometric/PIN strong confirmation (`system` never granted, hold-to-confirm disabled), 1 h access tokens and 30 d rotating refresh tokens with reuse full-revocation, risk warning flow, ongoing Off notification, 24 h idle auto-close, auto-reset on app update, and prompt-injection notice in core `guide`.
 
-## 2.0.0-beta5 (`v2.0` branch)
+## 2.0.0-beta6 (versionCode 63)
+
+- Added `StrongConfirm` and `StrongConfirmActivity` with `FLAG_SECURE`, `filterTouchesWhenObscured`, anti-tapjacking / anti-accessibility-click hardening, biometric/PIN verification (removing one-tap notification Allow buttons), multi-dimension `Risk` evaluation (`NEW_CLIENT`, `SCOPE_OPERATE`, `SCOPE_SYSTEM`, `HIGH_RISK`, `RATE`), and single-gate enforcement verified by `confirm_attack.py` emulator adversarial tests.
+
+## 2.0.0-beta5
 
 - Added `act --hold` and `note hold on|off` (Android 14+ post-reply app pause managed by the privileged Gate with automatic unhold before the next command, on timeout/takeover/release, or on app exit), short-range single-act rules `act --on "<cond> => <step>[ x1..x3]"` with shared persistence debounce and claimed BEFORE/AFTER windows, and first-line reply time hints (`X.Xs since last reply`) with a one-time `BEFORE` coaching note.
 
-## 2.0.0-beta4 (`v2.0` branch)
+## 2.0.0-beta4
 
 - Added closed-loop gestures (`press … hold until`, `drag … hold until`, `drag … seek until`) using existing `Probe` with region-only crop OCR (`readCrop`) and paused background OCR while fingers are down; added `GestureRecord` (pickup, follow, after-release `stayed`/`snapped_back`/`elsewhere`/`unknown`), `SNAP_BACK` loud reason, and fixed 4-cell drag strips in full replies.
 
-## 2.0.0-beta3 (`v2.0` branch)
+## 2.0.0-beta3
 
 - Added reply protocol v3 (`Loud`, short quiet replies when all actions meet expectations with escape hatches `act --full` / `note reply quiet|full` / auto-escalation, `PageBook` page cards, cropped change images at 960/360/640 px, event-based `[Meanwhile]` with toast and popup detection, 1200-token reply budget) and externalized session memory (turn counter, `task recap`, layered core + 8-topic `guide`).
 
-## 2.0.0-beta2 (`v2.0` branch)
+## 2.0.0-beta2
 
 - Added Gate in the privileged service process: holds the public loopback port and forwards raw TCP bytes to the app's internal port; wakes a frozen or force-stopped app within 3 s or returns `503 NOT_READY`, and cancels held agent fingers when heartbeats go stale.
 
-## 2.0.0-beta1 (`v2.0` branch)
+## 2.0.0-beta1
 
 - Added the evaluation harness (`:torture` 13 deterministic scenes and `tools/eval/` task runner) and reply cost metering (`meter` in JSON replies and step logs for characters, estimated tokens and image tokens), leaving text replies unchanged.
 

@@ -1,32 +1,78 @@
-# 更早版本的更新内容
+# 版本更新记录
 
-当前测试版的更新内容见 [1.4.2-beta3（versionCode 54）](../README.zh-CN.md#142-beta3-更新内容)。之后 `main` 上的改动列在最前面。
+当前 `main` 分支最新版本的更新摘要见 [README.zh-CN.md](../README.zh-CN.md#更新内容)。以下按时间倒序列出完整版本历史。
 
-## 2.0.0-beta8（`v2.0` 分支）
+## 2.0.1-beta1（versionCode 75）
+
+- **过长的列表自动折叠**：接入页的 agent、设置里的令牌、agent 页的临时许可和预约、盯守超过前几项时自动折叠，接入页按最近使用排序。
+- **关于项目和快捷反馈**：设置新增“关于项目”直达仓库；诊断页支持一键去 GitHub 提 issue，自动脱敏 IP、域名、邮箱和令牌样式字符串，完整版复制到剪贴板。
+
+## 2.0.0（versionCode 74）
+
+- **任务中保持亮屏**：设置新增“任务中保持亮屏”（默认关），仅在 agent 任务进行期间保持屏幕不自动熄灭，任务结束立即释放；电源键熄屏照常生效。
+- **更多手机能熄屏运行**：建副屏时系统拒绝“锁屏时也可用”选项不再连带丢弃“副屏单独供电”；诊断与状态会列出被系统拒绝的副屏选项与原因。
+
+## 2.0.0-beta16（versionCode 73）
+
+- 优化 `type` 后 `until text:` 超时诊断；精简 MCP `tools/list` 并隐藏旧写法（`zoom`/`frames`）；短回复/差异回复的 `structuredContent` 只保留展示元素并统计 structured 体积；`launch` 仅列最近 5 个段名；吸收列表行内 OCR 图标误读噪声、`look --last` 复用明显变化过滤、`spots` 过滤无障碍文字并按屏比例定界、紧缩 `task recap`、修复英文模式全角标点，以及两档 OCR 软降温节流。
+
+## 2.0.0-beta15（versionCode 72）
+
+- 待处理倒计时每秒实时更新；服务选“关闭”并离开 App 后真正退出进程；明确支付、临时免确认及公网永不开放系统操作的权限说明；改进 `key esc` 回退、输入未确认提示与 `swipe`/`drag` 末尾时长写法。
+
+## 2.0.0-beta14（versionCode 71）
+
+- 完整保留 agent 自报名称（不再截断到 16 字）；Cloudflare Tunnel 第 4 步补充三张标注截图（路由标签、已发布的应用程序、表单字段）。
+
+## 2.0.0-beta13（versionCode 70）
+
+- 公网通道开通步骤直接内嵌在页面上并配直达后台按钮和官方文档链接；Agent 等用户处理时屏幕顶部弹出紫色提示条，回复带 `next=user_on_phone` 与【等用户】块；重写云端 agent 接入说明，清晰分流网页连接器、自改 MCP 配置与 RFC 8628 设备码配对。
+
+## 2.0.0-beta12（versionCode 69）
+
+- Cloudflare 与 ngrok 步骤内直接粘贴保存令牌与域名；关闭服务彻底停止公网、远程、定时和副屏服务；新增过热保护；改进系统导航返回键、OCR 稳定性和 `repeat N:` 等步骤写法。
+
+## 2.0.0-beta11（versionCode 68）
+
+- 新增 `elevate` / `permissions` 提权申请（指纹确认，可选本轮/今天/永久）；公网 MCP 新增 Cloudflare Tunnel 和 ngrok 通道（带连接状态与公网自检）；新增 RFC 8628 无浏览器设备码配对；agent 回复默认改用英文（设置 › 通用 可切换）；坐标点击也检查付款按钮、长操作中途检查高频、公网有效权限取配对与当前设置较小值。
+
+## 2.0.0-beta10（versionCode 67）
+
+- 设置按 接入、权限、副屏、识别与录制、通用、更新、记录与诊断 重新分组；统一六类权限用语（应用操作、敏感操作、不可撤销操作、支付、系统操作、高频操作）。
+
+## 2.0.0-beta9（versionCode 66）
+
+- 引入每 agent 一张六行权限表（`Policy`：只看 / 稳妥 / 省心 / 全权 / 自定义），放宽需指纹确认、收紧立刻生效；除放宽权限与支付外确认更轻（支持本轮/今天范围）；授权码有效期延至 10 分钟，诊断带来源地址。
+
+## 2.0.0-beta8（versionCode 65）
 
 - 修复内置 Tailscale（`GOOS=android`）在 Android 上缺少 LocalAPI `cert/` 路由导致 Funnel HTTPS 握手 404 的问题，开启以真实拿到证书为准（中间态 `cert`）；公网开启改为 5 项前提清单（`funnel-check`、一键跳转/复制 `nodeAttrs`、回 App 自动重查、版本化一次同意）；公网限额按真实客户端来源（`ipn.FunnelConn.Src` → `X-AVS-Public-Src`，IPv4 `/32`、IPv6 `/64`）分桶并合并配对通知；强确认一次列出全部未批维度，新增「标准（默认）/ 严格」安全级别与接入时选权限一次授权、详情页可改权限；`--hold` 改为先冻结并核实 `cgroup.events`/`wchan` 后再回复、事前拒绝系统/常驻/输入法/系统媒体进程、按应用熔断；`until text:` 超时区分未出现、动作前已存在与 OCR 忙（`NOT_READ`）；系统 Toast 事件直入 `Loud.TOAST` 并移除 OCR 猜 toast；`seek` 改为闭环数值/自适应搜索并增加起点预检与读数超时上限；ONNX Runtime 统一为全局共享非自旋线程池并常驻 50 条推理诊断与 3 次检测模型验证哨兵；接入页三种连接方式平级并修复悬浮窗挖孔屏横屏几何、全屏无任务动画返回与小窗设置开关；新增升级后可点跳转的更新日志弹窗（与 `AgentNews` 共用数据源）；补齐 `guide <主题>`、移除旧写法提示并排除页标题中的图标按钮。
 
-## 2.0.0-beta7（`v2.0` 分支）
+## 2.0.0-beta7（versionCode 64）
 
-- 新增公网 MCP 接入（仅官方 Tailscale Funnel，Headscale 直接提示不支持）：独立本地监听 `PublicServer`（`127.0.0.1:18785`，`X-AVS-Public` 隔离，仅暴露 `/mcp` 与 OAuth 2.1 路径）、RFC 9728/8414/7591/8707 发现与动态注册、PKCE S256 + 8 位配对码手机生物识别强确认（默认 `look`、永不开放 `system`、禁用长按）、1 小时访问令牌与 30 天轮换刷新令牌（重用全撤销）、风险警告页、常驻关闭通知、24 小时无请求自动关闭与版本变更自动重置；核心 `guide` 增加屏幕文字防注入提示。
+- 新增公网 MCP 接入（仅官方 Tailscale Funnel，Headscale 直接提示不支持）：独立本地监听 `PublicServer`（`127.0.0.1:18785`，`X-AVS-Public` 隔离，仅暴露 `/mcp` 与 OAuth 2.1 路径）、RFC 9728/8414/7591/8707 发现与动态注册、PKCE S256 + 8 位配对码手机生物识别强确认（永不开放 `system`、禁用长按）、1 小时访问令牌与 30 天轮换刷新令牌（重用全撤销）、风险警告页、常驻关闭通知、24 小时无请求自动关闭与版本变更自动重置；核心 `guide` 增加屏幕文字防注入提示。
 
-## 2.0.0-beta5（`v2.0` 分支）
+## 2.0.0-beta6（versionCode 63）
+
+- 新增独立强确认页 `StrongConfirm` / `StrongConfirmActivity`，启用 `FLAG_SECURE`、`filterTouchesWhenObscured` 与防遮挡/防无障碍点击加固，移除通知栏“允许”按钮改由页内生物识别/PIN 验证；引入多维风险评估 `Risk`（`NEW_CLIENT`、`SCOPE_OPERATE`、`SCOPE_SYSTEM`、`HIGH_RISK`、`RATE`）并配套 `confirm_attack.py` 模拟器对抗测试。
+
+## 2.0.0-beta5
 
 - 新增 `act --hold` 与 `note hold on|off`（Android 14+，回复发出后由守门人暂停副屏前台应用，下条命令前、超时、接管或 App 退出时自动恢复）、单次 `act` 内生效的短程规则 `act --on "<条件> => <一步>[ x1..x3]"`（复用 `Probe` 与持续性去抖，规则触发窗口计入已认领变化），以及回复首行间隔时间提示（`距上次回复 X.Xs`）和连续 3 次 `BEFORE` 提示。
 
-## 2.0.0-beta4（`v2.0` 分支）
+## 2.0.0-beta4
 
 - 新增闭环手势（`press … hold until`、`drag … hold until`、`drag … seek until`），按住期间暂停后台整屏 OCR 并通过 `Probe` 做局部裁图识别（`readCrop`）；所有 `drag` 生成手势记录 `GestureRecord`（拿起/跟手/松手后 `stayed`/`snapped_back`/`elsewhere`/`unknown`），弹回触发 `SNAP_BACK` 完整回复，完整回复附 4 格拖动拼图条。
 
-## 2.0.0-beta3（`v2.0` 分支）
+## 2.0.0-beta3
 
 - 新增回复协议 v3 与外置记忆：符合预期的 `act` 返回短回复并不发图，支持 `act --full`、`note reply quiet|full` 与补看自动升级；引入页面卡 `PageBook` 替代旧 60% 差异逻辑、960/360/640 变化区域出图、事件化【这段时间】（含 toast 与弹出识别）、1200 token 回复预算、会话轮次、`task recap` 及核心+8 主题分层 `guide`。
 
-## 2.0.0-beta2（`v2.0` 分支）
+## 2.0.0-beta2
 
 - 新增守门人（`Gate`）：特权服务进程持有公开本机端口并字节转发到应用内部端口；App 被系统冻结或强停后，3 秒内自动解冻/拉起或返回明确 `503 NOT_READY`，心跳过期时自动取消未松开的 agent 手指。
 
-## 2.0.0-beta1（`v2.0` 分支）
+## 2.0.0-beta1
 
 - 新增评测场（`:torture` 13 个可复现测试场景与 `tools/eval/` 任务评测脚本）与回复计量（JSON `meter` 字段及任务步骤日志字数/估算 token/图片 token 统计），文字回复不变。
 

@@ -34,7 +34,9 @@ Agent-VScreen 在一块看不见的虚拟屏上打开和操作别的应用，你
 <p align="center"><sub>agent 工作时的 App 界面一览。<a href="docs/promo/tour.mp4?raw=true">下载 MP4</a></sub></p>
 <p align="center"><sub>三段 MP4 都带配乐，另有一段 34 秒的<a href="docs/promo/mix.mp4?raw=true">混剪版</a>。配乐：“Wallpaper”，Kevin MacLeod（incompetech.com），<a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>。</sub></p>
 
-- `main` 分支版本：1.4.2-beta3（versionCode 54） · [测试版 APK](https://github.com/kilolonion/agent-vscreen/releases/tag/v1.4.2-beta3) · [最新正式版 APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
+<!-- version:start -->
+- `main` 分支版本：2.0.1-beta1（versionCode 75） · [本版 APK](https://github.com/kilolonion/agent-vscreen/releases/tag/v2.0.1-beta1) · [最新正式版 APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
+<!-- version:end -->
 - 包名：`com.kilon.agentvscreen`
 - 系统：Android 11 及以上（arm64），推荐 Android 14 及以上
 - 特权：默认用 [Shizuku](https://shizuku.rikka.app/)，不需要 root；已 root 的手机也可以直接用 Root
@@ -123,7 +125,7 @@ apksigner verify --print-certs downloaded.apk
 
 18765 被别的应用（或分身里的同一个 App）占着时，服务会自动改用后面一个空闲端口，并在 App 里写明是谁占着；本机的 agent 会自己找到新端口，不用重新接入。
 
-### 云端：agent 在电脑、服务器或另一台手机上
+### 远程：其它设备经私有网络（Tailscale / SSH）
 
 选 **其它设备上**，先在 **远程连接** 里连好 Tailscale，复制出来的给 agent 的话、安装命令和 MCP 配置就会换成 Tailscale 地址。
 
@@ -131,21 +133,33 @@ apksigner verify --print-certs downloaded.apk
 - **Tailscale App**：手机上已经装了 Tailscale App、或要靠出口节点上网时用它。内置节点只负责让别的设备连进来，不接管手机自己的上网。
 - 也可以用 SSH 端口转发。
 
-令牌等于这台手机的操作权限：内置 Tailscale 在加密连接上接受令牌，其它远程连接默认要求给请求签名。本应用不提供公网链接。不要把令牌贴进公开的配置或截图。
+令牌等于这台手机的操作权限：内置 Tailscale 在加密连接上接受令牌，其它远程连接默认要求给请求签名。不要把令牌贴进公开的配置或截图。
+
+### 云端：公网 MCP（实验性，默认关闭）
+
+如果需要直接接入 claude.ai、ChatGPT 等无法加入私有 Tailscale 网络的云端 MCP 客户端，可在 **接入 › 云端（公网 MCP · 实验性）** 中手动开启。公网入口默认关闭，仅通过独立本地隔离端口（`127.0.0.1:18785`）暴露 `/mcp` 与 OAuth 2.1（PKCE S256 / RFC 8628 设备码）端点：
+
+- **三种通道**：**Tailscale Funnel**（`*.ts.net`，需官方 Tailscale 账号）、**Cloudflare Tunnel**（自有域名，支持 Headscale）或 **ngrok**（免费账号送一个固定域名）。
+- **用户主动输入配对码确认**：外部发起连接时手机**不会自动弹窗或发通知**；必须在手机上的 Agent-VScreen 里输入浏览器或 agent 给出的 8 位配对码，核对来源地址与客户端自报名称并经锁屏生物识别/PIN 确认后才颁布令牌。另提供可选的**严格配对窗口**（默认拒绝一切新客户端注册与配对，仅在手动开启的 3 分钟窗口内允许，批准后自动关闭）。
+- **权限与自动保护**：公网客户端**永不开放 `system` 权限**；配对确认页默认选中“省心”档位（支付、不可撤销等高风险操作仍需强确认），批准前可改为“只看”或“稳妥”；连续 **24 小时无已认证请求**自动关闭（未认证扫描不会延长计时），App 版本更新后自动恢复关闭。
+- **已知暴露面**：开启 Tailscale Funnel 后域名会出现在公开证书透明度（CT）日志中并可能被扫描；选择 Cloudflare Tunnel 或 ngrok 时，HTTPS 在其服务端解密后再转发至手机，开启前风险说明会逐项明示。
 
 ## 文档
 
-- [API.md](API.md)：命令行、MCP、HTTP 的完整说明，以及会话、盯守、权限和安全、远程连接、已知限制。
+- [API.md](API.md)：命令行、MCP、HTTP 的完整说明，以及会话、盯守、权限和安全、远程/公网连接、已知限制。
 - [docs/REFERENCE.md](docs/REFERENCE.md)：每条命令的参数和每个结果代码（由代码生成）。
 - [docs/TASKS.md](docs/TASKS.md)：发版前在真机上跑的固定任务集。
-- [docs/CHANGELOG.zh-CN.md](docs/CHANGELOG.zh-CN.md)：更早版本的更新内容。
+- [docs/RELEASE-PROCESS.md](docs/RELEASE-PROCESS.md)：版本沉淀期、发版前必查清单与 CI 签名隔离规范。
+- [docs/CHANGELOG.zh-CN.md](docs/CHANGELOG.zh-CN.md)：完整版本更新记录。
 
-## 1.4.2-beta3 更新内容
+## 更新内容
 
-- **可直接用 Root**：已 root 的手机可以不装 Shizuku。默认仍用 Shizuku，不需要 root。
-- **自己在副屏打开应用**：从首页打开，不必通过 agent。你使用副屏时，agent 会收到 `BUSY`；首页会显示你离开时的画面。
-- **更新渠道**：在设置里选择 **正式版** 或 **测试版（含正式版）**，更新说明支持 Markdown。
-- **更少卡死**：后台线程出错不会让整个进程退出，副屏服务和文字识别有超时，应用列表会缓存。
+<!-- whatsnew:start -->
+### 2.0.1-beta1 更新内容
+
+- **过长的列表自动折叠**：接入页的 agent、设置里的令牌、agent 页的临时许可和预约、盯守，太长时只显示前几项，点“还有 N 个”展开。接入页按最近使用排在前面。
+- **关于项目和快捷反馈**：设置里新增“关于项目”，直达 GitHub 仓库。诊断页可以一键去 GitHub 提问题：诊断信息会先去掉 IP、域名、邮箱和令牌样的字符串，再填进 issue，完整版复制到剪贴板。
+<!-- whatsnew:end -->
 
 ## 从源码编译
 
@@ -156,9 +170,16 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 ./gradlew :app:assembleRelease
 ```
 
-内置 Tailscale 是一个用 Go 写的小程序（`tsbridge/`）。编 APK 之前先运行一次 `tsbridge/build.sh`，生成 `app/src/main/jniLibs/arm64-v8a/libtsbridge.so`；不运行也能编，只是没有内置 Tailscale。
+内置 Tailscale / ngrok 节点（`tsbridge/`）和 Cloudflare Tunnel 客户端（`cloudflared/`）均为 Go 二进制，打包前可运行：
 
-正式签名可选：把 `keystore.properties.example` 复制成 `keystore.properties` 并填好，不填就用 debug 密钥签名。
+```bash
+./tsbridge/build.sh
+./cloudflared/build.sh   # 自动校验 cloudflared/COMMIT 固定提交哈希
+```
+
+分别生成 `app/src/main/jniLibs/arm64-v8a/libtsbridge.so` 与 `libcloudflared.so`；不运行也能编 APK，只是没有内置对应通道。
+
+正式签名可选：把 `keystore.properties.example` 复制成 `keystore.properties` 并填好，不填就用 debug 密钥签名（CI 标签构建使用 `-PavsUnsignedRelease=true` 产出未签名 APK，并在隔离的 `release` 环境中签名，详见 [docs/RELEASE-PROCESS.md](docs/RELEASE-PROCESS.md)）。
 
 ## 许可
 

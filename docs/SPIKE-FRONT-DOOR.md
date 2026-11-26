@@ -1,6 +1,6 @@
 # 验证方案：把入口放进 Shizuku 用户服务
 
-这是一份还没有做的验证方案。1.2.0 没有改这一部分，入口仍在 App 进程里。
+> **状态更新（已落地）**：本方案中“将公开本机端口托管在特权服务进程并负责唤醒 App”的部分已于 **2.0.0-beta2** 作为**守门人（`Gate`）**落地，实现位于 [`app/src/main/java/com/kilon/agentvscreen/core/Gate.kt`](../app/src/main/java/com/kilon/agentvscreen/core/Gate.kt)。特权服务（Shizuku 或 Root）现持有公开本机端口并将原始 TCP 字节转发到 App 内部端口，在 App 被系统冻结或强停后 3 秒内自动解冻/拉起或返回明确 `503 NOT_READY`，并在心跳过期时取消未松开的触摸。以下正文保留为 1.2.0 时期的原始设计记录。
 
 ## 要解决的问题
 
