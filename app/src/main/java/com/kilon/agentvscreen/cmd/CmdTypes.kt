@@ -118,12 +118,15 @@ class StepOut(val n: String, val step: String, var status: String, var text: Str
     var pollMsMax: Long? = null
     /** 2.0.0-beta5 (5.7 #2): color condition hit frame age in ms (`ColorWatch.lastImgAgeMs`). */
     var imgAgeMs: Long? = null
+    /** 2.0.0-beta16 (Item 8): concise label for `task recap` on control-flow containers; empty string omits duplicate closing entries. */
+    var recapLabel: String? = null
     fun json(): org.json.JSONObject = org.json.JSONObject().put("n", n).put("step", step).put("status", status)
         .also { o ->
             fact?.let { o.put("fact", it) }; code?.let { o.put("code", it) }
             waitedFor?.let { o.put("waited_for", it).put("met", waitMet == true).put("waited_ms", waitMs ?: 0) }
             point?.let { o.put("x", it.first).put("y", it.second) }
             changed?.let { o.put("changed", it) }
+            recapLabel?.let { o.put("recap", it) }
             val g = gesture?.json() ?: if (pollMsP50 != null || pollMsMax != null || imgAgeMs != null) {
                 org.json.JSONObject().also { go ->
                     pollMsP50?.let { go.put("poll_ms_p50", it) }

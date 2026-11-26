@@ -1,6 +1,8 @@
 package com.kilon.agentvscreen.core
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CaptureThrottleTest {
@@ -16,10 +18,13 @@ class CaptureThrottleTest {
     @Test fun explicitRefreshBypassesTheLimitOnceAndCoalesces() {
         val c = CaptureThrottle()
         c.onConvert(100)
+        assertFalse(c.isUrgent())
         c.request()
         c.request()
+        assertTrue(c.isUrgent())
         assertEquals(0L, c.delayMs(110, 120))
         c.onConvert(110)
+        assertFalse(c.isUrgent())
         assertEquals(119L, c.delayMs(111, 120))
         assertEquals(0L, c.delayMs(230, 120))
     }

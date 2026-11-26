@@ -132,7 +132,25 @@ object TaskLog {
 
     internal fun resetOpenForTest() = synchronized(this) { open.clear() }
 
-    private fun extractRecap(argv: List<String>, code: String, exit: Int, res: com.kilon.agentvscreen.cmd.NativeOffloadResult?): RecapStep? {
+    /** 2.0.0-beta16 (Item 8): strip control-flow `{ ... }` bodies when no explicit recap label is provided. */
+    internal fun compactStepForRecap(raw: String): String {
+        val t = raw.trim()
+        val brace = t.indexOf('{')
+        if (brace > 0) {
+            val head = t.substring(0, brace).trim()
+            if (head.startsWith("if ", ignoreCase = true) ||
+                head.equals("try", ignoreCase = true) ||
+                head.startsWith("repeat", ignoreCase = true)
+            ) {
+                val tail = t.substringAfterLast('}', "").trim()
+                val untilTail = if (tail.startsWith("until ", ignoreCase = true)) " $tail" else ""
+                return (head + untilTail).trim()
+            }
+        }
+        return t.substringBefore(" until ").trim()
+    }
+
+    internal fun extractRecap(argv: List<String>, code: String, exit: Int, res: com.kilon.agentvscreen.cmd.NativeOffloadResult?): RecapStep? {
         val sub = argv.firstOrNull() ?: return null
         if (sub !in setOf("launch", "act", "handoff")) return null
         val data = res?.data
@@ -146,9 +164,15 @@ object TaskLog {
                 val s = arr.optJSONObject(i) ?: continue
                 val status = s.optString("status")
                 if (status == "skipped" || status == "tried") continue
-                val raw = s.optString("step").trim()
-                if (raw.isEmpty()) continue
-                val clean = raw.substringBefore(" until ").trim()
+                val clean = if (s.has("recap") && !s.isNull("recap")) {
+                    val r = s.optString("recap").trim()
+                    if (r.isEmpty()) continue
+                    r
+                } else {
+                    val raw = s.optString("step").trim()
+                    if (raw.isEmpty()) continue
+                    compactStepForRecap(raw)
+                }
                 val fail = when {
                     status != "done" -> s.optString("code").takeIf { it.isNotBlank() && it != "null" } ?: status.uppercase()
                     s.has("changed") && !s.optBoolean("changed", true) -> "NO_CHANGE"

@@ -38,6 +38,22 @@ object Changes {
     /** Releases ordered newest first. Add a new [Release] entry whenever versionCode bumps. */
     val releases: List<Release> = listOf(
         Release(
+            versionCode = 73,
+            versionName = "2.0.0-beta16",
+            items = listOf(
+                Item(Kind.IMPROVED, Audience.AGENT, "输入后等待文字、MCP 工具表与短回复更精简准确",
+                    "type 后写 until text:同内容超时时会明确说明输入已成功且条件写错；MCP tools/list 去掉重复描述并隐藏旧写法（zoom/frames）；短回复和差异回复的 structuredContent 只带展示出的元素，meter 增加 structured 体积统计；launch 只列最近用过的 5 个段名。",
+                    "Cleaner replies, MCP tool list and type-wait diagnostics",
+                    "until text: matching only the box just typed into now states that typing succeeded and why the wait missed; MCP tools/list removes duplicated descriptions and hides old forms (zoom/frames); short and diff replies carry only shown elements in structuredContent with structured size in meter; launch lists only the 5 most recently used segment names.",
+                    null),
+                Item(Kind.IMPROVED, Audience.AGENT, "元素融合、录像回看、色块与路径回顾修复",
+                    "列表行左侧图标被 OCR 误读成 1–2 个字符时归并到行内，不再污染元素表和 collect；look --last 复用与【这段时间】相同的明显变化阈值，静止页不再被闪烁光标填满；spots 过滤无障碍文字并按屏幕比例设定大小范围；task recap 对控制流容器使用简短标记且不切在括号中间；修正英文模式标点与跨 agent 共享说明。",
+                    "Cleaner element fusion, replay dedup, spots, recap and English text",
+                    "1–2 char OCR icon noise inside clickable list rows is absorbed so it no longer pollutes [Now] or collect; look --last shares [Meanwhile]'s clear-change filter so blinking cursors no longer fill still stretches; spots skips accessibility text and scales size bounds to the screen; task recap records compact control-flow markers without cutting inside brackets; English outputs remove stray fullwidth punctuation and clarify shared notes/segments.",
+                    null),
+            ),
+        ),
+        Release(
             versionCode = 72,
             versionName = "2.0.0-beta15",
             items = listOf(

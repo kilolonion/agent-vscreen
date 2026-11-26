@@ -32,6 +32,8 @@ object Meter {
         val estTokens: Int,
         val images: List<IntArray>,
         val imageTokens: Int,
+        val structuredChars: Int? = null,
+        val structuredEstTokens: Int? = null,
     ) {
         fun imagesJson(): JSONArray = JSONArray(images.map { JSONArray().put(it[0]).put(it[1]) })
         fun json(): JSONObject = JSONObject()
@@ -39,12 +41,16 @@ object Meter {
             .put("est_tokens", estTokens)
             .put("images", imagesJson())
             .put("image_tokens", imageTokens)
+            .also { o ->
+                structuredChars?.let { o.put("structured_chars", it) }
+                structuredEstTokens?.let { o.put("structured_est_tokens", it) }
+            }
     }
 
     fun isCjk(cp: Int): Boolean =
         (cp in CJK_LOW_START..CJK_LOW_END) || (cp in CJK_FULL_START..CJK_FULL_END)
 
-    fun of(text: String, images: List<IntArray>): Cost {
+    fun of(text: String, images: List<IntArray>, structured: String? = null): Cost {
         var cjk = 0
         var other = 0
         var i = 0
@@ -64,11 +70,14 @@ object Meter {
                 imgTokens += ((w.toLong() * h.toLong() + PIXELS_PER_IMAGE_TOKEN - 1L) / PIXELS_PER_IMAGE_TOKEN).toInt()
             }
         }
+        val sc = structured?.let { of(it, emptyList()) }
         return Cost(
             chars = text.length,
             estTokens = cjk + otherTokens,
             images = cleanImages,
             imageTokens = imgTokens,
+            structuredChars = sc?.chars,
+            structuredEstTokens = sc?.estTokens,
         )
     }
 

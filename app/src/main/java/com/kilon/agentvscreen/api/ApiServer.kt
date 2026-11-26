@@ -559,7 +559,7 @@ class ApiServer(private val ctx: Context) {
             "/v2/codes" -> return langOf(r) { Resp.json(JSONObject().put("codes", JSONArray(com.kilon.agentvscreen.cmd.Codes.all.map { JSONObject().put("code", it.name).put("next", it.next.key).put("text", it.text) }))) }
             "/cli" -> { if (r.q("via") == "install") AgentLedger.installed(r.q("id")?.takeIf { id -> Tokens.list.value.any { it.id == id } } ?: Tokens.MAIN); return Resp.text(cliScript()) }
             "/skill" -> return langOf(r) { Resp.text(AgentGuide.skill()) }
-            "/memory" -> return langOf(r) { Resp.text(AgentGuide.memoryFor(when (r.q("via")) { "mcp" -> Abilities.Via.MCP; "http" -> Abilities.Via.HTTP; else -> Abilities.Via.CLI }) + "\n") }
+            "/memory" -> return langOf(r) { Resp.text(AgentGuide.memoryFor(when (r.q("via")) { "mcp" -> Abilities.Via.MCP; "http" -> Abilities.Via.HTTP; else -> Abilities.Via.CLI }, if (r.remote) null else ApiConfig.baseUrl) + "\n") }
         }
         // 2.0.0-beta7 (7.8 #3): /mcp method check (GET/DELETE -> 405 + Allow: POST) runs BEFORE auth, shared with PublicServer.
         Mcp.preAuthCheck(r)?.let { return it }
@@ -707,7 +707,8 @@ class ApiServer(private val ctx: Context) {
         try {
             val res0 = handler.handle(NativeOffloadRequest(listOf("vscreen") + argv, session))
             // 1.3 beta4: the agent's note is for an older version: what changed, and how to refresh it (AgentNews).
-            val notice = AgentNews.notice(com.kilon.agentvscreen.cmd.Call.current()?.tokenId ?: "main", fresh, com.kilon.agentvscreen.cmd.Call.current()?.via ?: Abilities.Via.CLI)
+            val cur = com.kilon.agentvscreen.cmd.Call.current()
+            val notice = AgentNews.notice(cur?.tokenId ?: "main", fresh, cur?.via ?: Abilities.Via.CLI, cur == null || cur.source == com.kilon.agentvscreen.cmd.Call.Source.LOCAL)
             // 2.0.0-beta11: the agent's permissions changed since its last reply (host/Permissions).
             val permNote = com.kilon.agentvscreen.host.Permissions.changeNotice(com.kilon.agentvscreen.cmd.Call.current())
             val res1 = if (permNote != null) res0.copy(output = permNote + "\n" + res0.output) else res0
@@ -849,7 +850,11 @@ class ApiServer(private val ctx: Context) {
         val cli = r.headers["x-vscreen-client"] == "cli"
         val shots = if (!v2) all else ImagePolicy.pick(res, all)
         val text = ShotStore.IN_TEXT.replace(res.output) { m -> val n = m.groupValues[1]; if (n in shots) shotUrl(n, r, v2) else ImagePolicy.leftOut() }
-        val meter = com.kilon.agentvscreen.core.Meter.of(text, com.kilon.agentvscreen.core.Meter.sentDimensions(ctx, res, shots, fullSize = cli || !v2))
+        val meter = com.kilon.agentvscreen.core.Meter.of(
+            text,
+            com.kilon.agentvscreen.core.Meter.sentDimensions(ctx, res, shots, fullSize = cli || !v2),
+            structured = if (v2) res.data?.toString() else null,
+        )
         val exit = if (!v2 && res.softFail) 0 else res.exitCode
         val code = if (!v2 && res.softFail) "OK" else res.codeOrDefault
         val o = JSONObject()

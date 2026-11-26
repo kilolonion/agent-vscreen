@@ -23,6 +23,7 @@ internal class CaptureThrottle {
     private var lastStartMs: Long? = null // pump thread only
 
     fun request() { urgent.set(true) }
+    fun isUrgent(): Boolean = urgent.get()
 
     fun delayMs(now: Long, intervalMs: Long): Long = when {
         urgent.get() -> 0L
@@ -359,7 +360,9 @@ class VScreenDisplay private constructor(
             // Always acquire, and never hold more than one image (the pending one):
             // the queue must never fill up.
             val img = runCatching { r.acquireLatestImage() }.getOrNull() ?: return@setOnImageAvailableListener
-            if (com.kilon.agentvscreen.host.ThermalGuard.limited || (VScreenAwake.screenOff && !BackgroundOperation.needsAwake())) {
+            val dropForHeat = com.kilon.agentvscreen.host.ThermalGuard.ocrPaused ||
+                (com.kilon.agentvscreen.host.ThermalGuard.limited && !throttle.isUrgent() && latestRaw != null)
+            if (dropForHeat || (VScreenAwake.screenOff && !BackgroundOperation.needsAwake())) {
                 img.close(); return@setOnImageAvailableListener
             }
             val now = SystemClock.elapsedRealtime()

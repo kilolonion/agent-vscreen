@@ -489,7 +489,7 @@ fun NewAgentPage() {
                         }
                         BasicComponent(title = tr("能力说明", "Ability note"), summary = tr("可粘贴到 agent 的自定义指令或记忆中", "Paste into the agent's custom instructions or memory"),
                             endActions = {
-                                IconButton(onClick = { host.copy(tr("能力说明", "Ability note"), when (how) { 1 -> AgentGuide.memoryMcp(); 2 -> AgentGuide.memoryHttp(base); else -> AgentGuide.memory(base) }) }, enabled = canCopyLocal) {
+                                IconButton(onClick = { host.copy(tr("能力说明", "Ability note"), when (how) { 1 -> AgentGuide.memoryMcp(base); 2 -> AgentGuide.memoryHttp(base); else -> AgentGuide.memory(base) }) }, enabled = canCopyLocal) {
                                     Icon(MiuixIcons.Copy, tr("复制", "Copy"))
                                 }
                             })

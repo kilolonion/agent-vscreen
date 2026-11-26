@@ -53,7 +53,9 @@ internal data class El(val n: Int, val text: String, val box: Rect, val fromA11y
                        /** 2.0.0-beta8 (L.3): AccessibilityNodeInfo.isHeading, preferred for page titles. */
                        val heading: Boolean = false,
                        /** 2.0.0-beta8 (L.3): non-clickable text inside a Toolbar/ActionBar container, preferred for page titles. */
-                       val toolbarTitle: Boolean = false) {
+                       val toolbarTitle: Boolean = false,
+                       /** 2.0.0-beta16 (Item 5): bounds of plain child accessibility text nodes absorbed into this container. */
+                       val textBoxes: List<Rect> = emptyList()) {
     val placeholder: Boolean get() = kind != ElKind.TEXT
     /** Nothing can be done with it: plain words. */
     val plain: Boolean get() = !clickable && !editable && !scrollable && checked == null && !password
@@ -168,7 +170,7 @@ internal object Report {
     const val MAX_GONE = 10
     const val MAX_BETWEEN = 5
     const val MAX_PIC_SPANS = 3
-    const val MIN_SPAN_SHARE = 0.01
+    const val MIN_SPAN_SHARE = VScreenActivity.CLEAR_CHANGE_SHARE
     const val TOAST_BOTTOM_SHARE = 0.35
     const val TOAST_MAX_MS = 4_000L
     const val MAX_TOASTS = 5
@@ -224,11 +226,13 @@ internal fun a11yRaw(d: VScreenDisplay): List<El> {
         if (!inside || !(text != null || (actionable && !big) || n.isEditable)) return
         var words: Pair<ElKind, String>? = text?.let { tidy(it) }
         var absorbedInner = false
+        var absorbedBoxes: List<Rect> = emptyList()
         if (words == null && !n.isEditable && (n.isClickable || n.isCheckable)) {
             // Plain words drawn inside this tappable node (not inside a tappable child of it).
             val inner = (start until raw.size).filter { i -> raw[i].let { it.plain && !it.placeholder && b.contains(it.box.centerX(), it.box.centerY()) } }
             if (inner.isNotEmpty()) {
                 words = ElKind.TEXT to inner.map { raw[it].text }.distinct().joinToString(" · ").let { if (it.length > 60) it.take(58) + "…" else it }
+                absorbedBoxes = inner.map { Rect(raw[it].box) }
                 inner.asReversed().forEach { raw.removeAt(it) }
                 absorbedInner = true
             }
@@ -247,7 +251,8 @@ internal fun a11yRaw(d: VScreenDisplay): List<El> {
             search = n.isClickable && ((n.viewIdResourceName?.substringAfterLast('/') ?: "") + " " + (n.className ?: "")).contains("search", ignoreCase = true),
             iconButton = node.isIconButton && !absorbedInner,
             heading = node.heading,
-            toolbarTitle = inToolbar && !n.isClickable && node.hasText))
+            toolbarTitle = inToolbar && !n.isClickable && node.hasText,
+            textBoxes = absorbedBoxes))
     }
     com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId).roots.forEach { walk(it, false) }
     // Same element at (nearly) the same place: once.
@@ -277,7 +282,10 @@ internal fun saysWord(l: String, w: String): Boolean {
  * that lags behind the picture: a timer, a counter), the picture's text wins — the list says what is drawn.
  * Nothing is cut here; the printer decides how many lines to show.
  */
-internal fun mergeElements(d: VScreenDisplay, a11y: List<El>, ocr: List<VScreenOcr.Item>?, icons: List<Rect>? = null): List<El> {
+internal fun mergeElements(d: VScreenDisplay, a11y: List<El>, ocr: List<VScreenOcr.Item>?, icons: List<Rect>? = null): List<El> =
+    mergeElements(d.height, a11y, ocr, icons)
+
+internal fun mergeElements(screenHeight: Int, a11y: List<El>, ocr: List<VScreenOcr.Item>?, icons: List<Rect>? = null): List<El> {
     val items = ocr.orEmpty().filter { !VScreenOcr.isJunk(it) && !isJunkLabel(it.text.trim()) && it.text.isNotBlank() }
     val out = ArrayList<El>()
     val usedOcr = HashSet<VScreenOcr.Item>()
@@ -307,11 +315,59 @@ internal fun mergeElements(d: VScreenDisplay, a11y: List<El>, ocr: List<VScreenO
         if (w.clickable) tappable += one
         items.filter { it !in usedOcr && w.box.contains(it.box.centerX(), it.box.centerY()) && VScreenOcr.norm(it.text).length <= 1 }.forEach { usedOcr += it }
     }
+    // 2.0.0-beta16 (Item 5): icon glyphs (<= 2 normalized chars) misread by OCR inside a clickable accessibility row
+    // (single-label, title+summary, with right-side switch, etc.) belong to the row when they do not overlap any
+    // accessibility text box of that row and sit on a detected icon box or in the row's leading icon zone.
+    // Absorbing them into usedOcr keeps them out of both [Now] and collect (which consumes this fused list).
+    val iconList = icons.orEmpty()
+    fun onDetectedIcon(b: Rect): Boolean = iconList.any { ic ->
+        ic.contains(b.centerX(), b.centerY()) || run {
+            val inter = Rect(b)
+            inter.intersect(ic) && area(inter) * 2L >= area(b)
+        }
+    }
+    for (row in a11y) {
+        if (!row.fromA11y || !row.clickable || row.scrollable || row.editable ||
+            row.kind == ElKind.LINK || row.kind == ElKind.EMPTY_INPUT) continue
+        val childTextBoxes = a11y.filter { c ->
+            c !== row && c.kind == ElKind.TEXT && !c.editable && c.text.isNotBlank() &&
+                row.box.contains(c.box.centerX(), c.box.centerY()) && area(c.box) < area(row.box)
+        }.map { it.box }
+        val hasRowText = (row.kind == ElKind.TEXT && row.text.isNotBlank()) || childTextBoxes.isNotEmpty()
+        if (!hasRowText) continue
+        val rowTextBoxes = row.textBoxes + childTextBoxes
+        val rowNorm = VScreenOcr.norm(row.text)
+        val textLeft = rowTextBoxes.minOfOrNull { it.left }
+        val isHorizontalRow = row.box.width() >= row.box.height() * 3 / 2
+        val leadingRight = row.box.left + minOf(row.box.width() / 4, row.box.height() * 3 / 2)
+        for (it in items) {
+            if (it in usedOcr) continue
+            if (!row.box.contains(it.box.centerX(), it.box.centerY())) continue
+            if (rowTextBoxes.any { tb -> Rect.intersects(tb, it.box) }) continue
+            val nt = VScreenOcr.norm(it.text)
+            if (nt.length > 2) continue
+            // When the row has no distinct child text boxes (self-labelled node), avoid swallowing real text of
+            // short buttons/counters or digit updates on a digit-bearing widget.
+            if (rowTextBoxes.isEmpty()) {
+                if (rowNorm.length <= 2 || saysWord(rowNorm, nt)) continue
+                if (DIGIT.containsMatchIn(row.text) && DIGIT.containsMatchIn(it.text)) continue
+            }
+            val inDetected = onDetectedIcon(it.box)
+            val inLeadingIconZone = isHorizontalRow &&
+                it.box.centerX() <= leadingRight &&
+                it.box.width() <= row.box.height() &&
+                it.box.height() <= row.box.height() &&
+                (textLeft == null || it.box.centerX() < textLeft)
+            if (inDetected || inLeadingIconZone) {
+                usedOcr += it
+            }
+        }
+    }
     for (a0 in a11y) {
         if (a0 in dropped) continue
         val a = if (a0 in tappable && !a0.clickable) a0.copy(clickable = true) else a0
         if (!a.placeholder && DIGIT.containsMatchIn(a.text) && a.text.length <= 24) {
-            val drawn = items.filter { Rect(a.box).apply { inset(-8, -8) }.contains(it.box.centerX(), it.box.centerY()) && DIGIT.containsMatchIn(it.text) }
+            val drawn = items.filter { it !in usedOcr && Rect(a.box).apply { inset(-8, -8) }.contains(it.box.centerX(), it.box.centerY()) && DIGIT.containsMatchIn(it.text) }
             val drawnText = drawn.joinToString(" ") { it.text.trim() }
             if (drawn.isNotEmpty() && VScreenOcr.norm(drawnText) != VScreenOcr.norm(a.text) && !VScreenOcr.norm(drawnText).contains(VScreenOcr.norm(a.text))) {
                 usedOcr += drawn
@@ -326,7 +382,7 @@ internal fun mergeElements(d: VScreenDisplay, a11y: List<El>, ocr: List<VScreenO
             val inner = items.filter { it !in usedOcr && a.box.contains(it.box.centerX(), it.box.centerY()) }
             if (inner.isNotEmpty()) {
                 usedOcr += inner
-                val row = maxOf(16, d.height / 120)
+                val row = maxOf(16, screenHeight / 120)
                 val words = inner.sortedWith(compareBy({ it.box.centerY() / row }, { it.box.centerX() })).joinToString(" · ") { it.text.replace('\n', ' ').trim() }
                 val w = tidy(words)
                 out += a.copy(text = if (w.first == ElKind.TEXT) w.second else "", kind = w.first, hint = if (w.first == ElKind.LINK) w.second else null)
@@ -359,7 +415,7 @@ internal fun mergeElements(d: VScreenDisplay, a11y: List<El>, ocr: List<VScreenO
         if (!said) { val w = tidy(t); out += El(0, if (w.first == ElKind.TEXT) w.second else "", Rect(it.box), false, kind = w.first, hint = if (w.first == ElKind.LINK) w.second else null) }
     }
     out += detectedOnly(out, icons.orEmpty())
-    val row = maxOf(16, d.height / 120)
+    val row = maxOf(16, screenHeight / 120)
     return out.sortedWith(compareBy({ it.box.centerY() / row }, { it.box.centerX() })).mapIndexed { i, r -> r.copy(n = i + 1) }
 }
 
@@ -1099,18 +1155,32 @@ internal fun quietEscapeLine(): String = tr(
     "Full reply: act --full; picture: look; replay: look --last",
 )
 
+/** 2.0.0-beta16 (Item 3): short reply text together with the exact current elements shown in it. */
+internal data class ShortReply(val text: String, val shown: List<El>)
+
 /**
- * 2.0.0-beta3 (3.3 & 3.11), pure: format the short reply for a quiet `act` (when `loudReasons` is empty).
- * Exact format:
- *   ✓ 第 7 轮 · P5 蓝牙 · 3 步都符合预期 · 1.8s
- *   1 tap 蓝牙 → text:已配对的设备 ✓ 0.6s
- *   ...
- *   现在 P5：和第 6 轮相比 +1 −0，其余 22 个不变
- *   + #24 耳机 Pro [120,880,960,960]
- *   [non-blocking 【注意】 lines if any]
- *   要完整内容：act --full；要看图：look；要回看这段：look --last
+ * 2.0.0-beta16 (Item 3), pure: populate `screen.elements`, `elements_total`, and `elements_omitted`
+ * respecting the reply's visibility decision: short/diff replies carry only [shown] elements; `--full` /
+ * `launch` / `handoff` / brand-new pages carry all elements (up to [Report.MAX_JSON_ELEMENTS]).
  */
-internal fun formatShortReply(
+internal fun putScreenElements(
+    screen: org.json.JSONObject,
+    all: List<El>,
+    shown: Collection<El>,
+    fullElements: Boolean,
+): org.json.JSONObject {
+    val list = (if (fullElements) all else shown.toList()).take(Report.MAX_JSON_ELEMENTS)
+    return screen
+        .put("elements", org.json.JSONArray(list.map { it.json() }))
+        .put("elements_total", all.size)
+        .put("elements_omitted", (all.size - list.size).coerceAtLeast(0))
+}
+
+/**
+ * 2.0.0-beta3 (3.3 & 3.11) + 2.0.0-beta16 (Item 3), pure: format the short reply for a quiet `act`
+ * (when `loudReasons` is empty) and return both the rendered text and the exact current [El]s shown.
+ */
+internal fun formatShortReplyWithShown(
     turn: Int,
     card: PageBook.Card,
     steps: List<StepOut>,
@@ -1120,7 +1190,7 @@ internal fun formatShortReply(
     sinceLastMs: Long? = null,
     rulesFired: List<RuleFired> = emptyList(),
     nowMs: Long = System.currentTimeMillis(),
-): String {
+): ShortReply {
     val sb = StringBuilder()
     val execRaw = steps.filter { it.status != "skipped" }
     // Drop container-open wrapper entries when a matching completion entry with waitedFor exists for the same label.
@@ -1173,23 +1243,25 @@ internal fun formatShortReply(
         ).append('\n')
     }
 
-    val diffLines = ArrayList<String>()
+    val diffEntries = ArrayList<Pair<String, El?>>()
     for (e in diff.added) {
         val lbl = e.label.let { if (it.length > Report.MAX_ELEMENT_TEXT) it.take(Report.MAX_ELEMENT_TEXT) + "…" else it }
-        diffLines += "+ #${e.n} $lbl [${Report.box(e.box)}]"
+        diffEntries += ("+ #${e.n} $lbl [${Report.box(e.box)}]") to e
     }
     for (e in diff.removed) {
         val lbl = e.label.let { if (it.length > Report.MAX_ELEMENT_TEXT) it.take(Report.MAX_ELEMENT_TEXT) + "…" else it }
-        diffLines += "- #${e.n} $lbl [${Report.box(e.box)}]"
+        diffEntries += ("- #${e.n} $lbl [${Report.box(e.box)}]") to null
     }
     for ((old, now) in diff.modified) {
         val oLbl = old.label.take(20)
         val nLbl = now.label.let { if (it.length > Report.MAX_ELEMENT_TEXT) it.take(Report.MAX_ELEMENT_TEXT) + "…" else it }
-        diffLines += "~ #${now.n} $oLbl → $nLbl [${Report.box(now.box)}]"
+        diffEntries += ("~ #${now.n} $oLbl → $nLbl [${Report.box(now.box)}]") to now
     }
-    diffLines.take(Report.MAX_QUIET_DIFF).forEach { sb.append(it).append('\n') }
-    if (diffLines.size > Report.MAX_QUIET_DIFF) {
-        val extra = diffLines.size - Report.MAX_QUIET_DIFF
+    val keptEntries = diffEntries.take(Report.MAX_QUIET_DIFF)
+    keptEntries.forEach { sb.append(it.first).append('\n') }
+    val shown = keptEntries.mapNotNull { it.second }
+    if (diffEntries.size > Report.MAX_QUIET_DIFF) {
+        val extra = diffEntries.size - Report.MAX_QUIET_DIFF
         sb.append(tr("另有 $extra 处变化，act 不带步骤可看全部", "$extra more changes; act with no steps lists all")).append('\n')
     }
 
@@ -1198,8 +1270,20 @@ internal fun formatShortReply(
         notes.list.forEach { sb.append("- ").append(it.line()).append('\n') }
     }
     sb.append(quietEscapeLine()).append('\n')
-    return sb.toString()
+    return ShortReply(sb.toString(), shown)
 }
+
+internal fun formatShortReply(
+    turn: Int,
+    card: PageBook.Card,
+    steps: List<StepOut>,
+    totalMs: Long,
+    els: List<El>,
+    notes: Notes = Notes(),
+    sinceLastMs: Long? = null,
+    rulesFired: List<RuleFired> = emptyList(),
+    nowMs: Long = System.currentTimeMillis(),
+): String = formatShortReplyWithShown(turn, card, steps, totalMs, els, notes, sinceLastMs, rulesFired, nowMs).text
 
 /** 2.0.0-beta3 (3.7): structured sections of a full reply for deterministic budget trimming. */
 internal data class FullReplyParts(
@@ -1492,24 +1576,27 @@ internal fun VScreenOffloadHandler.fourBlocks(
     // ── Quiet short reply path (act only, loudReasons empty) ──
     if (actLoud != null && reasons.isEmpty()) {
         val total = System.currentTimeMillis() - received
-        val baseShort = formatShortReply(
+        val shortReply = formatShortReplyWithShown(
             turn, card, steps, total, els, notes,
             sinceLastMs = sinceLastMs,
             rulesFired = actLoud.rulesFired,
             nowMs = now,
         )
-        val shortText = if (holdFooter != null) baseShort + holdFooter + "\n" else baseShort
+        val shortText = if (holdFooter != null) shortReply.text + holdFooter + "\n" else shortReply.text
         val returnedAt = recordReturned(snap.frame, snap.version, snap.activity?.substringBefore('/'), quiet = true, windowFrom = from)
-        val screen = org.json.JSONObject()
-            .put("app", snap.activity?.substringBefore('/') ?: org.json.JSONObject.NULL)
-            .put("activity", snap.activity ?: org.json.JSONObject.NULL)
-            .put("width", d.width).put("height", d.height)
-            .put("generation", d.generation)
-            .put("image", org.json.JSONObject.NULL)
-            .put("image_has_strip", false)
-            .put("page", card.pageJson())
-            .put("elements", org.json.JSONArray(els.take(Report.MAX_JSON_ELEMENTS).map { it.json() }))
-            .put("elements_total", els.size)
+        val screen = putScreenElements(
+            org.json.JSONObject()
+                .put("app", snap.activity?.substringBefore('/') ?: org.json.JSONObject.NULL)
+                .put("activity", snap.activity ?: org.json.JSONObject.NULL)
+                .put("width", d.width).put("height", d.height)
+                .put("generation", d.generation)
+                .put("image", org.json.JSONObject.NULL)
+                .put("image_has_strip", false)
+                .put("page", card.pageJson()),
+            all = els,
+            shown = shortReply.shown,
+            fullElements = false,
+        )
         val data = org.json.JSONObject()
             .put("timing", timing.json(total))
             .put("turn", turn)
@@ -1688,16 +1775,19 @@ internal fun VScreenOffloadHandler.fourBlocks(
     val fullText = if (holdFooter != null) baseFull + holdFooter + "\n" else baseFull
 
     val returnedAt = recordReturned(snap.frame, snap.version, snap.activity?.substringBefore('/'), quiet = if (actLoud != null) false else null, windowFrom = from)
-    val screen = org.json.JSONObject()
-        .put("app", snap.activity?.substringBefore('/') ?: org.json.JSONObject.NULL)
-        .put("activity", snap.activity ?: org.json.JSONObject.NULL)
-        .put("width", d.width).put("height", d.height)
-        .put("generation", d.generation)
-        .put("image", pic ?: org.json.JSONObject.NULL)
-        .put("image_has_strip", sheet && pic != null)
-        .put("page", card.pageJson())
-        .put("elements", org.json.JSONArray(els.take(Report.MAX_JSON_ELEMENTS).map { e -> e.json().also { o -> if (e !in shown) o.put("unchanged", true) } }))
-        .put("elements_total", els.size)
+    val screen = putScreenElements(
+        org.json.JSONObject()
+            .put("app", snap.activity?.substringBefore('/') ?: org.json.JSONObject.NULL)
+            .put("activity", snap.activity ?: org.json.JSONObject.NULL)
+            .put("width", d.width).put("height", d.height)
+            .put("generation", d.generation)
+            .put("image", pic ?: org.json.JSONObject.NULL)
+            .put("image_has_strip", sheet && pic != null)
+            .put("page", card.pageJson()),
+        all = els,
+        shown = shown,
+        fullElements = fullList || !card.canRef,
+    )
     val data = org.json.JSONObject()
         .put("timing", timing.json(total))
         .put("turn", turn)
@@ -1821,7 +1911,7 @@ private fun buildNowSection(
             outLines += tr("（还有 ${changed.size - limit} 个变化未列出：act 不带步骤可看全部）", "(${changed.size - limit} more changed not listed: act with no steps lists all)")
         }
         if (diff.removed.isNotEmpty()) {
-            val remShown = diff.removed.take(10).joinToString(tr("、", ", ")) { "“${it.label.take(20)}”" }
+            val remShown = diff.removed.take(10).joinToString(tr("、", ", ")) { tr("“${it.label.take(20)}”", "\"${it.label.take(20)}\"") }
             outLines += tr("− 不见了 ${diff.removed.size} 个：$remShown", "− ${diff.removed.size} gone: $remShown")
         }
         return Triple(header, outLines, shown)

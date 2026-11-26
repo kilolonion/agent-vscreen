@@ -19,13 +19,16 @@
 #                    without it a remote address follows the usual http_proxy / no_proxy variables
 
 CLI_VERSION="@@VERSION@@"
+CLI_PORT="@@PORT@@"
 umask 077
 CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/agent-vscreen"
 # The file holds the same names as the environment (VSCREEN_URL / VSCREEN_TOKEN); a variable already set wins.
 # It is read line by line, not sourced, so it can never override what the caller set. Old *_SAVED names still work.
 conf() { [ -f "$CONF_DIR/env" ] && sed -n -e "s/^$1=//p" -e "s/^$1_SAVED=//p" "$CONF_DIR/env" | head -n1; }
-URL="${VSCREEN_URL:-$(conf VSCREEN_URL)}"; URL="${URL:-http://127.0.0.1:@@PORT@@}"
+URL="${VSCREEN_URL:-$(conf VSCREEN_URL)}"; URL="${URL:-http://127.0.0.1:$CLI_PORT}"
+BASE_URL="$URL"
 TOKEN="${VSCREEN_TOKEN:-$(conf VSCREEN_TOKEN)}"
+if [ "$1" = "install" ] && [ -n "$2" ]; then TOKEN="$2"; fi
 SESSION="${VSCREEN_SESSION:-default}"
 SHOT_DIR="${VSCREEN_SHOT_DIR:-${TMPDIR:-/tmp}/vscreen-shots}"
 
@@ -62,7 +65,7 @@ hex() { od -An -v -tx1 | tr -d ' \n'; }
 # 1.4.0-beta15: on this phone the service takes the first free port of the ten from the set one (another app, or a
 # copy of the app in a parallel space, may hold the set port). Find it: the instance that holds THIS token answers
 # /v2/ping?me=<id>&n=<nonce> with sha256hex(K \n nonce \n ping \n K); nobody else can. A port that times out (a frozen
-# holder) ends the search: the wake-up below handles a frozen app.
+# holder) ends the search during normal calls (the wake-up below handles a frozen app), while install / post-wake scans all.
 find_port() {
   [ -n "$NOSIGN" ] || [ -z "$TOKEN" ] && return 0
   case "$URL" in http://127.0.0.1:*|http://localhost:*) ;; *) return 0 ;; esac
@@ -73,13 +76,14 @@ find_port() {
   _i=0
   while [ $_i -lt 10 ]; do
     _p=$((_p0 + _i)); _i=$((_i + 1))
+    [ $_p -gt 65535 ] && break
     _r=$(c -s -m 2 "$_b:$_p/v2/ping?me=$KID&n=$_n" 2>/dev/null); _rc=$?
     case "$_r" in *"\"you\":\"$_w\""*) [ $_p -ne $_p0 ] && URL="$_b:$_p"; return 0 ;; esac
-    [ $_rc -eq 28 ] && [ $_i -eq 1 ] && return 0
+    [ "$1" != "all" ] && [ $_rc -eq 28 ] && [ $_i -eq 1 ] && return 0
   done
   return 0
 }
-find_port
+if [ "$1" = "install" ]; then find_port all; else find_port; fi
 
 # curl may receive an interim response or a proxy CONNECT response before the app's.
 http_status() { awk '/^HTTP\/[0-9.]+ / { code=$2 } END { sub(/\r$/, "", code); print code }' "$1"; }
@@ -145,7 +149,16 @@ if [ "$1" = "install" ]; then
   c -fsS "$URL/cli?via=install&id=$tid" -o "$dest/vscreen" || { echo "vscreen: «下载失败：Agent-VScreen 在运行吗？|download failed: is Agent-VScreen running?»" >&2; exit 3; }
   chmod +x "$dest/vscreen"
   mkdir -p "$CONF_DIR"
-  printf 'VSCREEN_URL=%s\nVSCREEN_TOKEN=%s\n' "$URL" "$tok" > "$CONF_DIR/env"
+  SAVE_URL="$BASE_URL"
+  if [ -z "$NOSIGN" ]; then
+    case "$BASE_URL" in http://127.0.0.1:*|http://localhost:*)
+      _sb=${BASE_URL%:*}; _sp=${BASE_URL##*:}; _sp=${_sp%%/*}
+      case "$_sp:$CLI_PORT" in *[!0-9:]*|:*|*:) ;; *)
+        [ "$_sp" -ge "$CLI_PORT" ] && [ "$_sp" -lt $((CLI_PORT + 10)) ] && SAVE_URL="$_sb:$CLI_PORT" ;;
+      esac ;;
+    esac
+  fi
+  printf 'VSCREEN_URL=%s\nVSCREEN_TOKEN=%s\n' "$SAVE_URL" "$tok" > "$CONF_DIR/env"
   [ -n "$PROXY" ] && printf 'VSCREEN_PROXY=%s\n' "$PROXY" >> "$CONF_DIR/env"
   chmod 600 "$CONF_DIR/env" 2>/dev/null
   echo "«已安装：$dest/vscreen（令牌存在 $CONF_DIR/env）|Installed: $dest/vscreen (token saved in $CONF_DIR/env)»"
@@ -255,8 +268,10 @@ if [ $pr -eq 28 ]; then
           echo "vscreen: NOT_READY «用户关闭了 Agent-VScreen，叫不醒它。这是用户的选择，不是故障，不用修：请用户在 App 右上角的电源键里选“常驻”或“按需”。|The user turned Agent-VScreen off, so it cannot be woken. That is their choice, not a fault, and needs no repair: ask them to choose Always on or On demand with the power button at the top of the app.»" >&2
           exit 3 ;;
         esac
-        for i in 1 2 3; do sleep 2; alive && { pr=0; break; }; done
+        for i in 1 2 3; do sleep 2; URL="$BASE_URL"; find_port all; alive && { pr=0; break; }; done
         [ $pr -eq 0 ] && echo "«（Agent-VScreen 刚才没有响应，已唤醒）|(Agent-VScreen was not answering; it was woken up)»" >&2
+      elif [ -z "$refused" ]; then
+        URL="$BASE_URL"; find_port all; [ "$URL" != "$BASE_URL" ] && alive && pr=0
       fi ;;
   esac
 fi

@@ -110,6 +110,54 @@ internal object Tasks {
         return NativeOffloadResult(0, text + "\n", "OK", data)
     }
 
+    /**
+     * 2.0.0-beta16 (Item 8), pure: shorten a recap step label to at most [maxLen] characters without
+     * cutting in the middle of paired brackets `()[]{}（）「」【】` or quotes `""“”`.
+     */
+    internal fun truncateStepLabel(s: String, maxLen: Int = 28): String {
+        if (s.length <= maxLen) return s
+        if (maxLen <= 1) return s.take(maxLen)
+        val bracketPairs = mapOf(
+            '(' to ')', '[' to ']', '{' to '}',
+            '（' to '）', '「' to '」', '【' to '】',
+        )
+        val quotePairs = mapOf('"' to '"', '“' to '”')
+        val allOpen = bracketPairs + quotePairs
+        val closers = bracketPairs.values.toSet() + setOf('”')
+        val stack = ArrayDeque<Triple<Int, Char, Boolean>>() // (openIdx, closeChar, isQuote)
+        val limit = maxLen - 1
+        for (i in 0 until limit) {
+            val ch = s[i]
+            when {
+                ch == '"' -> {
+                    if (stack.isNotEmpty() && stack.last().second == '"') stack.removeLast()
+                    else stack.addLast(Triple(i, '"', true))
+                }
+                ch in allOpen -> stack.addLast(Triple(i, allOpen.getValue(ch), ch in quotePairs))
+                ch in closers -> {
+                    if (stack.isNotEmpty() && stack.last().second == ch) stack.removeLast()
+                }
+            }
+        }
+        if (stack.isEmpty()) {
+            return s.substring(0, limit).trimEnd() + "…"
+        }
+        val firstBracket = stack.firstOrNull { !it.third }
+        if (firstBracket != null && firstBracket.first > 0) {
+            val cutAt = firstBracket.first
+            val openQuotesBefore = stack.takeWhile { it.first < cutAt }.reversed().map { it.second }.joinToString("")
+            val prefix = s.substring(0, cutAt).trimEnd()
+            if (prefix.isNotEmpty()) {
+                val room = (maxLen - 1 - openQuotesBefore.length).coerceAtLeast(1)
+                return prefix.take(room).trimEnd() + "…" + openQuotesBefore
+            }
+        }
+        // Only quotes are open (or a bracket opened at index 0): keep balanced by closing open delimiters.
+        val closing = stack.reversed().map { it.second }.joinToString("")
+        val bodyLen = (maxLen - 1 - closing.length).coerceAtLeast(1)
+        return s.substring(0, minOf(bodyLen, s.length)).trimEnd() + "…" + closing
+    }
+
     internal fun formatRecap(
         turns: Int,
         cards: List<PageBook.Card>,
@@ -125,7 +173,7 @@ internal object Tasks {
         var lastPageId: String? = null
         for (e in entries) {
             for ((step, fail) in e.steps) {
-                val label = step.take(28) + (if (fail != null) " ✗ $fail" else "")
+                val label = truncateStepLabel(step, 28) + (if (fail != null) " ✗ $fail" else "")
                 toks += Tok(label, isStep = true)
             }
             if (e.pageId != null && e.pageId != lastPageId) {

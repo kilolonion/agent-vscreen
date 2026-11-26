@@ -599,7 +599,7 @@ internal object Teach {
         fun priorAt(t: String) = texts(a).filter { VScreenOcr.norm(it.text) == VScreenOcr.norm(t) }.map { it.box }
         val skipN = skip.map { VScreenOcr.norm(it) }
         fun ok(t: String) = sign(t) && skipN.none { s -> s.isNotEmpty() && (VScreenOcr.norm(t).contains(s) || s.contains(VScreenOcr.norm(t))) }
-        val fresh = texts(b).filter { counts(it.box, priorAt(it.text), null, newPage) && (newPage || VScreenOcr.norm(it.text) !in before) && ok(it.text.trim()) && unique(b, it.text.trim()) }
+        val fresh = texts(b).filter { counts(it.box, priorAt(it.text), null, newPage).ok && (newPage || VScreenOcr.norm(it.text) !in before) && ok(it.text.trim()) && unique(b, it.text.trim()) }
             .sortedWith(compareBy({ it.box.top }, { it.box.left }))
         fresh.firstOrNull()?.let { return "text:${it.text.trim()}" to tr("之后出现了「${it.text.trim()}」", "then \"${it.text.trim()}\" appeared") }
         if (a.pkg != null && b.pkg != null && a.pkg != b.pkg) return "app:${b.pkg}" to tr("之后换到了 ${b.pkg}", "then ${b.pkg} came to the front")
