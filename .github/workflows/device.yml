@@ -20,6 +20,8 @@ permissions:
 concurrency:
   group: device-${{ github.ref }}
   cancel-in-progress: true
+env:
+  SHIZUKU_SHA256: 6e273ab0e991c4e79bc8b1bbb9b9dd739ccac1a8712a541a214078886b7b790f
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,20 +29,20 @@ jobs:
     env:
       AVS_BUILD_DIR: ${{ github.workspace }}/.avs-build
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-java@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: '21'
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: tsbridge/go.mod
           cache-dependency-path: tsbridge/go.sum
-      - uses: gradle/actions/setup-gradle@v5
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
       - run: ./tsbridge/build.sh
       - run: CLOUDFLARED_SRC="$RUNNER_TEMP/cloudflared-src" ./cloudflared/build.sh
       - name: Robolectric jars
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.m2/repository/org/robolectric
           key: robolectric-${{ hashFiles('app/build.gradle.kts') }}
@@ -59,7 +61,7 @@ jobs:
           ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease :torture:assembleDebug
       - run: tools/android-smoke/check_abis.sh "$AVS_BUILD_DIR/app/outputs/apk/debug/app-debug.apk" "$AVS_BUILD_DIR/app/outputs/apk/release/app-release.apk"
       - run: tools/android-smoke/check_release_hooks.sh "$AVS_BUILD_DIR/app/outputs/apk/debug/app-debug.apk" "$AVS_BUILD_DIR/app/outputs/apk/release/app-release.apk"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: candidate
           path: |
@@ -79,8 +81,8 @@ jobs:
         # Android 14/15 own display group coverage (debug APK ships native x86_64 libs for emulator speed/stability).
         api: [34, 35]
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: candidate
           path: test-apks
@@ -90,12 +92,13 @@ jobs:
         run: |
           find test-apks -name '*.apk' -exec mv {} test-apks/ \;
           gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --output test-apks/shizuku.apk
+          echo "${SHIZUKU_SHA256}  test-apks/shizuku.apk" | sha256sum -c -
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - uses: reactivecircus/android-emulator-runner@v2
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: ${{ matrix.api }}
           arch: x86_64
@@ -105,7 +108,7 @@ jobs:
           disable-animations: true
           script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; python3 tools/android-smoke/agent_e2e.py test-apks/app-debug.apk 2>&1 | tee e2e.log; grep -q '^SUMMARY all passed' e2e.log || { adb logcat -d > logcat.txt; exit 1; }
       - if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: e2e-${{ matrix.api }}-logs
           path: |
@@ -121,8 +124,8 @@ jobs:
       matrix:
         mode: [root, root-uid0]
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: candidate
           path: test-apks
@@ -134,7 +137,7 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - uses: reactivecircus/android-emulator-runner@v2
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: 34
           arch: x86_64
@@ -144,7 +147,7 @@ jobs:
           disable-animations: true
           script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; python3 tools/android-smoke/agent_e2e.py test-apks/app-debug.apk --${{ matrix.mode }} 2>&1 | tee e2e.log; grep -q '^SUMMARY all passed' e2e.log || { adb logcat -d > logcat.txt; exit 1; }
       - if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: root-${{ matrix.mode }}-logs
           path: |
@@ -160,8 +163,8 @@ jobs:
       matrix:
         path: [fresh, upgrade]
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: candidate
           path: test-apks
@@ -171,12 +174,13 @@ jobs:
         run: |
           find test-apks -name '*.apk' -exec mv {} test-apks/ \;
           gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --output test-apks/shizuku.apk
+          echo "${SHIZUKU_SHA256}  test-apks/shizuku.apk" | sha256sum -c -
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - uses: reactivecircus/android-emulator-runner@v2
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: 30
           arch: x86_64
@@ -188,7 +192,7 @@ jobs:
           # app's ShizukuBackend "permission result" lines to tell a missed callback from a denied grant.
           script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; python3 tools/android-smoke/shizuku.py ${{ matrix.path }} || { adb logcat -d > logcat.txt; exit 1; }
       - if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: shizuku-${{ matrix.path }}-logs
           path: logcat.txt
@@ -198,8 +202,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: candidate
           path: test-apks
@@ -209,12 +213,13 @@ jobs:
         run: |
           find test-apks -name '*.apk' -exec mv {} test-apks/ \;
           gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --output test-apks/shizuku.apk
+          echo "${SHIZUKU_SHA256}  test-apks/shizuku.apk" | sha256sum -c -
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - uses: reactivecircus/android-emulator-runner@v2
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: 34
           arch: x86_64
@@ -224,7 +229,7 @@ jobs:
           disable-animations: true
           script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; mkdir -p eval-out && { python3 tools/eval/run.py --apk test-apks/torture-debug.apk --out eval-out --repeat-check --beta8-checks > eval-out/eval.log 2>&1; rc=$?; adb logcat -d > eval-out/logcat.txt; cat eval-out/eval.log; exit "$rc"; }
       - if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: eval-results
           path: eval-out/*
@@ -251,8 +256,8 @@ jobs:
             profile: pixel_2
             flag: "--api30"
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: candidate
           path: test-apks
@@ -264,6 +269,7 @@ jobs:
           find test-apks -type f -exec mv {} test-apks/ \; 2>/dev/null || true
           if [[ "$GATE_MODE" == shizuku ]]; then
             gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --output test-apks/shizuku.apk
+            echo "${SHIZUKU_SHA256}  test-apks/shizuku.apk" | sha256sum -c -
           fi
           ls -la test-apks
       - name: Enable KVM
@@ -271,7 +277,7 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - uses: reactivecircus/android-emulator-runner@v2
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: ${{ matrix.api }}
           arch: x86_64
@@ -281,7 +287,7 @@ jobs:
           disable-animations: true
           script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; python3 tools/android-smoke/gate.py test-apks/app-debug.apk ${{ matrix.flag }} 2>&1 | tee gate.log; grep -q '^SUMMARY all passed' gate.log || { adb logcat -d > logcat.txt; exit 1; }
       - if: failure()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: gate-${{ matrix.api }}-${{ matrix.mode }}-logs
           path: |
@@ -301,8 +307,8 @@ jobs:
           - api: 34
             profile: pixel_6
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: candidate
           path: test-apks
@@ -312,13 +318,14 @@ jobs:
         run: |
           find test-apks -type f -exec mv {} test-apks/ \; 2>/dev/null || true
           gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --output test-apks/shizuku.apk
+          echo "${SHIZUKU_SHA256}  test-apks/shizuku.apk" | sha256sum -c -
           ls -la test-apks
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - uses: reactivecircus/android-emulator-runner@v2
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: ${{ matrix.api }}
           arch: x86_64
@@ -328,7 +335,7 @@ jobs:
           disable-animations: true
           script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; mkdir -p confirm-out && { python3 tools/android-smoke/confirm_attack.py test-apks/app-debug.apk --out confirm-out > confirm-out/confirm-attack.log 2>&1; rc=$?; adb logcat -d > confirm-out/logcat.txt; cat confirm-out/confirm-attack.log; grep -q '^SUMMARY all passed' confirm-out/confirm-attack.log || exit 1; exit "$rc"; }
       - if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: confirm-attack-api${{ matrix.api }}
           path: confirm-out/*
@@ -339,8 +346,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
           name: candidate
           path: test-apks
@@ -352,7 +359,7 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - uses: reactivecircus/android-emulator-runner@v2
+      - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: 34
           arch: x86_64
@@ -362,11 +369,9 @@ jobs:
           disable-animations: true
           script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; mkdir -p public-out && { python3 tools/android-smoke/public_local.py test-apks/app-debug.apk > public-out/public-local.log 2>&1; rc=$?; adb logcat -d > public-out/logcat.txt; cat public-out/public-local.log; grep -q '^SUMMARY all passed' public-out/public-local.log || exit 1; exit "$rc"; }
       - if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: public-local-api34
           path: public-out/*
           if-no-files-found: warn
           retention-days: 7
-
-
