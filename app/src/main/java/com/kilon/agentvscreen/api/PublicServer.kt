@@ -42,6 +42,7 @@ class PublicServer(
      * at most it could pick its own rate-limit bucket.
      */
     private val cloudflareOrigin: Boolean = false,
+    private val onAuthenticatedActivity: () -> Unit = { PublicAccess.noteActivity() },
 ) {
     private val TAG = "PublicServer"
     private val pool = ThreadPoolExecutor(
@@ -179,7 +180,6 @@ class PublicServer(
 
         // 7.7: mark public BEFORE any downstream logic so X-VScreen-Tailnet can NEVER elevate this request.
         r.viaPublic = true
-        PublicAccess.noteActivity()
         val base = baseOverride ?: PublicOAuth.publicBase(r, baseProvider())
 
         return when (r.path) {
@@ -213,7 +213,9 @@ class PublicServer(
                 else methodNotAllowed("GET")
 
             "/oauth/token" ->
-                if (r.method == "POST") PublicOAuth.handleToken(r, base)
+                if (r.method == "POST") PublicOAuth.handleToken(r, base).also { resp ->
+                    if (resp.status == 200) onAuthenticatedActivity()
+                }
                 else methodNotAllowed("POST")
 
             "/mcp" -> handleMcp(r, base)
@@ -273,6 +275,7 @@ class PublicServer(
             }
         }
 
+        onAuthenticatedActivity()
         r.publicClientId = access.clientId
         r.publicScope = access.scope
         r.auth = ApiServer.Auth(access.token, signed = false, nonce = null)
