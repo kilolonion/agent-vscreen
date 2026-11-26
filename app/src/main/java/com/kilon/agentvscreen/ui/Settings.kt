@@ -348,6 +348,7 @@ fun TokensPage() {
     val list by Tokens.list.collectAsState()
     val agents by com.kilon.agentvscreen.api.AgentLedger.agents.collectAsState()
     val others = remember(list) { list.filter { it.id != Tokens.MAIN }.sortedByDescending { maxOf(it.lastUsedAt, it.createdAt) } }
+    val tokenFold = rememberFold(4)
     val unused = remember(list, agents) { Tokens.neverUsed { id -> agents[id]?.used == true } }
     val fmt = remember { java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.ROOT) }
     MiuixLazyPage(tr("令牌", "Tokens"), actions = {
@@ -373,7 +374,7 @@ fun TokensPage() {
                     onClick = { askUnused = unused })
             }
         }
-        cardItems(tr("每个 agent 一个令牌 · ${others.size}", "One token per agent · ${others.size}"), others, key = { it.id }) { t ->
+        cardItems(tr("每个 agent 一个令牌 · ${others.size}", "One token per agent · ${others.size}"), others, key = { it.id }, fold = tokenFold) { t ->
             TokenRow(t, fmt, open = { nav.go(Route.Agent(t.id)) }, remove = { askRemove = t })
         }
     }

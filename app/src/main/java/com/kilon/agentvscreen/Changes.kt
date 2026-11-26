@@ -38,6 +38,17 @@ object Changes {
     /** Releases ordered newest first. Add a new [Release] entry whenever versionCode bumps. */
     val releases: List<Release> = listOf(
         Release(
+            versionCode = 75,
+            versionName = "2.0.1-beta1",
+            items = listOf(
+                Item(Kind.IMPROVED, Audience.USER, "过长的列表自动折叠",
+                    "接入页的 agent、设置里的令牌、agent 页的临时许可和预约、盯守，太长时只显示前几项，点“还有 N 个”展开。接入页按最近使用排在前面。",
+                    "Long lists fold",
+                    "Connected agents, tokens, temporary allowances, bookings and watches show their first few rows when long; tap \"N more\" to see the rest. Connected agents are listed most recently used first.",
+                    Route.Connect),
+            ),
+        ),
+        Release(
             versionCode = 74,
             versionName = "2.0.0",
             items = listOf(
