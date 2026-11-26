@@ -38,6 +38,22 @@ object Changes {
     /** Releases ordered newest first. Add a new [Release] entry whenever versionCode bumps. */
     val releases: List<Release> = listOf(
         Release(
+            versionCode = 74,
+            versionName = "2.0.0",
+            items = listOf(
+                Item(Kind.NEW, Audience.BOTH, "任务中保持亮屏",
+                    "有些手机上副屏会随主屏一起休眠，手机自动熄屏后 agent 的任务就停住了。设置里新增“任务中保持亮屏”（默认关）：只在 agent 任务进行时让屏幕不自动熄灭（可以变暗），任务结束立刻恢复；按电源键熄屏仍然有效。",
+                    "Keep screen on during tasks",
+                    "On some phones the background screen sleeps with the main one, so an agent's task stops when the phone times out. New setting (off by default): the phone screen does not time out (it may dim) only while an agent task runs, and is let go when it ends; the power button still turns it off.",
+                    null),
+                Item(Kind.IMPROVED, Audience.BOTH, "更多手机能熄屏运行",
+                    "建副屏时，系统不给“锁屏时也可用”这项权限，就不再连带丢掉“副屏单独供电”，熄屏后副屏仍能单独保持唤醒。诊断和状态里会列出被系统拒绝的副屏选项和原因。",
+                    "Screen-off running on more phones",
+                    "When the system refuses the always-unlocked option for the background screen, it no longer also loses its own power group, so it can still stay awake with the phone screen off. Diagnostics and status list the display options the system refused, and why.",
+                    null),
+            ),
+        ),
+        Release(
             versionCode = 73,
             versionName = "2.0.0-beta16",
             items = listOf(
