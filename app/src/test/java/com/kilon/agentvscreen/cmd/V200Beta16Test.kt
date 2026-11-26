@@ -654,7 +654,15 @@ class V200Beta16Test {
         }
         surfaces["memory"] = AgentGuide.memory("http://127.0.0.1:18765")
         surfaces["memoryMcp"] = AgentGuide.memoryMcp()
+        surfaces["memoryMcpLocal"] = AgentGuide.memoryMcp("http://127.0.0.1:18765")
         surfaces["memoryHttp"] = AgentGuide.memoryHttp("http://127.0.0.1:18765")
+        surfaces["onboardLocal"] = AgentGuide.onboard("http://127.0.0.1:18765", "avs_a_secret")
+        surfaces["onboardRemote"] = AgentGuide.onboard("http://100.64.0.9:18765", "avs_a_secret")
+        surfaces["onboardMcpLocal"] = AgentGuide.onboardMcp("http://127.0.0.1:18765", "avs_a_secret")
+        surfaces["onboardMcpRemote"] = AgentGuide.onboardMcp("http://100.64.0.9:18765", "avs_a_secret")
+        surfaces["onboardHttpLocal"] = AgentGuide.onboardHttp("http://127.0.0.1:18765", "avs_a_secret")
+        surfaces["onboardHttpRemote"] = AgentGuide.onboardHttp("http://100.64.0.9:18765", "avs_a_secret")
+        surfaces["onboardPublic"] = AgentGuide.onboardPublic("https://phone.example.com/mcp")
         surfaces["skill"] = AgentGuide.skill()
         surfaces["advice"] = AgentGuide.advice()
         surfaces["quickHelp"] = CommandSpec.quickHelp()
@@ -693,5 +701,68 @@ class V200Beta16Test {
         assertTrue("EN memory should state notes/segments are shared: $enMem", enMem.contains("app notes") && enMem.contains("shared across all agents"))
         val enGuideTokens = Meter.of(AgentGuide.guide(), emptyList()).estTokens
         assertTrue("EN core guide tokens ($enGuideTokens) exceeded ${AgentGuide.CORE_GUIDE_MAX_TOKENS}", enGuideTokens <= AgentGuide.CORE_GUIDE_MAX_TOKENS)
+    }
+
+    // ── Local port conflict forward-probe guidance & CLI install-time discovery ──
+
+    @Test
+    fun localPortConflictGuidanceCoversAllLocalOnboardingAndMemoryPaths() {
+        val defaultEnd = ApiConfig.DEFAULT_PORT + ApiConfig.PORT_SPAN - 1
+        val defaultSpan = "${ApiConfig.DEFAULT_PORT}-$defaultEnd"
+        val customBase = 28000
+        val customSpan = "$customBase-${customBase + ApiConfig.PORT_SPAN - 1}"
+        val tok = "avs_demo_secretvalue"
+
+        for (lang in listOf(I18n.Lang.ZH, I18n.Lang.EN)) {
+            I18n.choice = lang
+            // All three local onboarding messages explain forward port probing across PORT_SPAN.
+            val shell = AgentGuide.onboard("http://127.0.0.1:${ApiConfig.DEFAULT_PORT}", tok)
+            val mcp = AgentGuide.onboardMcp("http://127.0.0.1:${ApiConfig.DEFAULT_PORT}", tok)
+            val http = AgentGuide.onboardHttp("http://127.0.0.1:${ApiConfig.DEFAULT_PORT}", tok)
+            for ((kind, text) in listOf("shell" to shell, "mcp" to mcp, "http" to http)) {
+                assertTrue("($lang $kind) missing port span $defaultSpan:\n$text", text.contains(defaultSpan))
+                assertTrue("($lang $kind) missing /v2/ping probe:\n$text", text.contains("/v2/ping"))
+                assertTrue("($lang $kind) missing app identity check:\n$text", text.contains("\"app\":\"agent-vscreen\""))
+            }
+            // MCP & HTTP onboarding cover 401 (e.g. parallel-space clone holding base port) and embed port-conflict memory.
+            assertTrue("($lang mcp) should mention 401:\n$mcp", mcp.contains("401"))
+            assertTrue("($lang http) should mention 401:\n$http", http.contains("401"))
+            val memMcpLocal = AgentGuide.memoryMcp("http://127.0.0.1:${ApiConfig.DEFAULT_PORT}")
+            val memHttpLocal = AgentGuide.memoryHttp("http://127.0.0.1:${ApiConfig.DEFAULT_PORT}")
+            assertTrue("($lang memoryMcp local) missing port span:\n$memMcpLocal", memMcpLocal.contains(defaultSpan))
+            assertTrue("($lang memoryHttp local) missing port span:\n$memHttpLocal", memHttpLocal.contains(defaultSpan))
+
+            // Range dynamically follows the base port + ApiConfig.PORT_SPAN and clamps at 65535.
+            val customMcp = AgentGuide.onboardMcp("http://localhost:$customBase", tok)
+            assertTrue("($lang custom) missing dynamic span $customSpan:\n$customMcp", customMcp.contains(customSpan))
+            assertFalse("($lang custom) should not hardcode default span:\n$customMcp", customMcp.contains(defaultSpan))
+            val highHttp = AgentGuide.onboardHttp("http://127.0.0.1:65532", tok)
+            assertTrue("($lang high port) should clamp at 65535:\n$highHttp", highHttp.contains("65532-65535"))
+
+            // Remote Tailscale and Public Cloud MCP onboarding/memory must NOT inject loopback port probing.
+            val remoteShell = AgentGuide.onboard("http://100.64.0.9:${ApiConfig.DEFAULT_PORT}", tok)
+            val remoteMcp = AgentGuide.onboardMcp("http://100.64.0.9:${ApiConfig.DEFAULT_PORT}", tok)
+            val remoteHttp = AgentGuide.onboardHttp("http://100.64.0.9:${ApiConfig.DEFAULT_PORT}", tok)
+            val publicMcp = AgentGuide.onboardPublic("https://phone.example.com/mcp")
+            val cloudMem = AgentGuide.memoryMcp()
+            for ((kind, text) in listOf(
+                "remoteShell" to remoteShell,
+                "remoteMcp" to remoteMcp,
+                "remoteHttp" to remoteHttp,
+                "publicMcp" to publicMcp,
+                "cloudMem" to cloudMem,
+            )) {
+                assertFalse("($lang $kind) must not mention local port span $defaultSpan:\n$text", text.contains(defaultSpan))
+                assertFalse("($lang $kind) must not mention 127.0.0.1:\n$text", text.contains("127.0.0.1"))
+            }
+        }
+
+        // CLI asset (`vscreen.sh`) reads install token before find_port, persists normalized base URL, and rescans on wake.
+        val script = ctx.assets.open("cli/vscreen.sh").bufferedReader().use { it.readText() }
+        val tokIdx = script.indexOf("if [ \"\$1\" = \"install\" ] && [ -n \"\$2\" ]; then TOKEN=\"\$2\"; fi")
+        val findIdx = script.indexOf("if [ \"\$1\" = \"install\" ]; then find_port all; else find_port; fi")
+        assertTrue("vscreen.sh must load install token before running find_port", tokIdx in 1 until findIdx)
+        assertTrue("vscreen.sh must persist SAVE_URL rather than shifted URL", script.contains("printf 'VSCREEN_URL=%s\\nVSCREEN_TOKEN=%s\\n' \"\$SAVE_URL\" \"\$tok\""))
+        assertTrue("vscreen.sh wake-up loop must rescan shifted ports", script.contains("URL=\"\$BASE_URL\"; find_port all; alive"))
     }
 }
