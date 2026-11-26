@@ -680,13 +680,18 @@ class V200Beta16Test {
         }
         assertTrue("English outputs contain fullwidth punctuation:\n${violations.joinToString("\n")}", violations.isEmpty())
 
-        // Both ZH and EN identity guidance accurately distinguish per-agent items from shared notes/segments.
+        // Both ZH and EN identity guidance accurately distinguish per-agent items from shared notes/segments,
+        // and the core guide remains within CORE_GUIDE_MAX_TOKENS in both languages.
         I18n.choice = I18n.Lang.ZH
         val zhMem = AgentGuide.memoryMcp()
         assertTrue("ZH memory should state notes/segments are shared: $zhMem", zhMem.contains("应用笔记") && zhMem.contains("所有 agent 共享"))
+        val zhGuideTokens = Meter.of(AgentGuide.guide(), emptyList()).estTokens
+        assertTrue("ZH core guide tokens ($zhGuideTokens) exceeded ${AgentGuide.CORE_GUIDE_MAX_TOKENS}", zhGuideTokens <= AgentGuide.CORE_GUIDE_MAX_TOKENS)
 
         I18n.choice = I18n.Lang.EN
         val enMem = AgentGuide.memoryMcp()
         assertTrue("EN memory should state notes/segments are shared: $enMem", enMem.contains("app notes") && enMem.contains("shared across all agents"))
+        val enGuideTokens = Meter.of(AgentGuide.guide(), emptyList()).estTokens
+        assertTrue("EN core guide tokens ($enGuideTokens) exceeded ${AgentGuide.CORE_GUIDE_MAX_TOKENS}", enGuideTokens <= AgentGuide.CORE_GUIDE_MAX_TOKENS)
     }
 }
