@@ -6,6 +6,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+val avsUnsignedRelease = providers.gradleProperty("avsUnsignedRelease").map { it.toBooleanStrict() }.orElse(false).get()
+
 android {
     namespace = "com.kilon.agentvscreen"
     compileSdk = 37
@@ -17,10 +19,10 @@ android {
         versionName = "2.0.1-beta1"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
-    // Release signing is read from keystore.properties (not committed). See keystore.properties.example.
+    // Unsigned CI builds do not even read local keystore settings. Local release builds keep existing behavior.
     val ksProps = Properties().apply {
         val f = rootProject.file("keystore.properties")
-        if (f.exists()) f.inputStream().use { load(it) }
+        if (!avsUnsignedRelease && f.exists()) f.inputStream().use { load(it) }
     }
     signingConfigs {
         if (ksProps.getProperty("storeFile") != null) create("release") {
@@ -42,7 +44,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            signingConfig = if (avsUnsignedRelease) null else signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

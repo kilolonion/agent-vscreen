@@ -1,8 +1,5 @@
-# CI for Agent-VScreen (free on public repositories).
-# Branches and PRs: check and build only; the release APK is signed with the debug key (no keystore.properties).
-# A tag v* (for example v1.4.1): the release APK is signed with the key from the repository's encrypted secrets
-# (AVS_KEYSTORE_BASE64, AVS_KEYSTORE_PASSWORD, AVS_KEY_ALIAS, AVS_KEY_PASSWORD), then the APK and the Operit ToolPkg
-# are uploaded to a GitHub Release for that tag. Notes come from docs/release-notes/<tag>.md when it exists.
+# CI for Agent-VScreen. The build runners never get the release key.
+# A v* tag push runs the emulator matrix for that exact ref, then waits for release approval.
 name: CI
 
 on:
@@ -98,32 +95,14 @@ jobs:
             exit 1
           fi
 
-      # Only on a tag push. Secrets are not given to pull requests from forks, and this runs after the tests.
-      - name: Release signing key
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        env:
-          KS_B64: ${{ secrets.AVS_KEYSTORE_BASE64 }}
-          KS_PASS: ${{ secrets.AVS_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.AVS_KEY_ALIAS }}
-          KEY_PASS: ${{ secrets.AVS_KEY_PASSWORD }}
-        run: |
-          if [ -z "$KS_B64" ] || [ -z "$KS_PASS" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASS" ]; then
-            echo "::error::Signing secrets missing (AVS_KEYSTORE_BASE64, AVS_KEYSTORE_PASSWORD, AVS_KEY_ALIAS, AVS_KEY_PASSWORD)"
-            exit 1
-          fi
-          mkdir -p keystore
-          printf '%s' "$KS_B64" | base64 -d > keystore/agent-vscreen.jks
-          printf 'storeFile=keystore/agent-vscreen.jks\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
-            "$KS_PASS" "$KEY_ALIAS" "$KEY_PASS" > keystore.properties
-
-      - name: Debug and release APKs
-        run: ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease
+      - name: Debug and unsigned release APKs
+        run: ./gradlew --no-daemon -PavsUnsignedRelease=true :app:assembleDebug :app:assembleRelease
 
       - name: Native code per APK (debug arm64 + x86_64, release arm64 only)
-        run: tools/android-smoke/check_abis.sh "$AVS_BUILD_DIR/app/outputs/apk/debug/app-debug.apk" "$AVS_BUILD_DIR/app/outputs/apk/release/app-release.apk"
+        run: tools/android-smoke/check_abis.sh "$AVS_BUILD_DIR/app/outputs/apk/debug/app-debug.apk" "$AVS_BUILD_DIR/app/outputs/apk/release/app-release-unsigned.apk"
 
       - name: Release APK contains no debug test hooks
-        run: tools/android-smoke/check_release_hooks.sh "$AVS_BUILD_DIR/app/outputs/apk/debug/app-debug.apk" "$AVS_BUILD_DIR/app/outputs/apk/release/app-release.apk"
+        run: tools/android-smoke/check_release_hooks.sh "$AVS_BUILD_DIR/app/outputs/apk/debug/app-debug.apk" "$AVS_BUILD_DIR/app/outputs/apk/release/app-release-unsigned.apk"
 
       - name: Test reports
         if: failure()
@@ -134,12 +113,21 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: APKs
+      - name: Debug APK
         uses: actions/upload-artifact@v5
         with:
           name: apks
-          path: .avs-build/app/outputs/apk/**/*.apk
-          if-no-files-found: warn
+          path: .avs-build/app/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Unsigned release APK
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v5
+        with:
+          name: unsigned-release-apk
+          path: .avs-build/app/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error
           retention-days: 7
 
   operit:
@@ -162,6 +150,21 @@ jobs:
           name: toolpkg
           path: ${{ runner.temp }}/agent-vscreen.toolpkg
           retention-days: 7
+      - name: Stage tagged release notes
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]
+          NOTES="docs/release-notes/${GITHUB_REF_NAME}.md"
+          test -s "$NOTES" || { echo '::error::Release notes are missing or empty'; exit 1; }
+          cp -- "$NOTES" "$RUNNER_TEMP/release-notes.md"
+      - name: Upload tagged release notes
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v5
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/release-notes.md
+          if-no-files-found: error
+          retention-days: 7
 
   secrets:
     name: Secret scan (gitleaks)
@@ -179,53 +182,88 @@ jobs:
           curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz -C "$RUNNER_TEMP" gitleaks
           "$RUNNER_TEMP/gitleaks" git --redact --verbose --exit-code 1 .
 
-  release:
-    name: GitHub Release
-    # Tag pushes only: a manual run on a tag ref must not sign or publish.
+  release-device:
+    name: Release emulator matrix
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [android, operit, secrets]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    uses: ./.github/workflows/device.yml
+
+  release:
+    name: Approve, sign and publish
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [android, operit, secrets, release-device]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
     permissions:
       contents: write
     env:
-      # SHA-256 of the Agent-VScreen release certificate (CN=Agent-VScreen), read from the published v1.4.0 APK.
-      # An APK signed by any other key cannot update existing installs, so the release stops.
       RELEASE_CERT_SHA256: 56b14824549e698017eba907cbc3347ee3a4ba30907efbd6068ea51ff4495756
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      # No checkout, project scripts, dependency installs or builds in this job.
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
-          path: dl
-      - name: Name assets and check the signature
+          name: unsigned-release-apk
+          path: dl/apk
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: toolpkg
+          path: dl/toolpkg
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: release-notes
+          path: dl/notes
+      - name: Align, sign and verify the release APK
+        env:
+          KS_B64: ${{ secrets.AVS_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.AVS_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.AVS_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.AVS_KEY_PASSWORD }}
         run: |
-          TAG="${GITHUB_REF_NAME}"; VER="${TAG#v}"
-          mkdir out
-          cp dl/apks/release/*.apk "out/agent-vscreen-${VER}.apk"
-          cp dl/toolpkg/agent-vscreen.toolpkg "out/agent-vscreen-${VER}.toolpkg"
-          BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
-          CERT=$("$ANDROID_HOME/build-tools/$BT/apksigner" verify --print-certs "out/agent-vscreen-${VER}.apk")
-          # 2.0.0: newer apksigner builds word the signer line differently ("Signer #1 certificate" vs
-          # "Signer (minSdkVersion=…) certificate"); the v2.0.0 release failed here. Match any signer's SHA-256 line.
-          echo "$CERT"
-          GOT=$(echo "$CERT" | grep -m1 -oE 'certificate SHA-256 digest: [0-9a-f]{64}' | awk '{print $NF}' || true)
-          if [ "$GOT" != "$RELEASE_CERT_SHA256" ]; then
-            echo "::error::APK signer $GOT is not the release certificate $RELEASE_CERT_SHA256"; exit 1
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]
+          : "${KS_B64:?Missing release keystore}" "${KS_PASS:?Missing release store password}" \
+            "${KEY_ALIAS:?Missing release key alias}" "${KEY_PASS:?Missing release key password}"
+          SDK="$ANDROID_HOME/build-tools/36.0.0"
+          test -x "$SDK/apksigner" && test -x "$SDK/zipalign" || exit 1
+          INPUT=dl/apk/app-release-unsigned.apk
+          test -s "$INPUT"
+          if "$SDK/apksigner" verify "$INPUT" >/dev/null 2>&1; then
+            echo '::error::Expected an unsigned input APK'; exit 1
           fi
+          umask 077
+          SIGN_DIR=$(mktemp -d "$RUNNER_TEMP/avs-signing.XXXXXXXX")
+          trap 'rm -rf -- "$SIGN_DIR"' EXIT
+          printf '%s' "$KS_B64" | base64 --decode > "$SIGN_DIR/release.jks"
+          unset KS_B64
+          VER="${GITHUB_REF_NAME#v}"
+          mkdir out
+          APK="out/agent-vscreen-${VER}.apk"
+          "$SDK/zipalign" -P 16 -f 4 "$INPUT" "$SIGN_DIR/aligned.apk"
+          "$SDK/apksigner" sign --ks "$SIGN_DIR/release.jks" --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
+            --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+            --v4-signing-enabled false --out "$APK" "$SIGN_DIR/aligned.apk"
+          unset KS_PASS KEY_PASS KEY_ALIAS
+          "$SDK/zipalign" -c -P 16 4 "$APK"
+          CERT=$("$SDK/apksigner" verify --print-certs "$APK")
+          GOT=$(printf '%s\n' "$CERT" | awk '/^Signer.* certificate SHA-256 digest: [0-9a-fA-F]{64}$/ {print tolower($NF)}' | sort -u)
+          if [[ "$GOT" != "$RELEASE_CERT_SHA256" ]]; then
+            echo '::error::APK certificate does not match the expected release signer'; exit 1
+          fi
+      - name: Name assets and write checksums
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          cp -- dl/toolpkg/agent-vscreen.toolpkg "out/agent-vscreen-${VER}.toolpkg"
           (cd out && sha256sum -- *.apk *.toolpkg > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
-      - name: Release
+      - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${GITHUB_REF_NAME}"; VER="${TAG#v}"
-          NOTES="docs/release-notes/${TAG}.md"
-          if [ ! -f "$NOTES" ]; then
-            NOTES="$RUNNER_TEMP/notes.md"
-            printf '**下载**：agent-vscreen-%s.apk（App）· agent-vscreen-%s.toolpkg（Operit 插件）\n' "$VER" "$VER" > "$NOTES"
-          fi
-          PRE=""; case "$TAG" in *-*) PRE="--prerelease";; esac
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" out/* --clobber
-          else
-            gh release create "$TAG" out/* --title "$TAG" --notes-file "$NOTES" --verify-tag $PRE
-          fi
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          test -s dl/notes/release-notes.md
+          opts=()
+          case "$TAG" in *-*) opts+=(--prerelease);; esac
+          # Never replace the assets of an already published release.
+          gh release create "$TAG" out/* --repo "$GITHUB_REPOSITORY" --title "$TAG" \
+            --notes-file dl/notes/release-notes.md --verify-tag "${opts[@]}"
