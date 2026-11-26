@@ -243,12 +243,21 @@ def main():
     code_match = re.search(r'<div class="code">([A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4})</div>', html_auth)
     id_match = re.search(r'var id="(pair_[0-9a-f]+)"', html_auth)
     check("oauth_authorize_html_pairing", st_auth == 200 and code_match is not None and id_match is not None, f"status={st_auth}")
+    pairing_code = code_match.group(1)
     pairing_id = id_match.group(1)
+
+    # P0-3: remote /oauth/authorize must NOT auto-popup or create a pending StrongConfirm card before code claim
+    pend_before = send_public_hook("pending_count")
+    check("no_unsolicited_pairing_card", pend_before.get("ok") is True and pend_before.get("pending_pairings") == 0, str(pend_before))
+    bad_claim = send_public_hook("claim:AAAA-BBBB")
+    check("wrong_pairing_code_rejected", bad_claim.get("ok") is False, str(bad_claim))
 
     st_p1, _, body_p1 = http_req(PUB_LOCAL_PORT, "GET", f"/oauth/authorize/status?id={pairing_id}", pub_hdr)
     check("pairing_status_pending", st_p1 == 200 and json.loads(body_p1).get("status") == "pending", body_p1)
 
-    # Approve as "operate" (even though client also passed "system" in scope, system is never granted)
+    # User enters the 8-char pairing code on the phone, then approves as "operate" (system is never granted)
+    claimed = send_public_hook(f"claim:{pairing_code}")
+    check("debug_hook_claim", claimed.get("ok") is True and claimed.get("pairing_id") == pairing_id, str(claimed))
     appr = send_public_hook("approve:operate")
     check("debug_hook_approve", appr.get("ok") is True, str(appr))
 

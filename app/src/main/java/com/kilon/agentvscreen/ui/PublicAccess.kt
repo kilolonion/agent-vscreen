@@ -35,6 +35,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.kilon.agentvscreen.api.ApiConfig
+import com.kilon.agentvscreen.api.PublicOAuth
 import com.kilon.agentvscreen.api.Tokens
 import com.kilon.agentvscreen.host.PublicAccess
 import com.kilon.agentvscreen.host.StrongConfirm
@@ -45,6 +46,7 @@ import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -54,12 +56,13 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 2.0.0-beta8 (A.3, B1, F.1, F.4, F.5): dedicated public MCP access page.
  *
  * - Unified header across checklist / running states (`resetScrollKey = enabled`).
- * - Prerequisite checklist checks all 5 items at once, gives a one-tap remediation button for each
+ * - Prerequisite checklist checks all items at once, gives a one-tap remediation button for each
  *   missing item (preferring Tailscale `QueryFeature` URL, falling back to Admin DNS/ACL + copyable
  *   `nodeAttrs` snippet), and auto-rechecks on `ON_RESUME` and while `ShouldWait` is true.
  * - Risk consent is persisted by version (`PublicAccess.RISK_CONSENT_VERSION`) so it is asked once.
- * - `PUBLIC_ENABLE` strong confirmation runs only at the last tap once all 5 checks pass.
+ * - `PUBLIC_ENABLE` strong confirmation runs only at the last tap once all checks pass.
  * - Running status distinguishes `starting`, `cert` ("正在申请 HTTPS 证书，首次约 30–60 秒"), `on`, and `error`.
+ * - User-initiated pairing-code claim (`PublicPairingCodeCard`) + optional strict pairing window mode.
  */
 @Composable
 fun PublicAccessPage() {
@@ -79,8 +82,8 @@ fun PublicAccessPage() {
     val mcpUrl = remember(ts.dnsName, channel, cfCfg, ngCfg) { PublicAccess.mcpUrl() }
 
     MiuixPage(
-        title = tr("云端（公网 MCP）", "Cloud (Public MCP)"),
-        subtitle = tr("供云端 MCP 客户端连接 · ${channel.title}", "For cloud MCP clients · ${channel.title}"),
+        title = tr("云端（公网 MCP · 实验性）", "Cloud (Public MCP · Experimental)"),
+        subtitle = tr("实验性功能 · 供云端 MCP 客户端连接 · ${channel.title}", "Experimental · For cloud MCP clients · ${channel.title}"),
         resetScrollKey = enabled,
     ) {
         PublicChannelPicker()
@@ -202,7 +205,133 @@ fun WrappableCode(text: String, onCopy: () -> Unit) {
     }
 }
 
-/** Running status card + wrappable MCP URL + Turn Off button, shared by [PublicAccessPage] and [NewAgentPage]. */
+/**
+ * User-initiated pairing-code entry card plus optional strict pairing window control.
+ * Shared by [PublicRunningSection] and Step 3 of [NewAgentPage].
+ */
+@Composable
+fun PublicPairingCodeCard() {
+    val ctx = LocalContext.current
+    val actx = ctx.applicationContext
+    val host = LocalHost.current
+    val strictWindow by PublicAccess.strictPairingWindowFlow.collectAsState()
+    val windowUntil by PublicAccess.pairingWindowUntilFlow.collectAsState()
+    val now = rememberNow()
+    var codeInput by remember { mutableStateOf("") }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+
+    fun submit(raw: String) {
+        when (PublicOAuth.claimPairingByCode(actx, raw, openActivity = true)) {
+            is PublicOAuth.ClaimResult.Opened -> {
+                codeInput = ""
+                errorMsg = null
+            }
+            PublicOAuth.ClaimResult.InvalidFormat -> {
+                errorMsg = tr("配对码应为 8 位字母或数字（如 ABCD-EFGH，不含 0/O/1/I）。", "Pairing code must be 8 letters/digits (e.g. ABCD-EFGH, without 0/O/1/I).")
+            }
+            PublicOAuth.ClaimResult.NotFound -> {
+                errorMsg = tr("没有找到对应的待配对请求，请核对配对码是否输错。", "No waiting pairing request matches this code. Please double-check it.")
+            }
+            PublicOAuth.ClaimResult.Expired -> {
+                errorMsg = tr("这条配对请求已过期或已处理，请在客户端重新发起连接。", "This pairing request expired or was already handled. Start pairing again from the client.")
+            }
+            PublicOAuth.ClaimResult.TooManyActive -> {
+                errorMsg = tr("当前有太多待确认的配对卡片，请先处理“等你处理”里的请求。", "Too many pairing cards are open right now. Handle existing requests in Needs you first.")
+            }
+            PublicOAuth.ClaimResult.NoLockscreen -> {
+                errorMsg = tr("手机未设置锁屏密码或生物识别，无法批准公网配对。", "Set a screen lock PIN or biometric on the phone before approving public pairings.")
+            }
+        }
+    }
+
+    Group(tr("配对新客户端", "Pair a new client"), padded = true) {
+        Text(
+            tr(
+                "外部发起连接时手机不会自动弹窗。请在下方输入浏览器或 agent 给你的 8 位配对码，打开确认卡核对来源地址后批准。",
+                "Incoming requests never pop up automatically. Enter the 8-character pairing code from your browser or agent below to review the source address and approve.",
+            ),
+            fontSize = 13.sp,
+            lineHeight = 19.sp,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        )
+        TextField(
+            value = codeInput,
+            onValueChange = { codeInput = it; errorMsg = null },
+            label = tr("8 位配对码（如 ABCD-EFGH）", "8-character pairing code (e.g. ABCD-EFGH)"),
+            useLabelAsPlaceholder = true,
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        errorMsg?.let { err ->
+            Text(err, fontSize = 12.5.sp, lineHeight = 18.sp, color = MiuixTheme.colorScheme.error)
+        }
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SoftButton(
+                onClick = {
+                    val clip = runCatching {
+                        ctx.getSystemService(android.content.ClipboardManager::class.java)
+                            ?.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString()
+                    }.getOrNull()
+                    if (clip.isNullOrBlank()) {
+                        host.say(tr("剪贴板是空的", "Clipboard is empty"))
+                    } else {
+                        codeInput = clip.trim()
+                        errorMsg = null
+                    }
+                },
+            ) {
+                Text(tr("粘贴", "Paste"), color = MiuixTheme.colorScheme.primary)
+            }
+            PrimaryButton(
+                onClick = { submit(codeInput) },
+                enabled = codeInput.isNotBlank(),
+                modifier = Modifier.weight(1f),
+                color = MiuixTheme.colorScheme.primary,
+            ) {
+                Text(tr("核对并确认", "Verify & confirm"), color = MiuixTheme.colorScheme.onPrimary)
+            }
+        }
+        SwitchRow(
+            title = tr("仅在手动开启窗口时允许新配对", "Only allow new pairings during a manual window"),
+            sub = tr(
+                "开启后，默认拒绝所有新客户端注册与配对，配对前先开 3 分钟窗口；已授权客户端不受影响。",
+                "When on, new client registrations and pairings are rejected unless you open a 3-minute window; authorized clients keep working.",
+            ),
+            checked = strictWindow,
+            onChange = { PublicAccess.setStrictPairingWindow(actx, it) },
+        )
+        if (strictWindow) {
+            val leftMs = (windowUntil - now).coerceAtLeast(0L)
+            if (leftMs > 0L) {
+                val sec = (leftMs + 999L) / 1000L
+                val fmt = "%d:%02d".format(java.util.Locale.ROOT, sec / 60, sec % 60)
+                InfoCard(
+                    Palette.takeover,
+                    tr("配对窗口已开启 · 剩余 $fmt", "Pairing window open · $fmt left"),
+                    tr("现在可以发起新客户端配对；批准后会自动关闭。", "New clients can initiate pairing now; the window closes automatically after approval."),
+                )
+                SoftButton(
+                    onClick = { PublicAccess.closePairingWindow() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(tr("立即关闭窗口", "Close window now"), color = MiuixTheme.colorScheme.error)
+                }
+            } else {
+                SoftButton(
+                    onClick = { PublicAccess.openPairingWindow() },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(tr("开启配对窗口（3 分钟）", "Open pairing window (3 min)"), color = MiuixTheme.colorScheme.primary)
+                }
+            }
+        }
+    }
+}
+
+/** Running status card + wrappable MCP URL + pairing-code claim + Turn Off button, shared by [PublicAccessPage] and [NewAgentPage]. */
 @Composable
 fun PublicRunningSection(
     ts: Tailnet.Status,
@@ -224,8 +353,8 @@ fun PublicRunningSection(
                     Palette.takeover,
                     tr("公网接入已开启", "Public access is on"),
                     tr(
-                        "HTTPS 证书已就绪，云端 MCP 客户端可连接下方地址。24 小时无请求自动关闭，App 更新后恢复关闭。",
-                        "HTTPS certificate is ready. Cloud MCP clients can connect below. Auto-closes after 24 h idle and resets to off after app updates.",
+                        "HTTPS 证书已就绪，云端 MCP 客户端可连接下方地址。24 小时无已认证请求自动关闭，App 更新后恢复关闭。",
+                        "HTTPS certificate is ready. Cloud MCP clients can connect below. Auto-closes after 24 h with no authenticated requests and resets to off after app updates.",
                     ),
                 )
                 if (mcpUrl != null) {
@@ -291,6 +420,7 @@ fun PublicRunningSection(
             }
         }
     }
+    PublicPairingCodeCard()
 }
 
 /**
@@ -439,8 +569,8 @@ fun PublicChecklistSection(
         } else {
             val warnings = listOf(
                 tr(
-                    "1. 开启后，你的手机会有一个任何人都能访问的公网地址。这个地址会出现在公开的证书日志里，可能被扫描到。没有你在手机上确认，谁也连不进来。",
-                    "1. Once enabled, your phone will have a public address reachable by anyone. This address appears in public certificate logs and may be scanned. Nobody can connect without your confirmation on the phone.",
+                    "1. 开启后，你的手机会有一个任何人都能访问的公网地址。这个地址会出现在公开的证书日志里，可能被扫描到。外部连接不会自动弹窗，必须由你在手机上输入配对码并验证指纹后才能接入。",
+                    "1. Once enabled, your phone will have a public address reachable by anyone. This address appears in public certificate logs and may be scanned. Incoming requests never pop up automatically; nothing connects until you enter the pairing code on the phone and confirm with your fingerprint.",
                 ),
                 tr(
                     "2. 你授权的云端客户端会保存访问凭证。如果那个服务被入侵，对方可以在凭证有效期内操作你的手机。不用时请关闭或撤销。",
@@ -451,8 +581,8 @@ fun PublicChecklistSection(
                     "3. Text on the screen may contain malicious instructions written for the agent (such as content in web pages or messages). Payments, sending messages, installs, and similar actions will still require your confirmation on the phone.",
                 ),
                 tr(
-                    "4. 默认只给“查看”权限；“系统”权限永远不会开放到公网。",
-                    "4. Access defaults to \"look\" only; \"system\" scope is never exposed to the public internet.",
+                    "4. 配对确认页默认选中“省心”档位（可点击和输入，付款/发送/安装等高风险操作仍需确认），批准前可改为“只看”或“谨慎”；“系统”权限永远不会开放到公网。",
+                    "4. Pairing confirmation defaults to \"Easy\" (tap and type; payments, sending, installs, and other high-risk actions still prompt) and can be changed to \"Look only\" or \"Careful\" before approving; \"system\" scope is never exposed to the public internet.",
                 ),
             )
             val shown = when (channel) {

@@ -37,9 +37,11 @@ object PublicAccess {
     private const val KEY_VERSION_CODE = "enabled_version_code"
     private const val KEY_LAST_ACTIVITY = "last_activity_at"
     private const val KEY_RISK_CONSENT_VERSION = "risk_consent_version"
+    private const val KEY_STRICT_PAIRING_WINDOW = "strict_pairing_window"
 
-    /** Bump only when the 4-point risk disclosure text changes and requires re-acceptance (beta8 B1). */
-    const val RISK_CONSENT_VERSION = 1
+    /** Bump only when the risk disclosure text changes and requires re-acceptance. */
+    const val RISK_CONSENT_VERSION = 2
+    const val PAIRING_WINDOW_MS = 3L * 60_000L
 
     const val ADMIN_DNS_URL = "https://login.tailscale.com/admin/dns"
     const val ADMIN_ACL_URL = "https://login.tailscale.com/admin/acls/file"
@@ -135,6 +137,14 @@ object PublicAccess {
     val riskConsentAccepted: Boolean get() = _riskConsentAccepted.value
     @Volatile private var savedConsentVersion: Int = 0
 
+    private val _strictPairingWindow = MutableStateFlow(false)
+    val strictPairingWindowFlow: StateFlow<Boolean> = _strictPairingWindow.asStateFlow()
+    val strictPairingWindow: Boolean get() = _strictPairingWindow.value
+
+    private val _pairingWindowUntil = MutableStateFlow(0L)
+    val pairingWindowUntilFlow: StateFlow<Long> = _pairingWindowUntil.asStateFlow()
+    val pairingWindowUntil: Long get() = _pairingWindowUntil.value
+
     @Volatile var secret: String = newSecret(); private set
     @Volatile var server: PublicServer? = null; private set
     @Volatile var lastActivityAt: Long = 0L; private set
@@ -150,6 +160,8 @@ object PublicAccess {
         val p = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs = p
         _channel.value = Channel.of(p.getString(KEY_CHANNEL, null))
+        _strictPairingWindow.value = p.getBoolean(KEY_STRICT_PAIRING_WINDOW, false)
+        _pairingWindowUntil.value = 0L
         Cloudflared.init(ctx)
         Ngrok.init(ctx)
         PublicOAuth.init(ctx)
@@ -169,6 +181,32 @@ object PublicAccess {
             _enabled.value = savedEnabled
         }
     }
+
+    /** Optional strict mode: reject public registration & pairing unless the user explicitly opened a short pairing window. */
+    fun setStrictPairingWindow(ctx: Context? = null, strict: Boolean) {
+        _strictPairingWindow.value = strict
+        if (!strict) _pairingWindowUntil.value = 0L
+        val p = prefs ?: ctx?.applicationContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)?.also { prefs = it }
+        p?.edit()?.putBoolean(KEY_STRICT_PAIRING_WINDOW, strict)?.apply()
+        Audit.security("public_strict_pairing_window", "enabled=$strict")
+    }
+
+    /** Open the strict pairing window for [durationMs] (default 3 minutes). */
+    fun openPairingWindow(durationMs: Long = PAIRING_WINDOW_MS): Long {
+        val until = clock() + durationMs.coerceAtLeast(30_000L)
+        _pairingWindowUntil.value = until
+        Audit.security("public_pairing_window_opened", "ms=${until - clock()}")
+        return until
+    }
+
+    fun closePairingWindow() {
+        if (_pairingWindowUntil.value != 0L) {
+            _pairingWindowUntil.value = 0L
+            Audit.security("public_pairing_window_closed", "")
+        }
+    }
+
+    fun isPairingAllowed(nowMs: Long = clock()): Boolean = !strictPairingWindow || nowMs < pairingWindowUntil
 
     /** Record acceptance of the current risk disclosure version so the user is not prompted again unless the text changes. */
     fun acceptRiskConsent(ctx: Context? = null, version: Int = RISK_CONSENT_VERSION) {
@@ -567,6 +605,7 @@ object PublicAccess {
         val app = ctx.applicationContext
         val wasOn = _enabled.value
         _enabled.value = false
+        closePairingWindow()
         prefs?.edit()?.putBoolean(KEY_ENABLED, false)?.apply()
         stopTunnels("disabled: $why")
         stopServer()
@@ -581,7 +620,7 @@ object PublicAccess {
         }
     }
 
-    /** Record activity from any valid public HTTP request for the 24 h idle auto-close timer. */
+    /** Record authenticated public activity (valid MCP Bearer or HTTP 200 /oauth/token) for the 24 h idle auto-close timer. */
     fun noteActivity() {
         val now = clock()
         if (now - lastActivityAt >= 60_000L || lastActivityAt == 0L) {
@@ -592,7 +631,7 @@ object PublicAccess {
         }
     }
 
-    /** Called periodically by [HostService]; auto-closes Funnel after 24 h of public inactivity (7.4). */
+    /** Called periodically by [HostService]; auto-closes public access after 24 h without authenticated public activity (7.4). */
     fun checkIdle(ctx: Context, nowMs: Long = clock()): Boolean {
         if (!enabled) return false
         val last = lastActivityAt
@@ -692,17 +731,21 @@ object PublicAccess {
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
             )
             val addr = mcpUrl()
-            val title = when (funnelState) {
-                "on" -> tr("公网接入已开启", "Public access is on")
-                "cert" -> tr("公网接入正在申请证书", "Public access: fetching certificate")
-                "error" -> tr("公网接入启动失败", "Public access failed to start")
+            val chTitle = channel.title
+            val isTunnel = channel.tunnel != null
+            val title = when {
+                isTunnel -> tr("公网接入已开启（$chTitle）", "Public access is on ($chTitle)")
+                funnelState == "on" -> tr("公网接入已开启", "Public access is on")
+                funnelState == "cert" -> tr("公网接入正在申请证书", "Public access: fetching certificate")
+                funnelState == "error" -> tr("公网接入启动失败", "Public access failed to start")
                 else -> tr("公网接入启动中", "Public access starting")
             }
-            val body = when (funnelState) {
-                "on" -> addr ?: tr("正在通过 Tailscale Funnel 提供公网 MCP 入口；不使用时可随时关闭。", "Serving public MCP via Tailscale Funnel; tap Off when not needed.")
-                "cert" -> tr("正在申请 HTTPS 证书，首次约 30–60 秒。", "Requesting HTTPS certificate; first time takes ~30–60 seconds.")
-                "error" -> Tailnet.status.value.funnelReason ?: tr("请打开 App 查看原因", "Open the app to inspect the error")
-                else -> addr ?: tr("正在启动 Tailscale Funnel…", "Starting Tailscale Funnel…")
+            val body = when {
+                isTunnel -> addr ?: tr("正在通过 $chTitle 提供公网 MCP 入口；不使用时可随时关闭。", "Serving public MCP via $chTitle; tap Off when not needed.")
+                funnelState == "on" -> addr ?: tr("正在通过 $chTitle 提供公网 MCP 入口；不使用时可随时关闭。", "Serving public MCP via $chTitle; tap Off when not needed.")
+                funnelState == "cert" -> tr("正在申请 HTTPS 证书，首次约 30–60 秒。", "Requesting HTTPS certificate; first time takes ~30–60 seconds.")
+                funnelState == "error" -> Tailnet.status.value.funnelReason ?: tr("请打开 App 查看原因", "Open the app to inspect the error")
+                else -> addr ?: tr("正在启动 $chTitle…", "Starting $chTitle…")
             }
             val n = NotificationCompat.Builder(ctx, NOTE_CHANNEL)
                 .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
@@ -719,7 +762,7 @@ object PublicAccess {
 
     /** Called when tsbridge reports a new Funnel state so the ongoing notification reflects real cert/on readiness (A.3 / C1). */
     fun onFunnelStateChanged(ctx: Context, funnelState: String?) {
-        if (enabled) showOngoingNotification(ctx.applicationContext, funnelState)
+        if (enabled && channel == Channel.TAILSCALE) showOngoingNotification(ctx.applicationContext, funnelState)
     }
 
     private fun cancelOngoingNotification(ctx: Context) {
@@ -737,7 +780,7 @@ object PublicAccess {
             val n = NotificationCompat.Builder(ctx, NOTE_CHANNEL)
                 .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
                 .setContentTitle(tr("公网接入已自动关闭", "Public access turned off automatically"))
-                .setContentText(tr("24 小时没有任何公网请求，已关闭 Funnel。需要时可在设置里重新开启。", "No public requests for 24 hours, so Funnel was turned off. Re-enable in Settings when needed."))
+                .setContentText(tr("24 小时没有已认证的公网请求，已自动关闭 ${channel.title}。需要时可在页面里重新开启。", "No authenticated public requests for 24 hours, so ${channel.title} was turned off. Re-enable when needed."))
                 .setContentIntent(openPublicIntent(ctx))
                 .setAutoCancel(true)
                 .build()
@@ -750,6 +793,8 @@ object PublicAccess {
         _enabled.value = false
         savedConsentVersion = 0
         _riskConsentAccepted.value = false
+        _strictPairingWindow.value = false
+        _pairingWindowUntil.value = 0L
         lastActivityAt = 0L
         clock = { System.currentTimeMillis() }
         currentVersionCode = { BuildConfig.VERSION_CODE }

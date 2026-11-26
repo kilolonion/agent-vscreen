@@ -369,7 +369,7 @@ fun NewAgentPage() {
                 Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
             RadioButtonPreference(
-                title = tr("云端（公网 MCP）", "Cloud (Public MCP)"),
+                title = tr("云端（公网 MCP · 实验性）", "Cloud (Public MCP · Experimental)"),
                 summary = tr("Claude、ChatGPT 等云端客户端，通过 Tailscale Funnel、Cloudflare Tunnel 或 ngrok 配对连接", "Cloud MCP clients via Tailscale Funnel, Cloudflare Tunnel or ngrok with on-phone pairing"),
                 selected = where == 2,
                 onClick = { where = 2 },
@@ -437,7 +437,8 @@ fun NewAgentPage() {
                             Text(tr("复制给 agent 的话", "Copy message for your agent"), color = MiuixTheme.colorScheme.onPrimary)
                         }
                     }
-                    Footnote(tr("第一次连接时会打开授权页，在这台手机上核对配对码批准；不需要令牌。", "The first connection opens an approval page; check the pairing code on this phone and approve. No token is needed."))
+                    PublicPairingCodeCard()
+                    Footnote(tr("外部连接不会自动弹窗：客户端或浏览器显示 8 位配对码后，在上方输入配对码核对来源地址并批准；不需要令牌。", "Incoming requests never pop up automatically: once the client or browser shows an 8-character pairing code, enter it above to verify the source address and approve. No token is needed."))
                     WizardStatus(where, null, openedAt)
                     Group(tr("预览", "Preview")) {
                         ArrowPreference(title = tr("完整消息", "Full message"), endActions = { Value(if (raw) tr("收起", "Hide") else tr("查看", "Show")) }, onClick = { raw = !raw })

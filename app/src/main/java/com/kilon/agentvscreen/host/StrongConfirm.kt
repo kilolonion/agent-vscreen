@@ -142,10 +142,11 @@ object StrongConfirm {
         val reusable: Boolean = false,
         val allowHold: Boolean = true,
         val onApprove: (() -> Unit)? = null,
-        /** 2.0.0-beta7 (7.2, 7.7): public OAuth NEW_CLIENT pairing code, client name, redirect host & scope picker. */
+        /** 2.0.0-beta7 (7.2, 7.7): public OAuth NEW_CLIENT pairing code, client name, redirect host, source address & scope picker. */
         val pairingCode: String? = null,
         val publicClientName: String? = null,
         val redirectHost: String? = null,
+        val sourceAddress: String? = null,
         val selectableScopes: List<String> = emptyList(),
         val defaultScope: String = "look",
         val onApproveWithScope: ((String) -> Unit)? = null,
@@ -528,7 +529,7 @@ object StrongConfirm {
                 tokenScope = "operate",
                 client = Risk.CLIENT_LOCAL,
                 commandName = tr("开启公网 MCP 接入", "Enable public MCP access"),
-                detail = tr("开启后将通过 Tailscale Funnel 提供公网 HTTPS MCP 入口", "Enables a public HTTPS MCP endpoint via Tailscale Funnel"),
+                detail = tr("开启后将通过 ${PublicAccess.channel.title} 提供公网 HTTPS MCP 入口", "Enables a public HTTPS MCP endpoint via ${PublicAccess.channel.title}"),
                 at = now,
                 validMs = VALID_MS,
                 reusable = false,
@@ -543,8 +544,9 @@ object StrongConfirm {
     }
 
     /**
-     * 2.0.0-beta7 (7.2, 7.7, 7.8 #5): strong confirmation (`NEW_CLIENT`) for a public OAuth pairing.
-     * Displays pairing code, client_name, redirect_uri host, and look/operate picker (never system, never hold).
+     * Public OAuth pairing strong confirmation (`NEW_CLIENT`), created ONLY after the user enters the agent's
+     * pairing code on the phone. Displays pairing code, self-reported client name, source address, redirect host,
+     * and permission level picker (never `system`, never hold-to-confirm).
      */
     fun createPublicPairingRequest(
         ctx: Context,
@@ -557,6 +559,8 @@ object StrongConfirm {
         validMs: Long,
         onApproveWithScope: (String) -> Unit,
         onDeny: () -> Unit,
+        sourceAddress: String? = null,
+        postNotify: Boolean = true,
     ): Request {
         // 2.0.0-beta8 (feedback 2): the pairing card offers levels; operate in the OAuth grant opens careful / free.
         val safeScopes = if ("operate" in selectableScopes) Tokens.PUBLIC_LEVELS else listOf(Tokens.LOOK)
@@ -582,6 +586,7 @@ object StrongConfirm {
                 pairingCode = pairingCode,
                 publicClientName = clientName,
                 redirectHost = redirectHost,
+                sourceAddress = sourceAddress,
                 selectableScopes = safeScopes,
                 // rainbow (P10): a default of "look" was approved without a glance and every later act failed;
                 // default to the most the client asked for that the user would usually give (Easy), shown plainly.
@@ -593,9 +598,11 @@ object StrongConfirm {
                 publishPendingLocked(now)
             }
         }
-        notify(ctx, req)
-        if (AppFront.visible) {
-            quiet("public-pairing-open") { com.kilon.agentvscreen.ui.StrongConfirmActivity.open(ctx, req.id) }
+        if (postNotify) {
+            notify(ctx, req)
+            if (AppFront.visible) {
+                quiet("public-pairing-open") { com.kilon.agentvscreen.ui.StrongConfirmActivity.open(ctx, req.id) }
+            }
         }
         return req
     }

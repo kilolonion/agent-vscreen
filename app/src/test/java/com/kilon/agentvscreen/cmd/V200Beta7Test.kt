@@ -92,7 +92,17 @@ class V200Beta7Test {
         Risk.resetForTests()
     }
 
+    private fun claimLatestIfNeeded() {
+        if (lastApprove == null && lastDeny == null) {
+            val pairing = PublicOAuth.latestPendingPairingForTests()
+            assertNotNull("no queued pairing to claim", pairing)
+            val res = PublicOAuth.claimPairingByCode(ctx, pairing!!.code, openActivity = false)
+            assertTrue("expected ClaimResult.Opened, got $res", res is PublicOAuth.ClaimResult.Opened)
+        }
+    }
+
     private fun approveLatestPairing(scope: String = "look") {
+        claimLatestIfNeeded()
         val fn = lastApprove
         lastApprove = null
         lastDeny = null
@@ -101,6 +111,7 @@ class V200Beta7Test {
     }
 
     private fun denyLatestPairing() {
+        claimLatestIfNeeded()
         val fn = lastDeny
         lastApprove = null
         lastDeny = null

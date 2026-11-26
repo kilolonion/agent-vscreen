@@ -68,6 +68,17 @@ internal object PublicTestHook {
                     .put("local_port", HostService.server?.boundPort ?: 0)
                     .put("tailnet_secret", Tailnet.secret)
             }
+            cmd == "pending_count" -> {
+                val n = com.kilon.agentvscreen.host.StrongConfirm.pending.value.count { it.pairingCode != null }
+                out.put("ok", true).put("pending_pairings", n)
+            }
+            cmd.startsWith("claim:") -> {
+                val code = cmd.removePrefix("claim:")
+                when (val res = PublicOAuth.claimPairingByCode(app, code, openActivity = false)) {
+                    is PublicOAuth.ClaimResult.Opened -> out.put("ok", true).put("confirm_id", res.confirmId).put("pairing_id", res.pairingId)
+                    else -> out.put("ok", false).put("error", res.javaClass.simpleName)
+                }
+            }
             cmd == "approve" || cmd.startsWith("approve:") -> {
                 val scope = cmd.substringAfter(':', "look").ifBlank { "look" }
                 val fn = synchronized(lock) { pendingApprove.also { pendingApprove = null; pendingDeny = null } }
