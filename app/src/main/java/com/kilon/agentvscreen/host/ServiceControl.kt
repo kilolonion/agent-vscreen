@@ -37,6 +37,7 @@ object ServiceControl {
     @Volatile var wokeBy: String? = null; private set
 
     fun now(ctx: Context): State = when {
+        ThermalGuard.locked -> State.BLOCKED
         Prefs.serviceOn(ctx) -> State.ON
         Prefs.blocked(ctx) -> State.BLOCKED
         else -> State.HIDDEN
@@ -51,14 +52,18 @@ object ServiceControl {
     fun hhmm(at: Long): String = java.text.SimpleDateFormat("HH:mm", java.util.Locale.ROOT).format(java.util.Date(at))
 
     fun turnOn(ctx: Context, why: String) {
+        if (ThermalGuard.locked) return
+        val wasOff = Prefs.blocked(ctx)
         Prefs.setServiceOn(ctx, true); Prefs.setBlocked(ctx, false)
         HostService.start(ctx)
+        if (wasOff) { restoreAfterOff(ctx); runCatching { Wake.arm(ctx) } }
         now(ctx)
         AppLogger.info("ServiceControl", "on: $why")
     }
 
     /** Out of the shade and the background; still woken by whatever needs it. */
     fun hide(ctx: Context, why: String) {
+        if (ThermalGuard.locked) return
         Prefs.setServiceOn(ctx, false); Prefs.setBlocked(ctx, false)
         HostService.ensureServer(ctx)
         BackgroundOperation.stopAndRelease(tr("服务改成按需（agent 用到时会再叫醒）", "The service is on demand now (an agent wakes it when needed)"))
@@ -67,9 +72,21 @@ object ServiceControl {
         AppLogger.info("ServiceControl", "hidden: $why")
     }
 
-    /** Agents may not use the phone until the user says so. */
+    /**
+     * Agents may not use the phone until the user says so.
+     *
+     * 2.0.0-beta12 (rainbow: "关闭" must close it like killing it from recents, or we are as hard to get rid of as
+     * malware): off leaves nothing running: public access (its tunnels and server; remembered, and turned back on with
+     * the service), the built-in Tailscale node, watches, tasks, booked-window alarms, the screen and the privileged
+     * screen service process, and at last this app's own process once none of its pages is open.
+     */
     fun block(ctx: Context, why: String) {
+        val app = ctx.applicationContext
+        val publicWasOn = PublicAccess.enabled
+        offPrefs(app).edit().putBoolean(K_PUBLIC_WAS_ON, publicWasOn).apply()
+        if (publicWasOn) runCatching { PublicAccess.disable(app, "service_off") }
         Prefs.setServiceOn(ctx, false); Prefs.setBlocked(ctx, true)
+        runCatching { com.kilon.agentvscreen.cmd.Tasks.cancelForHeat() }
         // 1.4.2-beta6: off at once, not when the service gets round to onDestroy: until then a command still running
         // reconnected by itself (acquire connects whenever the service is on) and built a new screen to go on with.
         BackgroundOperation.setEnabled(false, tr("用户关闭了 Agent-VScreen", "The user turned Agent-VScreen off"))
@@ -77,14 +94,81 @@ object ServiceControl {
         // 1.4.0-beta4: off is off: watches (their own notification) end too.
         runCatching { com.kilon.agentvscreen.core.VScreenRules.stopAll(tr("用户关闭了服务", "the user turned the service off")) }
         HostService.stop(ctx)
+        runCatching { Tailnet.stop("service off") }
+        runCatching { Wake.arm(app) }
         now(ctx)
         AppLogger.info("ServiceControl", "blocked: $why")
+        Thread({
+            // The screen is released above; then the privileged screen service process goes (it is a daemon that
+            // otherwise outlives us so a restarted app can adopt its screen), then our own process when unseen.
+            runCatching { Thread.sleep(1_500) }
+            if (!Prefs.blocked(app)) return@Thread
+            runCatching { com.kilon.agentvscreen.core.VScreenRemoteDisplay.shutdown() }
+            exitWhenUnseen(app)
+        }, "vscreen-off").apply { isDaemon = true }.start()
+    }
+
+    private const val K_PUBLIC_WAS_ON = "public_was_on"
+    private fun offPrefs(ctx: Context) = ctx.getSharedPreferences("service_off_v1", Context.MODE_PRIVATE)
+
+    /** Back on after "off": public access comes back if it was on when the service was turned off. */
+    private fun restoreAfterOff(ctx: Context) {
+        val p = offPrefs(ctx)
+        if (!p.getBoolean(K_PUBLIC_WAS_ON, false)) return
+        p.edit().remove(K_PUBLIC_WAS_ON).apply()
+        if (!PublicAccess.enabled) runCatching { PublicAccess.enable(ctx) }
+            .onFailure { AppLogger.warning("ServiceControl", "public access not restored: ${it.message}") }
+    }
+
+    @Volatile private var exitWatch = false
+    private var startedPages = 0
+
+    /**
+     * End this process once the service is off and no page of the app is on screen (now, or when the last one goes).
+     * Waits 2 s after the last page stops so a rotation or a page switch does not count.
+     */
+    private fun exitWhenUnseen(app: Context) {
+        val a = app as? android.app.Application ?: return
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        fun check() {
+            // 2.0.0-beta15 (test B8: after 关闭 and HOME the same process stayed, still listed in recents): the process
+            // importance used here never fell below "visible" while the accessibility service is bound by the system,
+            // so the process never ended. Whether a page is open is now our own count of started pages, and the app's
+            // tasks leave the recents list before the process ends. (With accessibility on, Android starts the process
+            // again for that service alone; nothing else runs until the user turns the service back on.)
+            if (!Prefs.blocked(app) || startedPages > 0 || AppFront.visible || HostService.isAlive) return
+            AppLogger.info("ServiceControl", "off: no page open, process ends")
+            runCatching { app.getSystemService(android.app.ActivityManager::class.java)?.appTasks?.forEach { t -> runCatching { t.finishAndRemoveTask() } } }
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }
+        main.post {
+            if (!exitWatch) {
+                exitWatch = true
+                startedPages = if (AppFront.visible) 1 else 0
+                a.registerActivityLifecycleCallbacks(object : android.app.Application.ActivityLifecycleCallbacks {
+                    override fun onActivityStarted(act: android.app.Activity) { startedPages++ }
+                    override fun onActivityStopped(act: android.app.Activity) {
+                        startedPages = (startedPages - 1).coerceAtLeast(0)
+                        if (startedPages == 0) main.postDelayed({ check() }, 2_000L)
+                    }
+                    override fun onActivityCreated(act: android.app.Activity, b: android.os.Bundle?) {}
+                    override fun onActivityResumed(act: android.app.Activity) {}
+                    override fun onActivityPaused(act: android.app.Activity) {}
+                    override fun onActivitySaveInstanceState(act: android.app.Activity, b: android.os.Bundle) {}
+                    override fun onActivityDestroyed(act: android.app.Activity) {}
+                })
+            }
+            main.postDelayed({ check() }, 2_000L)
+        }
     }
 
     /** From blocked back to hidden (woken on demand) without turning it on. */
     fun allow(ctx: Context, why: String) {
+        if (ThermalGuard.locked) return
+        val wasOff = Prefs.blocked(ctx)
         Prefs.setBlocked(ctx, false); now(ctx)
         HostService.ensureServer(ctx)
+        if (wasOff) { restoreAfterOff(ctx); runCatching { Wake.arm(ctx) } }
         AppLogger.info("ServiceControl", "allowed (hidden): $why")
     }
 
@@ -113,6 +197,7 @@ object ServiceControl {
         if (BackgroundOperation.state.value.displayId != null) return false
         if (Wake.windowOpen(ctx, t)) return false
         if (UserAsk.open.value.any { it.live }) return false
+        if (PublicAccess.enabled) return false
         if (runCatching { com.kilon.agentvscreen.core.VScreenRules.running().isNotEmpty() || com.kilon.agentvscreen.cmd.Tasks.running() > 0 }.getOrDefault(false)) return false
         return true
     }
@@ -129,7 +214,7 @@ object ServiceControl {
         State.ON -> null
         State.HIDDEN -> if (HostService.isAlive) tr("用完会自己收起", "It hides again when done")
             else tr("agent 用到时自动唤起，用完再收起", "Woken when an agent needs it, hidden again after")
-        State.BLOCKED -> tr("什么都叫不醒它，点右上角的电源键恢复", "Nothing wakes it; the power button at the top resumes it")
+        State.BLOCKED -> if (ThermalGuard.locked) ThermalGuard.reason() else tr("什么都叫不醒它，点右上角的电源键恢复", "Nothing wakes it; the power button at the top resumes it")
     }
 
     /** The full story behind the "?" next to the status line. */

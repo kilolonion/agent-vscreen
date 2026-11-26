@@ -1,0 +1,32 @@
+{
+  "id": "T10b",
+  "scene": "S10",
+  "seed": 7,
+  "since": "beta4",
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "drag 100 800 980 800 seek until text:70 in 400,600,700,700"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "value",
+      "ok": true
+    },
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 60
+}

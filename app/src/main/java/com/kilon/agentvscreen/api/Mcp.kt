@@ -41,39 +41,54 @@ internal object Mcp {
                 .put("session", JSONObject().put("type", "string").put("description", tr("可选：会话名（副屏同一时间属于一个会话）", "Optional: session name (the screen belongs to one session at a time)"))))
             .put("required", JSONArray().put("command")))
 
-    private fun typedTools(): List<JSONObject> = CommandSpec.commands.map { c ->
+    internal fun toolsList(): JSONArray = JSONArray(listOf(lineTool()) + typedTools())
+
+    private fun typedTools(): List<JSONObject> = CommandSpec.commands.filterNot { it.hidden }.map { c ->
         JSONObject().put("name", PREFIX + c.name)
-            .put("description", c.summary + "\n" + c.body.joinToString("\n"))
+            .put("description", c.description)
             .put("inputSchema", CommandSpec.inputSchema(c))
-            .put("annotations", JSONObject().put("readOnlyHint", c.scope == CommandSpec.Scope.LOOK))
+            .put("annotations", JSONObject().put("readOnlyHint", c.readOnly))
     }
+
+    /** 2.0.0-beta7 (7.8 #3): shared pre-auth check for /mcp used by both ApiServer and PublicServer. */
+    fun preAuthCheck(r: ApiServer.Req): ApiServer.Resp? =
+        if (r.path == "/mcp" && r.method != "POST") {
+            ApiServer.Resp(405, "text/plain; charset=utf-8", "MCP: POST JSON-RPC".toByteArray(), mapOf("Allow" to "POST"))
+        } else {
+            null
+        }
 
     fun handle(server: ApiServer, r: ApiServer.Req): ApiServer.Resp {
         val body = r.bodyText.trim()
         if (body.startsWith("[")) {
             val arr = runCatching { JSONArray(body) }.getOrElse { return ApiServer.Resp.json(error(null, -32700, "parse error"), 400) }
             val out = JSONArray()
-            for (i in 0 until arr.length()) one(server, r, arr.optJSONObject(i), null)?.let { out.put(it) }
-            return if (out.length() == 0) ApiServer.Resp(202, "text/plain", ByteArray(0)) else ApiServer.Resp.json(out)
+            val afterSends = ArrayList<() -> Unit>()
+            for (i in 0 until arr.length()) one(server, r, arr.optJSONObject(i), null) { fn -> fn?.let { afterSends += it } }?.let { out.put(it) }
+            val after: (() -> Unit)? = if (afterSends.isEmpty()) null else ({ afterSends.forEach { quiet("mcp-after-send") { it() } } })
+            return (if (out.length() == 0) ApiServer.Resp(202, "text/plain", ByteArray(0)) else ApiServer.Resp.json(out)).withAfterSend(after)
         }
         val msg = runCatching { JSONObject(body) }.getOrElse { return ApiServer.Resp.json(error(null, -32700, "parse error"), 400) }
         // A tool call that asked for progress, from a caller that reads an event stream: stream it.
         val token = msg.optJSONObject("params")?.optJSONObject("_meta")?.opt("progressToken")
         if (msg.optString("method") == "tools/call" && token != null && token != JSONObject.NULL && r.accepts("text/event-stream")) return ApiServer.Resp.sse { em ->
             var n = 0
-            val res = one(server, r, msg) { line ->
+            var after: (() -> Unit)? = null
+            val res = one(server, r, msg, { line ->
                 quiet("mcp-progress") { em.send("message", JSONObject().put("jsonrpc", "2.0").put("method", "notifications/progress")
                     .put("params", JSONObject().put("progressToken", token).put("progress", ++n).put("message", line)).toString()) }
-            }
+            }) { fn -> if (fn != null) after = fn }
             if (res != null) quiet("mcp-result") { em.send("message", res.toString()) }
+            after?.let { quiet("mcp-sse-after-send") { it() } }
         }
-        val res = one(server, r, msg, null) ?: return ApiServer.Resp(202, "text/plain", ByteArray(0))
+        var after: (() -> Unit)? = null
+        val res = one(server, r, msg, null) { fn -> if (fn != null) after = fn } ?: return ApiServer.Resp(202, "text/plain", ByteArray(0))
         val headers = if (msg.optString("method") == "initialize") mapOf("Mcp-Session-Id" to java.util.UUID.randomUUID().toString()) else emptyMap()
-        return ApiServer.Resp.json(res, 200, headers)
+        return ApiServer.Resp.json(res, 200, headers).withAfterSend(after)
     }
 
     /** null for notifications (no response). */
-    private fun one(server: ApiServer, r: ApiServer.Req, m: JSONObject?, onStep: ((String) -> Unit)?): JSONObject? {
+    private fun one(server: ApiServer, r: ApiServer.Req, m: JSONObject?, onStep: ((String) -> Unit)?, onAfterSend: (((() -> Unit)?) -> Unit)? = null): JSONObject? {
         if (m == null) return error(null, -32600, "invalid request")
         val id = m.opt("id")
         val method = m.optString("method")
@@ -91,7 +106,7 @@ internal object Mcp {
                         "Agent-VScreen: a background screen on this phone. To open, view or operate apps on the phone use these tools; they work on an invisible second screen, never disturb the user's screen, and need no adb.\n\n") + AgentGuide.guide().replace("`vscreen ", "`")))
             }
             "ping" -> result(id, JSONObject())
-            "tools/list" -> result(id, JSONObject().put("tools", JSONArray(listOf(lineTool()) + typedTools())))
+            "tools/list" -> result(id, JSONObject().put("tools", toolsList()))
             "tools/call" -> {
                 val name = p.optString("name")
                 val a = p.optJSONObject("arguments") ?: JSONObject()
@@ -105,6 +120,7 @@ internal object Mcp {
                 }
                 val session = server.sessionOf(r, a)
                 val (res, replayed) = server.runFor(r, argv, session, p.optJSONObject("_meta")?.optString("requestId")?.takeIf { it.isNotBlank() }, onStep)
+                onAfterSend?.invoke(res.afterSend)
                 result(id, toolResult(server, res, replayed, session))
             }
             "resources/list" -> result(id, JSONObject().put("resources", JSONArray()))
@@ -128,7 +144,14 @@ internal object Mcp {
         res.data?.let { d -> for (k in d.keys()) structured.put(k, d.get(k)) }
         structured.put("ok", res.exitCode == 0).put("code", res.codeOrDefault).put("exit", res.exitCode)
             .put("next", if (res.exitCode == 0) "none" else com.kilon.agentvscreen.cmd.Codes.next(res.codeOrDefault))
+            .put("returned_at", res.data?.optLong("returned_at")?.takeIf { it > 0L } ?: System.currentTimeMillis())
         if (replayed) structured.put("replayed", true)
+        val meter = com.kilon.agentvscreen.core.Meter.of(
+            text,
+            com.kilon.agentvscreen.core.Meter.sentDimensions(server.ctxFiles(), res, sent),
+            structured = structured.toString(),
+        )
+        structured.put("meter", meter.json())
         return JSONObject().put("content", content).put("structuredContent", structured).put("isError", res.exitCode != 0)
     }
 

@@ -165,8 +165,8 @@ object VScreenOwnership {
     /** One notification per handed-over app ("yours now", later "done with it?"); clear of the watch (7300+) and ask (7400–7899) ids. */
     fun nudgeId(pkg: String) = 8100 + (pkg.hashCode() and 0xff)
 
-    fun handBackIntent(ctx: Context, pkg: String): android.app.PendingIntent = android.app.PendingIntent.getService(ctx, nudgeId(pkg),
-        android.content.Intent(ctx, com.kilon.agentvscreen.host.HostService::class.java).setAction(com.kilon.agentvscreen.host.HostService.ACTION_HAND_BACK).putExtra("pkg", pkg),
+    fun handBackIntent(ctx: Context, pkg: String): android.app.PendingIntent = android.app.PendingIntent.getBroadcast(ctx, nudgeId(pkg),
+        android.content.Intent(ctx, com.kilon.agentvscreen.host.NoteActions::class.java).setAction(com.kilon.agentvscreen.host.HostService.ACTION_HAND_BACK).putExtra("pkg", pkg),
         android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
 
     /** Start watching (idempotent). Runs while the service runs; ticks only do work while there is a screen. */

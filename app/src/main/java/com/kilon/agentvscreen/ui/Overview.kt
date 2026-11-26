@@ -188,7 +188,7 @@ fun OverviewTab(bottom: Dp) {
                 NextUp(beat, app.tick)
                 if (tasks.isNotEmpty()) {
                     Row(Modifier.fillMaxWidth().padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        SmallTitle(tr("刚才", "Just now"), modifier = Modifier.weight(1f))
+                        SmallTitle(tr("最近", "Just now"), modifier = Modifier.weight(1f))
                         LinkButton(onClick = { nav.tab(TAB_RECORDS) }) { Text(tr("全部记录", "All records")) }
                     }
                     Card(Modifier.padding(horizontal = 12.dp).fillMaxWidth(), insideMargin = PaddingValues(0.dp)) {
@@ -439,6 +439,7 @@ private fun NeedsGroup() {
     val ctx = LocalContext.current
     val host = LocalHost.current
     val asks = pendingAsks()
+    val strongPending by com.kilon.agentvscreen.host.StrongConfirm.pending.collectAsState()
     val lessonNow by com.kilon.agentvscreen.cmd.Teach.lesson.collectAsState()
     val review = (lessonNow as? com.kilon.agentvscreen.cmd.Lesson.Review)?.result
     var sureDiscard by remember(review) { mutableStateOf(false) }
@@ -449,11 +450,20 @@ private fun NeedsGroup() {
     var tick by remember { mutableIntStateOf(0) }
     LaunchedEffect(refused.isNotEmpty()) { while (refused.isNotEmpty()) { delay(5_000); tick++ } }
     val queue = remember(refused, s.ownerSessionId, tick) { com.kilon.agentvscreen.host.Needs.waitingNow(owner = s.ownerSessionId) }
-    val n = asks.size + (if (review != null) 1 else 0) + given.size + queue.size
+    val n = strongPending.size + asks.size + (if (review != null) 1 else 0) + given.size + queue.size
     AnimatedVisibility(n > 0, enter = slideInVertically(tween(380)) { -it / 3 } + fadeIn(tween(300)) + expandVertically(tween(380)),
         exit = fadeOut(tween(220)) + shrinkVertically(tween(320))) {
         Column {
-            SmallTitle(tr("等你处理 · $n", "Waiting for you · $n"))
+            SmallTitle(tr("待处理 · $n", "Waiting for you · $n"))
+            // 2.0.0-beta6 (6.1): strong confirmation never approves inline — tapping only opens StrongConfirmActivity.
+            strongPending.firstOrNull()?.let { sc ->
+                NeedCard(
+                    tr("需要强确认：${sc.risk.title}", "Strong confirmation: ${sc.risk.title}"),
+                    tr("令牌「${sc.tokenName}」· ${com.kilon.agentvscreen.host.StrongConfirm.clientLabel(sc.client)} · ${sc.commandName}", "Token \"${sc.tokenName}\" · ${com.kilon.agentvscreen.host.StrongConfirm.clientLabel(sc.client)} · ${sc.commandName}"),
+                    tr("去确认", "Review"),
+                    { StrongConfirmActivity.open(ctx, sc.id) },
+                )
+            }
             // Questions: the newest one as a full card; it leaves to the right when answered.
             AnimatedVisibility(asks.isNotEmpty(), enter = fadeIn(tween(300)) + expandVertically(tween(380)),
                 exit = slideOutHorizontally(tween(280)) { it } + fadeOut(tween(220)) + shrinkVertically(tween(320, delayMillis = 160))) {
@@ -518,7 +528,7 @@ private fun NextUp(beat: Int, tick: Int) {
     LaunchedEffect(beat / 5, tick) { books = withContext(Dispatchers.IO) { runCatching { val now = System.currentTimeMillis(); Wake.list(ctx).filter { it.on && it.pending(now) != null } }.getOrDefault(emptyList()) } }
     val watches = remember(beat, tick) { VScreenRules.list().filter { !it.stopped } }
     if (books.isEmpty() && watches.isEmpty()) return
-    SmallTitle(tr("接下来", "Coming up"))
+    SmallTitle(tr("即将执行", "Coming up"))
     Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         books.forEach { e ->
             val next = e.pending(System.currentTimeMillis())
@@ -556,6 +566,7 @@ private fun ShieldSheet(show: Boolean, close: () -> Unit) {
             Text(ServiceControl.title(ctx) + (ServiceControl.sub(ctx)?.let { " · $it" } ?: ""), fontSize = 13.sp,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 12.dp))
             fun pick(to: ServiceControl.State) {
+                if (to != ServiceControl.State.BLOCKED && com.kilon.agentvscreen.host.ThermalGuard.locked && !com.kilon.agentvscreen.host.ThermalGuard.resumeFromPowerSheet()) { host.say(com.kilon.agentvscreen.host.ThermalGuard.reason()); return }
                 // 1.3.0: a flip back within 1.5 s is ignored (each flip restarts the Tailscale node).
                 val now = android.os.SystemClock.elapsedRealtime()
                 if (now - lastFlip < 1_500L) { host.say(tr("稍等一下再切换", "Wait a moment before switching again")); return }
@@ -575,7 +586,7 @@ private fun ShieldSheet(show: Boolean, close: () -> Unit) {
                 else tr("平时不在后台；本机 agent 或预约时间到了才叫醒，用完自己收起", "Not in the background; woken by an agent here or a booked time, then put away again"),
                 st == ServiceControl.State.HIDDEN) { pick(ServiceControl.State.HIDDEN) }
             ServiceChoice(Icons.Filled.Block, tr("关闭", "Off"),
-                tr("马上停下并退出通知栏，什么都叫不醒它，直到你回来选别的", "Stops now and leaves the shade; nothing wakes it until you choose again here"),
+                tr("全部停下，公网和远程也关，离开应用后不留后台；再打开时公网自动恢复", "Everything stops, public and remote access too, nothing stays in the background once you leave; public access comes back when you turn it on"),
                 st == ServiceControl.State.BLOCKED, danger = true) { pick(ServiceControl.State.BLOCKED) }
             HostService.server?.lastError?.let { e -> Note(e, Palette.stopped, Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) }
             if (HostService.server?.lastError == null) HostService.server?.portNote?.let { n -> Note(n, MiuixTheme.colorScheme.onSurfaceVariantSummary, Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) }

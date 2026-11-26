@@ -153,6 +153,25 @@ private fun VScreenOffloadHandler.wmFit(sid: String, pkg: String): String? {
 
 // ── handoff ──────────────────────────────────────────────────────────
 
+internal fun VScreenOffloadHandler.isOwnPackage(pkg: String?): Boolean =
+    !pkg.isNullOrBlank() && pkg == context.packageName
+
+/**
+ * 2.0.0-beta6 (6.1 L3 / 6.10 #3): single App-side gate refusing to put our own package onto a background screen
+ * (called by `launch`, `handoff in`, `handoff park`, and `handoff unpark`).
+ */
+internal fun VScreenOffloadHandler.requireNotOwnPackage(pkg: String?) {
+    if (isOwnPackage(pkg)) {
+        throw ActionError(
+            "PROTECTED_APP",
+            tr(
+                "Agent-VScreen 自己的页面只能在手机主屏上运行，不能在副屏打开、移屏或停放。要看它的状态用 vscreen status；要用户在 App 里做什么请直接告诉用户",
+                "Agent-VScreen's own pages run only on the phone's main screen and cannot be opened, moved, or parked on the background screen. Use vscreen status for its state, or ask the user directly",
+            ),
+        )
+    }
+}
+
 internal fun VScreenOffloadHandler.handoffSkip(): Set<String> =
     setOf(context.packageName, "com.android.systemui", "moe.shizuku.privileged.api") + runCatching { VScreenHandoff.homePackages() }.getOrDefault(emptySet())
 
@@ -167,7 +186,8 @@ private fun VScreenOffloadHandler.handoffPark(sid: String, pkgArg: String?, park
     val use = if (park) "handoff park <应用>" else "handoff unpark <应用>"
     val pkg = pkgArg?.takeIf { it.isNotBlank() }
         ?: throw ActionError("INVALID_ARGS", tr("$use：要写明是哪个应用（停放和取回都按名字，不猜）", "$use: name the app (park and unpark both go by name, never a guess)"))
-    if (pkg in handoffSkip()) throw ActionError("HANDOFF_DENIED", tr("$pkg 是桌面、系统界面或 Agent-VScreen 自己，不能停放", "$pkg is the launcher, system UI or Agent-VScreen itself and cannot be parked"))
+    requireNotOwnPackage(pkg)
+    if (pkg in handoffSkip()) throw ActionError("HANDOFF_DENIED", tr("$pkg 是桌面或系统界面，不能停放", "$pkg is the launcher or system UI and cannot be parked"))
     // Only this session's own screen: parking is not a way to take a screen another session is using (BUSY says whose).
     BackgroundOperation.previewDisplayFor(sid) ?: run {
         val owner = BackgroundOperation.state.value.ownerSessionId
@@ -247,16 +267,21 @@ internal fun VScreenOffloadHandler.handoffCmd(sid: String?, args: OffloadArgs): 
 
 private fun VScreenOffloadHandler.handoffIn(sid: String, pkgArg: String?): NativeOffloadResult {
     val start = System.currentTimeMillis(); val t0 = SystemClock.elapsedRealtime()
+    requireNotOwnPackage(pkgArg)
+    if (pkgArg != null && pkgArg in handoffSkip()) {
+        throw ActionError("PROTECTED_APP", tr("$pkgArg 是桌面或系统界面，不能接到副屏", "$pkgArg is the launcher or system UI and cannot be moved to the background screen"))
+    }
     val main = VScreenHandoff.tasksOn(0)
     val pick = if (pkgArg != null) main.firstOrNull { it.pkg == pkgArg }
         ?: throw ActionError("HANDOFF_NO_TASK", tr("主屏上没有 $pkgArg 的任务。可以 launch $pkgArg 在副屏另开一份（不带用户的页面）", "No task of $pkgArg on the main screen. launch $pkgArg opens a separate copy on the screen (without the user's page)"))
     else main.firstOrNull { it.pkg !in handoffSkip() }
         ?: throw ActionError("HANDOFF_NO_TASK", tr("主屏最近没有可接手的应用（只有桌面和 Agent-VScreen 自己）：请用户先打开那个应用，或说是哪个应用", "No app on the main screen to take over (only the launcher and Agent-VScreen): ask the user to open that app first, or to say which one"))
+    requireNotOwnPackage(pick.pkg)
     BackgroundOperation.requireNotParked(sid, pick.pkg)
     com.kilon.agentvscreen.core.Guard.require(com.kilon.agentvscreen.core.Guard.Act.TAKE, pick.pkg)
     // 1.2: taking the app the user is using off their screen is theirs to allow, on the phone.
     run { val app = VScreenKnowledge.label(pick.pkg) ?: pick.pkg
-        com.kilon.agentvscreen.host.Consent.require(context, "handoff:${pick.pkg}", tr("把你正在用的 $app 接到后台副屏", "move $app, which you are using, to the background screen"), tr("它会从主屏消失，停在当前页面，由 Agent 在后台继续操作", "it leaves the main screen, stays on its current page, and the agent carries on in the background"), kind = "system") }
+        com.kilon.agentvscreen.host.Consent.require(context, "handoff:${pick.pkg}", tr("把你正在用的 $app 接到后台副屏", "move $app, which you are using, to the background screen"), tr("它会从主屏消失，停在当前页面，由 Agent 在后台继续操作", "it leaves the main screen, stays on its current page, and the agent carries on in the background"), kind = com.kilon.agentvscreen.host.Consent.CAUTION, pkg = pick.pkg) }
     val want = VScreenShell.appOrientation(context, pick.pkg, null) ?: VScreenMap.profile(pick.pkg)["orientation"]?.let { it == "landscape" }
     // 1.4.2-beta6: building / rebuilding the screen and removing a task come before the action itself: not while the
     // user holds the screen or has stopped the AI.
@@ -329,7 +354,7 @@ internal fun VScreenOffloadHandler.stopCmd(sid: String?, args: OffloadArgs): Nat
     if (force) {
         val target = pkgArg ?: runCatching { BackgroundOperation.previewDisplayFor(s)?.let { VScreenShell.topPackage(it.displayId) } }.getOrNull() ?: "?"
         val app = VScreenKnowledge.label(target) ?: target
-        com.kilon.agentvscreen.host.Consent.require(context, "force-stop:$target", tr("结束整个 $app（force-stop）", "stop the whole of $app (force-stop)"), tr("主屏上的 $app 也会被结束，没保存的内容会丢", "$app on the main screen is stopped too; unsaved content is lost"), kind = "system")
+        com.kilon.agentvscreen.host.Consent.require(context, "force-stop:$target", tr("结束整个 $app（force-stop）", "stop the whole of $app (force-stop)"), tr("主屏上的 $app 也会被结束，没保存的内容会丢", "$app on the main screen is stopped too; unsaved content is lost"), kind = com.kilon.agentvscreen.host.Consent.CAUTION, pkg = target)
     }
     val stopped = VScreenKnowledge.journey(s)
     VScreenKnowledge.endJourney(s)
@@ -354,6 +379,9 @@ internal fun VScreenOffloadHandler.releaseCmd(sid: String?): NativeOffloadResult
     val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
     val main0 = mainWatch(s)
     BackgroundOperation.releaseNow(s)
+    PageBook.clear(s)
+    Loud.clear(s)
+    com.kilon.agentvscreen.api.Turns.resetTurn(s)
     return text(tr("副屏已释放（连接保留，下次 launch 会新建副屏）", "Screen released (connection kept; the next launch creates a new screen)") + (mainCheckLines(main0)?.let { "\n${Blocks.notes}$it" } ?: ""))
 }
 

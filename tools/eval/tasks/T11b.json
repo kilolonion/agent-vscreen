@@ -1,0 +1,28 @@
+{
+  "id": "T11b",
+  "scene": "S11",
+  "seed": 5303,
+  "since": "beta4",
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "press 540 1600 hold until color:220,1340=#16A34A~40 8s"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 60
+}

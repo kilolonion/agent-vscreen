@@ -64,6 +64,9 @@ object Tailnet {
         val downS: Int = 0,
         /** 1.3.0: logged in, relay not reached yet since this start: connecting, not connected and not dropped. */
         val connecting: Boolean = false,
+        /** 2.0.0-beta7 (7.1, 7.8): Tailscale Funnel state ("starting", "on", "error") and exact error reason. */
+        val funnel: String? = null,
+        val funnelReason: String? = null,
     ) {
         /** Logged in and actually reachable. */
         val linkUp get() = loggedIn && controlOk && relayOk && !connecting
@@ -78,6 +81,55 @@ object Tailnet {
             .put("control", control ?: "tailscale").put("login_error", loginError ?: JSONObject.NULL)
             .put("control_ok", controlOk).put("relay_ok", relayOk).put("relay", relay ?: JSONObject.NULL)
             .put("flaps_10m", flaps).put("problem", problem ?: JSONObject.NULL)
+            .put("funnel", funnel ?: JSONObject.NULL).put("funnel_reason", funnelReason ?: JSONObject.NULL)
+    }
+
+    /** 2.0.0-beta8 (B1): one prerequisite check item returned by `tsbridge`'s `funnel-check` command. */
+    data class FunnelFeature(
+        val ok: Boolean = false,
+        val text: String? = null,
+        val url: String? = null,
+        val shouldWait: Boolean = false,
+        val error: String? = null,
+    )
+
+    /** 2.0.0-beta8 (B1): structured result of `tsbridge`'s `funnel-check` control command. */
+    data class FunnelCheck(
+        val seq: String = "",
+        val official: Boolean = true,
+        val loggedIn: Boolean = false,
+        val dnsName: String? = null,
+        val https: FunnelFeature = FunnelFeature(),
+        val funnel: FunnelFeature = FunnelFeature(),
+        val port443: FunnelFeature = FunnelFeature(),
+        val error: String? = null,
+        val checkedAt: Long = 0L,
+    ) {
+        val shouldWait: Boolean get() = (!https.ok && https.shouldWait) || (!funnel.ok && funnel.shouldWait)
+    }
+
+    internal fun parseFunnelCheck(o: JSONObject, nowMs: Long = System.currentTimeMillis()): FunnelCheck {
+        fun feat(key: String): FunnelFeature {
+            val f = o.optJSONObject(key) ?: return FunnelFeature()
+            return FunnelFeature(
+                ok = f.optBoolean("ok", false),
+                text = f.optString("text").takeIf { it.isNotBlank() },
+                url = f.optString("url").takeIf { it.isNotBlank() },
+                shouldWait = f.optBoolean("should_wait", false),
+                error = f.optString("error").takeIf { it.isNotBlank() },
+            )
+        }
+        return FunnelCheck(
+            seq = o.optString("seq", ""),
+            official = o.optBoolean("official", true),
+            loggedIn = o.optBoolean("logged_in", false),
+            dnsName = o.optString("dns_name").takeIf { it.isNotBlank() },
+            https = feat("https"),
+            funnel = feat("funnel"),
+            port443 = feat("port443"),
+            error = o.optString("error").takeIf { it.isNotBlank() },
+            checkedAt = nowMs,
+        )
     }
 
     /**
@@ -199,6 +251,34 @@ object Tailnet {
     private val _status = MutableStateFlow(Status())
     val status: StateFlow<Status> = _status.asStateFlow()
 
+    private val _funnelCheck = MutableStateFlow<FunnelCheck?>(null)
+    val funnelCheck: StateFlow<FunnelCheck?> = _funnelCheck.asStateFlow()
+    private val _funnelChecking = MutableStateFlow(false)
+    val funnelChecking: StateFlow<Boolean> = _funnelChecking.asStateFlow()
+    private val funnelCheckSeq = java.util.concurrent.atomic.AtomicInteger(0)
+
+    internal fun setFunnelCheckForTests(fc: FunnelCheck?, checking: Boolean = false) {
+        _funnelCheck.value = fc
+        _funnelChecking.value = checking
+    }
+
+    /** 2.0.0-beta8 (B1): ask running `tsbridge` to check HTTPS / Funnel ACL / port 443 via LocalAPI + QueryFeature. */
+    fun requestFunnelCheck(): Boolean {
+        val w = stdin ?: return false
+        val seq = funnelCheckSeq.incrementAndGet()
+        _funnelChecking.value = true
+        return runCatching {
+            synchronized(w) {
+                w.write("funnel-check $seq\n")
+                w.flush()
+            }
+            true
+        }.getOrElse {
+            _funnelChecking.value = false
+            false
+        }
+    }
+
     @Volatile private var proc: Process? = null
     @Volatile private var stdin: OutputStreamWriter? = null
     @Volatile private var wanted = false
@@ -225,7 +305,12 @@ object Tailnet {
     }
 
     @Synchronized fun sync(ctx: Context) {
-        if (ApiConfig.tailnetMode == Mode.BUILTIN) start(ctx.applicationContext) else stop("mode ${ApiConfig.tailnetMode}")
+        if (ThermalGuard.locked) return
+        if (ApiConfig.tailnetMode == Mode.BUILTIN) start(ctx.applicationContext)
+        else {
+            if (PublicAccess.enabled && PublicAccess.channel == PublicAccess.Channel.TAILSCALE) PublicAccess.disable(ctx.applicationContext, "tailnet_mode_${ApiConfig.tailnetMode.key}")
+            stop("mode ${ApiConfig.tailnetMode}")
+        }
     }
 
     @Synchronized private fun start(ctx: Context) {
@@ -243,11 +328,21 @@ object Tailnet {
         proc?.let { p -> Thread { if (!runCatching { p.waitFor(3, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault(false)) runCatching { p.destroyForcibly() } }.apply { isDaemon = true }.start() }
         supervisor?.interrupt(); supervisor = null
         _status.value = Status()
+        _funnelCheck.value = null
+        _funnelChecking.value = false
         waitingSince = 0L
     }
 
     /** Sign out of the tailnet (the node stays listed in the admin console until removed there). */
-    fun logout(ctx: Context? = null) { ctx?.let { forget(it) }; runCatching { stdin?.apply { write("logout\n"); flush() } } }
+    fun logout(ctx: Context? = null) {
+        ctx?.let {
+            if (PublicAccess.enabled) PublicAccess.disable(it.applicationContext, "tailnet_logout")
+            forget(it)
+        }
+        _funnelCheck.value = null
+        _funnelChecking.value = false
+        runCatching { stdin?.apply { write("logout\n"); flush() } }
+    }
 
     /** 1.1.7: ask the control server for a fresh login link (the bridge also does this by itself every 20 s). */
     fun login() { runCatching { stdin?.apply { write("login\n"); flush() } } }
@@ -278,6 +373,9 @@ object Tailnet {
         // Let the old node finish writing its state before it may be deleted.
         com.kilon.agentvscreen.host.quiet("Tailnet:134") { old?.waitFor(3, java.util.concurrent.TimeUnit.SECONDS) }
         ApiConfig.configureTailnet(control, authKey)
+        if (ApiConfig.tailnetControlUrl != null && PublicAccess.enabled) {
+            PublicAccess.disable(ctx.applicationContext, "headscale_selected")
+        }
         if (!authKey.isNullOrBlank()) {
             com.kilon.agentvscreen.host.quiet("Tailnet:138") { stateDir(ctx).deleteRecursively() }
         }
@@ -329,6 +427,14 @@ object Tailnet {
         ApiConfig.tailnetControlUrl?.let { env["TSB_CONTROL_URL"] = it }
         // An auth key is only needed until the node is registered; it is dropped as soon as the node runs.
         ApiConfig.tailnetAuthKey?.let { env["TSB_AUTHKEY"] = it }
+        // 2.0.0-beta7 (7.1, 7.7): enable Tailscale Funnel on official Tailscale with a freshly rotated secret (never logged).
+        if (PublicAccess.enabled && PublicAccess.channel == PublicAccess.Channel.TAILSCALE && ApiConfig.tailnetControlUrl == null) {
+            val pubSrv = PublicAccess.ensureServer(ctx)
+            val pubPort = pubSrv.boundPort.takeIf { it > 0 } ?: PublicAccess.boundPort
+            env["TSB_FUNNEL"] = "1"
+            env["TSB_PUBLIC_TARGET"] = "127.0.0.1:$pubPort"
+            env["TSB_PUBLIC_SECRET"] = PublicAccess.rotateSecret()
+        }
         val p = synchronized(this) {
             if (g != gen || !wanted) return
             pb.start().also {
@@ -346,6 +452,11 @@ object Tailnet {
         p.inputStream.bufferedReader().forEachLine { line ->
             val o = runCatching { JSONObject(line) }.getOrNull() ?: return@forEachLine
             if (g != gen) return@forEachLine // a bridge on its way out says nothing about the current one
+            if (o.optString("type") == "funnel_check") {
+                _funnelCheck.value = parseFunnelCheck(o)
+                _funnelChecking.value = false
+                return@forEachLine
+            }
             val st = Status(
                 running = true,
                 state = o.optString("state", "Unknown"),
@@ -367,7 +478,11 @@ object Tailnet {
                 relay = o.optString("relay").takeIf { it.isNotBlank() }, flaps = o.optInt("flaps"),
                 problem = o.optString("problem").takeIf { it.isNotBlank() }, downS = o.optInt("down_s"),
                 connecting = o.optBoolean("connecting"),
+                funnel = o.optString("funnel").takeIf { it.isNotBlank() },
+                funnelReason = o.optString("reason").takeIf { it.isNotBlank() },
             )
+            var funnelChangedTo: String? = null
+            var funnelChanged = false
             synchronized(this) {
                 if (g != gen) return@forEachLine
                 if (st.linkUp) waitingSince = 0L else if (waitingSince == 0L) waitingSince = android.os.SystemClock.elapsedRealtime()
@@ -377,8 +492,13 @@ object Tailnet {
                 if (st.loggedIn) remember(ctx, st)
                 if (st.state != _status.value.state) AppLogger.info(TAG, "state ${st.state}${st.ip?.let { " $it" } ?: ""}${st.error?.let { " ($it)" } ?: ""}")
                 if (st.loggedIn && ApiConfig.tailnetAuthKey != null) ApiConfig.tailnetAuthKey = null
+                if (st.funnel != _status.value.funnel) {
+                    funnelChanged = true
+                    funnelChangedTo = st.funnel
+                }
                 _status.value = st
             }
+            if (funnelChanged) PublicAccess.onFunnelStateChanged(ctx, funnelChangedTo)
         }
         val code = runCatching { p.waitFor() }.getOrDefault(-1)
         AppLogger.info(TAG, "bridge exited with code $code" + (if (g != gen) " (replaced)" else if (!wanted) " (stopped)" else ""))
@@ -397,7 +517,7 @@ object Tailnet {
      * VPN and its DNS may be unreachable for this app (bypassed in the proxy); Wi-Fi's or mobile data's still are.
      * The bridge asks all of them at once (tsbridge/dns.go), so a dead one costs nothing.
      */
-    private fun dnsServers(ctx: Context): List<String> = runCatching {
+    internal fun dnsServers(ctx: Context): List<String> = runCatching {
         val cm = ctx.getSystemService(ConnectivityManager::class.java)
         @Suppress("DEPRECATION") val nets = listOfNotNull(cm.activeNetwork) + cm.allNetworks.filter { it != cm.activeNetwork }
         nets.flatMap { n -> runCatching { cm.getLinkProperties(n)?.dnsServers.orEmpty().mapNotNull { it.hostAddress } }.getOrDefault(emptyList()) }

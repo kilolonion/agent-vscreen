@@ -32,6 +32,37 @@ internal fun VScreenOffloadHandler.freshFrameOf(d: VScreenDisplay): Bitmap {
     return d.latestFrame() ?: throw ActionError("NO_FRAME", tr("副屏还没有画面", "the screen has no picture yet"))
 }
 
+internal data class SpotFilterResult(val kept: List<VScreenSpots.Spot>, val skippedText: Int)
+
+/**
+ * 2.0.0-beta16 (Item 7), pure: filter out colour blobs that sit on text, using both OCR word boxes and
+ * accessibility text node boxes (using inner [El.textBoxes] when present so icons beside text in a row stay).
+ */
+internal fun filterSpotsOnText(
+    spots: List<VScreenSpots.Spot>,
+    ocrBoxes: List<Rect>,
+    a11yEls: List<El>,
+    limit: Int = 60,
+): SpotFilterResult {
+    val textBoxes = ArrayList<Rect>(ocrBoxes.size + a11yEls.size)
+    textBoxes.addAll(ocrBoxes)
+    for (e in a11yEls) {
+        if (!e.fromA11y || e.kind != ElKind.TEXT || e.text.isBlank() || e.scrollable) continue
+        if (e.textBoxes.isNotEmpty()) textBoxes.addAll(e.textBoxes)
+        else textBoxes.add(e.box)
+    }
+    fun isText(b: Rect): Boolean {
+        val bArea = b.width().toLong() * b.height()
+        if (bArea <= 0L) return false
+        return textBoxes.any { w ->
+            val i = Rect(b)
+            i.intersect(w) && i.width().toLong() * i.height() * 2L >= bArea
+        }
+    }
+    val keptAll = spots.filter { !isText(it.box) }
+    return SpotFilterResult(keptAll.take(limit), spots.size - keptAll.size)
+}
+
 /** `spots [x1,y1,x2,y2] [--color #RRGGBB]`: colour blobs found on the device (no model), numbered S1…, with centres. */
 internal fun VScreenOffloadHandler.spotsCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {
     val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
@@ -40,12 +71,8 @@ internal fun VScreenOffloadHandler.spotsCmd(sid: String?, args: OffloadArgs): Na
     return BackgroundOperation.agentAction(s, null, isRead = true, describe = tr("找色块", "find color spots")) { d ->
         val snap = snapshot(d)
         val frame = snap.frame ?: throw ActionError("NO_FRAME", tr("副屏还没有画面", "the screen has no picture yet"))
-        // v0.5: blobs that are letters (inside an OCR word box) are not targets: left out, and counted.
-        val words = snap.items.orEmpty().map { it.box }
-        fun isText(b: Rect): Boolean = words.any { w -> val i = Rect(b); i.intersect(w) && i.width().toLong() * i.height() * 2 >= b.width().toLong() * b.height() }
         val found = VScreenSpots.find(frame, region = region, color = color, limit = 120)
-        val list = found.filter { !isText(it.box) }.take(60)
-        val textual = found.size - found.count { !isText(it.box) }
+        val (list, textual) = filterSpotsOnText(found, snap.items.orEmpty().map { it.box }, snap.els, limit = 60)
         if (list.isEmpty()) return@agentAction text(tr("没找到色块", "No color spots found") + (region?.let { tr("（区域 ${Report.box(it)}）", " (region ${Report.box(it)})") } ?: "") + if (textual > 0) tr("（有 $textual 个是文字，已略过）", " ($textual on text were skipped)") else "")
         val sb = StringBuilder(tr("色块（本地按颜色找的，不是识别；tap 用括号里的坐标）", "Color spots (found locally by color, not recognized; tap the coordinates in brackets)") + (if (textual > 0) tr("，另有 $textual 个落在文字上的已略过", "; $textual more on text were skipped") else "") + tr("：\n", ":\n"))
         list.forEachIndexed { i, sp ->
@@ -62,7 +89,7 @@ internal fun VScreenOffloadHandler.spotsCmd(sid: String?, args: OffloadArgs): Na
 internal fun VScreenOffloadHandler.zoomCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {
     val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
     val r0 = args.positional.firstOrNull()?.let { parseRect(it, tr("区域", "region")) }
-        ?: if (args.get("scale") != null) Rect(0, 0, Int.MAX_VALUE / 2, Int.MAX_VALUE / 2) else throw ActionError("INVALID_ARGS", "zoom x1,y1,x2,y2 [--scale 2]")
+        ?: if (args.get("scale") != null) Rect(0, 0, Int.MAX_VALUE / 2, Int.MAX_VALUE / 2) else throw ActionError("INVALID_ARGS", "look x1,y1,x2,y2 [--scale 2]")
     return BackgroundOperation.agentAction(s, null, isRead = true, describe = tr("放大看", "zoom in")) { d ->
         val frame = freshFrameOf(d)
         val r = Rect(r0.left.coerceIn(0, frame.width - 1), r0.top.coerceIn(0, frame.height - 1), r0.right.coerceIn(1, frame.width), r0.bottom.coerceIn(1, frame.height))
@@ -77,8 +104,8 @@ internal fun VScreenOffloadHandler.zoomCmd(sid: String?, args: OffloadArgs): Nat
         val whole = args.positional.isEmpty()
         // 1.4.0-beta6 (test: zoom --scale 1.5 on the whole screen always came out ×1 "would pass 2048 px"): the whole
         // screen at full detail is all there is; enlarging it adds no detail. Said so, with the way to get more.
-        if (whole && asked != null && asked > 1.0) adjusted(tr("整屏已按最清楚的给（放大整屏不会多出细节）；要看更细就框一块：zoom x1,y1,x2,y2 --scale $asked",
-            "the whole screen is given at full detail (enlarging it adds nothing); for more, frame a part: zoom x1,y1,x2,y2 --scale $asked"))
+        if (whole && asked != null && asked > 1.0) adjusted(tr("整屏已按最清楚的给（放大整屏不会多出细节）；要看更细就框一块：look x1,y1,x2,y2 --scale $asked",
+            "the whole screen is given at full detail (enlarging it adds nothing); for more, frame a part: look x1,y1,x2,y2 --scale $asked"))
         else if (asked != null && kotlin.math.abs(asked - k) > 0.05) adjusted(tr("--scale $asked 按 ${"%.1f".format(k)} 执行：这块区域再放大图会超过 $side 像素，框小一点能放得更大",
             "--scale $asked used as ${"%.1f".format(k)}: a larger picture of this region would pass $side px; a smaller region zooms further"))
         val w = (r.width() * k).roundToInt(); val h = (r.height() * k).roundToInt()
@@ -218,10 +245,29 @@ internal fun tabBarBoxes(els: List<El>, screenW: Int, screenH: Int): List<Rect> 
     return out + els.filter { e -> out.any { it.contains(e.box.centerX(), e.box.centerY()) } }.map { Rect(it.box) }
 }
 
-/** 1.3, pure: boxes that are at the same place in two looks taken before and after a scroll (fixed bars). */
-internal fun fixedBoxes(before: List<El>, after: List<El>): List<Rect> =
-    after.filter { a -> before.any { b -> b.kind == a.kind && Math.abs(b.box.centerX() - a.box.centerX()) <= 12 && Math.abs(b.box.centerY() - a.box.centerY()) <= 12 &&
+/**
+ * 1.3, pure: boxes that are at the same place in two looks taken before and after a scroll (fixed bars).
+ *
+ * 2.0.0-beta12 (test: `collect --from-top` in Settings left out WLAN, 蓝牙, 移动网络 and one more row of the first
+ * screen): a swipe that first collapses a big title barely moves the rows, and every row then sat "at the same place"
+ * and was taken for a bar. Staying put shows a bar only when the page did scroll: some words moved by a real
+ * distance, or most of the words are new. Without that, nothing is called fixed.
+ */
+internal fun fixedBoxes(before: List<El>, after: List<El>): List<Rect> {
+    val shifts = after.mapNotNull { a ->
+        before.filter { b -> b.text == a.text && b.text.isNotBlank() && Math.abs(b.box.centerX() - a.box.centerX()) <= 12 }
+            .minByOrNull { b -> Math.abs(b.box.centerY() - a.box.centerY()) }?.let { b -> Math.abs(b.box.centerY() - a.box.centerY()) }
+    }
+    val worded = after.filter { it.text.isNotBlank() }
+    val fresh = worded.count { a -> before.none { it.text == a.text } }
+    val scrolled = shifts.any { it >= SCROLL_SEEN_PX } || (worded.isNotEmpty() && fresh * 2 >= worded.size)
+    if (!scrolled) return emptyList()
+    return after.filter { a -> before.any { b -> b.kind == a.kind && Math.abs(b.box.centerX() - a.box.centerX()) <= 12 && Math.abs(b.box.centerY() - a.box.centerY()) <= 12 &&
         Math.abs(b.box.height() - a.box.height()) <= 16 } }.map { Rect(it.box) }
+}
+
+/** A word that moved this far between two looks shows the page scrolled. */
+internal const val SCROLL_SEEN_PX = 60
 
 /** `collect [--pages N] [--until 文字]`: scroll down page by page and gather the entries (de-duplicated). */
 internal fun VScreenOffloadHandler.collectCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {

@@ -1,0 +1,41 @@
+name: Detector data (emulator crawl)
+# 2.0: screens + accessibility dumps for the textless-element detector (tools/detector). Runs only by hand: a random
+# crawl over the emulator's own apps, no app of ours involved. The artifact unzips into a folder that goes to
+# Google Drive vscreen-detector/extra/<name>/ for the Colab notebook.
+on:
+  workflow_dispatch:
+    inputs:
+      steps:
+        description: crawl steps per API level
+        default: '400'
+permissions:
+  contents: read
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [34, 35]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          disable-animations: true
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; python3 tools/detector/collect.py crawl-${{ matrix.api }} --steps ${{ inputs.steps }} --seed ${{ matrix.api }}
+      - uses: actions/upload-artifact@v5
+        with:
+          name: detector-crawl-${{ matrix.api }}
+          path: crawl-${{ matrix.api }}
+          retention-days: 14

@@ -49,5 +49,26 @@ object Agents {
         }
     }
 
+    /**
+     * 2.0.0-beta8 (feedback 5): forget several agents with one write per store (the "remove never-used tokens" action
+     * and the one-time cleanup of tokens the connect page made in a loop). Never-used agents have no schedules or keeps.
+     */
+    fun forgetMany(ids: Set<String>) {
+        val drop = ids - Tokens.MAIN
+        if (drop.isEmpty()) return
+        Tokens.revokeMany(drop)
+        AgentLedger.forgetMany(drop)
+    }
+
+    /** Finishes [Tokens]' one-time cleanup once the ledger and approvals are loaded (called from VScreenApp). */
+    fun finishCleanup() {
+        val ids = Tokens.pendingForget
+        if (ids.isEmpty()) return
+        Tokens.pendingForget = emptySet()
+        com.kilon.agentvscreen.host.StrongConfirm.revokeAllForTokens(ids)
+        AgentLedger.forgetMany(ids)
+        com.kilon.agentvscreen.host.Audit.security("token_cleanup", "removed ${ids.size} never-used tokens made by the connect page loop")
+    }
+
     private fun firstName() = tr("最早接入的 agent", "First connected agent")
 }

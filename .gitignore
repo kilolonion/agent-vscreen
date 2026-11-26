@@ -14,6 +14,7 @@ keystore.properties
 .DS_Store
 # Built from tsbridge/ by tsbridge/build.sh (needs Go)
 app/src/main/jniLibs/arm64-v8a/libtsbridge.so
+app/src/main/jniLibs/x86_64/libtsbridge.so
 app/src/main/jniLibs/arm64-v8a/libtsnode.so
 __pycache__/
 # CI build outputs
@@ -22,3 +23,5 @@ __pycache__/
 # AOCI agent host integration (machine-bound; do not commit)
 .mcp.json
 .mcp.json.backup.*
+app/src/main/jniLibs/arm64-v8a/libcloudflared.so
+app/src/main/jniLibs/x86_64/libcloudflared.so

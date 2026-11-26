@@ -140,6 +140,12 @@ class FullscreenActivity : PageActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (MainDisplay.moved(this)) return
+        if (android.os.Build.VERSION.SDK_INT >= 34) {
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
+        }
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() { back() }
+        })
         teachAsk.intValue = intent.getIntExtra("teach_ask", -1)
         askOpen.intValue = intent.getIntExtra("ask", -1)
         paneOf(intent)?.let { pane.value = it }

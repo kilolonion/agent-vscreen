@@ -105,8 +105,22 @@ fun Modifier.glassSheet(shape: Shape = RoundedCornerShape(28.dp)): Modifier {
  * card or button bar drawn over the live picture takes the touch and the picture under it never sees it (never sent to
  * the background screen, never recorded in a lesson). Its own buttons still get their taps: nothing is consumed here.
  */
+/**
+ * 2.0.0-beta15: the current time, redrawn every [everyMs]. A countdown that only reads System.currentTimeMillis() is
+ * drawn once and freezes (the beta13 test saw "还剩 9:59" for half a minute): read this instead.
+ */
+@Composable
+fun rememberNow(everyMs: Long = 1000L): Long {
+    var now by remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
+    androidx.compose.runtime.LaunchedEffect(everyMs) { while (true) { kotlinx.coroutines.delay(everyMs); now = System.currentTimeMillis() } }
+    return now
+}
+
 /** A one-line title too long for its room scrolls through in a loop instead of ending in "…"; one that fits stays still. */
-fun Modifier.scrollIfLong(): Modifier = this.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1500, repeatDelayMillis = 2000, velocity = 28.dp)
+@Composable
+fun Modifier.scrollIfLong(): Modifier =
+    if (shouldAnimateLook()) this.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1500, repeatDelayMillis = 2000, velocity = 28.dp)
+    else this
 
 fun Modifier.eatTouches(): Modifier = this.pointerInput(Unit) {
     awaitEachGesture {

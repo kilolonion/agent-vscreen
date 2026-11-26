@@ -129,6 +129,8 @@ class VScreenDisplayService : Binder {
      * the next service start for anything a killed service left behind ([Sound.FILE]).
      */
     private val sound = Sound()
+    /** 2.0.0-beta2: byte-level TCP forwarder holding the public loopback port (survives app freeze/kill). */
+    private val gate = Gate(this)
 
     private inner class Sound {
         private val muted = LinkedHashMap<String, String>()
@@ -245,6 +247,7 @@ class VScreenDisplayService : Binder {
 
     override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
         if (code == DESTROY_CODE) {
+            runCatching { gate.stop() }
             synchronized(displays) { displays.values.forEach { runCatching { it.release() } }; displays.clear() }
             sound.giveAll() // uninstall, update, Shizuku stopping the service: no app is left silent
             System.exit(0)
@@ -269,7 +272,7 @@ class VScreenDisplayService : Binder {
                         touched[id] = SystemClock.elapsedRealtime()
                     }
                     startReaper()
-                    out.writeInt(0); out.writeInt(id); out.writeInt(lastFlags)
+                    out.writeInt(0); out.writeInt(id); out.writeInt(lastFlags); out.writeString(lastRejected)
                 }
                 CREATE_PARKING -> {
                     val active = data.readInt()
@@ -396,9 +399,14 @@ class VScreenDisplayService : Binder {
                 }
                 REMOVE_TASK -> {
                     val taskId = data.readInt(); val expected = data.readInt()
-                    // Never remove a task the system places on another display (the user's main screen).
+                    // 2.0.0-beta6 (6.10 #3): never remove a task on the user's main screen (display 0).
                     val on = runCatching { rootTasks().firstOrNull { taskId in it.children.map { c -> c.first } }?.displayId }.getOrNull()
-                    val okRemove = on != null && on == expected && removeTask(taskId)
+                    val okRemove = expected > android.view.Display.DEFAULT_DISPLAY &&
+                        on != null && on > android.view.Display.DEFAULT_DISPLAY &&
+                        on == expected && removeTask(taskId)
+                    if (!okRemove && expected <= android.view.Display.DEFAULT_DISPLAY) {
+                        System.err.println("vscreen-service: REMOVE_TASK refused for display $expected (task=$taskId)")
+                    }
                     out.writeInt(0); out.writeInt(if (okRemove) 1 else 0)
                 }
                 LIST_TASKS -> {
@@ -423,8 +431,12 @@ class VScreenDisplayService : Binder {
                 FOCUS_TASK -> {
                     val taskId = data.readInt()
                     val expected = if (data.dataAvail() >= 4) data.readInt() else null
-                    val r = runCatching {
-                        if (expected != null) check(rootTasks().any { r -> r.displayId == expected && r.children.any { it.first == taskId } })
+                    // 2.0.0-beta6 (6.10 #3): refuse display 0 and refuse when expected display is omitted.
+                    val r = if (expected == null || expected <= android.view.Display.DEFAULT_DISPLAY) {
+                        System.err.println("vscreen-service: FOCUS_TASK refused for display $expected (task=$taskId)")
+                        false
+                    } else runCatching {
+                        check(rootTasks().any { rt -> rt.displayId == expected && rt.children.any { it.first == taskId } })
                         val a = atmService()
                         a.javaClass.getMethod("setFocusedTask", Int::class.javaPrimitiveType).invoke(a, taskId); true
                     }.getOrDefault(false)
@@ -434,10 +446,24 @@ class VScreenDisplayService : Binder {
                     val taskId = data.readInt(); val target = data.readInt()
                     val source = if (data.dataAvail() >= 4) data.readInt() else null
                     val r = runCatching {
+                        // 2.0.0-beta6 (6.1 L3 / 6.10 #3): regardless of whether source is specified, refuse moving
+                        // our own package's task onto any non-default display.
+                        val allRoots = rootTasks()
+                        val matching = allRoots.filter { rt -> rt.children.any { it.first == taskId } }
+                        val pkgs = buildList {
+                            matching.forEach { rt ->
+                                rt.top?.substringBefore('/')?.let { add(it) }
+                                rt.children.forEach { c -> c.second?.substringBefore('/')?.let { add(it) } }
+                            }
+                        }
+                        if (shouldRefuseMoveTask(target, pkgs, com.kilon.agentvscreen.BuildConfig.APPLICATION_ID)) {
+                            System.err.println("vscreen-service: MOVE_TASK refused protected own package (task=$taskId -> display $target)")
+                            throw SecurityException("PROTECTED_APP: own package cannot move to display $target")
+                        }
                         if (source == null) moveTask(taskId, target)
                         else synchronized(displays) {
                             check(parking == (source to target) || parking == (target to source)) { "parking display pair no longer exists" }
-                            val root = rootTasks().firstOrNull { r -> r.displayId == source && r.children.any { it.first == taskId } }
+                            val root = matching.firstOrNull { rt -> rt.displayId == source }
                             check(root != null && root.children.size == 1) { "task moved away or shares a root with other tasks" }
                             moveTask(taskId, target)
                         }
@@ -493,6 +519,43 @@ class VScreenDisplayService : Binder {
                         else -> throw IllegalArgumentException("unknown aps op $op")
                     }
                 }
+                GATE -> {
+                    when (val op = data.readInt()) {
+                        0 -> {
+                            val wantPort = data.readInt()
+                            val internalPort = data.readInt()
+                            val pkg = data.readString().orEmpty()
+                            val processName = data.readString().orEmpty()
+                            val sdk = data.readInt()
+                            out.writeInt(0)
+                            out.writeInt(gate.start(wantPort, internalPort, pkg, processName, sdk))
+                        }
+                        1 -> {
+                            gate.beat()
+                            out.writeInt(0)
+                        }
+                        2 -> {
+                            gate.stop()
+                            out.writeInt(0)
+                        }
+                        3 -> {
+                            out.writeInt(0)
+                            out.writeString(gate.statusJson().toString())
+                        }
+                        4 -> {
+                            val n = data.readInt().coerceIn(0, Gate.HOLD_MAX_PROCS)
+                            val procs = List(n) { data.readString().orEmpty() }
+                            val maxMs = data.readLong()
+                            out.writeInt(0)
+                            out.writeInt(gate.hold(procs, maxMs))
+                        }
+                        5 -> {
+                            out.writeInt(0)
+                            out.writeInt(gate.unhold())
+                        }
+                        else -> throw IllegalArgumentException("unknown gate op $op")
+                    }
+                }
             }
         } catch (t: Throwable) {
             val cause = (t as? java.lang.reflect.InvocationTargetException)?.targetException ?: t
@@ -502,6 +565,8 @@ class VScreenDisplayService : Binder {
     }
 
     @Volatile private var lastFlags = 0
+    /** 2.0.0: the flag sets [create] tried before [lastFlags] and why each was refused (one per line). */
+    @Volatile private var lastRejected = ""
 
     // ── Honor/Huawei APS (per-app render resolution) ─────────────────────
 
@@ -630,8 +695,9 @@ class VScreenDisplayService : Binder {
     private fun injectKey(displayId: Int, code: Int, longPress: Boolean, epoch: Long): Boolean = synchronized(fence.lock(displayId)) {
         if (!fence.admits(displayId, epoch)) return@synchronized false
         val now = SystemClock.uptimeMillis()
+        val kf = keyFlags(code)
         val down = KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
-            0, InputDevice.SOURCE_KEYBOARD)
+            kf, InputDevice.SOURCE_KEYBOARD)
         var ok = inject(down, displayId)
         if (longPress) {
             Thread.sleep(600)
@@ -639,10 +705,10 @@ class VScreenDisplayService : Binder {
             if (!fence.admits(displayId, epoch)) { cancelKeys(displayId, listOf(down)); return@synchronized false }
             val t = SystemClock.uptimeMillis()
             ok = inject(KeyEvent(now, t, KeyEvent.ACTION_DOWN, code, 1, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
-                KeyEvent.FLAG_LONG_PRESS, InputDevice.SOURCE_KEYBOARD), displayId) && ok
+                kf or KeyEvent.FLAG_LONG_PRESS, InputDevice.SOURCE_KEYBOARD), displayId) && ok
         }
         val up = KeyEvent(now, SystemClock.uptimeMillis(), KeyEvent.ACTION_UP, code, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0,
-            0, InputDevice.SOURCE_KEYBOARD)
+            kf, InputDevice.SOURCE_KEYBOARD)
         inject(up, displayId) && ok
     }
 
@@ -708,6 +774,7 @@ class VScreenDisplayService : Binder {
      */
     private fun injectDrag(displayId: Int, x1: Int, y1: Int, x2: Int, y2: Int, durationMs: Int, holdMs: Int, epoch: Long): Boolean = synchronized(fence.lock(displayId)) {
         if (!fence.admits(displayId, epoch)) return@synchronized false
+        if (!mayInject(displayId)) return@synchronized false
         val downTime = SystemClock.uptimeMillis()
         var ok = true
         // 1.4.2-beta6: fenced out mid-gesture (takeover, Stop): no more events, and the finger is cancelled, not lifted.
@@ -859,6 +926,18 @@ class VScreenDisplayService : Binder {
         runCatching { inject(e, displayId, 1) }; e.recycle()
     }
 
+    /** 2.0.0-beta2: cancel held agent fingers on every display this service created (same path as pointer op 3). */
+    internal fun cancelAgentFingersOnAllDisplays(): Int {
+        val ids = synchronized(displays) { displays.keys.toList() }
+        var total = 0
+        for (id in ids) {
+            total += synchronized(fence.lock(id)) {
+                synchronized(fingers) { cancelFingers(id, 0L) }
+            }
+        }
+        return total
+    }
+
     /** A finger nobody moved for [FINGER_MAX_IDLE_MS] is cancelled, so a dead app never leaves a finger down. */
     private fun startFingerWatch() {
         if (fingerWatch) return
@@ -960,14 +1039,21 @@ class VScreenDisplayService : Binder {
         val dm = displayManager()
         val candidates = if (requested != 0) listOf(requested) else defaultFlagLadder()
         var last: Throwable? = null
+        val rejected = ArrayList<String>()
         for (f in candidates) {
             try {
                 val vd = dm.createVirtualDisplay(name, w, h, dpi, surface, f)
                     ?: throw IllegalStateException("createVirtualDisplay returned null")
                 lastFlags = f
+                lastRejected = rejected.joinToString("\n")
                 return vd
-            } catch (t: Throwable) { last = t }
+            } catch (t: Throwable) {
+                last = t
+                // 2.0.0: why each richer rung was refused, for status / diag (which permission a ROM withholds).
+                rejected += flagNames(f).joinToString("|") + " -> " + "${t.javaClass.simpleName}: ${t.message.orEmpty()}".take(200)
+            }
         }
+        lastRejected = rejected.joinToString("\n")
         throw last ?: IllegalStateException("no flags tried")
     }
 
@@ -1035,14 +1121,39 @@ class VScreenDisplayService : Binder {
          * ([InputFence.USER] for the user's own input); see [InputFence].
          */
         const val FENCE = FIRST_CALL_TRANSACTION + 22
+        /**
+         * 2.0.0-beta2 (protocol 16) & 2.0.0-beta5 (protocol 17): TCP forwarder (Gate) in the privileged service process.
+         * op 0 START (wantPort, internalPort, pkg, processName, sdk) -> boundPort (-1 = failed)
+         * op 1 BEAT -> ok
+         * op 2 STOP -> ok
+         * op 3 STATUS -> json string
+         * op 4 HOLD (n, n x proc, maxMs) -> frozen count
+         * op 5 UNHOLD -> unheld count
+         */
+        const val GATE = FIRST_CALL_TRANSACTION + 23
         /** The rule of [mayInject]: never the main screen; a display this service created, or one the app owns. */
+        /**
+         * 2.0.0-beta12 (test on HONOR: `key back`, `esc` did nothing on the screen while enter/del worked): BACK went in
+         * as a plain keyboard key, and that ROM's window policy drops a BACK that does not come from the system. The
+         * system's own back (the navigation bar and the back gesture, for every display) is a key marked
+         * FROM_SYSTEM | VIRTUAL_HARD_KEY; navigation keys are sent the same way. Typing keys stay plain.
+         */
+        internal fun keyFlags(code: Int): Int =
+            if (code in SYSTEM_NAV_KEYS) KeyEvent.FLAG_FROM_SYSTEM or KeyEvent.FLAG_VIRTUAL_HARD_KEY else 0
+        internal val SYSTEM_NAV_KEYS = setOf(KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ESCAPE)
+
         internal fun injectableDisplay(displayId: Int, created: Boolean, owner: String?, appPkg: String): Boolean = when {
             displayId == android.view.Display.DEFAULT_DISPLAY -> false
             created -> true
             else -> owner == appPkg
         }
+        /** 2.0.0-beta6 (6.1 L3 / 6.10 #3): service-side gate refusing own-package tasks from moving to non-0 displays. */
+        internal fun shouldRefuseMoveTask(targetDisplayId: Int, taskPackages: Collection<String>, ownPkg: String): Boolean =
+            targetDisplayId != android.view.Display.DEFAULT_DISPLAY &&
+                ownPkg.isNotBlank() &&
+                taskPackages.any { it == ownPkg }
         /** The newest call code; onTransact serves CREATE..LAST_CALL. A new code moves this. */
-        const val LAST_CALL = FENCE
+        const val LAST_CALL = GATE
         /** Apps the service silenced, so a service that was killed gives them back on its next start. Shell-owned. */
         const val FILE = "/data/local/tmp/agent-vscreen-muted.json"
         /** "allow" / "ignore" / "default" … as `appops get` says it, or null when it cannot be read. */
@@ -1056,7 +1167,7 @@ class VScreenDisplayService : Binder {
         /** A display nobody touched for this long (app gone) is released. */
         const val ORPHAN_MS = 20 * 60_000L
         /** Bump when the protocol changes, so Shizuku restarts an old service process. */
-        const val PROTOCOL = 15
+        const val PROTOCOL = 18
         /** Shizuku's reserved "destroy user service" transaction. */
         const val DESTROY_CODE = 16777115
         private const val SHELL_PKG = "com.android.shell"
@@ -1087,6 +1198,11 @@ class VScreenDisplayService : Binder {
             }
             if (Build.VERSION.SDK_INT >= 33) {
                 out += basic or TRUSTED or OWN_DISPLAY_GROUP or ALWAYS_UNLOCKED or TOUCH_FEEDBACK_DISABLED
+                // 2.0.0 (issue #48, HyperOS): its own display group is what lets the screen stay awake while the phone
+                // sleeps. ALWAYS_UNLOCKED needs its own permission (ADD_ALWAYS_UNLOCKED_DISPLAY) that some ROMs withhold
+                // from the shell; before, losing it also dropped the own group. Keep the group as long as possible.
+                out += basic or TRUSTED or OWN_DISPLAY_GROUP or TOUCH_FEEDBACK_DISABLED
+                out += basic or TRUSTED or OWN_DISPLAY_GROUP
                 out += basic or TRUSTED
             }
             out += basic

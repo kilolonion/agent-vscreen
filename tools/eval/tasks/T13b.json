@@ -1,0 +1,29 @@
+{
+  "id": "T13b",
+  "scene": "S13",
+  "seed": 7,
+  "since": "beta3",
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "--fast",
+      "repeat 20 { drag 540 2000 540 500 350ms } until \"text:目标 147\"; tap \"目标 147\" until text:已打开"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 180
+}

@@ -13,12 +13,15 @@
 // Configuration comes from the environment so nothing secret shows up in `ps`:
 //
 //	TSB_DIR (state dir), TSB_HOSTNAME, TSB_PORT, TSB_TARGET (host:port), TSB_SECRET, TSB_AUTHKEY (optional),
-//	TSB_CONTROL_URL (optional, e.g. a Headscale server), TSB_DNS (comma separated resolvers of the phone's network).
+//	TSB_CONTROL_URL (optional, e.g. a Headscale server), TSB_DNS (comma separated resolvers of the phone's network),
+//	TSB_FUNNEL ("1" to expose PublicServer via Tailscale Funnel :443), TSB_PUBLIC_TARGET (default 127.0.0.1:18785),
+//	TSB_PUBLIC_SECRET (per-launch random secret injected as X-AVS-Public; never logged).
 package main
 
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -78,6 +81,9 @@ type status struct {
 	// "connecting", not "connected" and not "dropped". Before, "Running" showed as connected at once and the relay's
 	// 10 s connect timeout then looked like a drop.
 	Connecting bool `json:"connecting,omitempty"`
+	// 2.0.0-beta7 (7.1, 7.8): Tailscale Funnel status ("starting", "on", "error") and exact error reason.
+	Funnel       string `json:"funnel,omitempty"`
+	FunnelReason string `json:"reason,omitempty"`
 }
 
 // normalizeControlURL turns what a person types ("hs.example.com", "https://hs.example.com/") into the URL tsnet needs.
@@ -191,16 +197,34 @@ func loginError(health []string) string {
 }
 
 var (
-	outMu    sync.Mutex
-	last     string
-	lastPeer string
-	peerMu   sync.Mutex
+	outMu        sync.Mutex
+	outWriter    io.Writer = os.Stdout
+	last         string
+	lastPeer     string
+	peerMu       sync.Mutex
+	funnelMu     sync.Mutex
+	funnelState  string
+	funnelReason string
+	lastBase     status
+	hasLastBase  bool
 )
 
 func emit(s status) {
 	peerMu.Lock()
 	s.LastPeer = lastPeer
 	peerMu.Unlock()
+	funnelMu.Lock()
+	lastBase = s
+	hasLastBase = true
+	if s.Funnel == "" {
+		s.Funnel = funnelState
+		s.FunnelReason = funnelReason
+	}
+	funnelMu.Unlock()
+	emitLocked(s)
+}
+
+func emitLocked(s status) {
 	b, _ := json.Marshal(s)
 	outMu.Lock()
 	defer outMu.Unlock()
@@ -208,7 +232,62 @@ func emit(s status) {
 		return
 	}
 	last = string(b)
-	fmt.Fprintln(os.Stdout, string(b))
+	fmt.Fprintln(outWriter, string(b))
+}
+
+func emitRaw(v any) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return
+	}
+	outMu.Lock()
+	defer outMu.Unlock()
+	fmt.Fprintln(outWriter, string(b))
+}
+
+func setFunnelStatus(state, reason string) {
+	funnelMu.Lock()
+	funnelState = state
+	funnelReason = reason
+	s := lastBase
+	have := hasLastBase
+	funnelMu.Unlock()
+	if !have {
+		s = status{State: "Starting"}
+	}
+	peerMu.Lock()
+	s.LastPeer = lastPeer
+	peerMu.Unlock()
+	s.Funnel = state
+	s.FunnelReason = reason
+	emitLocked(s)
+}
+
+// 2.0.0-beta7 (7.7): strip every caller-supplied X-VScreen-* and X-AVS-* header (case-insensitive)
+// before forwarding so a public or tailnet caller can never spoof internal bridge headers.
+func stripInternalHeaders(h http.Header) {
+	for k := range h {
+		lk := strings.ToLower(k)
+		if strings.HasPrefix(lk, "x-vscreen-") || strings.HasPrefix(lk, "x-avs-") {
+			delete(h, k)
+		}
+	}
+}
+
+// preparePublicProxyRequest rewrites an incoming Funnel :443 request for PublicServer on 127.0.0.1.
+// All X-VScreen-* and X-AVS-* headers are stripped first, X-AVS-Public is set, and when ConnContext
+// attached a verified source (FunnelConn.Src or "tailnet:<ip>"), X-AVS-Public-Src is set (Section I).
+func preparePublicProxyRequest(r *http.Request, base func(*http.Request), pubSecret string) {
+	host := r.Host
+	if base != nil {
+		base(r)
+	}
+	r.Host = host
+	stripInternalHeaders(r.Header)
+	r.Header.Set("X-AVS-Public", pubSecret)
+	if src, ok := r.Context().Value(publicSrcKey{}).(string); ok && src != "" {
+		r.Header.Set("X-AVS-Public-Src", src)
+	}
 }
 
 // 1.3: tsnet repeats some lines every few seconds (the login prompt, with its link) and they filled the app's
@@ -358,6 +437,10 @@ func main() {
 		os.Exit(4)
 	}
 	setupDNS(dnsServerList(os.Getenv("TSB_DNS")))
+	if os.Getenv("TSB_MODE") == "ngrok" { // 2.0.0-beta11: the ngrok channel (ngrok.go)
+		runNgrok()
+		return
+	}
 	setupInterfaces()
 	os.Setenv("TS_NO_LOGS_NO_SUPPORT", "true") // no log upload to Tailscale
 
@@ -427,6 +510,11 @@ func main() {
 		r.Host = host // the app checks that the caller named this node
 		r.Header.Del("X-VScreen-Tailnet")
 		r.Header.Del("X-VScreen-Peer")
+		for k := range r.Header {
+			if strings.HasPrefix(strings.ToLower(k), "x-avs-") {
+				delete(r.Header, k)
+			}
+		}
 		r.Header.Set("X-VScreen-Tailnet", secret)
 		who := r.RemoteAddr
 		if wi, err := lc.WhoIs(r.Context(), r.RemoteAddr); err == nil && wi != nil {
@@ -457,8 +545,151 @@ func main() {
 
 	// Commands from the app; EOF = the app is gone.
 	quit := make(chan struct{})
+	quitCtx, quitCancel := context.WithCancel(context.Background())
+	defer quitCancel()
+	var (
+		funnelLnMu sync.Mutex
+		funnelLn   net.Listener
+		funnelSrv  *http.Server
+	)
+	closeFunnel := func() {
+		funnelLnMu.Lock()
+		s := funnelSrv
+		l := funnelLn
+		funnelSrv, funnelLn = nil, nil
+		funnelLnMu.Unlock()
+		if s != nil {
+			_ = s.Close()
+		}
+		if l != nil {
+			_ = l.Close()
+		}
+	}
+	defer closeFunnel()
+
+	// 2.0.0-beta7 (7.1, 7.7, 7.8 #1) + 2.0.0-beta8 (A.3, I):
+	// Optional Tailscale Funnel on :443 in an independent goroutine (ListenFunnel blocks until Running).
+	// Do NOT pass FunnelOnly(): all :443 traffic goes through PublicServer + OAuth.
+	// Per A.3, never report "on" until the TLS certificate for our DNS name is actually fetched and valid
+	// (intermediate status "cert", 120 s timeout). Per I, ConnContext extracts the true client IP from
+	// *ipn.FunnelConn.Src (or "tailnet:<ip>" for in-tailnet connections).
+	funnelFlag := strings.ToLower(strings.TrimSpace(os.Getenv("TSB_FUNNEL")))
+	if funnelFlag == "1" || funnelFlag == "true" {
+		pubTarget := env("TSB_PUBLIC_TARGET", "127.0.0.1:18785")
+		pubSecret := os.Getenv("TSB_PUBLIC_SECRET")
+		if pubSecret == "" {
+			setFunnelStatus("error", "TSB_PUBLIC_SECRET missing")
+		} else if srv.ControlURL != "" {
+			setFunnelStatus("error", "Funnel is only supported on official Tailscale")
+		} else {
+			setFunnelStatus("starting", "")
+			go func() {
+				fln, ferr := srv.ListenFunnel("tcp", ":443")
+				if ferr != nil {
+					select {
+					case <-quit:
+						return
+					default:
+					}
+					setFunnelStatus("error", ferr.Error())
+					fmt.Fprintln(os.Stderr, "funnel listen error:", ferr.Error())
+					return
+				}
+				funnelLnMu.Lock()
+				select {
+				case <-quit:
+					funnelLnMu.Unlock()
+					_ = fln.Close()
+					return
+				default:
+					funnelLn = fln
+				}
+				funnelLnMu.Unlock()
+
+				// A.3: actively fetch & validate the HTTPS certificate before marking Funnel "on".
+				setFunnelStatus("cert", "")
+				domain := ""
+				stCtx, stCancel := context.WithTimeout(quitCtx, 10*time.Second)
+				if st, serr := lc.Status(stCtx); serr == nil && st != nil {
+					if st.Self != nil {
+						domain = strings.TrimSuffix(st.Self.DNSName, ".")
+					}
+					if domain == "" && len(st.CertDomains) > 0 {
+						domain = strings.TrimSuffix(st.CertDomains[0], ".")
+					}
+				}
+				stCancel()
+
+				certCtx, certCancel := context.WithTimeout(quitCtx, 120*time.Second)
+				cerr := fetchAndVerifyFunnelCert(certCtx, lc, domain)
+				certCancel()
+				if cerr == nil {
+					_, cerr = lc.GetCertificate(&tls.ClientHelloInfo{ServerName: domain})
+				}
+				if cerr != nil {
+					select {
+					case <-quit:
+						return
+					default:
+					}
+					closeFunnel()
+					setFunnelStatus("error", cerr.Error())
+					fmt.Fprintln(os.Stderr, "funnel cert error:", cerr.Error())
+					return
+				}
+
+				ptu, _ := url.Parse("http://" + pubTarget)
+				prp := httputil.NewSingleHostReverseProxy(ptu)
+				prp.FlushInterval = -1
+				pbase := prp.Director
+				prp.Director = func(r *http.Request) {
+					preparePublicProxyRequest(r, pbase, pubSecret)
+				}
+				prp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+					w.Header().Set("Content-Type", "application/json; charset=utf-8")
+					w.WriteHeader(http.StatusBadGateway)
+					fmt.Fprintf(w, `{"ok":false,"code":"APP_NOT_ANSWERING","error":"Agent-VScreen public server did not answer (%s)"}`, strings.ReplaceAll(err.Error(), `"`, `'`))
+				}
+				psrv := &http.Server{
+					Handler:           bounded(prp),
+					ReadHeaderTimeout: 30 * time.Second,
+					ConnContext: func(ctx context.Context, c net.Conn) context.Context {
+						return context.WithValue(ctx, publicSrcKey{}, extractPublicSource(c))
+					},
+				}
+				funnelLnMu.Lock()
+				select {
+				case <-quit:
+					funnelLnMu.Unlock()
+					_ = fln.Close()
+					return
+				default:
+					funnelLn = fln
+					funnelSrv = psrv
+				}
+				funnelLnMu.Unlock()
+				setFunnelStatus("on", "")
+				if serr := psrv.Serve(fln); serr != nil && !errors.Is(serr, http.ErrServerClosed) && !errors.Is(serr, net.ErrClosed) {
+					select {
+					case <-quit:
+					default:
+						setFunnelStatus("error", serr.Error())
+						fmt.Fprintln(os.Stderr, "funnel serve error:", serr.Error())
+					}
+				}
+			}()
+		}
+	}
+
 	var quitOnce sync.Once
-	stop := func(why string) { quitOnce.Do(func() { fmt.Fprintln(os.Stderr, "quit:", why); close(quit) }) }
+	stop := func(why string) {
+		quitOnce.Do(func() {
+			fmt.Fprintln(os.Stderr, "quit:", why)
+			quitCancel()
+			close(quit)
+			closeFunnel()
+		})
+	}
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	go func() { s := <-sigs; stop("signal " + s.String()) }()
@@ -495,14 +726,22 @@ func main() {
 	go func() {
 		sc := bufio.NewScanner(os.Stdin)
 		for sc.Scan() {
-			switch strings.TrimSpace(sc.Text()) {
-			case "logout":
+			line := strings.TrimSpace(sc.Text())
+			switch {
+			case line == "logout":
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				_ = lc.Logout(ctx)
 				cancel()
-			case "login":
+			case line == "login":
 				kick(true)
-			case "quit":
+			case line == "funnel-check" || strings.HasPrefix(line, "funnel-check "):
+				seq := strings.TrimSpace(strings.TrimPrefix(line, "funnel-check"))
+				go func(seq string) {
+					ctx, cancel := context.WithTimeout(quitCtx, 15*time.Second)
+					defer cancel()
+					emitRaw(evaluateFunnelCheck(ctx, lc, srv.ControlURL, seq))
+				}(seq)
+			case line == "quit":
 				stop("asked by the app")
 				return
 			}

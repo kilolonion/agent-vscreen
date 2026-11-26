@@ -112,6 +112,23 @@ def root_pid():
         return ""
 
 
+
+def su_ready(secs=15):
+    """The stand-in su daemon was started in the background just before; its socket may not be up yet (seen in CI:
+    `su -c id` exit 1 right after `--daemon`). Ask again until it answers, then show who it runs as."""
+    last = ""
+    for _ in range(secs * 2):
+        try:
+            out = shell(SU, "-c", "id")
+            if "uid=" in out:
+                return out
+            last = out
+        except subprocess.CalledProcessError as e:
+            last = (e.output or "").strip() or ("exit %d" % e.returncode)
+        time.sleep(0.5)
+    raise SystemExit("FAIL stand-in su never answered in %ds: %s" % (secs, last))
+
+
 def setup_root():
     """The root way in, no Shizuku on the phone: a root manager stand-in, then the user taps "use root" in setup."""
     print("SDK", shell("getprop", "ro.build.version.sdk"), "ABIs", shell("getprop", "ro.product.cpu.abilist"), flush=True)
@@ -125,7 +142,7 @@ def setup_root():
     env = "AVSU_NO_UID=1 " if ROOT_UID0 else ""
     shell("sh", "-c", "'%s%s --daemon </dev/null >/dev/null 2>&1'" % (env, SU))
     shell("setprop", "debug.avs.su", SU)
-    print("stand-in su:", shell(SU, "-c", "id"), flush=True)
+    print("stand-in su:", su_ready(), flush=True)
     shell("logcat", "-c")
     try:
         run("adb", "install", "-r", "-g", str(APK), timeout=240)
@@ -365,6 +382,29 @@ def session_and_control(target, x=None, y=None):
     control("resume")
     r = api("act")
     check("the stopped long press tapped nothing", before is None or activity(r) == before, "%s -> %s" % (before, activity(r)))
+
+    # 2.0.0-beta4 (4.6): user takeover midway through a closed-loop drag cancels the finger and returns USER_TAKEOVER.
+    scr = r.get("screen") or {}
+    sw = int(scr.get("width") or 1080)
+    sh = int(scr.get("height") or 2400)
+    dx1, dx2, dy = max(20, sw // 4), min(sw - 20, (sw * 3) // 4), max(40, sh // 2)
+    drag_res = {}
+    def run_drag():
+        t0 = time.time()
+        drag_res["r"] = api('act "drag %d %d %d %d 2s hold until color:10,10=#010203~0 6s"' % (dx1, dy, dx2, dy))
+        drag_res["s"] = time.time() - t0
+    dth = threading.Thread(target=run_drag)
+    dth.start()
+    time.sleep(1.2)
+    control("takeover")
+    dth.join(60)
+    dr = drag_res.get("r") or {}
+    check("mid-drag user takeover cancels finger and returns USER_TAKEOVER",
+          dr.get("code") == "USER_TAKEOVER" and drag_res.get("s", 99) < 6.0,
+          "%s after %.1fs" % (why(dr), drag_res.get("s", -1)))
+    control("handback")
+    r = api("act")
+    check("after mid-drag takeover hand-back the agent can look", r.get("ok") is True, why(r))
 
 
 def main():

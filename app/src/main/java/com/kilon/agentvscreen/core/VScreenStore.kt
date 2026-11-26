@@ -26,11 +26,12 @@ internal object VScreenStore {
     private const val PREFS = "vscreen_store"
     private const val K_RULES = "app_rules"
     private const val K_IDLE_SAVE = "idle_power_save"
+    private const val K_KEEP_SCREEN_ON = "keep_screen_on"
 
     enum class Rule(val key: String, private val zhText: String, private val enText: String) {
         BLOCK("block", "禁止操作", "blocked"), READONLY("readonly", "只读", "read-only"),
         /** 1.2: every stretch that acts in this app is confirmed by the user on the phone first. */
-        ASK("ask", "每次询问", "ask every time");
+        ASK("ask", "每次确认", "confirm every time");
         val zh: String get() = tr(zhText, enText)
         companion object { fun of(s: String?): Rule? = values().firstOrNull { it.key == s } }
     }
@@ -44,6 +45,9 @@ internal object VScreenStore {
 
     private val _idlePowerSave = MutableStateFlow(true)
     val idlePowerSave: StateFlow<Boolean> = _idlePowerSave.asStateFlow()
+    /** 2.0.0 (issue #48): keep the phone's own screen on (dimmed) while an agent turn runs. Off by default. */
+    private val _keepScreenOn = MutableStateFlow(false)
+    val keepScreenOn: StateFlow<Boolean> = _keepScreenOn.asStateFlow()
 
     fun init(context: Context) {
         if (appContext != null) return
@@ -54,6 +58,7 @@ internal object VScreenStore {
             o.keys().asSequence().mapNotNull { k -> Rule.of(o.optString(k))?.let { k to it } }.toMap()
         }.getOrDefault(emptyMap())
         _idlePowerSave.value = prefs.getBoolean(K_IDLE_SAVE, true)
+        _keepScreenOn.value = prefs.getBoolean(K_KEEP_SCREEN_ON, false)
     }
 
     private fun ready() = appContext != null
@@ -76,6 +81,12 @@ internal object VScreenStore {
         if (!ready()) return
         _idlePowerSave.value = on
         prefs.edit().putBoolean(K_IDLE_SAVE, on).apply()
+    }
+
+    fun setKeepScreenOn(on: Boolean) {
+        if (!ready()) return
+        _keepScreenOn.value = on
+        prefs.edit().putBoolean(K_KEEP_SCREEN_ON, on).apply()
     }
 
     /** File-name-safe key; keeps Chinese, letters, digits, '-', '_' and '.'. */

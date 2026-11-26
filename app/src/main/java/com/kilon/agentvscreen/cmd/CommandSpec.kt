@@ -43,12 +43,32 @@ internal object CommandSpec {
                * stop --force and handoff in reach beyond the background screen). Null = [scope].
                */
               val scopeOf: ((OffloadArgs) -> Scope)? = null,
-              private val scopeNoteZh: String = "", private val scopeNoteEn: String = "") {
+              private val scopeNoteZh: String = "", private val scopeNoteEn: String = "",
+              /**
+               * 2.0.0-beta11 (review): the lowest level that may call it and whether it changes anything are two things.
+               * `elevate` is callable while looking only (else a viewer could never ask), yet it notifies the phone and
+               * may change the agent's table, so it is not read-only.
+               */
+              val sideEffects: Boolean = false,
+              /** 2.0.0-beta16 (Item 2): kept for CLI compatibility, omitted from MCP tools/list and help command lists. */
+              val hidden: Boolean = false) {
+        /** For MCP's readOnlyHint: callable while looking only and changes nothing. */
+        val readOnly: Boolean get() = scope == Scope.LOOK && !sideEffects
         val scopeNote: String get() = tr(scopeNoteZh, scopeNoteEn)
         fun scopeFor(args: OffloadArgs): Scope = scopeOf?.invoke(args) ?: scope
         val positional: String get() = tr(posZh, posEn)
         val body: List<String> get() = if (I18n.en) en else zh
         val summary: String get() = tr(sumZh, sumEn).ifEmpty { body.firstOrNull().orEmpty() }
+        /** 2.0.0-beta16 (Item 2): full description for MCP tools; prepends summary only when a distinct summary is set. */
+        val description: String get() {
+            val sum = tr(sumZh, sumEn)
+            val bodyText = body.joinToString("\n")
+            return when {
+                sum.isEmpty() || body.firstOrNull() == sum -> bodyText
+                bodyText.isEmpty() -> sum
+                else -> "$sum\n$bodyText"
+            }
+        }
         /** Every option the command takes (its own, `--async` when it may run as a task). */
         val allOpts: List<Opt> get() = if (long) opts + ASYNC else opts
         fun usageLine(): String = (name + " " + positional).trim() + allOpts.filter { !it.deprecated }.joinToString("") { " [${it.usage()}]" }
@@ -59,9 +79,9 @@ internal object CommandSpec {
         }
     }
 
-    /** An act that only looks: no steps or only waits, and nothing kept or saved. */
+    /** An act that only looks: no steps or only waits, and nothing kept, saved, held, or rule-driven. */
     private fun looksOnly(a: OffloadArgs): Boolean {
-        if (a.get("keep") != null || a.get("save") != null) return false
+        if (a.get("keep") != null || a.get("save") != null || a.hasFlag("hold") || a.getAll("on").isNotEmpty()) return false
         val body = a.positional.joinToString(" ").trim()
         if (body.isEmpty()) return true
         return runCatching { Steps.parseAll(body).all { it.kind == StepKind.WAIT || it.kind == StepKind.SLEEP } }.getOrDefault(false)
@@ -87,65 +107,86 @@ internal object CommandSpec {
             listOf("做一段操作（最多 40 步，用 ; 或换行分开），返回四段。不带步骤 = 看一眼（等画面稳定，最多 3 秒）。",
                 "步骤：",
                 "  tap 目标 | press 目标 [时长，如 1.2s；纯数字是毫秒] | swipe x1 y1 x2 y2 [时长] | drag x1 y1 x2 y2 [x3 y3 …] [时长]",
+                "  闭环手势（按着边看边松手）：press 目标 hold until <条件> [最长]（默认 5s，上限 10s）| drag x1 y1 x2 y2 […] [时长] hold until <条件> [最长] | drag x1 y1 x2 y2 seek until <条件> [最长]（两点直线小步移动，默认 15s，上限 30s）；手势里的 text:/gone: 必须带 in x1,y1,x2,y2；不做 swipe … until，翻找用 repeat { swipe … } until text:…",
                 "  scroll up|down|left|right [#N | x y] | type 文字 | type+ 文字（追加） | type \"文字\" slow [200ms]（逐字输入） | key 键名 | key ctrl+a（组合键：ctrl/shift/alt + 键） | back | enter",
                 "  wait <条件> [or <条件>] [最长时长] | wait 2s | use 段名",
                 "  目标 = x y | #N（上次【现在】列表里的编号）| 画面上的字（先找完全一样的，再找包含的；只写一个数＝点画面上的这个数字）",
                 "  字里可写 *（任意字，整段字要对上：*蓝牙* 含蓝牙，共*条 以共开头以条结尾），text:/gone: 条件也一样；字@N = 从上往下第 N 处（@-1 最后一处）；字 +dx,+dy = 字旁边那一点（图标、开关）；坐标可写屏幕比例 50% 80%（换屏幕尺寸也点同一处）",
-                "  流程：try 一步 | try { 几步 }（没找到、没达到预期就跳过接着做）| if <条件> [最长] { … } [else { … } | else 一步]（看现在的画面，默认等 1.5s）| repeat 3 { … } | repeat [最多次数] { … } until <条件>（每轮后看，默认最多 10 次）。括号里可以换行、可以嵌套",
+                "  流程：try 一步 | try { 几步 }（没找到、没达到预期就跳过接着做）| if <条件> [最长] { … } [else { … } | else 一步]（看现在的画面，默认等 1.5s）| repeat 3 { … } | repeat [最多次数，最多 50] { … } until <条件>（每轮后看，默认最多 10 次，上限 50 次）。括号里可以换行、可以嵌套",
                 "  键名：back enter tab del space esc search menu up down left right paste copy cut page_up page_down，或数字 keycode（没有 home：副屏没有桌面）",
-                "每个动作后可加 until <条件> [or <条件>] [最长时长，默认 5s]；没写就等画面稳定（最多 3 秒；画面只剩循环小动画也算稳定）；这次等待结束后（稳定了或到时间）画面和动作前一样时，再看最多 1.5 秒（type、编辑键和 --fast 的中间步骤不看），时刻从动作完成算起：变了就等它稳定，说“画面在动作 X 后才变化，Y 时稳定”（或“等到 Y 还在变”）；其间满足 --stop 条件就停在这一步，后面不做，不给 NO_CHANGE；仍没变才说“画面没有变化”（NO_CHANGE，只表示这段时间里没检测到变化）。",
-                "条件：text:字 | gone:字 | change[:x1,y1,x2,y2] | still[:区域]（完全不动）| stable（稳定，容许循环小动画）| color:x,y=#RRGGBB[~容差] | app:包名或界面名",
+                "每个动作后可加 until <条件> [or <条件>] [最长时长，默认 5s]（until text: 的字要是动作后才会新出现的字，动作前已在画面上的字不算）；没写就等画面稳定（最多 3 秒；画面只剩循环小动画也算稳定）；这次等待结束后（稳定了或到时间）画面和动作前一样时，再看最多 1.5 秒（type、编辑键和 --fast 的中间步骤不看），时刻从动作完成算起：变了就等它稳定，说“画面在动作 X 后才变化，Y 时稳定”（或“等到 Y 还在变”）；其间满足 --stop 条件就停在这一步，后面不做，不给 NO_CHANGE；仍没变才说“画面没有变化”（NO_CHANGE，只表示这段时间里没检测到变化）。",
+                "条件：text:字（动作后新出现的字；* 可以一个字也不配，9* 也匹配 9%）| gone:字 | change[:x1,y1,x2,y2] | still[:区域]（完全不动）| stable（稳定，容许循环小动画）| color:x,y=#RRGGBB[~容差] | app:包名或界面名",
                 "一步没达到预期，这段就停在这一步，后面的不做，结果是失败（退出码 1，outcome=missed/refused）：",
                 "  until 到时间没等到；字画面上找不到；同样的字有好几处（AMBIGUOUS，会列出每一处的坐标，改用坐标）；#N 的元素已经不在原位（STALE_ELEMENT）；",
                 "  type 没有获得焦点的输入框、或输入后框里没有你的字。type 前先点输入框，【现在】里它标“可输入 有焦点”。",
-                "真正付钱的按钮（支付、提交订单、转账）、用户设为“每次询问”的应用（用户选“谨慎”档时还有删除等不可撤销的按钮）：手机上会弹出确认，用户点了允许才会做（最多等 60 秒；没答复是 CONFIRM_PENDING，告诉用户去手机上允许，再重发）。",
+                "支付按钮（付款、提交订单、转账）、用户设为“每次确认”的应用，以及这个 agent 的权限表里设为“问我”的类别（不可撤销操作、敏感操作等）：手机上会弹出确认，用户允许后才会执行；设为“不允许”的类别直接返回 SCOPE_DENIED（最多等 60 秒；没答复是 CONFIRM_PENDING，告诉用户去手机上允许，再重发）。",
                 "例：act \"tap 搜索; type 耳机; key enter until text:综合\"",
                 "    act \"drag 300 900 800 900\" --watch 2s",
+                "    act \"drag 200 1500 540 600 hold until color:540,600=#4CAF50 2s\"",
+                "    act \"drag 100 800 980 800 seek until text:70 in 400,600,700,700\"",
+                "    act \"press 540 1600 hold until text:9* in 300,1400,800,1500 8s\"",
+                "    act --on \"text:限时优惠 => tap 980,420\" \"tap 确定 until text:已确定\"",
+                "    act --on \"text:点我 => tap 点我 x3\" --watch 10s",
+                "    act \"tap 开始 until text:进行中\" --hold",
                 "    act --stop \"text:到货\" --keep notify --for 2h"),
             listOf("do a stretch of steps (up to 40, separated by ; or newlines), returns four blocks. No steps = take a look (waits for the picture to settle, up to 3 s).",
                 "steps:",
                 "  tap <target> | press <target> [duration, e.g. 1.2s; a bare number is ms] | swipe x1 y1 x2 y2 [duration] | drag x1 y1 x2 y2 [x3 y3 …] [duration]",
+                "  closed-loop gestures (judge while holding): press <target> hold until <cond> [max] (default 5s, max 10s) | drag x1 y1 x2 y2 […] [duration] hold until <cond> [max] | drag x1 y1 x2 y2 seek until <cond> [max] (2-point line in small steps, default 15s, max 30s); text:/gone: inside hold/seek must include in x1,y1,x2,y2; no swipe … until — use repeat { swipe … } until text:…",
                 "  scroll up|down|left|right [#N | x y] | type <text> | type+ <text> (append) | type \"<text>\" slow [200ms] (one character at a time) | key <name> | key ctrl+a (shortcut: ctrl/shift/alt + key) | back | enter",
                 "  wait <condition> [or <condition>] [max duration] | wait 2s | use <segment>",
                 "  target = x y | #N (number in the last [Now] list) | text on the screen (exact match first, then contains; a single number = tap that number on the screen)",
                 "  words may hold * (any characters; the whole text must match: *Wi-Fi* holds Wi-Fi), in text:/gone: conditions too; words@N = the N-th place from the top (@-1 the last); words +dx,+dy = the point that far beside them (an icon, a switch); coordinates may be shares of the screen, 50% 80% (same place on any screen size)",
-                "  flow: try <step> | try { steps } (not found or not as expected: skip and go on) | if <condition> [max] { … } [else { … } | else <step>] (the screen as it is, waits up to 1.5 s by default) | repeat 3 { … } | repeat [at most] { … } until <condition> (checked after each round, at most 10 by default). Braces may span lines and nest",
+                "  flow: try <step> | try { steps } (not found or not as expected: skip and go on) | if <condition> [max] { … } [else { … } | else <step>] (the screen as it is, waits up to 1.5 s by default) | repeat 3 { … } | repeat [at most, max 50] { … } until <condition> (checked after each round, default 10, max 50). Braces may span lines and nest",
                 "  keys: back enter tab del space esc search menu up down left right paste copy cut page_up page_down, or a numeric keycode (no home: the screen has no launcher)",
-                "After each action you may add until <condition> [or <condition>] [max duration, default 5s]; without it the picture is awaited to settle (up to 3 s; a picture left with only a small looping animation counts as settled); if after that wait (settled or timed out) it matches the picture before the action, it looks up to 1.5 s longer (not for type, edit keys or the in-between steps of --fast), timing from when the action finished: a change then is waited out and said as \"the screen changed late, X after the action, and settled at Y\" (or \"was still changing when time was up at Y\"); a --stop condition met meanwhile stops the stretch there, skips the rest and gives no NO_CHANGE; only a picture still unchanged is \"the screen did not change\" (NO_CHANGE: no change was seen in that time).",
-                "conditions: text:<word> | gone:<word> | change[:x1,y1,x2,y2] | still[:region] (no motion at all) | stable (settled, small looping animation allowed) | color:x,y=#RRGGBB[~tolerance] | app:<package or screen name>",
+                "After each action you may add until <condition> [or <condition>] [max duration, default 5s] (until text: must match text that newly appears after the action; text already on screen beforehand does not count); without it the picture is awaited to settle (up to 3 s; a picture left with only a small looping animation counts as settled); if after that wait (settled or timed out) it matches the picture before the action, it looks up to 1.5 s longer (not for type, edit keys or the in-between steps of --fast), timing from when the action finished: a change then is waited out and said as \"the screen changed late, X after the action, and settled at Y\" (or \"was still changing when time was up at Y\"); a --stop condition met meanwhile stops the stretch there, skips the rest and gives no NO_CHANGE; only a picture still unchanged is \"the screen did not change\" (NO_CHANGE: no change was seen in that time).",
+                "conditions: text:<word> (newly appearing after action; * may match zero chars: 9* also matches 9%) | gone:<word> | change[:x1,y1,x2,y2] | still[:region] (no motion at all) | stable (settled, small looping animation allowed) | color:x,y=#RRGGBB[~tolerance] | app:<package or screen name>",
                 "A step that does not reach what it expects stops the stretch there, skips the rest, and the result is a failure (exit code 1, outcome=missed/refused):",
                 "  until timed out; text not found on the screen; the same text in several places (AMBIGUOUS, every place is listed with its point: use coordinates); the element of #N is no longer where it was (STALE_ELEMENT);",
                 "  type found no focused input box, or your text is not in the box afterwards. Tap the input box before type; in [Now] it is marked \"input focused\".",
-                "Buttons that actually spend money (pay, place order, transfer) and apps the user set to \"ask every time\" (in the user's \"careful\" mode also irreversible buttons such as delete): the phone asks the user, and the step is done only after the user allows it (waits up to 60 s; no answer is CONFIRM_PENDING: tell the user to allow it on the phone, then send again).",
+                "Buttons that actually spend money (pay, place order, transfer) and apps the user set to \"confirm every time\" (plus the classes this agent's permission table sets to \"Ask me\", such as irreversible or sensitive actions): the phone asks the user, and the step is done only after the user allows it; classes set to \"Not allowed\" return SCOPE_DENIED (waits up to 60 s; no answer is CONFIRM_PENDING: tell the user to allow it on the phone, then send again).",
                 "e.g. act \"tap Search; type headphones; key enter until text:All\"",
                 "     act \"drag 300 900 800 900\" --watch 2s",
+                "     act \"drag 200 1500 540 600 hold until color:540,600=#4CAF50 2s\"",
+                "     act \"drag 100 800 980 800 seek until text:70 in 400,600,700,700\"",
+                "     act \"press 540 1600 hold until text:9* in 300,1400,800,1500 8s\"",
+                "     act --on \"text:Promo => tap 980,420\" \"tap OK until text:Done\"",
+                "     act --on \"text:Tap me => tap Tap me x3\" --watch 10s",
+                "     act \"tap Start until text:Running\" --hold",
                 "     act --stop \"text:In stock\" --keep notify --for 2h"),
             listOf(Opt("stop", Kind.VALUE, "条件", "condition", "整段一直盯着，满足就停下，后面的步骤不做", "watched for the whole stretch; when met it stops and skips the rest"),
+                Opt("on", Kind.VALUE, "条件 => 一步", "cond => step", "短程规则（仅本次 act 生效，可写 1–3 条，不跨轮）：条件成立时执行一步（只允许 tap / key back / scroll / wait 时长，可选 x1–x3，默认 x1；条件不能是 stable / still；text: / gone: 连续 2 次独立读屏才触发，间隔 500ms；规则不能触发付款或“每次确认”应用）", "short-range rule for this act only (1–3 rules, never persisted): when cond holds, run one step (tap / key back / scroll / wait duration only; optional x1–x3, default x1; cond cannot be stable / still; text: / gone: requires 2 consecutive independent readings with 500ms cooldown; rules never auto-confirm payments or ask-every-time apps)"),
+                Opt("hold", Kind.SWITCH, null, null, "回复发出前暂停副屏前台应用并核实，下一条命令前自动恢复（最长 120 秒，仅 Android 14+；一直要就 note hold on）。注意：Android 15 起，暂停正在频繁刷新的应用时，系统可能直接结束它；暂停只对按帧计时的应用有效，按真实时钟计时的应用恢复后会直接跳过这段时间；暂停期间网络连接可能超时", "pause and verify the virtual screen's foreground app before sending the reply, resuming before the next command (max 120s, Android 14+ only; set default with note hold on). Note: starting on Android 15, pausing an actively refreshing app may cause the system to kill it; pausing only stops frame-timed apps (wall-clock apps skip ahead on resume) and active network connections may time out"),
                 Opt("watch", Kind.DURATION, "时长", "duration", "步骤做完再看这么久（会动的画面）", "keep looking this long after the steps (moving pictures)"),
-                Opt("fast", Kind.SWITCH, null, null, "动作之间不等画面稳定（游戏、连续点击）；最后一步仍会等", "do not wait for the picture to settle between actions (games, rapid taps); the last step still waits"),
+                Opt("fast", Kind.SWITCH, null, null, "只跳过动作之间的画面稳定等待（游戏、连续点击）；最后一步以及 repeat 内每轮的 until / 稳定等待仍会执行", "skip settle waits only between actions (games, rapid taps); the last step and each repeat iteration's until / settle wait still run"),
                 Opt("bare", Kind.SWITCH, null, null, "这一段不做这个应用记下的前置/收尾步骤", "this stretch skips the before/after steps kept for this app"),
                 Opt("human", Kind.SWITCH, null, null, "仿人节奏：每个动作前随机停 0.2–2.6 秒，点击在元素内略偏、按住和滑动的时长与位置有波动，打字分 1–3 个字一段（对节奏敏感的应用用；条件判断不变）。一直要就 note human on", "human pacing: a random 0.2–2.6 s pause before each action, taps slightly off-centre inside the element, varied hold and swipe lengths, typing 1–3 characters at a time (for apps sensitive to machine timing; conditions are unchanged). To keep it on: note human on"),
                 Opt("keep", Kind.VALUE, "notify|wake", "notify|wake", "本轮结束后继续盯 --stop 的条件，看到就通知用户（notify）或发一条事件给调用方（wake，用 events 取），然后结束；重启后还在", "after this turn keep watching the --stop condition; when seen, notify the user (notify) or send the caller an event (wake, fetched with events), then end; survives a restart"),
                 Opt("for", Kind.DURATION, "时长", "duration", "--keep 盯多久（默认 1 小时，最长 12 小时）", "how long --keep watches (default 1 hour, at most 12 hours)"),
                 Opt("save", Kind.VALUE, "名字", "name", "把这段步骤存成这个应用的段，以后 use 名字", "save these steps as a segment of this app, later: use <name>"),
+                Opt("full", Kind.SWITCH, null, null, "这次一定出完整回复；不带步骤时按上次 act 的时间窗重算【这段时间】并返回全屏图和全部元素", "always return a full reply this time; with no steps, replays the last act window with a full picture and all elements"),
                 Opt("paused", Kind.SWITCH, null, null, "= --bare", "= --bare", deprecated = true),
                 Opt("confirmed", Kind.SWITCH, null, null, "已不起作用：付费/不可撤销由用户在手机上确认", "no longer has any effect: payment / irreversible steps are confirmed by the user on the phone", deprecated = true)),
             long = true, sumZh = "在副屏上做一段步骤（点、滑、输入、等待），返回现在的画面；不带步骤 = 看一眼",
             sumEn = "run a stretch of steps on the screen (tap, swipe, type, wait) and return the screen now; no steps = look",
             scopeOf = { a -> if (looksOnly(a)) Scope.LOOK else Scope.OPERATE },
             scopeNoteZh = "不带步骤、或只有 wait 的 act 只需要 look", scopeNoteEn = "an act with no steps, or only wait steps, needs just look"),
-        Cmd("note", "[文字] | before \"<步骤>\" | after \"<步骤>\" | save <段名> \"<步骤>\" | show <段名> | human on|off | delete <编号|before|after|段名>", "[text] | before \"<steps>\" | after \"<steps>\" | save <segment> \"<steps>\" | show <segment> | human on|off | delete <number|before|after|segment>",
+        Cmd("note", "[文字] | before \"<步骤>\" | after \"<步骤>\" | save <段名> \"<步骤>\" | show <段名> | human on|off | reply quiet|full | hold on|off | delete <编号|before|after|段名>", "[text] | before \"<steps>\" | after \"<steps>\" | save <segment> \"<steps>\" | show <segment> | human on|off | reply quiet|full | hold on|off | delete <number|before|after|segment>",
             listOf("给当前应用记笔记（不带参数 = 列出笔记、段和前置/收尾步骤）。下次 launch 会列出来，并标明是谁、在应用哪个版本时记的。",
                 "before / after：每段 act 开始前先做 before 的步骤，做完、观察完再做 after 的步骤（--bare 跳过）。",
                 "例：会自己走的画面（游戏、播放器）记 before = 继续的步骤、after = 暂停的步骤，你思考时画面就停着；每次进页面都弹的窗记 before = 关掉它的步骤。",
                 "save：不执行，直接存下或改写一个段（示教存的段也一样），步骤写法和 act 相同，可以用 try / if / repeat、* 和 @N；note 列出的就是段的完整步骤。",
-                "human on：这个应用以后每段 act 都用仿人节奏（同 act --human）；off 关掉。"),
+                "human on：这个应用以后每段 act 都用仿人节奏（同 act --human）；off 关掉。",
+                "reply quiet|full：按当前 agent 保存默认回复模式（默认 quiet：符合预期时给短回复，full：每次都给完整回复），不需要先打开应用。",
+                "hold on|off：按当前 agent 保存默认是否开启 act --hold（默认 off，仅 Android 14+ 生效；Android 15 起，暂停正在频繁刷新的应用时，系统可能直接结束它），不需要先打开应用。"),
             listOf("keep notes for the current app (no arguments = list notes, segments and before/after steps). The next launch lists them, with who wrote each and for which app version.",
                 "before / after: every act first does the before steps, and after acting and looking does the after steps (--bare skips them).",
                 "e.g. for a picture that moves by itself (a game, a player) keep before = the steps that resume and after = the steps that pause, so it stands still while you think; for a popup shown on every visit keep before = the steps that close it.",
                 "save: store or rewrite a segment without running it (taught lessons too); the steps are written as for act, with try / if / repeat, * and @N; note lists each segment's full steps.",
-                "human on: every act on this app uses human pacing from now on (as act --human); off turns it off."),
-            sumZh = "给当前应用记笔记、前置/收尾步骤", sumEn = "keep notes and before/after steps for the current app"),
+                "human on: every act on this app uses human pacing from now on (as act --human); off turns it off.",
+                "reply quiet|full: save this agent's default reply mode (default quiet: short reply when expected; full: always return full four blocks); works without an open app.",
+                "hold on|off: save whether this agent enables act --hold by default (default off, Android 14+ only; starting on Android 15, pausing an actively refreshing app may cause the system to kill it); works without an open app."),
+            sumZh = "给当前应用记笔记、前置/收尾步骤，或设回复/暂停默认模式", sumEn = "keep notes and before/after steps for the current app, or set reply/hold defaults"),
         Cmd("events", "", "",
             listOf("取盯守（act --keep wake）看到条件时发来的事件。事件有序号，取走后在你下一次 events 时才删除（中途断了不会丢）。",
                 "这个会话没有正在运行的 --keep wake 盯守时不等，直接说明。"),
@@ -154,9 +195,9 @@ internal object CommandSpec {
             listOf(Opt("wait", Kind.DURATION, "时长", "duration", "没有事件时最多等这么久（默认不等，最长 120s）", "wait up to this long when there is none (default no wait, at most 120s)"),
                 Opt("again", Kind.SWITCH, null, null, "把上一次取走的那批再给一遍", "return the previously fetched batch again")),
             scope = Scope.LOOK, screen = false),
-        Cmd("task", "[任务号] | cancel <任务号>", "[task id] | cancel <task id>",
-            listOf("查看用 --async 开始的任务：不带参数列出本会话的任务；带任务号返回它的状态，做完了就是它的完整结果；cancel 让它在下一步之前停下。"),
-            listOf("look at tasks started with --async: no argument lists this session's tasks; with a task id it returns the state, and the full result once finished; cancel stops it before its next step."),
+        Cmd("task", "[任务号] | cancel <任务号> | recap", "[task id] | cancel <task id> | recap",
+            listOf("查看用 --async 开始的任务：不带参数列出本会话的任务；带任务号返回它的状态，做完了就是它的完整结果；cancel 让它在下一步之前停下；recap 返回本会话走过的页面和步骤摘要（不重新读屏，最多 600 字）。"),
+            listOf("look at tasks started with --async: no argument lists this session's tasks; with a task id it returns the state, and the full result once finished; cancel stops it before its next step; recap summarizes this session's pages and steps without re-reading the screen (at most 600 chars)."),
             listOf(Opt("wait", Kind.DURATION, "时长", "duration", "任务没做完时最多等这么久（最长 120s）", "wait up to this long while the task is unfinished (at most 120s)")),
             scope = Scope.LOOK, screen = false),
         Cmd("tasks", "", "",
@@ -167,12 +208,26 @@ internal object CommandSpec {
             listOf("在悬浮窗上显示你正在做什么（最多 40 字，给用户看；不带文字 = 清除；这一轮结束时自动清除）。"),
             listOf("show what you are doing on the floating window (up to 40 characters, for the user; no text = clear; cleared when this turn ends)."),
             screen = false),
+        Cmd("permissions", "", "",
+            listOf("这个 agent 现在的权限：每类操作是允许、每次确认还是不允许，临时许可何时结束，哪些应用每次确认、禁止或只读，以及固定边界。任务开始前看一次，按它规划；用户问起时照此转告。手机在每条命令执行前按同一张表检查。"),
+            listOf("this agent's permissions now: whether each class of action is allowed, confirmed each time or not allowed, when temporary allows end, which apps confirm every time, are blocked or read-only, and the fixed limits. Read it once before a task and plan by it; pass it on when the user asks. The phone checks every command against the same table before it runs."),
+            scope = Scope.LOOK, screen = false, sumZh = "查看这个 agent 的权限设置", sumEn = "show this agent's permission settings"),
+        Cmd("elevate", "<类别|档位>", "<class|level>",
+            listOf("提前向用户申请更高的许可，写明原因：手机上弹出确认（通知 → 指纹），用户选择本轮任务内、今天内或永久。类别 caution/destroy/system/operate/rate，档位 careful/free/free_system。",
+                "临时许可到期自动收回；支付不能申请（每次付款都单独确认）。命令遇到“不允许”的类别时也会弹出同样的确认。"),
+            listOf("ask the user ahead for more permission, with your reason: the phone shows a confirmation (notification → fingerprint) and the user picks this turn, today or permanently. Classes caution/destroy/system/operate/rate, levels careful/free/free_system.",
+                "A temporary permission ends by itself; payments cannot be asked for (each payment is confirmed on its own). A command that meets a Not allowed class brings up the same confirmation."),
+            listOf(Opt("why", Kind.VALUE, "原因", "reason", "为什么需要（用户在确认卡上看到，最多 120 字）", "why you need it (shown on the card, up to 120 characters)"),
+                Opt("for", Kind.VALUE, "round|today|always", "round|today|always", "希望的范围（默认 round；用户可以改）", "the range you hope for (default round; the user may pick another)")),
+            scope = Scope.LOOK, screen = false, sumZh = "向用户申请临时或永久的更高许可（手机上指纹确认）", sumEn = "ask the user for temporary or permanent extra permission (fingerprint on the phone)", sideEffects = true),
         Cmd("done", "", "",
             listOf("这一轮做完了：副屏马上省电暂停、页面保留 10 分钟，别的会话可以接手（不 done 的话安静满 N 分钟自动结束，N 在 App 里设）。"),
             listOf("this turn is finished: the screen pauses to save power at once, the page is kept 10 minutes, and other sessions can take over (without done, it ends after N quiet minutes, set in the app).")),
         Cmd("keep", "| off <名字|all>", "| off <name|all>",
-            listOf("列出 / 停止本轮之后的盯守（用 act --stop … --keep 开始）。"),
-            listOf("list / stop watches that run after this turn (started with act --stop … --keep)."), screen = false),
+            listOf("列出 / 停止本轮之后的盯守（用 act --stop … --keep 开始）。",
+                "另见 act --hold（两轮之间暂停应用）：Android 15 起，暂停正在频繁刷新的应用时，系统可能直接结束它。"),
+            listOf("list / stop watches that run after this turn (started with act --stop … --keep).",
+                "See also act --hold (pause between turns): starting on Android 15, pausing an actively refreshing app may cause the system to kill it."), screen = false),
         Cmd("stop", "[包名]", "[package]",
             listOf("关掉副屏上的应用。"),
             listOf("close the app on the screen."),
@@ -238,11 +293,11 @@ internal object CommandSpec {
         Cmd("frames", "", "",
             listOf("look --last … 的旧写法：回看录像，默认是上一次返回的【这段时间】。"),
             listOf("old form of look --last …: look back at the recording, by default the [Meanwhile] of the last reply."),
-            lookOpts(), scope = Scope.LOOK),
+            lookOpts(), scope = Scope.LOOK, hidden = true),
         Cmd("zoom", "x1,y1,x2,y2", "x1,y1,x2,y2",
             listOf("look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐标）。"), listOf("old form of look x1,y1,x2,y2: zoom into a region (screen coordinates on the picture's edges)."),
             listOf(Opt("scale", Kind.VALUE, "倍数", "factor", "放大倍数（默认按区域大小定）", "zoom factor (default follows the region size)"),
-                detailOpt, marksOpt), scope = Scope.LOOK),
+                detailOpt, marksOpt), scope = Scope.LOOK, hidden = true),
         Cmd("collect", "", "",
             listOf("从当前位置往下一页页滚，收集每一条（一张卡片或一行列表算一条，去重）。上面还有内容时会说；--from-top 先回到顶部。"), listOf("scroll down page by page from here and collect every item (a card or list row is one item, deduplicated). Says when there is more above; --from-top goes to the top first."),
             listOf(Opt("pages", Kind.VALUE, "页数", "count", "最多翻几页（默认 8，最多 40）", "pages to go through at most (default 8, at most 40)"),
@@ -306,8 +361,8 @@ internal object CommandSpec {
             "- 命令一条一条排队执行：同一块副屏上不会有两条命令同时动。排队超过 60 秒返回 QUEUE_TIMEOUT，这条没有执行。\n" +
             "- 用户点“接管”时动作会等待（最多 15 秒，之后 USER_TAKEOVER）。接管只由用户结束，你这一轮结束了副屏也留在用户手上、不会被释放：用 vscreen events --wait 等 handback 事件再继续，不要 release 或重新 launch。交还后第一个改动画面的命令会被拒一次（REREAD_REQUIRED），先 act（不带步骤）看一眼再重发。\n" +
             "- 用户在悬浮窗点“停止 AI”后，所有操作返回 USER_STOPPED：停下来，把返回里“怎么解除”那句转告用户，不要重试。\n" +
-            "- 用户可以把应用设成“禁止操作”（APP_BLOCKED）、“只读”（APP_READ_ONLY）或“每次询问”（手机上确认）。这是用户的决定，不要绕过，也不要换个入口进同一个应用。\n" +
-            "- 付钱的步骤（用户选“谨慎”档时还有不可撤销的步骤、stop --force、handoff in）：由用户在手机上确认（或用户事先给这个令牌开了免确认时段）。你自己加任何参数都不能代替用户确认。\n" +
+            "- 用户可以把应用设成“禁止操作”（APP_BLOCKED）、“只读”（APP_READ_ONLY）或“每次确认”（手机上确认）。这是用户的决定，不要绕过，也不要换个入口进同一个应用。\n" +
+            "- 支付，以及这个 agent 的权限表里设为“问我”的类别（不可撤销操作、敏感操作如 stop --force、handoff in 等）：由用户在手机上确认（或用户事先给这个令牌开了临时免确认）。设为“不允许”的类别不会执行。你自己加任何参数都不能代替用户确认。\n" +
             "- 涉及隐私（私信、通讯录、相册、余额）的步骤，先问用户，答复后再做。\n" +
             "- 一个副屏同一时间只属于一个会话（请求头 X-VScreen-Session，默认 default）。别的会话在用时返回 BUSY，写明归谁、多久后自动让出。\n" +
             "- --keep 在你不在时替你盯：告诉用户你在盯什么、盯多久、看到后会怎样、怎么停（keep off）。",
@@ -318,8 +373,8 @@ internal object CommandSpec {
             "- Commands run one at a time, in a queue: two commands never move the same screen at once. After 60 s in the queue a command returns QUEUE_TIMEOUT and has not run.\n" +
             "- While the user has taken over, actions wait (up to 15 s, then USER_TAKEOVER). Only the user ends a takeover: when your turn ends the screen stays with the user and is not released; wait for the handback event with vscreen events --wait, don't release or launch again. After the hand-back the first command that changes the screen is refused once (REREAD_REQUIRED): look with act (no steps), then send it again.\n" +
             "- After the user taps \"Stop AI\" on the floating window, every action returns USER_STOPPED: stop, pass on the \"how to undo\" line to the user, don't retry.\n" +
-            "- The user can set an app to \"blocked\" (APP_BLOCKED), \"read-only\" (APP_READ_ONLY) or \"ask every time\" (confirmed on the phone). That is the user's decision: don't get around it, and don't enter the same app another way.\n" +
-            "- Steps that spend money (and, in the user's \"careful\" mode, irreversible steps, stop --force and handoff in) are confirmed by the user on the phone (or the user gave this token a no-confirmation period beforehand). No option you add can stand in for the user's confirmation.\n" +
+            "- The user can set an app to \"blocked\" (APP_BLOCKED), \"read-only\" (APP_READ_ONLY) or \"confirm every time\" (confirmed on the phone). That is the user's decision: don't get around it, and don't enter the same app another way.\n" +
+            "- Payments, and the classes this agent's permission table sets to \"Ask me\" (irreversible or sensitive actions such as stop --force and handoff in), are confirmed by the user on the phone (or the user gave this token a temporary no-confirmation period). Classes set to \"Not allowed\" are never done. No option you add can stand in for the user's confirmation.\n" +
             "- Steps touching privacy (messages, contacts, photos, balances): ask the user first and act after the answer.\n" +
             "- A screen belongs to one session at a time (header X-VScreen-Session, default \"default\"). When another session is using it you get BUSY, with whose it is and when it frees up.\n" +
             "- --keep watches for you while you are away: tell the user what you watch, for how long, what happens when seen, and how to stop it (keep off).")
@@ -327,15 +382,15 @@ internal object CommandSpec {
     /** `help all`. */
     fun fullHelp(): String = buildString {
         append(head).append('\n')
-        commands.forEach { c -> c.help().forEach { append(it).append('\n') } }
+        commands.filterNot { it.hidden }.forEach { c -> c.help().forEach { append(it).append('\n') } }
         append("  guide\n        ").append(tr("用法速查（一页）。", "the one-page quick usage.")).append('\n')
-        append("  help [all|codes|<").append(tr("命令", "command")).append(">]\n        ").append(tr("完整说明 / 代码表 / 单条命令。", "the full reference / the code table / one command.")).append('\n')
+        append("  help [all|codes|<").append(tr("主题", "topic")).append(">|<").append(tr("命令", "command")).append(">]\n        ").append(tr("完整说明 / 代码表 / 主题 / 单条命令。", "the full reference / the code table / a topic / one command.")).append('\n')
         append('\n').append(rules)
     }
 
     /** `help` (short). */
     /** Commands kept only as old forms of another (listed once, at the end of the quick help). */
-    private val OLD_FORMS = mapOf("zoom" to "look x1,y1,x2,y2", "frames" to "look --last …")
+    internal val OLD_FORMS = mapOf("zoom" to "look x1,y1,x2,y2", "frames" to "look --last …")
 
     /**
      * `help` (short). 1.4.0-beta2: generated from the command table and the step / condition kinds, so a new command,
@@ -345,7 +400,7 @@ internal object CommandSpec {
         append(tr("vscreen — Agent-VScreen：在看不见的副屏里操作应用，不占用户主屏（完整说明：help all；单条：help act；代码表：help codes）",
             "vscreen — Agent-VScreen: operate apps on an invisible background screen without taking the user's screen (full guide: help all; one command: help act; codes: help codes)")).append('\n')
         for (c in commands) {
-            if (c.name in OLD_FORMS) continue
+            if (c.hidden || c.name in OLD_FORMS) continue
             val use = (c.name + " " + c.positional).trim()
             append("  ").append(use.padEnd(24)).append("  ").append(c.summary.substringBefore(tr("。", ". ")).trimEnd('.', '。')).append('\n')
             if (c.name == "act") {
@@ -415,8 +470,18 @@ internal object CommandSpec {
         }
         if (options != null) for (o in c.allOpts) {
             val k = listOf(o.name, o.name.replace('-', '_')).firstOrNull { options.has(it) } ?: continue
-            if (o.kind == Kind.SWITCH) { if (options.optBoolean(k, false)) out += "--${o.name}" }
-            else options.opt(k)?.toString()?.takeIf { it.isNotEmpty() && it != "null" }?.let { out += "--${o.name}"; out += it }
+            if (o.kind == Kind.SWITCH) {
+                if (options.optBoolean(k, false)) out += "--${o.name}"
+            } else {
+                val v = options.opt(k)
+                if (v is JSONArray) {
+                    for (idx in 0 until v.length()) {
+                        v.optString(idx).takeIf { it.isNotEmpty() && it != "null" }?.let { out += "--${o.name}"; out += it }
+                    }
+                } else {
+                    v?.toString()?.takeIf { it.isNotEmpty() && it != "null" }?.let { out += "--${o.name}"; out += it }
+                }
+            }
         }
         return out
     }

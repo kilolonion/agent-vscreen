@@ -63,6 +63,7 @@ This list and the note agents receive come from one ability table (`Abilities.kt
 - **a step only the user can do (password, code, face, scanning), or the app I need is the one the user is using**: `vscreen handoff out` puts the app on the user's screen with what to do; `vscreen handoff in` takes the app from the user's screen
 - **an app has no sound, or the user wants an app muted or its sound back**: `vscreen sound` shows it, `sound mute|unmute <app>` mutes or unmutes
 - **switch or park apps**: `vscreen tasks` lists tasks; `launch --keep` switches without reopening; `handoff park/unpark` sets aside or restores apps
+- **the task needs more than my permission (uninstalling, system actions…)**: `vscreen permissions` shows mine, `vscreen elevate <class> --why <reason>` asks
 - **the text is too small or an icon, or there is no text at all (games, canvas, charts), or I need to see what just happened**: `vscreen look` asks for pictures: the screen now, a region up close, or the recording; `vscreen spots` finds tappable color patches
 - **the phone cannot be reached, commands keep failing, or something odd happens**: First tell off from broken: not running, service off or hidden is the user's choice; tell the user to open it, nothing to repair. Only `vscreen status` with ready false is a fault, and `vscreen fix` repairs what it lists and gives sound back to apps left silent
 <!-- abilities:end -->
@@ -163,7 +164,7 @@ Release signing is optional: copy `keystore.properties.example` to `keystore.pro
 
 ## License
 
-MIT. The bundled OCR models (`app/src/main/assets/vscreen-ocr/`) come from PaddleOCR under their own Apache-2.0 license.
+MIT. The bundled OCR models (`app/src/main/assets/vscreen-ocr/`) come from PaddleOCR under their own Apache-2.0 license. The textless-icon detector model (`app/src/main/assets/vscreen-detector/model.onnx`, and the larger optional download from [agent-vscreen-models](https://github.com/kilolonion/agent-vscreen-models)) is a separate file under AGPL-3.0 (see the NOTICE.txt beside it; training code in `tools/detector`); the app reads it only as data and asks before turning it on.
 
 ## Thanks
 

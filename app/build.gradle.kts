@@ -13,8 +13,8 @@ android {
         applicationId = "com.kilon.agentvscreen"
         minSdk = 30
         targetSdk = 35
-        versionCode = 57
-        versionName = "1.4.2-beta6"
+        versionCode = (project.findProperty("avsVersionCode") as String?)?.toIntOrNull() ?: 74
+        versionName = "2.0.0"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     // Release signing is read from keystore.properties (not committed). See keystore.properties.example.
@@ -35,6 +35,9 @@ android {
         }
     }
     buildTypes {
+        // 2.0: the test build also carries x86_64 native code, so OCR on the CI emulator (x86_64) runs natively instead
+        // of through the arm64 translator (0.5-30 s a reading there). Release stays arm64 only.
+        debug { ndk { abiFilters += listOf("x86_64") } }
         release {
             isMinifyEnabled = true
             isShrinkResources = true

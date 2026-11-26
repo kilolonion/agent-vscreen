@@ -166,7 +166,7 @@ class V120Test {
             Regex("`vscreen ([a-z]+)").findAll(g).map { it.groupValues[1] }.forEach { assertTrue("guide names unknown command $it", CommandSpec.of(it) != null || it in CommandSpec.TRANSPORT_WORDS) }
             assertTrue(AgentGuide.skill().startsWith("---\nname: agent-vscreen"))
             // The note carries one line per ability (Abilities); English runs about twice as long as Chinese.
-            AgentGuide.memory().length.let { n -> assertTrue("memory note is $n chars", n < (if (lang == I18n.Lang.ZH) 1780 else 3970)) }
+            AgentGuide.memory().length.let { n -> assertTrue("memory note is $n chars", n < (if (lang == I18n.Lang.ZH) 1880 else 4170)) }
         }
         I18n.choice = I18n.Lang.ZH
         assertTrue(AgentGuide.guide().contains("看 → 做 → 核对"))

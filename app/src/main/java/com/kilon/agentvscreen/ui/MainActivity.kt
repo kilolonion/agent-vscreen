@@ -43,6 +43,9 @@ class MainActivity : ComponentActivity(), AppHost {
             null, "", "MAIN" -> null
             "CONNECT" -> Route.Connect
             "REMOTE" -> Route.Remote
+            "PUBLIC" -> Route.PublicAccess
+            "SECURITY" -> Route.Security
+            "FLOATING", "FLOATING_WINDOW" -> Route.FloatingWindow
             "TOKENS" -> Route.Tokens
             "RULES", "PERMS" -> Route.Rules
             "SCHEDULE", "SCHEDULES" -> Route.Schedules
@@ -86,7 +89,9 @@ class MainActivity : ComponentActivity(), AppHost {
 
     override fun copy(label: String, text: String) {
         getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(label, text))
-        say(tr("已复制：$label", "Copied: $label"))
+        val flat = text.replace(Regex("\\s+"), " ").trim()
+        val preview = if (flat.length > 40) flat.take(40) + "…" else flat
+        say(tr("已复制：$label（$preview）", "Copied: $label ($preview)"))
     }
 
     override fun recreateForLanguage() = recreate()

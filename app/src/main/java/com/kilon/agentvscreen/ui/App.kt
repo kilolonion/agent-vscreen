@@ -3,9 +3,13 @@ package com.kilon.agentvscreen.ui
 import androidx.compose.material.icons.outlined.AddLink
 import top.yukonga.miuix.kmp.basic.Icon
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.Box
@@ -52,6 +56,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.kilon.agentvscreen.core.BackgroundOperation
 import com.kilon.agentvscreen.host.Prefs
 import com.kilon.agentvscreen.host.Setup
@@ -115,6 +120,10 @@ sealed interface Route : NavKey {
     @Serializable data object NewAgent : Route
     @Serializable data class Agent(val id: String) : Route
     @Serializable data object Remote : Route
+    @Serializable data object PublicAccess : Route
+    @Serializable data class PublicGuide(val channel: String) : Route
+    @Serializable data object Security : Route
+    @Serializable data object FloatingWindow : Route
     @Serializable data object Tokens : Route
     @Serializable data object Rules : Route
     @Serializable data object Schedules : Route
@@ -124,6 +133,14 @@ sealed interface Route : NavKey {
     @Serializable data object Diag : Route
     @Serializable data object Help : Route
     @Serializable data class Task(val id: Long) : Route
+}
+
+/** Shared trigger allowing Settings › About › What's new to open the same changelog sheet hosted in [AppRoot]. */
+internal object ChangesSheetHost {
+    val replay = kotlinx.coroutines.flow.MutableStateFlow<List<com.kilon.agentvscreen.Changes.Release>?>(null)
+    fun show(releases: List<com.kilon.agentvscreen.Changes.Release>) {
+        if (releases.isNotEmpty()) replay.value = releases
+    }
 }
 
 /** What a page may ask of the activity. */
@@ -147,14 +164,17 @@ class Nav(val stack: NavBackStack, private val selectTab: (Int) -> Unit) {
 
 /** What several pages read: the setup check, the switch, background trouble; refreshed every 2 s while shown. */
 @Stable
+/** Setup items that never count as "left to do": accessibility (only the user can turn it on) and the detector (optional, AGPL notice). */
+private val NOT_COUNTED = setOf("accessibility", "detector")
+
 class AppState {
     var items by mutableStateOf(emptyList<Setup.Item>())
     var serviceOn by mutableStateOf(false)
     var liveProblem by mutableStateOf<String?>(null)
     /** Bumped after an action so lists read their store again. */
     var tick by mutableIntStateOf(0)
-    val allOk get() = items.isNotEmpty() && items.filter { it.key != "accessibility" }.all { it.ok }
-    val left get() = items.count { !it.ok && it.key != "accessibility" }
+    val allOk get() = items.isNotEmpty() && items.filter { it.key !in NOT_COUNTED }.all { it.ok }
+    val left get() = items.count { !it.ok && it.key !in NOT_COUNTED }
     fun bump() { tick++ }
 }
 
@@ -189,7 +209,11 @@ fun AppRoot(host: AppHost, firstPage: Route?, snack: SnackbarHostState, firstTab
         pager.animateScrollToPage(i)
     } }
     val nav = remember(stack) { Nav(stack) { i -> toTab(i) } }
-    LaunchedEffect(firstPage) { if (firstPage != null && firstPage != Route.Main) nav.go(firstPage) }
+    var firstPageApplied by remember { mutableStateOf(firstPage == null || firstPage == Route.Main) }
+    LaunchedEffect(firstPage) {
+        if (firstPage != null && firstPage != Route.Main) nav.go(firstPage)
+        firstPageApplied = true
+    }
     // 1.4.0-beta11: a notification tapped while the app is open goes to its page (tab, then the page if it has one).
     val asked by MainActivity.pageRequests.collectAsState()
     LaunchedEffect(asked) {
@@ -211,6 +235,10 @@ fun AppRoot(host: AppHost, firstPage: Route?, snack: SnackbarHostState, firstTab
                 entry<Route.Setup>(swipeDismiss = swipe) { SetupFlowPage() }
                 entry<Route.Connect>(swipeDismiss = swipe) { ConnectPage() }
                 entry<Route.Remote>(swipeDismiss = swipe) { RemotePage() }
+                entry<Route.PublicAccess>(swipeDismiss = swipe) { PublicAccessPage() }
+                entry<Route.PublicGuide>(swipeDismiss = swipe) { PublicGuidePage(it.channel) }
+                entry<Route.Security>(swipeDismiss = swipe) { SecurityPage() }
+                entry<Route.FloatingWindow>(swipeDismiss = swipe) { FloatingWindowPage() }
                 entry<Route.NewAgent>(swipeDismiss = swipe) { NewAgentPage() }
                 entry<Route.Agent>(swipeDismiss = swipe) { r -> AgentPage(r.id) }
                 entry<Route.Tokens>(swipeDismiss = swipe) { TokensPage() }
@@ -225,6 +253,143 @@ fun AppRoot(host: AppHost, firstPage: Route?, snack: SnackbarHostState, firstTab
             }
             SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 84.dp))
         }
+        // 2.0.0-beta8 (H): post-upgrade changelog bottom sheet on entering home (and replay from Settings › About › What's new).
+        var autoChanges by remember { mutableStateOf<List<com.kilon.agentvscreen.Changes.Release>?>(null) }
+        var checkedAutoChanges by remember { mutableStateOf(false) }
+        val replayChanges by ChangesSheetHost.replay.collectAsState()
+        val topRoute = stack.lastOrNull()
+        LaunchedEffect(firstPageApplied, topRoute) {
+            if (!checkedAutoChanges && firstPageApplied && topRoute == Route.Main) {
+                checkedAutoChanges = true
+                val shown = withContext(Dispatchers.IO) { com.kilon.agentvscreen.Changes.consumeLaunchAutoShow(ctx) }
+                if (shown.isNotEmpty()) autoChanges = shown
+            }
+        }
+        val activeChanges = replayChanges ?: autoChanges
+        val isAuto = replayChanges == null && autoChanges != null
+        ChangesBottomSheet(
+            releases = activeChanges,
+            onDismiss = {
+                if (isAuto) com.kilon.agentvscreen.Changes.markSeen(ctx)
+                autoChanges = null
+                ChangesSheetHost.replay.value = null
+            },
+            onNavigate = { route ->
+                if (isAuto) com.kilon.agentvscreen.Changes.markSeen(ctx)
+                autoChanges = null
+                ChangesSheetHost.replay.value = null
+                nav.go(route)
+            },
+        )
+        }
+    }
+}
+
+@Composable
+private fun ChangesBottomSheet(
+    releases: List<com.kilon.agentvscreen.Changes.Release>?,
+    onDismiss: () -> Unit,
+    onNavigate: (Route) -> Unit,
+) {
+    val shown = releases.orEmpty()
+    val title = shown.firstOrNull()?.versionName ?: ""
+    top.yukonga.miuix.kmp.overlay.OverlayBottomSheet(
+        show = shown.isNotEmpty(),
+        title = title,
+        onDismissRequest = onDismiss,
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(bottom = 24.dp),
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .weight(1f, fill = false)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                shown.forEach { rel ->
+                    if (shown.size > 1) {
+                        Text(
+                            rel.versionName,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MiuixTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                    val newItems = rel.items.filter { it.kind == com.kilon.agentvscreen.Changes.Kind.NEW }
+                    val improvedItems = rel.items.filter { it.kind == com.kilon.agentvscreen.Changes.Kind.IMPROVED }
+                    if (newItems.isNotEmpty()) {
+                        Text(
+                            tr("新功能", "New"),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MiuixTheme.colorScheme.primary,
+                        )
+                        newItems.forEach { item ->
+                            ChangeItemRow(item, onNavigate)
+                        }
+                    }
+                    if (improvedItems.isNotEmpty()) {
+                        Text(
+                            tr("改进", "Improved"),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            modifier = Modifier.padding(top = if (newItems.isNotEmpty()) 4.dp else 0.dp),
+                        )
+                        improvedItems.forEach { item ->
+                            ChangeItemRow(item, onNavigate)
+                        }
+                    }
+                }
+            }
+            PrimaryButton(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                color = MiuixTheme.colorScheme.primary,
+            ) {
+                Text(tr("知道了", "Got it"), color = MiuixTheme.colorScheme.onPrimary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChangeItemRow(
+    item: com.kilon.agentvscreen.Changes.Item,
+    onNavigate: (Route) -> Unit,
+) {
+    val route = item.route
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+            .then(if (route != null) Modifier.clickable { onNavigate(route) } else Modifier)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(item.title, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Text(
+                item.detail,
+                fontSize = 13.sp,
+                lineHeight = 18.sp,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            )
+        }
+        if (route != null) {
+            Icon(
+                androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MiuixTheme.colorScheme.primary,
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
 }
@@ -272,13 +437,15 @@ private fun MainTabs(pager: androidx.compose.foundation.pager.PagerState) {
         var keep by remember { mutableIntStateOf(1) }
         val moving = remember(pager) { { pager.isScrollInProgress } }
         LaunchedEffect(Unit) { delay(700); keep = 3 }
+        // 2.0.0-beta8 (K.4): guarantee every tab clears the FloatingNavigationBar height uniformly.
+        val navInset = androidx.compose.foundation.layout.WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val bottom = maxOf(pad.calculateBottomPadding() + 16.dp, navInset + 96.dp)
         Box(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
             CompositionLocalProvider(LocalPagerMoving provides moving) {
             HorizontalPager(
                 state = pager, beyondViewportPageCount = keep, verticalAlignment = Alignment.Top,
                 flingBehavior = PagerDefaults.flingBehavior(state = pager),
             ) { page ->
-                val bottom = pad.calculateBottomPadding()
                 when (page) {
                     0 -> OverviewTab(bottom)
                     TAB_CONNECT -> ConnectPage(tab = true, bottom = bottom)
@@ -300,7 +467,7 @@ fun Dot(c: Color, size: Dp = 8.dp) = Box(Modifier.size(size).clip(CircleShape).b
 /**
  * One page: a glass top bar with a large title that folds as the page scrolls under it, the content in a scrolling
  * column. [back] shows the back arrow (every page but the four tabs). [bottom] keeps the last group clear of the
- * floating bar on a tab.
+ * floating bar on a tab. [resetScrollKey] expands the large header and scrolls back to top when page state flips (F.4).
  */
 @Composable
 fun MiuixPage(
@@ -312,6 +479,7 @@ fun MiuixPage(
     lead: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     marqueeTitle: Boolean = false,
+    resetScrollKey: Any? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val nav = LocalNav.current
@@ -319,6 +487,12 @@ fun MiuixPage(
     val backdrop: LayerBackdrop? = if (Glass.blurOk) rememberLayerBackdrop { drawRect(surface); drawContent() } else null
     val bar = MiuixScrollBehavior()
     val scroll = rememberScrollState()
+    if (resetScrollKey != null) {
+        LaunchedEffect(resetScrollKey) {
+            scroll.scrollTo(0)
+            bar.state.heightOffset = 0f
+        }
+    }
     val moving = LocalPagerMoving.current
     // 1.4.0-beta13: blur only what is there to blur: content scrolled under the bar, and not while the tabs slide.
     val blurNow by remember(backdrop) { androidx.compose.runtime.derivedStateOf { backdrop != null && scroll.value > 0 && !moving() } }
@@ -345,6 +519,67 @@ fun MiuixPage(
             ) { content() }
         }
     }
+}
+
+/**
+ * 2.0.0-beta9 (feedback 6): [MiuixPage] for pages whose lists grow with use (agents, tokens, records, the log).
+ * The same bar, blur and paddings, but the content is a [androidx.compose.foundation.lazy.LazyColumn]: only the rows
+ * on screen are composed, so hundreds of entries cost what a dozen did. Rows that belong to one card use [cardItems].
+ */
+@Composable
+fun MiuixLazyPage(
+    title: String,
+    back: Boolean = true,
+    bottom: Dp = 0.dp,
+    actions: @Composable RowScope.() -> Unit = {},
+    content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
+) {
+    val nav = LocalNav.current
+    val surface = MiuixTheme.colorScheme.surface
+    val backdrop: LayerBackdrop? = if (Glass.blurOk) rememberLayerBackdrop { drawRect(surface); drawContent() } else null
+    val bar = MiuixScrollBehavior()
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    val moving = LocalPagerMoving.current
+    val blurNow by remember(backdrop) { androidx.compose.runtime.derivedStateOf { backdrop != null && (list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 0) && !moving() } }
+    Scaffold(
+        topBar = {
+            Box(if (blurNow && backdrop != null) Modifier.textureBlur(backdrop = backdrop, shape = RectangleShape, blurRadius = 25f,
+                colors = BlurDefaults.blurColors(blendColors = listOf(BlendColorEntry(color = surface.copy(0.8f))))) else Modifier) {
+                TopAppBar(title = title, scrollBehavior = bar, color = if (blurNow) Color.Transparent else surface,
+                    navigationIcon = {
+                        if (back) IconButton(onClick = { nav.back() }, modifier = Modifier.padding(start = 16.dp)) { Icon(MiuixIcons.Back, tr("返回", "Back")) }
+                    }, actions = actions)
+            }
+        },
+    ) { pad ->
+        Box(if (backdrop != null) Modifier.layerBackdrop(backdrop) else Modifier) {
+            androidx.compose.foundation.lazy.LazyColumn(
+                state = list,
+                modifier = Modifier.fillMaxSize().overScrollVertical().nestedScroll(bar.nestedScrollConnection),
+                contentPadding = PaddingValues(top = pad.calculateTopPadding(), bottom = maxOf(bottom, pad.calculateBottomPadding()) + 24.dp),
+                content = content,
+            )
+        }
+    }
+}
+
+/**
+ * The rows of one [Group]-like card as separate lazy items: a small title, then each row on the card's background,
+ * the first and last with the card's rounded corners. [key] must be stable (an id), so rows keep their state.
+ */
+fun <T> androidx.compose.foundation.lazy.LazyListScope.cardItems(
+    title: String?, rows: List<T>, key: (T) -> Any, row: @Composable (T) -> Unit,
+) {
+    if (rows.isEmpty()) return
+    item(key = "title:$title:${rows.size}") { if (title != null) SmallTitle(title) else Spacer(Modifier.height(12.dp)) }
+    items(rows.size, key = { i -> key(rows[i]) }) { i ->
+        val top = if (i == 0) 16.dp else 0.dp
+        val bottomR = if (i == rows.lastIndex) 16.dp else 0.dp
+        Box(Modifier.padding(horizontal = 12.dp).fillMaxWidth()
+            .clip(RoundedCornerShape(topStart = top, topEnd = top, bottomStart = bottomR, bottomEnd = bottomR))
+            .background(MiuixTheme.colorScheme.surfaceContainer)) { row(rows[i]) }
+    }
+    item(key = "gap:$title") { Spacer(Modifier.height(6.dp)) }
 }
 
 /** Miuix's string-only TopAppBar wraps the expanded title and truncates the collapsed one. Task titles

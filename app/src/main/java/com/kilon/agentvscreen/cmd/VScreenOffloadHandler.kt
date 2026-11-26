@@ -56,7 +56,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         }
 
         /** Commands that do not read the app on the screen themselves (act and launch check the app rules per step). */
-        internal val RULE_FREE = setOf("status", "apps", "sound", "release", "stop", "fix", "help", "handoff", "note", "keep", "schedule", "ask", "teach", "launch", "act", "events", "done", "title", "task", "tasks", "diag")
+        internal val RULE_FREE = setOf("status", "apps", "sound", "release", "stop", "fix", "help", "handoff", "note", "keep", "schedule", "ask", "teach", "launch", "act", "events", "done", "title", "task", "tasks", "diag", "elevate", "permissions")
 
         /**
          * 1.2: the screen queue. There is one background screen; commands that work on it run one at a time, in the
@@ -68,6 +68,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
 
         /** Drop everything remembered about [displayId] (called when BackgroundOperation releases it). */
         internal fun forgetDisplay(displayId: Int) {
+            ActHold.unholdNow("display_released")
             synchronized(lastActivity) { lastActivity.remove(displayId) }
             com.kilon.agentvscreen.core.VScreenPerception.stop(displayId)
             com.kilon.agentvscreen.core.VScreenRecorder.stop(displayId)
@@ -77,29 +78,34 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         init { BackgroundOperation.onScreenReleased { forgetDisplay(it) } }
     }
 
-    /** `help [command|all|codes]`. */
+    /** `help [command|topic|all|codes]`. */
     internal fun helpFor(cmd: String?): String = when (cmd) {
         null -> CommandSpec.quickHelp()
         "all" -> CommandSpec.fullHelp()
         "codes" -> Codes.help()
-        else -> CommandSpec.helpFor(cmd) ?: (tr("没有叫 $cmd 的命令。", "There is no command called $cmd.") + "\n\n" + CommandSpec.quickHelp())
+        else -> com.kilon.agentvscreen.api.AgentGuide.topic(cmd)
+            ?: CommandSpec.helpFor(cmd)
+            ?: (tr("没有叫 $cmd 的命令。", "There is no command called $cmd.") + "\n\n" + CommandSpec.quickHelp())
     }
 
     /** Nothing a command does may take the app down: any throwable becomes an error result. Every call is audited. */
     override fun handle(request: NativeOffloadRequest): NativeOffloadResult {
         val t0 = android.os.SystemClock.elapsedRealtime()
         val call = Call.current()
+        val argv = request.argv.drop(1)
         val r = try {
-            handleCommand(request)
+            // 2.0.0-beta13: a reply that leaves a request waiting on the phone says so and gives the line for the user.
+            UserWait.attach(handleCommand(request), argv.firstOrNull(), call?.tokenId)
         } catch (t: Throwable) {
             AppLogger.error(TAG, "vscreen command crashed", t)
             err("INTERNAL_ERROR", run { val why = "${t.javaClass.simpleName}: ${(t.cause?.message ?: t.message ?: "").take(300)}"; tr("工具内部错误（$why），命令没有执行完。vscreen diag 能导出诊断，交给开发者", "Internal tool error ($why); the command did not finish. vscreen diag exports a diagnostic bundle for the developer") })
         }
-        val argv = request.argv.drop(1)
+        val sid = request.sessionId?.takeIf { it.isNotBlank() } ?: DEFAULT_SESSION
+        if (argv.firstOrNull() != "release") com.kilon.agentvscreen.api.Turns.bumpTurn(sid)
         if (argv.firstOrNull() !in setOf(null, "help", "--help", "-h"))
-            com.kilon.agentvscreen.host.quiet("audit") { Audit.command(call?.tokenName ?: "main", call?.peer, request.sessionId ?: DEFAULT_SESSION, argv, r.codeOrDefault, r.exitCode, android.os.SystemClock.elapsedRealtime() - t0, call?.requestId) }
+            com.kilon.agentvscreen.host.quiet("audit") { Audit.command(call?.tokenName ?: "main", call?.peer, sid, argv, r.codeOrDefault, r.exitCode, android.os.SystemClock.elapsedRealtime() - t0, call?.requestId, call?.source?.key, call?.srcAddr) }
         if (argv.firstOrNull() !in setOf(null, "help", "--help", "-h"))
-            com.kilon.agentvscreen.host.quiet("tasklog") { com.kilon.agentvscreen.core.TaskLog.onCommand(request.sessionId ?: DEFAULT_SESSION, call?.tokenName ?: "main", argv, r.codeOrDefault, r.exitCode, android.os.SystemClock.elapsedRealtime() - t0, r.output) }
+            com.kilon.agentvscreen.host.quiet("tasklog") { com.kilon.agentvscreen.core.TaskLog.onCommand(sid, call?.tokenName ?: "main", argv, r.codeOrDefault, r.exitCode, android.os.SystemClock.elapsedRealtime() - t0, r.output, r) }
         return r
     }
 
@@ -109,19 +115,32 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         if (sub == null || sub == "--help" || sub == "-h") return NativeOffloadResult(0, helpFor(null) + "\n")
         if (sub == "help") return NativeOffloadResult(0, helpFor(argv.getOrNull(1)) + "\n")
         if (argv.drop(1).contains("--help")) return NativeOffloadResult(0, helpFor(sub) + "\n")
+        // 2.0.0-beta5 (5.1 & 5.6): unfreeze any held app BEFORE any command logic (including `look` and `status`).
+        val resumed = ActHold.unholdBeforeCommand()
         // 1.2.0-beta2: a look-only token cannot open a screen of its own, so its commands look at the screen that exists
         // (whoever owns it) instead of meeting NO_SCREEN / BUSY for ever.
         val sid = (request.sessionId?.takeIf { it.isNotBlank() } ?: DEFAULT_SESSION).let { own ->
             if (Call.current()?.scopes == setOf("look")) BackgroundOperation.state.value.ownerSessionId ?: own else own
         }
+        fun attachResumed(res: NativeOffloadResult): NativeOffloadResult {
+            if (resumed == null) return res
+            val data = (res.data ?: org.json.JSONObject()).put("resumed_after_ms", resumed.pausedMs)
+            val text = if (resumed.sid == sid && !res.output.trimStart().startsWith("{")) {
+                resumed.line() + "\n" + res.output
+            } else {
+                res.output
+            }
+            return res.copy(output = text, data = data)
+        }
         takeAdjusted()
-        return try {
-            val spec = CommandSpec.of(sub) ?: return unknown(sub)
+        return attachResumed(try {
+            val spec = CommandSpec.of(sub) ?: return attachResumed(unknown(sub))
             val rest = VScreenOptions.normalize(sub, argv.drop(1))
             checkOptions(sub, rest)
             val args = VScreenOptions.args(sub, rest)
             allowed(spec, spec.scopeFor(args))
-            if (spec.long && args.hasFlag("async")) return Tasks.start(this, sid, sub, argv.filter { it != "--async" })
+            com.kilon.agentvscreen.host.Risk.check(context, Call.current(), spec, args)
+            if (spec.long && args.hasFlag("async")) return attachResumed(Tasks.start(this, sid, sub, argv.filter { it != "--async" }))
             queued(spec, sid) {
                 BackgroundOperation.refreshStatus()
                 if (sub == "look") BackgroundOperation.requireNotParked(sid)
@@ -142,15 +161,48 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         } catch (t: Exception) {
             AppLogger.error(TAG, "$sub failed", t)
             err("OPERATION_FAILED", "${t.javaClass.simpleName}: ${t.message}")
+        })
+    }
+
+    /**
+     * The caller may do what the command does (look ⊂ operate ⊂ system). 2.0.0-beta8 (feedback 2): for a local or
+     * tailnet agent the rows "operate apps" / "system actions" of its own table decide: allowed runs; "ask me" is one
+     * tap on the phone (for this once, this run or today); "not allowed" asks the user once to allow that row
+     * (fingerprint) and runs if they do. A public client is bound by its OAuth grant: beyond it, SCOPE_DENIED.
+     */
+    private fun allowed(spec: CommandSpec.Cmd, need: CommandSpec.Scope) {
+        val call = Call.current() ?: return
+        if (need.key == "look") return
+        val tok = com.kilon.agentvscreen.api.Tokens.byId(call.tokenId)
+        if (call.source == Call.Source.PUBLIC || tok == null || tok.publicOnly) {
+            if (need.key in call.scopes && (tok == null || com.kilon.agentvscreen.host.StrongConfirm.effectiveAct(tok, need.key) != com.kilon.agentvscreen.api.Policy.Act.ASK)) return
+            if (need.key in call.scopes && tok != null) return askRow(call, spec, need.key)
+            if (need.key == "system") throw ActionError("SCOPE_DENIED", tr("公网 MCP 不开放系统操作（${spec.name}），这是固定的边界，不是设置问题；不要换别的办法绕过。确实需要时，请用户在这台手机上或经 Tailscale 接入一个 agent 来做",
+                "System actions (${spec.name}) are never available over public MCP; this is a fixed boundary, not a setting. Don't work around it. If it is really needed, the user can connect an agent on this phone or over Tailscale to do it"))
+            if (tok != null && tok.scope == "operate") throw ActionError("SCOPE_DENIED", tr("这个公网客户端（${call.tokenName}）配对时只获准查看，之后在手机上调高档位不会放宽这次配对发出的凭据，这条 ${spec.name} 没有执行。要操作，请重新连接这个客户端并在手机上批准一次配对",
+                "This public client (${call.tokenName}) was paired to look only; raising its level on the phone later does not widen the credentials of that pairing, so this ${spec.name} did not run. To operate, reconnect the client and approve a new pairing on the phone"))
+            throw ActionError("SCOPE_DENIED", tr("这个公网客户端（${call.tokenName}）只获准查看，这条 ${spec.name} 没有执行。要操作，请用户在 Agent-VScreen › 接入 › 这个 agent 里把档位改成能操作的（或重新配对时选择）",
+                "This public client (${call.tokenName}) may only look, so this ${spec.name} did not run. To operate, the user can raise its level in Agent-VScreen › Connect › this agent (or pick one when pairing again)"))
+        }
+        when (com.kilon.agentvscreen.host.StrongConfirm.effectiveAct(tok, need.key)) {
+            com.kilon.agentvscreen.api.Policy.Act.ALLOW -> return
+            com.kilon.agentvscreen.api.Policy.Act.ASK -> askRow(call, spec, need.key)
+            com.kilon.agentvscreen.api.Policy.Act.DENY -> {
+                val risks = buildList {
+                    if (!com.kilon.agentvscreen.host.StrongConfirm.hasAgentApproval(call.tokenId, com.kilon.agentvscreen.host.Risk.clientOf(call))) add(com.kilon.agentvscreen.host.Risk.NEW_CLIENT)
+                    add(com.kilon.agentvscreen.host.Risk.LEVEL_UP)
+                }
+                com.kilon.agentvscreen.host.StrongConfirm.requireForRisks(context, call, risks, spec.name, targetLevel = "row:${need.key}")
+            }
         }
     }
 
-    /** The caller's token must cover what the command does (look ⊂ operate ⊂ system). */
-    private fun allowed(spec: CommandSpec.Cmd, need: CommandSpec.Scope) {
-        val call = Call.current() ?: return
-        if (need.key in call.scopes) return
-        throw ActionError("SCOPE_DENIED", tr("这个令牌（${call.tokenName}）的权限不含“${need.key}”，这条 ${spec.name} 没有执行。权限由用户在 Agent-VScreen › 设置 › 令牌 里定，不要换别的办法绕过；需要的话请用户调整",
-            "This token (${call.tokenName}) does not include \"${need.key}\", so this ${spec.name} did not run. The user sets token permissions in Agent-VScreen › Settings › Tokens; don't work around it, ask the user to change it if needed"))
+    /** A row set to "ask me": one tap on the phone, which can cover this run or today. */
+    private fun askRow(call: Call, spec: CommandSpec.Cmd, key: String) {
+        val row = com.kilon.agentvscreen.api.Policy.row(key)?.title ?: key
+        com.kilon.agentvscreen.host.StrongConfirm.requireForConsent(context, call, "row:$key:${spec.name}", tr("$row：${spec.name}", "$row: ${spec.name}"),
+            tr("${call.tokenName} 要执行 ${spec.name}", "${call.tokenName} wants to run ${spec.name}"), key, "*",
+            com.kilon.agentvscreen.host.Consent.WAIT_MS, com.kilon.agentvscreen.host.Consent.VALID_MS)
     }
 
     /** Run [block] in the screen queue when the command works on the screen. */
@@ -219,33 +271,44 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         com.kilon.agentvscreen.core.Guard.require(com.kilon.agentvscreen.core.Guard.Act.READ, com.kilon.agentvscreen.core.VScreenShell.topPackage(id))
     }
 
-    internal fun dispatch(sub: String, args: OffloadArgs, sid: String?): NativeOffloadResult = when (sub) {
-        "launch" -> launchCmd(sid, args)
-        "act" -> act(sid, args)
-        "note" -> noteCmd(sid, args)
-        "keep" -> keepCmd(sid, args)
-        "schedule" -> scheduleCmd(sid, args)
-        "ask" -> askCmd(sid, args)
-        "teach" -> teachCmd(sid, args)
-        "stop" -> stopCmd(sid, args)
-        "release" -> releaseCmd(sid)
-        "handoff" -> handoffCmd(sid, args)
-        "tasks" -> tasksCmd(sid)
-        "status" -> status(sid, args)
-        "apps" -> apps(args)
-        "sound" -> soundCmd(args)
-        "events" -> eventsCmd(sid, args)
-        "task" -> Tasks.command(sid ?: DEFAULT_SESSION, args)
-        "done" -> doneCmd(sid)
-        "title" -> titleCmd(sid, args)
-        "spots" -> spotsCmd(sid, args)
-        "look" -> lookCmd(sid, args)
-        "zoom" -> lookCmd(sid, args, "zoom")
-        "frames" -> lookCmd(sid, args, "frames")
-        "collect" -> collectCmd(sid, args)
-        "fix" -> fix(sid, args)
-        "diag" -> diagCmd(sid)
-        else -> unknown(sub)
+    internal fun dispatch(sub: String, args: OffloadArgs, sid: String?): NativeOffloadResult {
+        val s = sid ?: DEFAULT_SESSION
+        val isRefetch = when (sub) {
+            "act" -> args.hasFlag("full") || args.positional.joinToString(" ").trim().isEmpty()
+            "look", "zoom", "frames" -> true
+            else -> false
+        }
+        Loud.onCommand(s, sub, isRefetch)
+        return when (sub) {
+            "launch" -> launchCmd(sid, args)
+            "act" -> act(sid, args)
+            "note" -> noteCmd(sid, args)
+            "keep" -> keepCmd(sid, args)
+            "schedule" -> scheduleCmd(sid, args)
+            "ask" -> askCmd(sid, args)
+            "teach" -> teachCmd(sid, args)
+            "stop" -> stopCmd(sid, args)
+            "release" -> releaseCmd(sid)
+            "handoff" -> handoffCmd(sid, args)
+            "tasks" -> tasksCmd(sid)
+            "status" -> status(sid, args)
+            "apps" -> apps(args)
+            "sound" -> soundCmd(args)
+            "events" -> eventsCmd(sid, args)
+            "task" -> Tasks.command(s, args)
+            "done" -> doneCmd(sid)
+            "title" -> titleCmd(sid, args)
+            "elevate" -> elevateCmd(args)
+            "permissions" -> NativeOffloadResult(0, com.kilon.agentvscreen.host.Permissions.text(Call.current()), data = com.kilon.agentvscreen.host.Permissions.json(Call.current()))
+            "spots" -> spotsCmd(sid, args)
+            "look" -> lookCmd(sid, args)
+            "zoom" -> lookCmd(sid, args, "zoom")
+            "frames" -> lookCmd(sid, args, "frames")
+            "collect" -> collectCmd(sid, args)
+            "fix" -> fix(sid, args)
+            "diag" -> diagCmd(sid)
+            else -> unknown(sub)
+        }
     }
 
     private fun unknown(sub: String): NativeOffloadResult = if (sub in setOf("resume", "continue", "screenshot", "tap", "type", "swipe", "key", "wait", "scroll"))

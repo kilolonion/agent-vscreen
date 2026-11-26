@@ -33,6 +33,11 @@ object A11yTree {
         val password get() = info.isPassword
         val viewId: String? get() = info.viewIdResourceName
         val className: String? get() = info.className?.toString()
+        val heading: Boolean get() = info.isHeading
+        val hasText: Boolean = !info.text.isNullOrBlank()
+        val hasContentDesc: Boolean = !info.contentDescription.isNullOrBlank()
+        /** 2.0.0-beta8 (L.3): clickable icon button (ImageButton, or clickable node with contentDescription but no text). */
+        val isIconButton: Boolean get() = clickable && ((className?.endsWith("ImageButton") == true) || (!hasText && hasContentDesc))
         fun all(): Sequence<Node> = sequence { yield(this@Node); children.forEach { yieldAll(it.all()) } }
     }
 
@@ -87,6 +92,7 @@ object A11yTree {
         /** 1.4.0-beta14: ask the largest visible scrollable area to go one page further (the list's own scroll). */
         fun scrollForward(): Boolean {
             val best = nodes.filter { it.scrollable && it.visible }.maxByOrNull { it.box.width().toLong() * it.box.height() } ?: return false
+            if (!com.kilon.agentvscreen.host.VScreenAccessibilityService.verifyNodeForAction(best.info, "ACTION_SCROLL_FORWARD")) return false
             return runCatching { best.info.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) }.getOrDefault(false)
         }
 

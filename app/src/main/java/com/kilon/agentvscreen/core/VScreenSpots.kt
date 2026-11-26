@@ -14,11 +14,28 @@ import kotlin.math.sqrt
 object VScreenSpots {
     data class Spot(val box: Rect, val cx: Int, val cy: Int, val color: Int, val area: Int, val fill: Double, val hollow: Boolean, val shape: String)
 
+    const val MIN_SIDE_RATIO = 1.0 / 90.0
+    const val MAX_SIDE_RATIO = 1.0 / 3.0
+
     /**
-     * [minSide]/[maxSide] bound a spot's box (screen px); [region] limits the search; [color] keeps
-     * spots whose mean colour is near it (RGB distance ≤ [colorTol]).
+     * 2.0.0-beta16 (Item 7): default spot size bounds scaled to the screen's short side so large buttons
+     * on high-DPI displays are not dropped by a fixed pixel cap.
      */
-    fun find(frame: Bitmap, minSide: Int = 12, maxSide: Int = 160, region: Rect? = null, color: Int? = null, colorTol: Int = 70, limit: Int = 80): List<Spot> {
+    fun defaultSideBounds(frameW: Int, frameH: Int): Pair<Int, Int> {
+        val shortSide = minOf(frameW, frameH).coerceAtLeast(1)
+        val minS = (shortSide * MIN_SIDE_RATIO).roundToInt().coerceAtLeast(4)
+        val maxS = (shortSide * MAX_SIDE_RATIO).roundToInt().coerceAtLeast(minS)
+        return minS to maxS
+    }
+
+    /**
+     * [minSide]/[maxSide] bound a spot's box (screen px; null uses [defaultSideBounds]); [region] limits the
+     * search; [color] keeps spots whose mean colour is near it (RGB distance ≤ [colorTol]).
+     */
+    fun find(frame: Bitmap, minSide: Int? = null, maxSide: Int? = null, region: Rect? = null, color: Int? = null, colorTol: Int = 70, limit: Int = 80): List<Spot> {
+        val (defMin, defMax) = defaultSideBounds(frame.width, frame.height)
+        val minS = minSide ?: defMin
+        val maxS = maxSide ?: defMax
         val k = maxOf(1, (maxOf(frame.width, frame.height) / 640.0).roundToInt())
         val w = frame.width / k; val h = frame.height / k
         if (w < 8 || h < 8) return emptyList()
@@ -58,7 +75,7 @@ object VScreenSpots {
                 if (cy < ry1 - 1) { val j = i + w; if (mask[j] && !seen[j]) { seen[j] = true; stack[sp++] = j } }
             }
             val bw = (maxX - minX + 1) * k; val bh = (maxY - minY + 1) * k
-            if (bw < minSide || bh < minSide || bw > maxSide || bh > maxSide) continue
+            if (bw < minS || bh < minS || bw > maxS || bh > maxS) continue
             val aspect = bw.toDouble() / bh
             if (aspect < 0.33 || aspect > 3.0) continue // lines and bars are not spots
             val fill = area.toDouble() / ((maxX - minX + 1) * (maxY - minY + 1))

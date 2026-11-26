@@ -102,7 +102,10 @@ internal object VScreenRemoteDisplay {
             shizukuBinder = service?.takeIf { it.pingBinder() }
             latch?.countDown()
         }
-        override fun onServiceDisconnected(name: ComponentName?) { shizukuBinder = null }
+        override fun onServiceDisconnected(name: ComponentName?) {
+            shizukuBinder = null
+            com.kilon.agentvscreen.host.HostService.server?.onPrivilegeChanged()
+        }
     }
     @Volatile private var latch: CountDownLatch? = null
 
@@ -127,6 +130,24 @@ internal object VScreenRemoteDisplay {
         }
     }
 
+    /**
+     * 2.0.0-beta12 (service off = nothing left): end the privileged screen service process. It gives back any muted
+     * app and releases its screens on the way out (DESTROY); Shizuku's copy is also unbound and removed.
+     */
+    fun shutdown() {
+        if (Privileged.via == Privileged.Via.ROOT) { RootBackend.stop(); return }
+        val b = shizukuBinder
+        if (b != null && b.isBinderAlive) runCatching {
+            val d = Parcel.obtain(); val r = Parcel.obtain()
+            try { b.transact(VScreenDisplayService.DESTROY_CODE, d, r, 0) } finally { d.recycle(); r.recycle() }
+        }
+        runCatching { if (ShizukuManager.isReady()) Shizuku.unbindUserService(args, conn, true) }
+        shizukuBinder = null
+    }
+
+    /** 2.0.0: flag sets the service tried before the one the screen got, with the reason each was refused. */
+    @Volatile var rejectedFlags: List<String> = emptyList(); private set
+
     fun create(name: String, width: Int, height: Int, dpi: Int, surface: Surface): Result<Created> = runCatching {
         val b = service().getOrThrow()
         timed("create") {
@@ -138,7 +159,10 @@ internal object VScreenRemoteDisplay {
                 surface.writeToParcel(data, 0)
                 b.transact(VScreenDisplayService.CREATE, data, reply, 0)
                 if (reply.readInt() != 0) error(reply.readString() ?: "unknown error")
-                Created(reply.readInt(), reply.readInt())
+                Created(reply.readInt(), reply.readInt()).also {
+                    // 2.0.0: an older service sends no reasons; a newer one lists the refused flag sets.
+                    rejectedFlags = if (reply.dataAvail() > 0) reply.readString().orEmpty().lines().filter { l -> l.isNotBlank() } else emptyList()
+                }
             } finally { data.recycle(); reply.recycle() }
         }
     }.onFailure { AppLogger.warning(TAG, "remote create failed: ${it.message}") }
@@ -333,5 +357,53 @@ internal object VScreenRemoteDisplay {
     fun touch(displayId: Int) {
         if (binder?.isBinderAlive != true) return
         call(VScreenDisplayService.TOUCH, { it.writeInt(displayId) }) { }
+    }
+
+    /** 2.0.0-beta2 [Gate]: TCP forwarder in the privileged service process. */
+    fun gateStart(wantPort: Int, internalPort: Int, pkg: String, processName: String, sdk: Int): Result<Int> =
+        call(VScreenDisplayService.GATE, {
+            it.writeInt(0); it.writeInt(wantPort); it.writeInt(internalPort)
+            it.writeString(pkg); it.writeString(processName); it.writeInt(sdk)
+        }) { it.readInt() }
+
+    fun gateBeat(): Result<Unit> = call(VScreenDisplayService.GATE, { it.writeInt(1) }) { }
+
+    fun gateStop(): Result<Unit> = call(VScreenDisplayService.GATE, { it.writeInt(2) }) { }
+
+    fun gateStatus(): Result<String> = call(VScreenDisplayService.GATE, { it.writeInt(3) }) { it.readString().orEmpty() }
+
+    /** 2.0.0-beta5 (5.1): ask Gate to freeze [processes] for up to [maxMs] ms; returns count frozen. */
+    fun gateHold(processes: List<String>, maxMs: Long): Result<Int> =
+        call(VScreenDisplayService.GATE, {
+            it.writeInt(4)
+            val list = processes.take(Gate.HOLD_MAX_PROCS)
+            it.writeInt(list.size)
+            list.forEach { p -> it.writeString(p) }
+            it.writeLong(maxMs)
+        }) { it.readInt() }
+
+    /** 2.0.0-beta5 (5.1): ask Gate to unfreeze all held processes and clear its hold file. */
+    fun gateUnhold(): Result<Int> = call(VScreenDisplayService.GATE, { it.writeInt(5) }) { it.readInt() }
+
+    /** [gateStatus] only when the service is already connected (never binds or waits); null otherwise. */
+    fun gateStatusIfConnected(): String? {
+        if (binder?.isBinderAlive != true) return null
+        return gateStatus().getOrNull()
+    }
+
+    /** Stop Gate on the Shizuku binder specifically (used when switching from Shizuku to Root). */
+    fun gateStopShizuku() {
+        val b = shizukuBinder?.takeIf { it.isBinderAlive } ?: return
+        Thread({
+            val data = Parcel.obtain(); val reply = Parcel.obtain()
+            try {
+                data.writeInterfaceToken(VScreenDisplayService.DESCRIPTOR)
+                data.writeInt(2)
+                b.transact(VScreenDisplayService.GATE, data, reply, 0)
+            } catch (_: Throwable) {
+            } finally {
+                data.recycle(); reply.recycle()
+            }
+        }, "vscreen-gate-stop").apply { isDaemon = true }.start()
     }
 }

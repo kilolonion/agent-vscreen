@@ -28,11 +28,12 @@ object VScreenRecorder {
     const val MAX_SIDE = 640
     private const val MIN_GAP_MS = 150L
     private const val FULL_MS = 3 * 60_000L
-    private const val KEEP_MS = 10 * 60_000L
+    const val KEEP_MS = 10 * 60_000L
     private const val OFF_KEEP_MS = 15_000L
     private const val MAX_BYTES = 60L * 1024 * 1024
+    private const val STRICT_START_GRACE_MS = 1_500L
 
-    class Frame(val atMs: Long, val file: File, val bytes: Long)
+    class Frame(val atMs: Long, val file: File, val bytes: Long, val clearChange: Boolean = true)
 
     /** Something drawn on the track: an action (with its points) or an event. */
     class Mark(val n: Int, val atMs: Long, val kind: String, val label: String, val pts: List<IntArray>) {
@@ -49,6 +50,8 @@ object VScreenRecorder {
         var lastAt = 0L
         var markSeq = 0
         var closed = false // under the track lock
+        /** 2.0.0-beta16 (Item 6): 160px thumbnail of the last frame tagged clearChange=true, for the same filter as Meanwhile. */
+        var lastClearThumb: Bitmap? = null
         @Volatile var on = true
         val startedAt = System.currentTimeMillis()
     }
@@ -74,20 +77,49 @@ object VScreenRecorder {
 
     /** A frame the perception service just looked at; stored only when it is new. Never throws. */
     fun offer(d: VScreenDisplay, frame: Bitmap, version: Long, pkg: String?) {
+        offerInternal(d, frame, version, pkg, respectGap = true)
+    }
+
+    /** 2.0.0-beta3: ensure the current frame is recorded on the track immediately (bypasses MIN_GAP_MS) and return it. */
+    fun offerFresh(d: VScreenDisplay, frame: Bitmap, version: Long, pkg: String?): Frame? {
+        offerInternal(d, frame, version, pkg, respectGap = false)
+        return existing(d.displayId)?.let { t -> synchronized(t) { t.frames.lastOrNull() } }
+    }
+
+    private fun offerInternal(d: VScreenDisplay, frame: Bitmap, version: Long, pkg: String?, respectGap: Boolean) {
         runCatching {
             val t = track(d) ?: return
             val now = System.currentTimeMillis()
-            if (version == t.lastVersion || now - t.lastAt < MIN_GAP_MS) return
-            t.lastVersion = version; t.lastAt = now
+            val skip = synchronized(t) {
+                t.closed || (version == t.lastVersion && t.frames.isNotEmpty()) || (respectGap && now - t.lastAt < MIN_GAP_MS)
+            }
+            if (skip) return
             t.on = enabledFor(pkg)
             val k = MAX_SIDE.toDouble() / maxOf(frame.width, frame.height)
             val small = if (k >= 1.0) frame else Bitmap.createScaledBitmap(frame, maxOf(1, (frame.width * k).roundToInt()), maxOf(1, (frame.height * k).roundToInt()), true)
-            val f = File(t.dir, "$now.jpg")
-            try { Pictures.write(small, f, Pictures.Use.RECORDING, fit = false) }
-            finally { if (small !== frame) small.recycle() }
+            val f = File(t.dir, "${now}_${version}.jpg")
+            var tiny: Bitmap? = null
+            try {
+                tiny = VScreenPerception.small(small, 160)
+                Pictures.write(small, f, Pictures.Use.RECORDING, fit = false)
+            } catch (e: Throwable) {
+                tiny?.recycle()
+                throw e
+            } finally {
+                if (small !== frame) small.recycle()
+            }
+            val mask = VScreenPerception.mask(d.displayId)
             synchronized(t) {
-                if (t.closed) { f.delete(); return }
-                t.frames.addLast(Frame(now, f, f.length())); t.bytes += f.length()
+                if (t.closed) { f.delete(); tiny.recycle(); return }
+                val clear = t.lastClearThumb == null || VScreenActivity.isClearChange(t.lastClearThumb, tiny, mask)
+                if (clear) {
+                    t.lastClearThumb?.recycle()
+                    t.lastClearThumb = tiny
+                } else {
+                    tiny.recycle()
+                }
+                t.lastVersion = version; t.lastAt = now
+                t.frames.addLast(Frame(now, f, f.length(), clearChange = clear)); t.bytes += f.length()
                 prune(t, now)
             }
         }.onFailure { AppLogger.warning(TAG, "offer: ${it.message}") }
@@ -137,6 +169,51 @@ object VScreenRecorder {
         synchronized(t) { t.frames.lastOrNull { it.atMs <= atMs } ?: t.frames.firstOrNull() }
     }
 
+    /**
+     * 2.0.0-beta3 (3.2): strict frame lookup (used by 3.5 changed-region comparison).
+     * Returns null when [atMs] is missing or older than [KEEP_MS] (or already pruned from the track).
+     */
+    fun frameAtStrict(displayId: Int, atMs: Long): Frame? = existing(displayId)?.let { t ->
+        if (atMs <= 0L) return null
+        val now = System.currentTimeMillis()
+        val keep = if (t.on && BackgroundOperation.state.value.recording) KEEP_MS else OFF_KEEP_MS
+        if (now - atMs > keep) return null
+        synchronized(t) {
+            if (t.frames.isEmpty()) return null
+            t.frames.lastOrNull { it.atMs <= atMs }
+                ?: t.frames.first().takeIf { it.atMs - atMs <= STRICT_START_GRACE_MS }
+        }
+    }
+
+    /**
+     * 2.0.0-beta3 (3.13), pure: whether a track with [recordingOn] and [oldestFrameMs] reliably covers
+     * history from [fromMs] up to [nowMs]. Returns false when [fromMs] is missing, older than the active
+     * retention window ([KEEP_MS] when on, [OFF_KEEP_MS] when off), or precedes [oldestFrameMs] beyond grace.
+     */
+    internal fun isCoveredBy(
+        fromMs: Long,
+        nowMs: Long,
+        recordingOn: Boolean,
+        oldestFrameMs: Long?,
+    ): Boolean {
+        if (fromMs <= 0L || oldestFrameMs == null) return false
+        val keep = if (recordingOn) KEEP_MS else OFF_KEEP_MS
+        if (nowMs - fromMs > keep) return false
+        return oldestFrameMs <= fromMs + STRICT_START_GRACE_MS
+    }
+
+    /**
+     * 2.0.0-beta3 (3.13): whether [displayId]'s recording track covers [fromMs] without retention/pruning gaps.
+     * When true and no frames changed in `[fromMs, toMs]`, the screen was unchanged; when false, uncertain (= changed).
+     */
+    fun coversFrom(displayId: Int, fromMs: Long, nowMs: Long = System.currentTimeMillis()): Boolean {
+        val t = existing(displayId) ?: return false
+        return synchronized(t) {
+            if (t.closed) false
+            else isCoveredBy(fromMs, nowMs, t.on && BackgroundOperation.state.value.recording, t.frames.firstOrNull()?.atMs)
+        }
+    }
+
     fun marks(displayId: Int, fromMs: Long, toMs: Long): List<Mark> = existing(displayId)?.let { t ->
         synchronized(t) { t.marks.filter { it.atMs in fromMs..toMs } }
     }.orEmpty()
@@ -184,7 +261,11 @@ object VScreenRecorder {
     fun stop(displayId: Int) { synchronized(tracks) { tracks.remove(displayId) }?.let { drop(it) } }
 
     private fun drop(t: Track) {
-        synchronized(t) { t.closed = true }
+        synchronized(t) {
+            t.closed = true
+            t.lastClearThumb?.recycle()
+            t.lastClearThumb = null
+        }
         runCatching { t.dir.deleteRecursively() }
     }
 

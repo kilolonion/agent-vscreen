@@ -22,11 +22,22 @@ object TaskLog {
     private const val FRAMES = 4
     private const val QUIET_MS = 10 * 60_000L
 
+    /** 2.0.0-beta3 (3.8): compact step/page record used by `task recap` without re-reading the screen. */
+    data class RecapStep(
+        val cmd: String,
+        val steps: List<Pair<String, String?>>,
+        val pageId: String?,
+        val pageTitle: String?,
+        val code: String,
+        val exit: Int,
+    )
+
     class Task(
         val id: Long, val session: String, val token: String, val start: Long,
         var end: Long = 0L, var title: String? = null, var pkg: String? = null,
         var commands: Int = 0, var lastCode: String = "OK", var failed: Int = 0, var stoppedByUser: Boolean = false,
         val frames: MutableList<String> = ArrayList(), @Volatile var lastFrameAt: Long = 0L,
+        val recap: MutableList<RecapStep> = ArrayList(),
     ) {
         /** When its last command came (only while open). */
         @Volatile var lastAt: Long = start
@@ -82,9 +93,11 @@ object TaskLog {
      * agent was told (pictures left out), and a small copy of the picture it got (the reply's own pictures are cleared
      * with the screen, so a copy is kept here, at most [STEP_FRAMES] per task).
      */
-    private fun saveStep(t: Task, n: Int, argv: List<String>, code: String, exit: Int, ms: Long, output: String) {
+    private fun saveStep(t: Task, n: Int, argv: List<String>, code: String, exit: Int, ms: Long, output: String,
+                         res: com.kilon.agentvscreen.cmd.NativeOffloadResult? = null) {
         val f = stepsFile(t.id) ?: return
-        val shot = com.kilon.agentvscreen.cmd.ShotStore.refs(output).firstOrNull()
+        val allShots = com.kilon.agentvscreen.cmd.ShotStore.refs(output)
+        val shot = allShots.firstOrNull()
         var frame: String? = null
         if (shot != null && n <= STEP_FRAMES) runCatching {
             val c = app ?: return@runCatching
@@ -93,9 +106,17 @@ object TaskLog {
             val name = "t${t.id}_s$n.jpg"
             Pictures.write(b, File(f.parentFile, name), Pictures.Use.STEP); b.recycle(); frame = name
         }
+        val sentShots = if (res != null) com.kilon.agentvscreen.api.ImagePolicy.pick(res, allShots) else allShots.take(com.kilon.agentvscreen.api.ImagePolicy.MAX)
+        val meteredText = com.kilon.agentvscreen.cmd.ShotStore.IN_TEXT.replace(output) { m ->
+            val sn = m.groupValues[1]
+            if (sn in sentShots) com.kilon.agentvscreen.api.ApiConfig.baseUrl + "/v2/shot/" + sn else com.kilon.agentvscreen.api.ImagePolicy.leftOut()
+        }
+        val cost = Meter.of(meteredText, Meter.sentDimensions(app, res, sentShots))
         val text = com.kilon.agentvscreen.cmd.ShotStore.IN_TEXT.replace(output, "").trim().take(STEP_TEXT)
         val o = JSONObject().put("n", n).put("at", System.currentTimeMillis()).put("cmd", com.kilon.agentvscreen.host.Audit.redact(argv))
             .put("code", code).put("exit", exit).put("ms", ms).put("text", text).put("frame", frame ?: JSONObject.NULL)
+            .put("chars", cost.chars).put("est_tokens", cost.estTokens).put("images", cost.imagesJson()).put("image_tokens", cost.imageTokens)
+        res?.data?.optJSONObject("screen")?.optJSONObject("page")?.let { o.put("page", it) }
         f.appendText(o.toString() + "\n")
     }
 
@@ -103,6 +124,65 @@ object TaskLog {
     fun steps(id: Long): List<JSONObject> = runCatching {
         stepsFile(id)?.takeIf { it.isFile }?.readLines()?.mapNotNull { l -> runCatching { JSONObject(l) }.getOrNull() }
     }.getOrNull() ?: emptyList()
+
+    /** 2.0.0-beta3 (3.8): recorded step/page trail for [session]'s open task (in-memory, no screen read). */
+    fun recapSteps(session: String): List<RecapStep> = synchronized(this) {
+        open[session]?.recap?.toList().orEmpty()
+    }
+
+    internal fun resetOpenForTest() = synchronized(this) { open.clear() }
+
+    /** 2.0.0-beta16 (Item 8): strip control-flow `{ ... }` bodies when no explicit recap label is provided. */
+    internal fun compactStepForRecap(raw: String): String {
+        val t = raw.trim()
+        val brace = t.indexOf('{')
+        if (brace > 0) {
+            val head = t.substring(0, brace).trim()
+            if (head.startsWith("if ", ignoreCase = true) ||
+                head.equals("try", ignoreCase = true) ||
+                head.startsWith("repeat", ignoreCase = true)
+            ) {
+                val tail = t.substringAfterLast('}', "").trim()
+                val untilTail = if (tail.startsWith("until ", ignoreCase = true)) " $tail" else ""
+                return (head + untilTail).trim()
+            }
+        }
+        return t.substringBefore(" until ").trim()
+    }
+
+    internal fun extractRecap(argv: List<String>, code: String, exit: Int, res: com.kilon.agentvscreen.cmd.NativeOffloadResult?): RecapStep? {
+        val sub = argv.firstOrNull() ?: return null
+        if (sub !in setOf("launch", "act", "handoff")) return null
+        val data = res?.data
+        val page = data?.optJSONObject("screen")?.optJSONObject("page")
+        val pageId = page?.optString("id")?.takeIf { it.isNotBlank() && it != "null" }
+        val pageTitle = page?.optString("title")?.takeIf { it.isNotBlank() && it != "null" }
+        val stepList = ArrayList<Pair<String, String?>>()
+        val arr = data?.optJSONArray("steps")
+        if (arr != null) {
+            for (i in 0 until arr.length()) {
+                val s = arr.optJSONObject(i) ?: continue
+                val status = s.optString("status")
+                if (status == "skipped" || status == "tried") continue
+                val clean = if (s.has("recap") && !s.isNull("recap")) {
+                    val r = s.optString("recap").trim()
+                    if (r.isEmpty()) continue
+                    r
+                } else {
+                    val raw = s.optString("step").trim()
+                    if (raw.isEmpty()) continue
+                    compactStepForRecap(raw)
+                }
+                val fail = when {
+                    status != "done" -> s.optString("code").takeIf { it.isNotBlank() && it != "null" } ?: status.uppercase()
+                    s.has("changed") && !s.optBoolean("changed", true) -> "NO_CHANGE"
+                    else -> null
+                }
+                stepList += clean to fail
+            }
+        }
+        return RecapStep(sub, stepList, pageId, pageTitle, code, exit)
+    }
 
     private fun dropFiles(t: Task) {
         t.frames.forEach { n -> dir?.let { File(it, n).delete() } }
@@ -147,7 +227,8 @@ object TaskLog {
     }
 
     /** A command of [session] finished with [code] (called for every audited command). */
-    fun onCommand(session: String, token: String, argv: List<String>, code: String, exit: Int, ms: Long = 0L, output: String = "") {
+    fun onCommand(session: String, token: String, argv: List<String>, code: String, exit: Int, ms: Long = 0L, output: String = "",
+                  res: com.kilon.agentvscreen.cmd.NativeOffloadResult? = null) {
         val sub = argv.firstOrNull() ?: return
         if (sub in setOf("status", "guide", "help", "remembered", "events", "diag", "version")) return
         val now = System.currentTimeMillis()
@@ -156,6 +237,7 @@ object TaskLog {
         // of the open task (none open: nothing to log), and the task ends with it.
         val ends = sub in setOf("done", "release", "stop")
         if (ends && synchronized(this) { open[session] } == null) return
+        val recapEntry = extractRecap(argv, code, exit, res)
         val t = synchronized(this) {
             load()
             open.getOrPut(session) {
@@ -165,10 +247,11 @@ object TaskLog {
             }.also { t ->
                 t.commands++; t.lastCode = code; t.lastAt = now; if (exit != 0) t.failed++
                 BackgroundOperation.state.value.agentTitle?.let { t.title = it }
+                if (recapEntry != null) t.recap += recapEntry
             }
         }
         val n = t.commands
-        worker.execute { runCatching { saveStep(t, n, argv, code, exit, ms, output) } }
+        worker.execute { runCatching { saveStep(t, n, argv, code, exit, ms, output, res) } }
         if (ends) { onTurnEnd(session); return }
         if (now - t.lastFrameAt < FRAME_GAP_MS) return
         t.lastFrameAt = now

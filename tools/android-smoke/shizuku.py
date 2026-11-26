@@ -65,12 +65,49 @@ def install(filename):
     run("adb", "install", "-r", str(APKS / filename))
 
 
+def state_now():
+    states = re.findall(r"state=(\w+)", shell("logcat", "-d", "-s", "ShizukuManager:I"))
+    return states[-1] if states else None
+
+
+def wait_ready(secs):
+    for _ in range(secs):
+        if state_now() == "READY":
+            return True
+        time.sleep(1)
+    return False
+
+
+def window_packages():
+    dump = shell("uiautomator", "dump", "/data/local/tmp/vscreen-window.xml")
+    if "dumped" not in dump.lower():
+        return set()
+    root = ET.fromstring(shell("cat", "/data/local/tmp/vscreen-window.xml"))
+    return {n.attrib.get("package") for n in root.iter("node")}
+
+
 def grant():
     launch()
     check_state("NEED_PERMISSION")
     press_text(APP, ["Grant Shizuku", "授权 Shizuku"])
     press_text(MANAGER, ["Allow all the time", "始终允许"])
-    check_state("READY")
+    # A slow API 30 emulator can swallow the tap on Shizuku's dialog (CI: the tap "passed", the app stayed
+    # NEED_PERMISSION for 45 s). Tell that apart from the app missing a granted permission, which must still fail.
+    for attempt in range(3):
+        if wait_ready(15):
+            print("PASS app reports READY", flush=True)
+            return
+        if MANAGER in window_packages():
+            print("Shizuku dialog still showing after the tap (swallowed tap); tapping again", flush=True)
+            press_text(MANAGER, ["Allow all the time", "始终允许"])
+            continue
+        # Say what the app itself saw: a "permission result ... grant=false" line means the tap denied, none at all
+        # means the callback never arrived.
+        seen = shell("logcat", "-d", "-s", "ShizukuBackend:*", "ShizukuManager:*").splitlines()[-12:]
+        print("app's Shizuku log:\n" + "\n".join(seen), flush=True)
+        raise RuntimeError("Shizuku dialog is gone but the app still reports %s: the grant was not noticed"
+                           % state_now())
+    raise RuntimeError("Expected READY after 3 taps on Shizuku's dialog, saw " + str(state_now()))
 
 
 print("SDK", shell("getprop", "ro.build.version.sdk"), "ABIs", shell("getprop", "ro.product.cpu.abilist"), flush=True)
@@ -82,32 +119,16 @@ shell(binary)
 shell("input", "keyevent", "KEYCODE_HOME")
 shell("logcat", "-c")
 if MODE == "upgrade":
-    # Cover the reported 1.3 -> 1.4 recovery using their original signed releases.
-    install("1.3.0.apk")
-    launch()
-    install("1.4.0.apk")
-    grant()
-    # Candidate uses a CI signer. To model a genuine in-place update from 1.4 to
-    # the candidate, repeat the historical path with a disposable shared signer.
-    run("adb", "uninstall", APP)
-    signer = sorted((Path(os.environ["ANDROID_HOME"]) / "build-tools").glob("*/apksigner"))[-1]
-    key = Path(os.environ["RUNNER_TEMP"]) / "smoke-signing.jks"
-    run("keytool", "-genkeypair", "-keystore", str(key), "-storepass", "temporary", "-keypass", "temporary",
-        "-alias", "smoke", "-dname", "CN=Disposable", "-keyalg", "RSA", "-validity", "3")
-    for name in ["1.3.0", "1.4.0", "app-release"]:
-        run(str(signer), "sign", "--ks", str(key), "--ks-pass", "pass:temporary", "--key-pass", "pass:temporary",
-            "--out", str(APKS / (name + "-ci.apk")), str(APKS / (name + ".apk")))
-    install("1.3.0-ci.apk")
-    launch()
-    install("1.4.0-ci.apk")
-    shell("logcat", "-c")
+    # 2.0.0-beta8 (J.2): verify in-place upgrade on x86_64 emulator using two debug APKs with the same debug
+    # keystore and increasing versionCode (both carrying native x86_64 libs, avoiding arm64 translator crashes).
+    install("app-debug-prev.apk")
     grant()
     shell("logcat", "-c")
-    install("app-release-ci.apk")
+    install("app-debug.apk")
     launch()
     check_state("READY")
 else:
-    install("baseline.apk" if MODE == "published-beta" else "app-release.apk")
+    install("baseline.apk" if MODE == "published-beta" else "app-debug.apk")
     grant()
 shell("am", "force-stop", APP)
 shell("logcat", "-c")

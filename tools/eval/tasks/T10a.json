@@ -1,0 +1,31 @@
+{
+  "id": "T10a",
+  "scene": "S10",
+  "seed": 7,
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "drag 100 800 716 800 700ms"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "value",
+      "ok": true
+    },
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 60
+}

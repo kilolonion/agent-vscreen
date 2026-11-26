@@ -61,11 +61,13 @@ object VScreenTyping {
      * (some toolkits report focus late or never).
      */
     private fun focusedEditable(displayId: Int, at: Pair<Int, Int>? = null): AccessibilityNodeInfo? {
-        val roots = BackgroundOperation.nodeRoots(displayId)
-        roots.firstNotNullOfOrNull { runCatching { it.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) }.getOrNull() }
-            ?.takeIf { it.isEditable }?.let { return it }
-        val edits = A11yTree.snapshot(displayId).editables()
+        // 2.0.0-beta6 (6.10 #3): never call global `findFocus(FOCUS_INPUT)` — on Android it can escape to display 0
+        // and return the user's main-screen input box. Search only inside the display-scoped, own-package-filtered tree.
+        if (displayId <= android.view.Display.DEFAULT_DISPLAY) return null
+        val snap = A11yTree.snapshot(displayId)
+        val edits = snap.editables()
         edits.firstOrNull { it.focused }?.let { return it.info }
+        snap.nodes.firstOrNull { it.editable && it.focused }?.let { return it.info }
         // 1.4.0-beta13: [at] is a frame point; the bounds are input space (see VScreenDisplay.toFrame).
         val d = BackgroundOperation.displayById(displayId)
         if (at != null) return edits.filter { (d?.toFrame(it.box) ?: it.box).contains(at.first, at.second) }.minByOrNull { it.box.width().toLong() * it.box.height() }?.info
@@ -142,6 +144,12 @@ object VScreenTyping {
                 if (!r.ok) throw ActionError(r.code, r.message)
                 tr("按键注入", "key injection")
             }
+            // 2.0.0-beta12 (test F3: `type 蓝牙` with no box focused wrote the user's clipboard, which the background
+            // cannot read back): when the screen can be read and no box has focus, nothing would take the paste; the
+            // user's clipboard is not touched for it.
+            a11y && node == null -> throw ActionError("TYPE_FAILED", tr(
+                "没有输入：画面上没有获得焦点的输入框（这段字要走剪贴板，没有框接收时不动用户的剪贴板）。先点输入框，等【现在】里标“有焦点”再 type",
+                "Nothing typed: no input box has focus (this text would go through the clipboard, and the user's clipboard is not touched when nothing would take it). Tap the input box first and type once [Now] marks it \"focused\""))
             else -> { pasteText(displayId, text); tr("剪贴板粘贴", "clipboard paste") }
         }
         if (!a11y) return TypeFact(method, null, null, null, checked = false)

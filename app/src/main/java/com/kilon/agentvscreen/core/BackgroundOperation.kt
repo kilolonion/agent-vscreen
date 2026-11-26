@@ -51,6 +51,8 @@ object BackgroundOperation {
     private const val K_RECORDING = "recording_enabled"
     private const val K_WIN_SCALE = "window_scale"
     private const val K_SCREEN_SIZE = "screen_size"
+    private const val K_MINI_CONTROLS = "overlay_mini_controls"
+    private const val K_MINI_TAP_EXPAND = "overlay_mini_tap_expand"
 
     /** How long a screen survives with no task using it. */
     const val IDLE_TTL_MS = 10 * 60_000L
@@ -62,6 +64,10 @@ object BackgroundOperation {
     data class State(
         val enabled: Boolean = false,
         val showPreview: Boolean = true,
+        /** 2.0.0-beta8 (K.5): when true, the top-right mini window also renders title/fullscreen/close/stop buttons. */
+        val miniShowControls: Boolean = true,
+        /** 2.0.0-beta8 (K.5): when true (default), tapping the mini window expands it to center preview. */
+        val miniTapToExpand: Boolean = true,
         /** 精确 OCR: read / tap --text use PP-OCRv6 (on-device); ML Kit stays for fast paths. */
         val accurateOcr: Boolean = true,
         /** 后台录屏 (v42): keep a recording track of the background screen for `rewind` (deleted on release). */
@@ -321,10 +327,10 @@ object BackgroundOperation {
     fun unpark(d: VScreenDisplay): String? {
         mainHandler.removeCallbacks(idlePark)
         if (!d.parked) return null
-        val r = d.unpark()
+        val res = d.unparkResult()
         _state.update { it.copy(powerSaving = false) }
-        wakeNote = d.displayId to r
-        return r
+        wakeNote = d.displayId to res
+        return d.resumeText(res)
     }
 
     /**
@@ -333,8 +339,11 @@ object BackgroundOperation {
      * reached only the app's own window. Now the next reply on that screen carries it, whichever path woke it (the
      * turn starting, or the command itself).
      */
-    @Volatile private var wakeNote: Pair<Int, String>? = null
-    fun takeWakeNote(displayId: Int): String? = wakeNote?.takeIf { it.first == displayId }?.let { wakeNote = null; it.second }
+    @Volatile private var wakeNote: Pair<Int, VScreenDisplay.Resume>? = null
+    /** Worded now, in the language of the reply that carries it. */
+    fun takeWakeNote(displayId: Int): String? = wakeNote?.takeIf { it.first == displayId }?.let { n ->
+        wakeNote = null; display?.takeIf { it.displayId == displayId }?.resumeText(n.second)
+    }
 
     /** The settings switch: turning it off wakes a paused screen at once. */
     fun setIdlePowerSave(on: Boolean) {
@@ -403,6 +412,8 @@ object BackgroundOperation {
             it.copy(
                 enabled = prefs.getBoolean(K_ENABLED, false),
                 showPreview = prefs.getBoolean(K_PREVIEW, true),
+                miniShowControls = prefs.getBoolean(K_MINI_CONTROLS, true),
+                miniTapToExpand = prefs.getBoolean(K_MINI_TAP_EXPAND, true),
                 accurateOcr = prefs.getBoolean(K_ACCURATE_OCR, true),
                 recording = prefs.getBoolean(K_RECORDING, true),
             )
@@ -444,6 +455,16 @@ object BackgroundOperation {
     fun setShowPreview(on: Boolean) {
         prefs.edit().putBoolean(K_PREVIEW, on).apply()
         _state.update { it.copy(showPreview = on) }
+    }
+
+    fun setMiniShowControls(on: Boolean) {
+        prefs.edit().putBoolean(K_MINI_CONTROLS, on).apply()
+        _state.update { it.copy(miniShowControls = on) }
+    }
+
+    fun setMiniTapToExpand(on: Boolean) {
+        prefs.edit().putBoolean(K_MINI_TAP_EXPAND, on).apply()
+        _state.update { it.copy(miniTapToExpand = on) }
     }
 
     /** Re-read Shizuku, accessibility and main-screen metrics. Cheap; call from UI. */
@@ -561,6 +582,14 @@ object BackgroundOperation {
     fun currentDisplay(): VScreenDisplay? = display?.takeIf { !it.released }
 
     /** v0.5: work is pending on the background screen — the owner's chat turn is running, or a watch holds it. */
+    /** 2.0.0: an agent's chat turn owns the screen right now (not a watch between turns, not the user's takeover). */
+    fun agentTurnActive(): Boolean {
+        val d = display ?: return false
+        if (d.released) return false
+        val owner = _state.value.ownerSessionId ?: return false
+        return !_state.value.userStopped && synchronized(lock) { owner in turns }
+    }
+
     fun needsAwake(): Boolean {
         val d = display ?: return false
         if (d.released) return false
@@ -584,6 +613,7 @@ object BackgroundOperation {
     fun onScreenReleased(listener: (Int) -> Unit) { releaseListeners += listener }
 
     private fun releaseScreen(reason: String) {
+        com.kilon.agentvscreen.cmd.ActHold.unholdNow("release_screen")
         cancelIdleRelease()
         mainHandler.removeCallbacks(idlePark)
         _state.update { it.copy(powerSaving = false) }
@@ -592,7 +622,7 @@ object BackgroundOperation {
         if (com.kilon.agentvscreen.cmd.Teach.lesson.value is com.kilon.agentvscreen.cmd.Lesson.Recording)
             runCatching { com.kilon.agentvscreen.cmd.Teach.endRecording(appContext, byDone = false, screenGone = true, endWaitMs = 800L) }
         // 1.4.2: the open task keeps the screen as it is left (the home page's resting picture), before it goes.
-        _state.value.ownerSessionId?.let { TaskLog.captureNow(it) }
+        if (!com.kilon.agentvscreen.host.ThermalGuard.locked) _state.value.ownerSessionId?.let { TaskLog.captureNow(it) }
         val d = synchronized(lock) { display.also { display = null } }
         clearParking()
         if (d == null) return
@@ -643,6 +673,8 @@ object BackgroundOperation {
         if (sessionId.isEmpty()) return
         synchronized(lock) { tasks.remove(sessionId); turns.remove(sessionId) }
         clearParking(sessionId)
+        // 2.0.0: the phone's screen is let go as soon as the turn ends, not at the keeper's next check.
+        VScreenAwake.syncScreenLock()
         // 1.4.2-beta6: the turn's title goes with the turn, whether or not its screen is still there.
         _state.update { if (it.titleSession == sessionId) it.copy(titleText = null, titleSession = null) else it }
         TaskLog.captureNow(sessionId)
@@ -739,6 +771,7 @@ object BackgroundOperation {
     fun beginTakeover(sessionId: String): Boolean {
         val s = _state.value
         if (s.displayId == null || s.ownerSessionId != sessionId) return false
+        com.kilon.agentvscreen.cmd.ActHold.unholdNow("takeover")
         // 1.4.2-beta4: the screen the user holds is never paused or released under them. Before, taking over an idle
         // screen left its 10-minute release timer running, and the screen went away in the user's hands.
         cancelIdleRelease()
@@ -766,6 +799,7 @@ object BackgroundOperation {
 
     /** 1.1: the user's Stop: refuse the agent (USER_STOPPED) until [userResume]; a finger the agent holds is lifted. */
     fun userStop() {
+        com.kilon.agentvscreen.cmd.ActHold.unholdNow("user_stop")
         _state.value.ownerSessionId?.let { TaskLog.stoppedByUser(it) }
         val wasHeld = _state.value.takeoverSessionId != null
         // 1.4.2-beta6: the fence cancels the agent's gesture in flight and its held fingers in the screen service (as a
@@ -882,6 +916,7 @@ object BackgroundOperation {
     }
 
     private fun acquireOwned(sid: String, create: Boolean, landscape: Boolean?, scale: Double): VScreenDisplay {
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) throw BackgroundOperation.ActionError("THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
         val s0 = _state.value
         if (!s0.enabled) throw ActionError("DISABLED", tr("Agent-VScreen 的服务已被用户关闭。请用户打开 Agent-VScreen 点“启动服务”", "The user turned off the Agent-VScreen service. Ask the user to open Agent-VScreen and turn the service on"))
         if (s0.connection != Connection.READY) {
@@ -895,6 +930,7 @@ object BackgroundOperation {
             }
         }
         synchronized(lock) {
+            if (com.kilon.agentvscreen.host.ThermalGuard.locked) throw BackgroundOperation.ActionError("THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
             val cur = display
             val s = _state.value
             if (cur != null && !cur.released) {
@@ -923,6 +959,7 @@ object BackgroundOperation {
             }
         }
         synchronized(lock) {
+            if (com.kilon.agentvscreen.host.ThermalGuard.locked) throw BackgroundOperation.ActionError("THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
             val cur = display
             val s = _state.value
             if (cur != null && !cur.released) {

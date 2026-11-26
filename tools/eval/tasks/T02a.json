@@ -1,0 +1,31 @@
+{
+  "id": "T02a",
+  "scene": "S02",
+  "seed": 7,
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "wait text:限时优惠 5s; tap 980 420; tap 确定"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "popup_closed",
+      "ok": true
+    },
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 60
+}

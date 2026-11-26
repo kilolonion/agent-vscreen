@@ -64,8 +64,9 @@ internal object AskWords {
         UserAsk.Kind.TEACH -> tr("去演示", "Show it")
         else -> tr("去回答", "Answer")
     }
-    fun left(a: UserAsk.Ask): String {
-        val s = ((a.at + a.validMs - System.currentTimeMillis()) / 1000).coerceAtLeast(0)
+    /** Time left at [now]. Callers pass a ticking `now` ([rememberNow]) so the countdown redraws; reading the clock here alone never did. */
+    fun left(a: UserAsk.Ask, now: Long): String {
+        val s = ((a.at + a.validMs - now) / 1000).coerceAtLeast(0)
         return "${s / 60}:${"%02d".format(s % 60)}"
     }
     fun letter(i: Int) = ('A' + i).toString()
@@ -148,6 +149,7 @@ internal fun AskQuick(a: UserAsk.Ask, count: Int, k: Float, modifier: Modifier =
 @Composable
 internal fun HomeAskCard(a: UserAsk.Ask, count: Int) {
     val ctx = LocalContext.current
+    val now = rememberNow()
     Column(
         Modifier.fillMaxWidth().glass(RoundedCornerShape(24.dp))
             .border(1.5.dp, Brush.linearGradient(listOf(Color(0xFF8B7CFF), Palette.asking)), RoundedCornerShape(24.dp))
@@ -159,7 +161,7 @@ internal fun HomeAskCard(a: UserAsk.Ask, count: Int) {
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(AskWords.who(a), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MiuixTheme.colorScheme.primary)
-                Text(tr("会话 ${a.session} · 还剩 ${AskWords.left(a)}", "Session ${a.session} · ${AskWords.left(a)} left") + if (count > 1) tr(" · 还有 ${count - 1} 个", " · ${count - 1} more") else "",
+                Text(tr("会话 ${a.session} · 还剩 ${AskWords.left(a, now)}", "Session ${a.session} · ${AskWords.left(a, now)} left") + if (count > 1) tr(" · 还有 ${count - 1} 个", " · ${count - 1} more") else "",
                     fontSize = 11.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
         }

@@ -1,0 +1,32 @@
+{
+  "id": "T07b",
+  "scene": "S07",
+  "seed": 7,
+  "since": "beta3",
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "tap 保存 until text:已保存 3s"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "toast",
+      "ok": true
+    },
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 60
+}

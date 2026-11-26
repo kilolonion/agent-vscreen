@@ -12,15 +12,12 @@ import com.kilon.agentvscreen.host.AppLogger
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
-import java.io.ByteArrayOutputStream
-import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
-import java.net.URLDecoder
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.SynchronousQueue
@@ -78,6 +75,7 @@ class ApiServer(private val ctx: Context) {
     @Volatile var lastCaller: String? = null; private set
 
     val running: Boolean get() = server?.isClosed == false
+    @Volatile var starting = false; private set
 
     /** 1.2: the extra socket on this phone's Tailscale address (null: off, or no tailnet address now). */
     @Volatile private var tailServer: ServerSocket? = null
@@ -98,34 +96,164 @@ class ApiServer(private val ctx: Context) {
      * Tailscale node keeps answering on the set port and forwards to wherever the service is. Nobody is killed.
      */
     fun start(port: Int) {
-        stop()
-        if (!bindAny(port)) retryBind(port)
-        if (ApiConfig.tailnet) startTailnet(port)
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return
+        if (starting && wantedPort == port) return
+        wantedPort = port
+        if (!com.kilon.agentvscreen.host.Privileged.isReady()) {
+            rebindGen.incrementAndGet()
+            synchronized(bindLock) {
+                closeLocalLocked()
+                if (!bindAny(port)) retryBind(port)
+                if (ApiConfig.tailnet) startTailnet(port)
+            }
+            return
+        }
+        val gen = rebindGen.incrementAndGet()
+        starting = true
+        val task = {
+            try {
+                synchronized(bindLock) {
+                    if (gen == rebindGen.get() && wantedPort == port) {
+                        startWithGateOrFallbackLocked(port)
+                    }
+                }
+            } finally {
+                if (gen == rebindGen.get()) starting = false
+            }
+        }
+        val onMain = runCatching { android.os.Looper.myLooper() == android.os.Looper.getMainLooper() }.getOrDefault(false)
+        if (onMain) Thread(task, "vscreen-api-start").apply { isDaemon = true }.start() else task()
+    }
+
+    /** 2.0.0-beta2: re-run Gate setup when privileged service connects, reconnects (Shizuku restart) or switches (Root). */
+    fun onPrivilegeChanged() {
+        val port = wantedPort
+        if (port <= 0) return
+        val gen = rebindGen.incrementAndGet()
+        starting = false
+        Thread({
+            synchronized(bindLock) {
+                if (gen != rebindGen.get() || wantedPort != port) return@synchronized
+                if (com.kilon.agentvscreen.host.Privileged.isReady()) {
+                    if (usingGate && server?.isClosed == false && internalPort > 0) {
+                        val gp = com.kilon.agentvscreen.core.VScreenRemoteDisplay.gateStart(
+                            port, internalPort, ctx.packageName, processName(), android.os.Build.VERSION.SDK_INT
+                        ).getOrDefault(-1)
+                        if (gp > 0) {
+                            boundPort = gp
+                            lastError = null; portBusy = false; bindFailures = 0
+                            portNote = if (gp == port) null else tr("端口 $port 被占着，已改用 $gp；agent 会自己找到，不用重新接入",
+                                "Port $port is held, so $gp is used; agents find it by themselves, nothing to set up again")
+                            com.kilon.agentvscreen.host.Tailnet.retarget(ctx, gp)
+                            onChange?.invoke()
+                            AppLogger.info(TAG, "gate rebound on 127.0.0.1:$gp -> internal 127.0.0.1:$internalPort")
+                            return@synchronized
+                        }
+                    }
+                    startWithGateOrFallbackLocked(port)
+                } else if (usingGate) {
+                    closeLocalLocked()
+                    if (!bindAny(port)) retryBind(port)
+                    if (ApiConfig.tailnet) startTailnet(port)
+                }
+            }
+        }, "vscreen-gate-rebind").apply { isDaemon = true }.start()
     }
 
     /** The port the service listens on right now (0: none); [ApiConfig.port] is the one agents are told. */
     @Volatile var boundPort = 0; private set
+    /** 2.0.0-beta2: internal loopback port when Gate forwards traffic to this server (0: direct mode). */
+    @Volatile var internalPort = 0; private set
+    /** 2.0.0-beta2: true while public loopback traffic arrives through the privileged Gate. */
+    @Volatile var usingGate = false; private set
     /** Not an error: the set port was taken, another one is used (shown as a plain note). */
     @Volatile var portNote: String? = null; private set
+    @Volatile private var wantedPort = 0
+    private val bindLock = Any()
+    private val rebindGen = AtomicInteger(0)
+
+    private fun processName(): String =
+        if (android.os.Build.VERSION.SDK_INT >= 28) runCatching { android.app.Application.getProcessName() }.getOrNull()
+            ?.takeIf { it.isNotBlank() } ?: ctx.applicationInfo?.processName ?: ctx.packageName
+        else ctx.applicationInfo?.processName ?: ctx.packageName
+
+    private fun startWithGateOrFallbackLocked(port: Int) {
+        closeLocalLocked()
+        if (!bindWithGateLocked(port)) {
+            if (!bindAny(port)) retryBind(port)
+        }
+        if (ApiConfig.tailnet) startTailnet(port)
+    }
+
+    private fun bindWithGateLocked(port: Int): Boolean {
+        if (!com.kilon.agentvscreen.host.Privileged.isReady()) return false
+        var ss: ServerSocket? = null
+        var intPort = 0
+        for (p in ApiConfig.INTERNAL_BASE until ApiConfig.INTERNAL_BASE + ApiConfig.PORT_SPAN) {
+            if (p > 65535) break
+            val cand = ServerSocket()
+            try {
+                cand.reuseAddress = true
+                cand.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), p), 50)
+                ss = cand; intPort = p; break
+            } catch (e: Exception) {
+                com.kilon.agentvscreen.host.quiet("ApiServer:internal") { cand.close() }
+                AppLogger.info(TAG, "bind internal $p: ${e.message}")
+            }
+        }
+        if (ss == null || intPort <= 0) return false
+        server = ss; internalPort = intPort
+        Thread({ acceptLoop(ss, sendAcceptAck = true) }, "vscreen-http-accept").apply { isDaemon = true }.start()
+        val gp = com.kilon.agentvscreen.core.VScreenRemoteDisplay.gateStart(
+            port, intPort, ctx.packageName, processName(), android.os.Build.VERSION.SDK_INT
+        ).onFailure { AppLogger.warning(TAG, "gateStart failed: ${it.message}") }.getOrDefault(-1)
+        if (gp <= 0) {
+            com.kilon.agentvscreen.host.quiet("ApiServer:gate-fallback") { ss.close() }
+            server = null; internalPort = 0; boundPort = 0; usingGate = false
+            return false
+        }
+        boundPort = gp; usingGate = true; lastError = null; portBusy = false; bindFailures = 0
+        portNote = if (gp == port) null else tr("端口 $port 被占着，已改用 $gp；agent 会自己找到，不用重新接入",
+            "Port $port is held, so $gp is used; agents find it by themselves, nothing to set up again")
+        com.kilon.agentvscreen.host.Tailnet.retarget(ctx, gp)
+        onChange?.invoke()
+        AppLogger.info(TAG, "gate listening on 127.0.0.1:$gp -> internal 127.0.0.1:$intPort")
+        return true
+    }
+
+    private fun closeLocalLocked() {
+        retry?.interrupt(); retry = null
+        usingGate = false
+        runCatching { server?.close() }; server = null; boundPort = 0; internalPort = 0; portNote = null
+        tailWatch?.interrupt(); tailWatch = null
+        runCatching { tailServer?.close() }; tailServer = null; tailAddress = null
+    }
 
     private fun bindAny(port: Int): Boolean {
         val taken = ArrayList<String>()
+        var sawOwnGate = false
         for (p in port until port + ApiConfig.PORT_SPAN) {
             if (p > 65535) break
             if (bindLocal(p)) {
-                portNote = if (p == port) null else tr("端口 $port 被${taken.firstOrNull() ?: "别的程序"}占着，已改用 $p；agent 会自己找到，不用重新接入",
+                portNote = if (p == port || taken.isEmpty()) null else tr("端口 $port 被${taken.firstOrNull() ?: "别的程序"}占着，已改用 $p；agent 会自己找到，不用重新接入",
                     "Port $port is held by ${taken.firstOrNull() ?: "another program"}, so $p is used; agents find it by themselves, nothing to set up again")
-                if (p != port) AppLogger.warning(TAG, "port $port taken (${taken.joinToString()}), listening on $p")
+                if (p != port && taken.isNotEmpty()) AppLogger.warning(TAG, "port $port taken (${taken.joinToString()}), listening on $p")
                 com.kilon.agentvscreen.host.Tailnet.retarget(ctx, p)
                 onChange?.invoke()
                 return true
             }
-            taken += holderOf(p)
+            if (PortHolder.isOwnGate(p)) {
+                sawOwnGate = true
+            } else {
+                taken += holderOf(p)
+            }
         }
         bindFailures++
-        portBusy = true
-        lastError = tr("端口 $port 到 ${port + ApiConfig.PORT_SPAN - 1} 都被占着（${taken.distinct().joinToString("、")}）：在“接入”里换一组端口，或关掉占着它们的应用；每 30 秒会自己再试",
-            "Ports $port to ${port + ApiConfig.PORT_SPAN - 1} are all taken (${taken.distinct().joinToString(", ")}): pick other ports under Connect, or close the apps holding them; tried again every 30 s")
+        if (taken.isNotEmpty() || !sawOwnGate) {
+            portBusy = true
+            lastError = tr("端口 $port 到 ${port + ApiConfig.PORT_SPAN - 1} 都被占着（${taken.distinct().joinToString("、")}）：在“接入”里换一组端口，或关掉占着它们的应用；每 30 秒会自己再试",
+                "Ports $port to ${port + ApiConfig.PORT_SPAN - 1} are all taken (${taken.distinct().joinToString(", ")}): pick other ports under Connect, or close the apps holding them; tried again every 30 s")
+        }
         onChange?.invoke()
         return false
     }
@@ -144,7 +272,7 @@ class ApiServer(private val ctx: Context) {
             AppLogger.info(TAG, "bind $port: ${e.message}")
             return false
         }
-        server = ss; boundPort = port; lastError = null; portBusy = false; bindFailures = 0
+        server = ss; boundPort = port; internalPort = 0; usingGate = false; lastError = null; portBusy = false; bindFailures = 0
         Thread({ acceptLoop(ss) }, "vscreen-http-accept").apply { isDaemon = true }.start()
         AppLogger.info(TAG, "listening on 127.0.0.1:$port")
         return true
@@ -155,7 +283,10 @@ class ApiServer(private val ctx: Context) {
         retry = Thread({
             while (!Thread.currentThread().isInterrupted && server == null) {
                 try { Thread.sleep(30_000) } catch (_: InterruptedException) { break }
-                if (bindAny(port)) break
+                synchronized(bindLock) {
+                    if (server != null || wantedPort != port) return@Thread
+                    if (bindWithGateLocked(port) || bindAny(port)) return@Thread
+                }
             }
         }, "vscreen-http-rebind").apply { isDaemon = true }.also { it.start() }
     }
@@ -187,11 +318,19 @@ class ApiServer(private val ctx: Context) {
         tr("端口刚刚被放开", "The port was just released")
     }
 
-    fun stop() {
-        retry?.interrupt(); retry = null
-        runCatching { server?.close() }; server = null; boundPort = 0; portNote = null
-        tailWatch?.interrupt(); tailWatch = null
-        runCatching { tailServer?.close() }; tailServer = null; tailAddress = null
+    fun stop(stopGate: Boolean = true) {
+        rebindGen.incrementAndGet()
+        starting = false
+        val shouldStopGate = synchronized(bindLock) {
+            wantedPort = 0
+            val wasGate = usingGate
+            closeLocalLocked()
+            stopGate && wasGate
+        }
+        if (shouldStopGate) {
+            Thread({ runCatching { com.kilon.agentvscreen.core.VScreenRemoteDisplay.gateStop() } }, "vscreen-gate-stop")
+                .apply { isDaemon = true }.start()
+        }
     }
 
     /**
@@ -218,9 +357,38 @@ class ApiServer(private val ctx: Context) {
         }, "vscreen-tailnet-watch").apply { isDaemon = true }.also { it.start() }
     }
 
-    private fun acceptLoop(ss: ServerSocket) {
+    /** 2.0.0-beta2 test helper: bind a loopback port directly in internal-Gate mode (writes 0x06 accept-ack). */
+    internal fun startInternalForTests(port: Int): Boolean = synchronized(bindLock) {
+        closeLocalLocked()
+        val ss = ServerSocket()
+        try {
+            ss.reuseAddress = true
+            ss.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), port), 50)
+        } catch (_: Exception) {
+            quiet("ApiServer:test-internal") { ss.close() }
+            return@synchronized false
+        }
+        server = ss; boundPort = port; internalPort = port; usingGate = true
+        Thread({ acceptLoop(ss, sendAcceptAck = true) }, "vscreen-http-accept").apply { isDaemon = true }.start()
+        true
+    }
+
+    private fun acceptLoop(ss: ServerSocket, sendAcceptAck: Boolean = false) {
         while (!ss.isClosed) {
             val s = try { ss.accept() } catch (e: SocketException) { break } catch (e: Exception) { continue }
+            if (sendAcceptAck) {
+                // 2.0.0-beta2: prove the app process itself ran accept() (not a dying/frozen kernel listen queue)
+                // before Gate forwards any client bytes. Only sent on the internal port behind Gate.
+                try {
+                    s.getOutputStream().apply {
+                        write(com.kilon.agentvscreen.core.Gate.ACCEPT_ACK_BYTE)
+                        flush()
+                    }
+                } catch (_: Exception) {
+                    quiet("http-ack-close") { s.close() }
+                    continue
+                }
+            }
             // 1.2: a bounded pool. When every worker is taken the connection is told so at once (503) instead of
             // one more thread being made for it: a flood of connections can no longer exhaust the app.
             // 1.2.0-beta2: a worker waiting for a request that has not come is not doing anything. When every worker
@@ -258,18 +426,28 @@ class ApiServer(private val ctx: Context) {
         @Volatile var peer: InetAddress? = null
         @Volatile internal var sock: Socket? = null
         @Volatile var auth: Auth? = null
-        /** Forwarded by the built-in Tailscale node (loopback + its secret). */
-        val viaBuiltinTailnet: Boolean get() = peer?.isLoopbackAddress == true &&
+        /** 2.0.0-beta7 (7.7): true when handled by [PublicServer] via Funnel; never treated as tailnet even if X-VScreen-Tailnet is present. */
+        @Volatile var viaPublic: Boolean = false
+        /** 2.0.0-beta7 (7.7): OAuth client_id when [viaPublic] is true. */
+        @Volatile var publicClientId: String? = null
+        /** 2.0.0-beta11: what this public credential may do now ([PublicOAuth.effectiveScope]); null off the public path. */
+        @Volatile var publicScope: String? = null
+        /** Forwarded by the built-in Tailscale node (loopback + its secret, never on public path). */
+        val viaBuiltinTailnet: Boolean get() = !viaPublic && peer?.isLoopbackAddress == true &&
             headers["x-vscreen-tailnet"]?.let { constTimeEq(it, com.kilon.agentvscreen.host.Tailnet.secret) } == true
-        val remote: Boolean get() = viaBuiltinTailnet || peer?.isLoopbackAddress == false
+        val remote: Boolean get() = viaPublic || viaBuiltinTailnet || peer?.isLoopbackAddress == false
         /** The other device, as the tailnet names it (null on this phone). */
         val peerName: String? get() = when {
+            viaPublic -> publicClientId?.let { "public:$it" } ?: "public"
             viaBuiltinTailnet -> headers["x-vscreen-peer"] ?: "?"
             peer?.isLoopbackAddress == false -> peer?.hostAddress
             else -> null
         }
         /** Who is calling, for the app's "last caller" line. */
-        val caller: String get() = (peerName?.let { "Tailscale: $it" } ?: tr("本机", "This phone")) + (auth?.token?.takeIf { it.id != Tokens.MAIN }?.let { " · ${it.name}" } ?: "")
+        val caller: String get() = when {
+            viaPublic -> tr("公网", "Public") + (auth?.token?.let { " · ${it.name}" } ?: "")
+            else -> (peerName?.let { "Tailscale: $it" } ?: tr("本机", "This phone")) + (auth?.token?.takeIf { it.id != Tokens.MAIN }?.let { " · ${it.name}" } ?: "")
+        }
         fun q(k: String) = query[k]?.firstOrNull()
         val bodyText: String get() = String(body, Charsets.UTF_8)
         fun accepts(type: String): Boolean = headers["accept"]?.contains(type) == true
@@ -288,22 +466,26 @@ class ApiServer(private val ctx: Context) {
 
     class Resp(val status: Int, val type: String, val body: ByteArray, val headers: Map<String, String> = emptyMap(),
                /** When set, the response is a stream (text/event-stream): the body is written by this. */
-               val stream: ((Emitter) -> Unit)? = null) {
-        fun plus(h: Map<String, String>) = Resp(status, type, body, headers + h, stream)
+               val stream: ((Emitter) -> Unit)? = null,
+               /** 2.0.0-beta5 (5.6): callback invoked after the HTTP response is flushed & closed (e.g. --hold freeze). */
+               val afterSend: (() -> Unit)? = null) {
+        fun plus(h: Map<String, String>) = Resp(status, type, body, headers + h, stream, afterSend)
+        fun withAfterSend(fn: (() -> Unit)?) = if (fn == null) this else Resp(status, type, body, headers, stream, fn)
         companion object {
             fun json(o: Any, status: Int = 200, headers: Map<String, String> = emptyMap()) =
                 Resp(status, "application/json; charset=utf-8", o.toString().toByteArray(), headers)
             fun text(t: String, status: Int = 200, headers: Map<String, String> = emptyMap()) =
                 Resp(status, "text/plain; charset=utf-8", t.toByteArray(), headers)
+            fun html(h: String, status: Int = 200, headers: Map<String, String> = emptyMap()) =
+                Resp(status, "text/html; charset=utf-8", h.toByteArray(), headers)
             fun err(status: Int, code: String, msg: String) = json(JSONObject().put("ok", false).put("code", code).put("error", msg)
                 .put("next", com.kilon.agentvscreen.cmd.Codes.next(code)), status, mapOf("X-VScreen-Code" to code))
             fun sse(block: (Emitter) -> Unit) = Resp(200, "text/event-stream; charset=utf-8", ByteArray(0), stream = block)
         }
     }
 
-    private class HttpError(val status: Int, val code: String, message: String) : Exception(message)
-
     private fun serve(s: Socket) {
+        var afterSend: (() -> Unit)? = null
         s.use { sock ->
             runCatching {
                 // 1.2: the request must arrive promptly and be of sane size: a client that opens a connection and
@@ -312,7 +494,7 @@ class ApiServer(private val ctx: Context) {
                 val inp = BufferedInputStream(sock.getInputStream())
                 val out = sock.getOutputStream()
                 synchronized(reading) { reading[sock] = System.currentTimeMillis() }
-                val req = try { read(inp) } catch (e: HttpError) { write(out, Resp.err(e.status, e.code, e.message ?: e.code)); return }
+                val req = try { HttpCore.readRequest(inp) } catch (e: HttpError) { write(out, Resp.err(e.status, e.code, e.message ?: e.code)); return }
                     catch (e: java.net.SocketTimeoutException) { quiet("http-408") { write(out, Resp.err(408, "REQUEST_TIMEOUT", "the request did not arrive in time")) }; return }
                     finally { synchronized(reading) { reading.remove(sock) } } ?: return
                 req.peer = sock.inetAddress
@@ -322,73 +504,18 @@ class ApiServer(private val ctx: Context) {
                     AppLogger.error(TAG, "route ${req.path}", t)
                     Resp.err(500, "INTERNAL_ERROR", "${t.javaClass.simpleName}: ${t.message}")
                 }
+                afterSend = resp.afterSend
                 write(out, resp)
             }.onFailure { if (it !is SocketException && it !is java.io.IOException) AppLogger.warning(TAG, "serve: ${it.message}") }
         }
+        afterSend?.let { quiet("http-after-send") { it() } }
     }
 
-    private fun read(inp: InputStream): Req? {
-        val t0 = android.os.SystemClock.elapsedRealtime()
-        val head = ByteArrayOutputStream()
-        var last4 = 0
-        while (true) {
-            val b = inp.read(); if (b < 0) return null
-            head.write(b); last4 = (last4 shl 8) or b
-            if (last4 == 0x0D0A0D0A) break
-            if (head.size() > MAX_HEAD) throw HttpError(431, "HEADERS_TOO_LARGE", "request headers over $MAX_HEAD bytes")
-            if (head.size() % 512 == 0 && android.os.SystemClock.elapsedRealtime() - t0 > HEAD_MS) throw HttpError(408, "REQUEST_TIMEOUT", "request headers took too long")
-        }
-        val lines = head.toString("UTF-8").split("\r\n")
-        val parts = lines.first().split(" ")
-        if (parts.size < 2) throw HttpError(400, "BAD_REQUEST", "bad request line")
-        val headers = HashMap<String, String>()
-        for (l in lines.drop(1)) { val i = l.indexOf(':'); if (i > 0) headers[l.substring(0, i).trim().lowercase()] = l.substring(i + 1).trim() }
-        val body: ByteArray = if (headers["transfer-encoding"]?.lowercase()?.contains("chunked") == true) readChunked(inp, t0) else {
-            val len = headers["content-length"]?.toIntOrNull() ?: 0
-            if (len < 0 || len > MAX_BODY) throw HttpError(413, "BODY_TOO_LARGE", "request body over $MAX_BODY bytes")
-            val b = ByteArray(len)
-            var off = 0
-            while (off < len) {
-                val n = inp.read(b, off, len - off); if (n < 0) throw HttpError(400, "BAD_REQUEST", "body shorter than Content-Length")
-                off += n
-                if (android.os.SystemClock.elapsedRealtime() - t0 > BODY_MS) throw HttpError(408, "REQUEST_TIMEOUT", "request body took too long")
-            }
-            b
-        }
-        val target = parts[1]
-        return Req(parts[0].uppercase(), target, parseForm(target.substringAfter('?', "")), headers, body)
-    }
-
-    /** 1.2: Transfer-Encoding: chunked request bodies (some HTTP clients and proxies send nothing else). */
-    private fun readChunked(inp: InputStream, t0: Long): ByteArray {
-        val out = ByteArrayOutputStream()
-        fun line(): String { val sb = StringBuilder(); while (true) { val c = inp.read(); if (c < 0) throw HttpError(400, "BAD_REQUEST", "chunked body cut off"); if (c == '\n'.code) break; if (c != '\r'.code) sb.append(c.toChar()); if (sb.length > 256) throw HttpError(400, "BAD_REQUEST", "bad chunk header") }; return sb.toString() }
-        while (true) {
-            val size = line().substringBefore(';').trim().toIntOrNull(16) ?: throw HttpError(400, "BAD_REQUEST", "bad chunk size")
-            if (size == 0) { while (line().isNotEmpty()) { /* trailers */ }; break }
-            if (size < 0 || out.size() + size > MAX_BODY) throw HttpError(413, "BODY_TOO_LARGE", "request body over $MAX_BODY bytes")
-            val b = ByteArray(size); var off = 0
-            while (off < size) { val n = inp.read(b, off, size - off); if (n < 0) throw HttpError(400, "BAD_REQUEST", "chunked body cut off"); off += n }
-            out.write(b); line()
-            if (android.os.SystemClock.elapsedRealtime() - t0 > BODY_MS) throw HttpError(408, "REQUEST_TIMEOUT", "request body took too long")
-        }
-        return out.toByteArray()
-    }
-
-    private fun write(out: OutputStream, r: Resp) {
-        val reason = when (r.status) { 200 -> "OK"; 202 -> "Accepted"; 400 -> "Bad Request"; 401 -> "Unauthorized"; 403 -> "Forbidden"; 404 -> "Not Found"; 405 -> "Method Not Allowed"; 408 -> "Request Timeout"; 413 -> "Payload Too Large"; 429 -> "Too Many Requests"; 431 -> "Request Header Fields Too Large"; 503 -> "Service Unavailable"; else -> "Error" }
-        val sb = StringBuilder("HTTP/1.1 ${r.status} $reason\r\nContent-Type: ${r.type}\r\n")
-        if (r.stream == null) sb.append("Content-Length: ${r.body.size}\r\n")
-        sb.append("Connection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-VScreen-Version: ${cliVersion()}\r\n")
-        r.headers.forEach { (k, v) -> sb.append(k).append(": ").append(v.replace("\r", "").replace("\n", " ")).append("\r\n") }
-        sb.append("\r\n")
-        out.write(sb.toString().toByteArray())
-        if (r.stream == null) { out.write(r.body); out.flush() } else { out.flush(); r.stream.invoke(Emitter(out)) }
-    }
+    private fun write(out: OutputStream, r: Resp) = HttpCore.writeResponse(out, r, cliVersion())
 
     // ── routing ───────────────────────────────────────────────────────────
 
-    private fun route(r: Req): Resp {
+    internal fun route(r: Req): Resp {
         // No browser may drive the phone (CSRF / DNS rebinding): only known hosts, no Origin.
         val host = r.headers["host"]?.substringBeforeLast(':')?.lowercase()?.takeIf { it.isNotEmpty() } ?: r.headers["host"]?.lowercase()
         val remote = r.peer?.let { !it.isLoopbackAddress } == true
@@ -421,7 +548,7 @@ class ApiServer(private val ctx: Context) {
                 // takes only the one that answers this): sha256hex(K \n n \n ping \n K). Says nothing to anyone else.
                 .also { o -> val kid = r.q("me"); val n = r.q("n")
                     if (kid != null && n != null && n.length in 8..64 && n.all { it.isLetterOrDigit() })
-                        Tokens.byId(kid)?.let { t -> o.put("you", Tokens.sha256("${t.key}\n$n\nping\n${t.key}")) } }
+                        Tokens.byId(kid)?.takeIf { !it.publicOnly && it.key.isNotEmpty() }?.let { t -> o.put("you", Tokens.sha256("${t.key}\n$n\nping\n${t.key}")) } }
                 .put("version", BuildConfig.VERSION_NAME).put("code", BuildConfig.VERSION_CODE).put("pid", android.os.Process.myPid())
                 .put("time", System.currentTimeMillis() / 1000).put("api", JSONArray(listOf("v2", "v1")))
                 // 1.3: ready + the codes of what blocks (no details before the token is checked).
@@ -432,11 +559,14 @@ class ApiServer(private val ctx: Context) {
             "/v2/codes" -> return langOf(r) { Resp.json(JSONObject().put("codes", JSONArray(com.kilon.agentvscreen.cmd.Codes.all.map { JSONObject().put("code", it.name).put("next", it.next.key).put("text", it.text) }))) }
             "/cli" -> { if (r.q("via") == "install") AgentLedger.installed(r.q("id")?.takeIf { id -> Tokens.list.value.any { it.id == id } } ?: Tokens.MAIN); return Resp.text(cliScript()) }
             "/skill" -> return langOf(r) { Resp.text(AgentGuide.skill()) }
-            "/memory" -> return langOf(r) { Resp.text(AgentGuide.memoryFor(when (r.q("via")) { "mcp" -> Abilities.Via.MCP; "http" -> Abilities.Via.HTTP; else -> Abilities.Via.CLI }) + "\n") }
+            "/memory" -> return langOf(r) { Resp.text(AgentGuide.memoryFor(when (r.q("via")) { "mcp" -> Abilities.Via.MCP; "http" -> Abilities.Via.HTTP; else -> Abilities.Via.CLI }, if (r.remote) null else ApiConfig.baseUrl) + "\n") }
         }
+        // 2.0.0-beta7 (7.8 #3): /mcp method check (GET/DELETE -> 405 + Allow: POST) runs BEFORE auth, shared with PublicServer.
+        Mcp.preAuthCheck(r)?.let { return it }
         val auth = when (val a = authenticate(r)) { is Auth -> a; is Resp -> return a; else -> return Resp.err(401, "BAD_TOKEN", "?") }
         r.auth = auth
         Tokens.used(auth.token.id)
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return Resp.err(503, "THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
         // 1.4.0-beta5: on demand, the server stays up in the app's process while the service sleeps (no notification,
         // no foreground service). A signed request is the agent needing the phone: wake the service and wait for it,
         // so any client (curl, Operit, MCP) wakes it, not only one with Android's `am` at hand.
@@ -449,7 +579,7 @@ class ApiServer(private val ctx: Context) {
             r.path.startsWith("/v1/shot/") || r.path.startsWith("/v2/shot/") -> shot(r.path.substringAfterLast('/'))
             r.path == "/v1/events" || r.path == "/v2/events" -> events(r, auth)
             r.path == "/v2/cli" -> Resp.text(cliScript())
-            r.path == "/mcp" -> if (r.method == "POST") Mcp.handle(this, r) else Resp(405, "text/plain", "MCP: POST JSON-RPC".toByteArray(), mapOf("Allow" to "POST"))
+            r.path == "/mcp" -> Mcp.handle(this, r)
             else -> Resp.err(404, "NOT_FOUND", r.path)
         } }
         // 1.2: a signed request gets a signed answer, so the caller knows the reply (and a CLI update) came from this
@@ -457,38 +587,22 @@ class ApiServer(private val ctx: Context) {
         return if (auth.signed && auth.nonce != null && resp.stream == null) resp.plus(mapOf("X-VScreen-Proof" to proof(auth.token.key, auth.nonce, resp.body))) else resp
     }
 
-    private fun <T> langOf(r: Req, block: () -> T): T = com.kilon.agentvscreen.I18n.with((r.headers["x-vscreen-lang"] ?: r.q("lang"))?.lowercase()?.take(2), block)
+    private fun <T> langOf(r: Req, block: () -> T): T = com.kilon.agentvscreen.I18n.with((r.headers["x-vscreen-lang"] ?: r.q("lang") ?: com.kilon.agentvscreen.I18n.agentDefault())?.lowercase()?.take(2), block)
+    internal fun <T> withLang(r: Req, block: () -> T): T = langOf(r, block)
+    internal fun notePublicCaller(r: Req) {
+        requests++
+        lastClient = r.headers["user-agent"]?.take(60)
+        lastCaller = r.caller
+    }
 
     // ── who is calling ───────────────────────────────────────────────────
 
-    /** Failed checks per caller in the last minute; a remote caller that keeps failing is shut out for a while. */
-    private val fails = HashMap<String, ArrayDeque<Long>>()
-    private val lockedUntil = HashMap<String, Long>()
+    /** Shared auth failure lockout used by both [ApiServer] and [PublicServer] (7.3, 7.7). */
+    internal val failLimiter = AuthFailLimiter(ctx)
     private val nonces = LinkedHashMap<String, Long>()
 
-    private fun failed(r: Req, code: String, msg: String, status: Int = 401): Resp {
-        val who = r.peerName ?: "local"
-        val now = System.currentTimeMillis()
-        val n = synchronized(fails) {
-            val q = fails.getOrPut(who) { ArrayDeque() }
-            q.addLast(now); while (q.isNotEmpty() && now - q.first() > 60_000L) q.removeFirst()
-            if (fails.size > 500) fails.keys.firstOrNull()?.let { fails.remove(it) }
-            q.size
-        }
-        Audit.security("auth_failed", "$who $code ${r.path}")
-        if (r.remote && n >= MAX_FAILS) {
-            val first = synchronized(fails) { val was = lockedUntil[who] ?: 0L; lockedUntil[who] = now + LOCK_MS; was < now }
-            if (first) {
-                Audit.security("locked_out", who)
-                quiet("lockout-notify") { com.kilon.agentvscreen.core.VScreenHandoff.alert(ctx, 7390, tr("有设备在反复尝试连接 Agent-VScreen", "A device keeps trying to connect to Agent-VScreen"),
-                    tr("$who 一分钟内 $n 次验证失败，已暂停接受它的请求 ${LOCK_MS / 60_000} 分钟。不是你的设备的话，在 其它设备 里关掉远程访问或重置令牌", "$who failed verification $n times within a minute; its requests are refused for ${LOCK_MS / 60_000} minutes. If it is not your device, turn off remote access or reset the token under Other devices"),
-                    com.kilon.agentvscreen.host.Needs.open(ctx, com.kilon.agentvscreen.host.Needs.Page.CONNECT, 2)) }
-            }
-        }
-        // Slow every wrong guess down a little (bounded: it holds one worker).
-        Thread.sleep(if (r.remote) 400 else 100)
-        return Resp.err(status, code, msg)
-    }
+    private fun failed(r: Req, code: String, msg: String, status: Int = 401): Resp =
+        failLimiter.recordFailure(r.peerName ?: "local", r.remote, r.path, code, msg, status)
 
     /**
      * [Auth] when the request proved a live token, else the refusal.
@@ -504,12 +618,11 @@ class ApiServer(private val ctx: Context) {
      */
     private fun authenticate(r: Req): Any {
         val who = r.peerName ?: "local"
-        if (r.remote) synchronized(fails) { lockedUntil[who] }?.let { until ->
-            if (until > System.currentTimeMillis()) return Resp.err(429, "RATE_LIMITED", tr("验证失败次数太多，${(until - System.currentTimeMillis()) / 1000 + 1} 秒后再试", "Too many failed verifications; try again in ${(until - System.currentTimeMillis()) / 1000 + 1} s"))
-        }
+        failLimiter.checkLocked(who, r.remote)?.let { return it }
         val kid = r.headers["x-vscreen-key"]
         if (kid != null) {
-            val t = Tokens.byId(kid) ?: return failed(r, "BAD_TOKEN", tr("没有这个令牌（可能已被用户撤销）：请用户在 Agent-VScreen 里重新复制接入命令", "No such token (the user may have revoked it): ask the user to copy the connect message in Agent-VScreen again"))
+            val t = Tokens.byId(kid)?.takeIf { !it.publicOnly && it.key.isNotEmpty() }
+                ?: return failed(r, "BAD_TOKEN", tr("没有这个令牌（可能已被用户撤销）：请用户在 Agent-VScreen 里重新复制接入命令", "No such token (the user may have revoked it): ask the user to copy the connect message in Agent-VScreen again"))
             val ts = r.headers["x-vscreen-time"]?.toLongOrNull() ?: return failed(r, "BAD_SIGNATURE", "X-VScreen-Time missing")
             val nonce = r.headers["x-vscreen-nonce"]?.takeIf { it.length in 8..64 && it.all { c -> c.isLetterOrDigit() } } ?: return failed(r, "BAD_SIGNATURE", "X-VScreen-Nonce missing (8-64 letters/digits)")
             val sign = r.headers["x-vscreen-sign"]?.lowercase() ?: return failed(r, "BAD_SIGNATURE", "X-VScreen-Sign missing")
@@ -561,17 +674,31 @@ class ApiServer(private val ctx: Context) {
         // saved its note (the app shows it to the user).
         when (argv.firstOrNull()) {
             null, "guide" -> {
+                val topicArg = argv.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
+                if (topicArg != null) {
+                    Turns.bumpTurn(session)
+                    val body = AgentGuide.topic(topicArg)
+                    if (body != null) return NativeOffloadResult(0, body + "\n")
+                    val avail = AgentGuide.TOPICS.joinToString(", ")
+                    return NativeOffloadResult(
+                        2,
+                        tr("未知主题“$topicArg”。可用主题：$avail\n", "Unknown topic \"$topicArg\". Available topics: $avail\n"),
+                        "INVALID_ARGS",
+                    )
+                }
                 // 1.3 beta4: the guide says which version it is for, and whether this agent's note is older.
                 val tid = com.kilon.agentvscreen.cmd.Call.current()?.tokenId ?: "main"
                 val ack = AgentLedger.ackVersion(tid)
                 val head = "Agent-VScreen ${com.kilon.agentvscreen.BuildConfig.VERSION_NAME}" +
                     (if (ack < com.kilon.agentvscreen.BuildConfig.VERSION_CODE) tr("（你的说明还没按这一版确认：更新后执行 remembered \"<存在哪里>\"）", " (your note is not confirmed for this version yet: refresh it, then run remembered \"<where>\")") else "") + "\n\n"
+                Turns.bumpTurn(session)
                 return NativeOffloadResult(0, head + AgentGuide.guide())
             }
             "remembered" -> {
                 val where = argv.drop(1).joinToString(" ").trim()
                 if (where.isEmpty()) return NativeOffloadResult(2, tr("用法：vscreen remembered \"<你把说明存在了哪里>\"（例如：长期记忆 / skills/agent-vscreen）\n", "Usage: vscreen remembered \"<where you saved the note>\" (e.g. long-term memory / skills/agent-vscreen)\n"))
                 AgentLedger.remembered(where)
+                Turns.bumpTurn(session)
                 return NativeOffloadResult(0, tr("已记录（版本 ${com.kilon.agentvscreen.BuildConfig.VERSION_NAME}）：你说把 Agent-VScreen 的说明存在了「${where.take(80)}」。App 首页会显示给用户。以后的新对话里，要操作手机应用时用 vscreen（不知道怎么用就先 vscreen guide）。\n", "Recorded: you saved the Agent-VScreen note in \"${where.take(80)}\". The app shows this to the user. In future conversations, use vscreen to operate apps on the phone (run vscreen guide first if unsure how).\n"))
             }
         }
@@ -580,8 +707,12 @@ class ApiServer(private val ctx: Context) {
         try {
             val res0 = handler.handle(NativeOffloadRequest(listOf("vscreen") + argv, session))
             // 1.3 beta4: the agent's note is for an older version: what changed, and how to refresh it (AgentNews).
-            val notice = AgentNews.notice(com.kilon.agentvscreen.cmd.Call.current()?.tokenId ?: "main", fresh, com.kilon.agentvscreen.cmd.Call.current()?.via ?: Abilities.Via.CLI)
-            val res = if (notice != null) res0.copy(output = notice + "\n" + res0.output) else res0
+            val cur = com.kilon.agentvscreen.cmd.Call.current()
+            val notice = AgentNews.notice(cur?.tokenId ?: "main", fresh, cur?.via ?: Abilities.Via.CLI, cur == null || cur.source == com.kilon.agentvscreen.cmd.Call.Source.LOCAL)
+            // 2.0.0-beta11: the agent's permissions changed since its last reply (host/Permissions).
+            val permNote = com.kilon.agentvscreen.host.Permissions.changeNotice(com.kilon.agentvscreen.cmd.Call.current())
+            val res1 = if (permNote != null) res0.copy(output = permNote + "\n" + res0.output) else res0
+            val res = if (notice != null) res1.copy(output = notice + "\n" + res1.output) else res1
             if (notice != null) return res
             // First call after a long silence (likely a new conversation): one line pointing at the short usage.
             if (!fresh || argv.first() == "help") return res
@@ -596,13 +727,22 @@ class ApiServer(private val ctx: Context) {
      */
     fun runFor(r: Req, argv: List<String>, session: String, requestId: String?, onStep: ((String) -> Unit)? = null): Pair<NativeOffloadResult, Boolean> {
         val auth = r.auth ?: return NativeOffloadResult(1, "", "BAD_TOKEN") to false
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return NativeOffloadResult(1, "", "THERMAL_STOP: " + com.kilon.agentvscreen.host.ThermalGuard.reason()) to false
         val t = Tokens.byId(auth.token.id) ?: auth.token
         val via = when {
             r.path.startsWith("/mcp") -> Abilities.Via.MCP
             r.headers["x-vscreen-client"] == "cli" -> Abilities.Via.CLI
             else -> Abilities.Via.HTTP
         }
-        val call = Call(session, t.id, t.name, t.scopes, r.peerName, requestId, com.kilon.agentvscreen.I18n.code, t.trustUntil, via)
+        val source = when {
+            r.viaPublic -> Call.Source.PUBLIC
+            r.viaBuiltinTailnet || r.peer?.isLoopbackAddress == false -> Call.Source.TAILNET
+            else -> Call.Source.LOCAL
+        }
+        val scopes = if (r.viaPublic || t.publicOnly) t.scopes.intersect(Tokens.PUBLIC_SCOPES.toSet())
+            .let { s -> if (r.viaPublic && r.publicScope != "operate") s.intersect(setOf("look")) else s } else t.scopes
+        val call = Call(session, t.id, t.name, scopes, r.peerName, requestId, com.kilon.agentvscreen.I18n.code, t.trustUntil, via, source,
+            srcAddr = if (r.viaPublic) r.headers["x-avs-public-src"]?.trim()?.take(64)?.takeIf { it.isNotEmpty() } else null)
         call.progress = onStep
         val key = requestId?.let { "${t.id}:$it" }
         var mine: Flight? = null
@@ -684,13 +824,14 @@ class ApiServer(private val ctx: Context) {
         if (v2 && r.accepts("text/event-stream")) return Resp.sse { em ->
             val (res, replayed) = runFor(r, argv, session, requestId) { line -> quiet("sse-step") { em.send("step", line) } }
             quiet("sse-result") { em.send("result", envelope(res, session, requestId, replayed, r, true).toString()) }
+            res.afterSend?.let { quiet("sse-after-send") { it() } }
         }
         val (res, replayed) = runFor(r, argv, session, requestId)
         val env = envelope(res, session, requestId, replayed, r, v2)
         val headers = mapOf("X-VScreen-Exit" to env.optInt("exit").toString(), "X-VScreen-Code" to env.optString("code"), "X-VScreen-Images" to env.optJSONArray("images").let { a -> (0 until (a?.length() ?: 0)).joinToString(",") { a!!.getJSONObject(it).optString("name") } }, "X-VScreen-Session" to session) +
             (if (v2) emptyMap() else mapOf("Deprecation" to "true", "Link" to "</v2/run>; rel=\"successor-version\""))
-        return if (r.q("format") == "text" || r.headers["accept"]?.startsWith("text/plain") == true) Resp.text(env.optString("text"), 200, headers)
-        else Resp.json(env, 200, headers)
+        return (if (r.q("format") == "text" || r.headers["accept"]?.startsWith("text/plain") == true) Resp.text(env.optString("text"), 200, headers)
+        else Resp.json(env, 200, headers)).withAfterSend(res.afterSend)
     }
 
     /**
@@ -709,6 +850,11 @@ class ApiServer(private val ctx: Context) {
         val cli = r.headers["x-vscreen-client"] == "cli"
         val shots = if (!v2) all else ImagePolicy.pick(res, all)
         val text = ShotStore.IN_TEXT.replace(res.output) { m -> val n = m.groupValues[1]; if (n in shots) shotUrl(n, r, v2) else ImagePolicy.leftOut() }
+        val meter = com.kilon.agentvscreen.core.Meter.of(
+            text,
+            com.kilon.agentvscreen.core.Meter.sentDimensions(ctx, res, shots, fullSize = cli || !v2),
+            structured = if (v2) res.data?.toString() else null,
+        )
         val exit = if (!v2 && res.softFail) 0 else res.exitCode
         val code = if (!v2 && res.softFail) "OK" else res.codeOrDefault
         val o = JSONObject()
@@ -718,6 +864,8 @@ class ApiServer(private val ctx: Context) {
         o.put("ok", exit == 0).put("exit", exit).put("code", if (v2 || exit != 0) code else JSONObject.NULL).put("session", session).put("text", text)
             .put("images", JSONArray(shots.map { n -> JSONObject().put("name", n).put("full_url", shotUrl(n, r, v2))
                 .put("url", if (cli || !v2) shotUrl(n, r, v2) else shotUrl(ImagePolicy.sendName(ctx, res, n), r, v2)) }))
+            .put("meter", meter.json())
+            .put("returned_at", res.data?.optLong("returned_at")?.takeIf { it > 0L } ?: System.currentTimeMillis())
         if (v2) {
             o.put("next", com.kilon.agentvscreen.cmd.Codes.next(code).takeIf { exit != 0 } ?: "none")
             requestId?.let { o.put("request_id", it) }
@@ -755,14 +903,14 @@ class ApiServer(private val ctx: Context) {
     internal fun cliVersion() = "${BuildConfig.VERSION_NAME}-${com.kilon.agentvscreen.I18n.code}"
 
     companion object {
-        const val MAX_CONN = 24
-        const val MAX_HEAD = 16_384
-        const val MAX_BODY = 1_048_576
-        const val HEAD_MS = 10_000L
-        const val BODY_MS = 20_000L
+        const val MAX_CONN = HttpCore.MAX_CONN
+        const val MAX_HEAD = HttpCore.MAX_HEAD
+        const val MAX_BODY = HttpCore.MAX_BODY
+        const val HEAD_MS = HttpCore.HEAD_MS
+        const val BODY_MS = HttpCore.BODY_MS
         const val SKEW_S = 300L
-        const val MAX_FAILS = 8
-        const val LOCK_MS = 5 * 60_000L
+        const val MAX_FAILS = HttpCore.MAX_FAILS
+        const val LOCK_MS = HttpCore.LOCK_MS
         const val GRACE_MS = 3_000L
         const val IDEM_MS = 10 * 60_000L
         const val IDEM_MAX = 200
@@ -804,17 +952,7 @@ class ApiServer(private val ctx: Context) {
                 .flatMap { cm.getLinkProperties(it)?.linkAddresses.orEmpty() }.map { it.address }.firstOrNull { isTailnet(it) }
         }.getOrNull()
 
-        fun parseForm(s: String): Map<String, List<String>> {
-            if (s.isEmpty()) return emptyMap()
-            val out = LinkedHashMap<String, MutableList<String>>()
-            for (kv in s.split('&')) {
-                if (kv.isEmpty()) continue
-                val k = URLDecoder.decode(kv.substringBefore('='), "UTF-8")
-                val v = URLDecoder.decode(kv.substringAfter('=', ""), "UTF-8")
-                out.getOrPut(k) { ArrayList() } += v
-            }
-            return out
-        }
+        fun parseForm(s: String): Map<String, List<String>> = HttpCore.parseForm(s)
 
         /** Shell-like split: spaces separate, "…" and '…' group, backslash escapes inside "…" and outside quotes. */
         fun splitCommand(s: String): List<String> {

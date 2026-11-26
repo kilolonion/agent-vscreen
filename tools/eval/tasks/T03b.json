@@ -1,0 +1,28 @@
+{
+  "id": "T03b",
+  "scene": "S03",
+  "seed": 7,
+  "since": "beta3",
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "tap 加载 until text:加载完成 8s"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 60
+}

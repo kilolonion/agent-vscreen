@@ -43,7 +43,22 @@ object Setup {
                 Privileged.isReady() -> tr("自动设置没成功：", "Automatic setup failed: ") + pw.problems().joinToString(tr("、", ", ")) + tr("。请手动：", ". Please do it by hand: ") + VScreenPower.manualSteps()
                 else -> pw.problems().joinToString(tr("、", ", ")) + tr("（${Privileged.name()} 就绪后会自动补上）", " (granted automatically once ${Privileged.name()} is ready)")
             }),
-        ) + vendorItem(ctx)
+        ) + vendorItem(ctx) + detectorItem(ctx)
+    }
+
+    /**
+     * 2.0: the built-in textless-icon detector is AGPL (a separate file next to the MIT app), so it stays off until
+     * the user has read that; first-run setup asks once (optional: turn on or skip; Settings can do it later).
+     */
+    private fun detectorItem(ctx: Context): List<Item> {
+        if (com.kilon.agentvscreen.core.DetectorModels.builtIn(ctx) == null) return emptyList()
+        val on = com.kilon.agentvscreen.core.VScreenDetector.licenseAccepted(ctx)
+        val skipped = com.kilon.agentvscreen.core.VScreenDetector.declined(ctx)
+        return listOf(Item("detector", tr("无字图标识别", "Textless icon finder"), on || skipped, when {
+            on -> tr("已开启：agent 的元素列表里会多出没有文字的图标、×、开关", "On: the agent's element list includes icons, × and switches without words")
+            skipped -> tr("已跳过，可以在设置里随时开启", "Skipped; turn it on in Settings any time")
+            else -> tr("帮 agent 找到图标、×、开关这类没有文字的按钮。", "Helps agents find buttons without words (icons, ×, switches). ") + com.kilon.agentvscreen.core.VScreenDetector.licenseNote()
+        }))
     }
 
     /**
@@ -67,7 +82,7 @@ object Setup {
         val out = ArrayList<String>()
         fun step(label: String, argv: Array<String>) {
             val r = runCatching { VScreenShell.run(argv, 6_000L) }.getOrNull()
-            out += if (r != null && r.exitCode == 0) "✓ $label" else "✗ $label：${r?.combined?.take(80) ?: tr("失败", "failed")}"
+            out += if (r != null && r.exitCode == 0) "✓ $label" else "✗ $label${tr("：", ": ")}${r?.combined?.take(80) ?: tr("失败", "failed")}"
         }
         if (!Settings.canDrawOverlays(ctx)) step(tr("悬浮窗", "Floating window"), arrayOf("appops", "set", pkg, "SYSTEM_ALERT_WINDOW", "allow"))
         if (Build.VERSION.SDK_INT >= 33 && ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)

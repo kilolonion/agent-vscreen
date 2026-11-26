@@ -57,9 +57,10 @@ internal fun VScreenOffloadHandler.status(sid: String?, args: OffloadArgs): Nati
         com.kilon.agentvscreen.host.quiet("VScreenScreenCommands:55") { BackgroundOperation.acquire(sid, create = false) }
     }
     val t0 = SystemClock.elapsedRealtime()
-    // Right after the app starts the system may still be binding the accessibility service: wait for it once
-    // (not once per field: with accessibility off that cost seconds on every status).
-    val a11y = a11yLive(if (BackgroundOperation.state.value.accessibilityConnected) 0 else 1_500)
+    // 2.0.0-beta2: do not block `status` for 1.5 s waiting for accessibility to bind; Readiness.no_accessibility
+    // already notes that binding may still be in progress right after start, and waiting penalised every cold wake
+    // and every phone with accessibility off.
+    val a11y = a11yLive(0)
     if (a11y && !BackgroundOperation.state.value.accessibilityConnected) BackgroundOperation.refreshStatus()
     val s = BackgroundOperation.state.value
     val d = BackgroundOperation.previewDisplayFor(sid ?: "")
@@ -114,6 +115,8 @@ internal fun VScreenOffloadHandler.status(sid: String?, args: OffloadArgs): Nati
         .put("idle", s.idle)
         .put("power_saving", s.powerSaving)
         .put("background_network", com.kilon.agentvscreen.core.VScreenPower.check(context).json())
+        // 2.0.0-beta11: what this agent may do, from the same source the checks use (host/Permissions).
+        .put("permissions", com.kilon.agentvscreen.host.Permissions.json(Call.current()))
         .put("app_rules", JSONObject().also { o -> VScreenStore.rules.value.forEach { (k, v) -> o.put(k, v.key) } })
         .put("keeps", JSONArray(VScreenRules.list().filter { it.spec.agentId == me }.map { it.json() }))
         .put("idle_release_in_s", if (idleAt > 0) ((idleAt - SystemClock.elapsedRealtime()) / 1000).coerceAtLeast(0) else JSONObject.NULL)
@@ -149,6 +152,7 @@ internal fun VScreenOffloadHandler.status(sid: String?, args: OffloadArgs): Nati
         else tr("副屏 ${s.displayId} 正被另一个会话的任务使用，等它结束后再操作", "Screen ${s.displayId} is in use by another session's task; wait until it ends"))
     }
     data.put("capabilities", capabilities(d))
+    data.put("perception", com.kilon.agentvscreen.core.OnnxRuntime.perceptionJson(context))
     runCatching {
         val dv = Vendor.device
         data.put("device", JSONObject().put("vendor", dv.vendor).put("brand", dv.brand).put("model", dv.model)
@@ -308,6 +312,13 @@ internal fun VScreenOffloadHandler.apps(args: OffloadArgs): NativeOffloadResult 
     return ok(args, JSONObject().put("apps", arr))
 }
 
+/** 2.0.0-beta8 (C6), pure: truthful `capabilities.drag` status string based on display ownership and privilege readiness. */
+internal fun dragCapabilityText(shellOwned: Boolean?, privilegeReady: Boolean): String = when {
+    shellOwned == true -> tr("副屏服务 POINTER（drag 多点、按住）", "screen service POINTER (multi-point drag, hold)")
+    shellOwned == null && privilegeReady -> tr("建副屏后可用（副屏服务 POINTER）", "available once the screen is created (screen service POINTER)")
+    else -> tr("不可用（需要 Shizuku 副屏服务）", "unavailable (needs the Shizuku screen service)")
+}
+
 /** Which mechanism each capability is using right now, for `status`. */
 internal fun VScreenOffloadHandler.capabilities(d: VScreenDisplay?): JSONObject {
     val s = BackgroundOperation.state.value
@@ -315,7 +326,7 @@ internal fun VScreenOffloadHandler.capabilities(d: VScreenDisplay?): JSONObject 
     o.put("screen", when { d == null -> tr("无副屏", "no screen"); d.shellOwned && d.trusted -> tr("Shizuku 服务创建的受信任副屏", "trusted screen created by the Shizuku service"); d.shellOwned -> tr("Shizuku 服务创建（未受信任）", "created by the Shizuku service (untrusted)"); else -> tr("应用自建副屏（受限）", "app's own screen (limited)") })
     o.put("tap_swipe", tr("副屏服务注入（触摸事件直接进副屏，不经过 shell 命令）", "injected by the display service (touch events go straight to the screen, no shell command)"))
     o.put("keys", if (d?.ownFocus == true) tr("带 displayId 注入（副屏有独立焦点）", "injected with displayId (the screen has its own focus)") else tr("带 displayId 注入，失败时 input -d", "injected with displayId, input -d as fallback"))
-    o.put("drag", if (d?.shellOwned == true) tr("副屏服务 POINTER（drag 多点、按住）", "screen service POINTER (multi-point drag, hold)") else tr("不可用（需要 Shizuku 副屏服务）", "unavailable (needs the Shizuku screen service)"))
+    o.put("drag", dragCapabilityText(d?.shellOwned, s.privilege == BackgroundOperation.Privilege.READY))
     o.put("ocr", VScreenOcr.engineInfo())
     o.put("with_user", org.json.JSONArray(com.kilon.agentvscreen.core.VScreenOwnership.given.value.values.map { g ->
         JSONObject().put("app", g.pkg).put("since", g.at).put("why", g.why) }))

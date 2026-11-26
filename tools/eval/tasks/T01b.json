@@ -1,0 +1,36 @@
+{
+  "id": "T01b",
+  "scene": "S01",
+  "seed": 7,
+  "since": "beta3",
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "tap \"条目 5\" until text:详情"
+    ],
+    [
+      "act",
+      "tap 返回 until text:条目 5"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "detail",
+      "ok": true
+    },
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 60
+}

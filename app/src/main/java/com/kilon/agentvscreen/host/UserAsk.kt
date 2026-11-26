@@ -81,7 +81,17 @@ object UserAsk {
     /** The user has taken this question into a lesson (getting ready, recording or saving). */
     fun taken(a: Ask) = bound(a)
 
-    private fun publish() { _open.value = asks.filter { it.live && it.id != heldId } }
+    /** Republishes [open] when the earliest unanswered question runs out of time (see [ExpiryWake]). */
+    private val expiry = ExpiryWake("ask") { synchronized(lock) { prune(System.currentTimeMillis()); publish(); lock.notifyAll() } }
+    /** When the next shown question runs out of time, or null when none is shown (tests). */
+    internal val nextExpiryAt: Long? get() = expiry.dueAt
+
+    /** The only writer of [open]: publishes the shown questions and arms the wake for the earliest expiry. */
+    private fun publish() {
+        val shown = asks.filter { it.live && it.id != heldId }
+        _open.value = shown
+        expiry.at(shown.minOfOrNull { it.at + it.validMs }, System.currentTimeMillis())
+    }
 
     private fun prune(now: Long) {
         val gone = asks.filter { !bound(it) && now - it.at > it.validMs && (it.answer == null || now - it.answeredAt > it.validMs) }
@@ -223,8 +233,8 @@ object UserAsk {
                 .setPriority(NotificationCompat.PRIORITY_HIGH).setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setAutoCancel(false).setTimeoutAfter(a.validMs)
             if (a.kind == Kind.CONFIRM) {
-                fun pi(allow: Boolean) = PendingIntent.getService(ctx, a.id * 2 + (if (allow) 1 else 0),
-                    Intent(ctx, HostService::class.java).setAction(ACTION).putExtra("id", a.id).putExtra("allow", allow),
+                fun pi(allow: Boolean) = PendingIntent.getBroadcast(ctx, a.id * 2 + (if (allow) 1 else 0),
+                    Intent(ctx, NoteActions::class.java).setAction(ACTION).putExtra("id", a.id).putExtra("allow", allow),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
                 val open = Needs.open(ctx, Needs.Page.HOME, 6)
                 val body = tr("${a.detail}\n来自：${a.tokenName}（会话 ${a.session}）", "${a.detail}\nFrom: ${a.tokenName} (session ${a.session})")

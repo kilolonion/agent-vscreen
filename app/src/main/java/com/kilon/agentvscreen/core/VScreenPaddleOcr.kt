@@ -53,7 +53,7 @@ internal object VScreenPaddleOcr {
     private const val REC_BATCH_W = 2400
     private const val REC_MIN_SCORE = 0.5f
 
-    private class Engine(val env: OrtEnvironment, val det: OrtSession, val rec: OrtSession, val chars: Array<String>)
+    private class Engine(val appContext: Context, val env: OrtEnvironment, val det: OrtSession, val rec: OrtSession, val chars: Array<String>)
 
     @Volatile private var engine: Engine? = null
     @Volatile private var loadError: String? = null
@@ -107,29 +107,28 @@ internal object VScreenPaddleOcr {
         engine?.let { return it }
         loadError?.let { throw IllegalStateException(it) }
         try {
-            val env = OrtEnvironment.getEnvironment()
+            val appCtx = context.applicationContext
+            val env = OnnxRuntime.environment(appCtx)
             // 1.4.0-beta2: the full optimisation level rewrites the graph per CPU (layout to NHWC, special kernels); on
             // beta1's phone that rewrite asked for a kernel the runtime does not have. A model that cannot be built that
             // way is built again without the CPU-specific rewrite (plain kernels, the same answers), and that is logged.
             fun session(name: String): OrtSession {
-                val path = modelFile(context, name).absolutePath
-                fun build(level: OrtSession.SessionOptions.OptLevel): OrtSession = OrtSession.SessionOptions().apply {
-                    setIntraOpNumThreads(max(1, min(4, Runtime.getRuntime().availableProcessors() / 2)))
-                    setOptimizationLevel(level)
-                }.use { opts -> env.createSession(path, opts) }
+                val path = modelFile(appCtx, name).absolutePath
+                fun build(level: OrtSession.SessionOptions.OptLevel): OrtSession =
+                    OnnxRuntime.sessionOptions(appCtx, level).use { opts -> env.createSession(path, opts) }
                 return try { build(OrtSession.SessionOptions.OptLevel.ALL_OPT) } catch (e: ai.onnxruntime.OrtException) {
                     AppLogger.warning(TAG, "$name at ALL_OPT failed (${e.message?.take(200)}); building at EXTENDED_OPT")
                     optNote = "$name: EXTENDED_OPT (${e.message?.take(120)})"
                     build(OrtSession.SessionOptions.OptLevel.EXTENDED_OPT)
                 }
             }
-            val dict = context.assets.open("$DIR/dict.txt").bufferedReader(Charsets.UTF_8).use { r ->
+            val dict = appCtx.assets.open("$DIR/dict.txt").bufferedReader(Charsets.UTF_8).use { r ->
                 r.readLines().filter { it.isNotEmpty() }
             }
             val chars = (listOf("") + dict + listOf(" ")).toTypedArray()
             val det = session("det.onnx")
             val rec = try { session("rec.onnx") } catch (t: Throwable) { runCatching { det.close() }; throw t }
-            return Engine(env, det, rec, chars).also { engine = it }
+            return Engine(appCtx, env, det, rec, chars).also { engine = it }
         } catch (t: Throwable) {
             loadError = "${t.javaClass.simpleName}: ${t.message}"
             AppLogger.warning(TAG, "PP-OCRv6 load failed: $loadError")
@@ -152,6 +151,20 @@ internal object VScreenPaddleOcr {
     fun busy(): Boolean = slot.availablePermits() == 0
 
     /**
+     * 2.0.0-beta12: wait until the reading now running ends (at most [ms]); true when the engine is free. The slot is
+     * not kept: the caller then looks at the reading that just finished before starting one of its own.
+     */
+    fun awaitIdle(ms: Long): Boolean {
+        if (!busy()) return true
+        if (ms <= 0L || !slot.tryAcquire(ms, java.util.concurrent.TimeUnit.MILLISECONDS)) return false
+        slot.release()
+        return true
+    }
+
+    /** How long the current PP-OCRv6 reading has been running (0 when idle). */
+    fun busyMs(): Long = if (busy() && busySince > 0L) (android.os.SystemClock.elapsedRealtime() - busySince).coerceAtLeast(0L) else 0L
+
+    /**
      * Items in frame pixels. Throws on any failure. Not on the main thread.
      *
      * 1.4.2: with a deadline. The native inference has no timeout of its own, and before, one stuck reading held the
@@ -167,21 +180,53 @@ internal object VScreenPaddleOcr {
         // 1.4.2-beta6: a caller waits for the slot only as long as a normal reading takes ([SLOT_WAIT_MS]), not the
         // whole [TIMEOUT_MS]. A reader past that is one this CPU cannot finish in time (the cold build under emulator
         // translation took 36 s on API 35 CI); waiting 15 s for it, then giving ML Kit what was left, was the OCR_DOWN.
+        val waitStart = android.os.SystemClock.elapsedRealtime()
         if (!slot.tryAcquire(SLOT_WAIT_MS, java.util.concurrent.TimeUnit.MILLISECONDS))
             error("PP-OCRv6 busy: a reading has not finished for ${(android.os.SystemClock.elapsedRealtime() - busySince) / 1000} s")
+        val slotWaitMs = (android.os.SystemClock.elapsedRealtime() - waitStart).coerceAtLeast(0L)
         val own: Bitmap
         val task: java.util.concurrent.FutureTask<List<VScreenOcr.Item>>
+        val timedOut = java.util.concurrent.atomic.AtomicBoolean(false)
+        val currentHandle = java.util.concurrent.atomic.AtomicReference<OnnxRuntime.ActiveHandle?>(null)
+        val readStartMono = android.os.SystemClock.elapsedRealtime()
+        val frameShape = "${frame.width}x${frame.height}"
         try {
             own = frame.copy(Bitmap.Config.ARGB_8888, false) ?: error("PP-OCRv6: could not copy the frame")
-            busySince = android.os.SystemClock.elapsedRealtime()
+            busySince = readStartMono
             task = java.util.concurrent.FutureTask {
+                var ok = true
+                var errMsg: String? = null
                 try {
                     val e = engine(context)
-                    val boxes = detect(e, own)
-                    if (boxes.isEmpty()) emptyList() else recognizeBoxes(e, own, boxes)
+                    val boxes = detect(e, own, slotWaitMs) { h ->
+                        currentHandle.set(h)
+                        if (timedOut.get()) h.markTimedOut(TIMEOUT_MS)
+                    }
+                    if (boxes.isEmpty()) emptyList()
+                    else recognizeBoxes(e, own, boxes) { h ->
+                        currentHandle.set(h)
+                        if (timedOut.get()) h.markTimedOut(TIMEOUT_MS)
+                    }
+                } catch (t: Throwable) {
+                    ok = false
+                    errMsg = "${t.javaClass.simpleName}: ${t.message}"
+                    throw t
                 } finally {
                     own.recycle()
                     slot.release()
+                    if (timedOut.get()) {
+                        val totalDur = (android.os.SystemClock.elapsedRealtime() - readStartMono).coerceAtLeast(0L)
+                        OnnxRuntime.recordLatePipelineCompletion(
+                            ctx = context,
+                            model = "ppocr-pipeline",
+                            totalDurMs = totalDur,
+                            timeoutBudgetMs = TIMEOUT_MS,
+                            slotWaitMs = slotWaitMs,
+                            shape = frameShape,
+                            ok = ok,
+                            err = errMsg,
+                        )
+                    }
                 }
             }
             Thread(task, "vscreen-ocr").apply { isDaemon = true }.start()
@@ -192,7 +237,9 @@ internal object VScreenPaddleOcr {
         return try {
             task.get(TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
         } catch (_: java.util.concurrent.TimeoutException) {
-            AppLogger.warning(TAG, "PP-OCRv6 no result in ${TIMEOUT_MS}ms")
+            timedOut.set(true)
+            currentHandle.get()?.markTimedOut(TIMEOUT_MS)
+            AppLogger.warning(TAG, "PP-OCRv6 no result in ${TIMEOUT_MS}ms (slotWait=${slotWaitMs}ms)")
             error("PP-OCRv6 timed out after ${TIMEOUT_MS / 1000} s")
         } catch (e: java.util.concurrent.ExecutionException) {
             throw e.cause ?: e
@@ -203,7 +250,12 @@ internal object VScreenPaddleOcr {
 
     private class DetBox(val crop: Rect, val tight: Rect)
 
-    private fun detect(e: Engine, frame: Bitmap): List<DetBox> {
+    private fun detect(
+        e: Engine,
+        frame: Bitmap,
+        slotWaitMs: Long = 0L,
+        onHandle: ((OnnxRuntime.ActiveHandle) -> Unit)? = null,
+    ): List<DetBox> {
         val w = frame.width
         val h = frame.height
         val r = min(1f, DET_LONG.toFloat() / max(w, h))
@@ -223,10 +275,13 @@ internal object VScreenPaddleOcr {
             input[2 * plane + i] = ((((c shr 16) and 0xFF) / 255f) - 0.406f) / 0.225f
         }
         val prob = FloatArray(plane)
-        OnnxTensor.createTensor(e.env, FloatBuffer.wrap(input), longArrayOf(1, 3, rh.toLong(), rw.toLong())).use { t ->
-            e.det.run(mapOf(e.det.inputNames.first() to t)).use { res ->
-                val fb = (res.get(0) as OnnxTensor).floatBuffer
-                fb.get(prob, 0, min(plane, fb.remaining()))
+        val detShape = longArrayOf(1, 3, rh.toLong(), rw.toLong())
+        OnnxTensor.createTensor(e.env, FloatBuffer.wrap(input), detShape).use { t ->
+            OnnxRuntime.runInference(e.appContext, "ppocr-det", detShape, slotWaitMs = slotWaitMs, onHandle = onHandle) {
+                e.det.run(mapOf(e.det.inputNames.first() to t)).use { res ->
+                    val fb = (res.get(0) as OnnxTensor).floatBuffer
+                    fb.get(prob, 0, min(plane, fb.remaining()))
+                }
             }
         }
         // Connected components of the thresholded map (4-neighbour flood fill).
@@ -280,7 +335,12 @@ internal object VScreenPaddleOcr {
 
     private class Crop(val det: DetBox, val data: FloatArray, val width: Int)
 
-    private fun recognizeBoxes(e: Engine, frame: Bitmap, boxes: List<DetBox>): List<VScreenOcr.Item> {
+    private fun recognizeBoxes(
+        e: Engine,
+        frame: Bitmap,
+        boxes: List<DetBox>,
+        onHandle: ((OnnxRuntime.ActiveHandle) -> Unit)? = null,
+    ): List<VScreenOcr.Item> {
         val crops = boxes.map { b ->
             val c = b.crop
             val nw = ceil(REC_H * c.width().toDouble() / c.height()).toInt().coerceIn(8, REC_MAX_W)
@@ -317,16 +377,18 @@ internal object VScreenPaddleOcr {
                         ((bi * 3 + ch) * REC_H + y) * mw, c.width)
                 }
             }
-            OnnxTensor.createTensor(e.env, FloatBuffer.wrap(input),
-                longArrayOf(batch.size.toLong(), 3, REC_H.toLong(), mw.toLong())).use { t ->
-                e.rec.run(mapOf(e.rec.inputNames.first() to t)).use { res ->
-                    val out = res.get(0) as OnnxTensor
-                    val shape = out.info.shape
-                    val steps = shape[1].toInt()
-                    val classes = shape[2].toInt()
-                    val buf = out.floatBuffer
-                    batch.forEachIndexed { bi, c ->
-                        items += decode(e, buf, bi * steps * classes, steps, classes, mw, c)
+            val recShape = longArrayOf(batch.size.toLong(), 3, REC_H.toLong(), mw.toLong())
+            OnnxTensor.createTensor(e.env, FloatBuffer.wrap(input), recShape).use { t ->
+                OnnxRuntime.runInference(e.appContext, "ppocr-rec", recShape, onHandle = onHandle) {
+                    e.rec.run(mapOf(e.rec.inputNames.first() to t)).use { res ->
+                        val out = res.get(0) as OnnxTensor
+                        val shape = out.info.shape
+                        val steps = shape[1].toInt()
+                        val classes = shape[2].toInt()
+                        val buf = out.floatBuffer
+                        batch.forEachIndexed { bi, c ->
+                            items += decode(e, buf, bi * steps * classes, steps, classes, mw, c)
+                        }
                     }
                 }
             }

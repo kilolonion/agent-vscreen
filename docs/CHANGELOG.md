@@ -2,6 +2,34 @@
 
 For [1.4.2-beta3 (versionCode 54)](../README.md#whats-new-in-142-beta3), see the current beta notes. Changes on `main` since then come first.
 
+## 2.0.0-beta8 (`v2.0` branch)
+
+- Fixed built-in Tailscale (`GOOS=android`) missing the LocalAPI `cert/` route causing Funnel TLS handshake 404s, with active cert verification before reporting ready (`cert` intermediate state); reworked public access onboarding into a 5-item prerequisite checklist (`funnel-check`, one-tap fixes with `QueryFeature` URL / admin fallback + copyable `nodeAttrs`, auto-recheck on resume, once-only versioned risk consent); bucketed public rate limits and pairing caps by real client source (`ipn.FunnelConn.Src` → `X-AVS-Public-Src`, IPv4 `/32`, IPv6 `/64`) with coalesced pairing notifications; batched all unapproved strong-confirmation risk dimensions into one prompt with Standard (default) / Strict security levels, onboarding scope grant, and editable agent permissions; made `--hold` freeze and verify via `cgroup.events`/`wchan` before replying with upfront `HOLD_REFUSED` for system/persistent/IME/system-media processes and per-app circuit breaking; separated `until text:` timeout reasons (absent / pre-existing / `NOT_READ`); routed real Android Toast accessibility events into `Loud.TOAST` and removed OCR toast guessing; replaced open-loop `seek` with closed-loop numeric/adaptive search with start pre-check and per-read timeout; unified ONNX Runtime onto a shared non-spinning global pool with always-on 50-record diagnostics and 3-run detector verification sentinel; promoted peer connection methods, fixed display-cutout landscape floating window geometry, seamless fullscreen return, and mini-window toggles; added an in-app post-upgrade changelog bottom sheet shared with `AgentNews`; added `guide <topic>`, removed deprecated command suggestions, and excluded icon buttons from page titles.
+
+## 2.0.0-beta7 (`v2.0` branch)
+
+- Added public MCP access over official Tailscale Funnel (Headscale rejected upfront): dedicated loopback `PublicServer` (`127.0.0.1:18785`, constant-time `X-AVS-Public`, `/mcp` and OAuth 2.1 endpoints only), RFC 9728/8414/7591/8707 discovery and dynamic registration, PKCE S256 with 8-char pairing code and biometric/PIN strong confirmation (default `look`, `system` never granted, hold-to-confirm disabled), 1 h access tokens and 30 d rotating refresh tokens with reuse full-revocation, 4-point risk warning flow, ongoing Off notification, 24 h idle auto-close, auto-reset on app update, and prompt-injection notice in core `guide`.
+
+## 2.0.0-beta5 (`v2.0` branch)
+
+- Added `act --hold` and `note hold on|off` (Android 14+ post-reply app pause managed by the privileged Gate with automatic unhold before the next command, on timeout/takeover/release, or on app exit), short-range single-act rules `act --on "<cond> => <step>[ x1..x3]"` with shared persistence debounce and claimed BEFORE/AFTER windows, and first-line reply time hints (`X.Xs since last reply`) with a one-time `BEFORE` coaching note.
+
+## 2.0.0-beta4 (`v2.0` branch)
+
+- Added closed-loop gestures (`press … hold until`, `drag … hold until`, `drag … seek until`) using existing `Probe` with region-only crop OCR (`readCrop`) and paused background OCR while fingers are down; added `GestureRecord` (pickup, follow, after-release `stayed`/`snapped_back`/`elsewhere`/`unknown`), `SNAP_BACK` loud reason, and fixed 4-cell drag strips in full replies.
+
+## 2.0.0-beta3 (`v2.0` branch)
+
+- Added reply protocol v3 (`Loud`, short quiet replies when all actions meet expectations with escape hatches `act --full` / `note reply quiet|full` / auto-escalation, `PageBook` page cards, cropped change images at 960/360/640 px, event-based `[Meanwhile]` with toast and popup detection, 1200-token reply budget) and externalized session memory (turn counter, `task recap`, layered core + 8-topic `guide`).
+
+## 2.0.0-beta2 (`v2.0` branch)
+
+- Added Gate in the privileged service process: holds the public loopback port and forwards raw TCP bytes to the app's internal port; wakes a frozen or force-stopped app within 3 s or returns `503 NOT_READY`, and cancels held agent fingers when heartbeats go stale.
+
+## 2.0.0-beta1 (`v2.0` branch)
+
+- Added the evaluation harness (`:torture` 13 deterministic scenes and `tools/eval/` task runner) and reply cost metering (`meter` in JSON replies and step logs for characters, estimated tokens and image tokens), leaving text replies unchanged.
+
 ## On `main` since 1.4.2-beta3 (not released yet)
 
 - **Fewer false "the screen did not change" from slow apps**: when the picture after an action's first wait still matches the one before, `act` looks up to 1.5 s longer (also for the last step under `--fast`). A late change is waited out and both moments are counted from the action: "the screen changed late, 2.0s after the action, and settled at 2.6s", or "… was still changing when time was up at 5.0s". A `--stop` condition met meanwhile stops the stretch at that step, without `NO_CHANGE`. "The screen did not change" (`NO_CHANGE`) now means no change was seen within that window, about 1.5 s later than before. If the screen changes only after the observation window closes, the step can still report `NO_CHANGE`; and the check compares a sampled picture, so it does not prove a tap missed.

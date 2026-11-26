@@ -11,7 +11,7 @@ name: Device tests (emulator)
 #    the next app process adopts it, and switching back to Shizuku stops it.
 on:
   push:
-    branches: [main, v1.4, 'beta/**']
+    branches: [main, v1.4, v2.0, 'v2/**', 'beta/**']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -37,20 +37,35 @@ jobs:
           cache-dependency-path: tsbridge/go.sum
       - uses: gradle/actions/setup-gradle@v5
       - run: ./tsbridge/build.sh
+      - run: CLOUDFLARED_SRC="$RUNNER_TEMP/cloudflared-src" ./cloudflared/build.sh
+      - name: Robolectric jars
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-${{ hashFiles('app/build.gradle.kts') }}
+          restore-keys: robolectric-
       - name: Unit tests
         run: ./gradlew --no-daemon :app:testDebugUnitTest
       - name: Stand-in root manager for the emulator (x86_64)
         run: |
           "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --target=x86_64-linux-android30 -O2 -Wall \
             -o "$AVS_BUILD_DIR/avsu" tools/android-smoke/avsu.c
-      # Debug: carries the CI hook (src/debug) that hands the test its token; release APKs never do.
-      - run: ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease
+      # Debug: carries the CI hook (src/debug) and native x86_64 libs for emulators; release APKs stay arm64-only with 0 hooks.
+      # Also build a lower-versionCode debug APK (same debug keystore) for shizuku (upgrade) in-place upgrade testing.
+      - run: |
+          ./gradlew --no-daemon -PavsVersionCode=64 :app:assembleDebug
+          cp "$AVS_BUILD_DIR/app/outputs/apk/debug/app-debug.apk" "$AVS_BUILD_DIR/app-debug-prev.apk"
+          ./gradlew --no-daemon :app:assembleDebug :app:assembleRelease :torture:assembleDebug
+      - run: tools/android-smoke/check_abis.sh "$AVS_BUILD_DIR/app/outputs/apk/debug/app-debug.apk" "$AVS_BUILD_DIR/app/outputs/apk/release/app-release.apk"
+      - run: tools/android-smoke/check_release_hooks.sh "$AVS_BUILD_DIR/app/outputs/apk/debug/app-debug.apk" "$AVS_BUILD_DIR/app/outputs/apk/release/app-release.apk"
       - uses: actions/upload-artifact@v5
         with:
           name: candidate
           path: |
             ${{ env.AVS_BUILD_DIR }}/app/outputs/apk/debug/app-debug.apk
+            ${{ env.AVS_BUILD_DIR }}/app-debug-prev.apk
             ${{ env.AVS_BUILD_DIR }}/app/outputs/apk/release/app-release.apk
+            ${{ env.AVS_BUILD_DIR }}/torture/outputs/apk/debug/torture-debug.apk
             ${{ env.AVS_BUILD_DIR }}/avsu
           retention-days: 3
   agent-e2e:
@@ -60,9 +75,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Our native code is arm64 only, so the x86_64 emulator must run it through the arm64 translator. API 30/31
-        # translators abort on an FPCR write (fp16 OCR) and the API 33 image has no translator at all, so only 34+
-        # can run the app here. Real phones are not affected.
+        # Android 14/15 own display group coverage (debug APK ships native x86_64 libs for emulator speed/stability).
         api: [34, 35]
     steps:
       - uses: actions/checkout@v5
@@ -89,7 +102,7 @@ jobs:
           profile: pixel_6
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: python3 tools/android-smoke/agent_e2e.py test-apks/app-debug.apk 2>&1 | tee e2e.log; grep -q '^SUMMARY all passed' e2e.log || { adb logcat -d > logcat.txt; exit 1; }
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; python3 tools/android-smoke/agent_e2e.py test-apks/app-debug.apk 2>&1 | tee e2e.log; grep -q '^SUMMARY all passed' e2e.log || { adb logcat -d > logcat.txt; exit 1; }
       - if: failure()
         uses: actions/upload-artifact@v5
         with:
@@ -128,7 +141,7 @@ jobs:
           profile: pixel_6
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: python3 tools/android-smoke/agent_e2e.py test-apks/app-debug.apk --${{ matrix.mode }} 2>&1 | tee e2e.log; grep -q '^SUMMARY all passed' e2e.log || { adb logcat -d > logcat.txt; exit 1; }
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; python3 tools/android-smoke/agent_e2e.py test-apks/app-debug.apk --${{ matrix.mode }} 2>&1 | tee e2e.log; grep -q '^SUMMARY all passed' e2e.log || { adb logcat -d > logcat.txt; exit 1; }
       - if: failure()
         uses: actions/upload-artifact@v5
         with:
@@ -151,18 +164,12 @@ jobs:
         with:
           name: candidate
           path: test-apks
-      - name: Fetch public releases
+      - name: Fetch Shizuku
         env:
           GH_TOKEN: ${{ github.token }}
-          TEST_PATH: ${{ matrix.path }}
         run: |
           find test-apks -name '*.apk' -exec mv {} test-apks/ \;
           gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --output test-apks/shizuku.apk
-          if [[ "$TEST_PATH" == upgrade ]]; then
-            for version in 1.3.0 1.4.0; do
-              gh release download "v$version" --repo "$GITHUB_REPOSITORY" --pattern '*.apk' --output "test-apks/$version.apk"
-            done
-          fi
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -176,4 +183,189 @@ jobs:
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: true
-          script: python3 tools/android-smoke/shizuku.py ${{ matrix.path }}
+          # On failure keep the whole logcat: the API 30 "dialog gone but still NEED_PERMISSION" case needs the
+          # app's ShizukuBackend "permission result" lines to tell a missed callback from a denied grant.
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; python3 tools/android-smoke/shizuku.py ${{ matrix.path }} || { adb logcat -d > logcat.txt; exit 1; }
+      - if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: shizuku-${{ matrix.path }}-logs
+          path: logcat.txt
+          retention-days: 7
+  eval:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: candidate
+          path: test-apks
+      - name: Fetch Shizuku
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find test-apks -name '*.apk' -exec mv {} test-apks/ \;
+          gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --output test-apks/shizuku.apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          disable-animations: true
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; mkdir -p eval-out && { python3 tools/eval/run.py --apk test-apks/torture-debug.apk --out eval-out --repeat-check --beta8-checks > eval-out/eval.log 2>&1; rc=$?; adb logcat -d > eval-out/logcat.txt; cat eval-out/eval.log; exit "$rc"; }
+      - if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: eval-results
+          path: eval-out/*
+          if-no-files-found: warn
+          retention-days: 7
+  gate:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 34
+            mode: shizuku
+            profile: pixel_6
+            flag: ""
+          - api: 34
+            mode: root
+            profile: pixel_6
+            flag: "--root"
+          - api: 30
+            mode: shizuku
+            profile: pixel_2
+            flag: "--api30"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: candidate
+          path: test-apks
+      - name: Prepare artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GATE_MODE: ${{ matrix.mode }}
+        run: |
+          find test-apks -type f -exec mv {} test-apks/ \; 2>/dev/null || true
+          if [[ "$GATE_MODE" == shizuku ]]; then
+            gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --output test-apks/shizuku.apk
+          fi
+          ls -la test-apks
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          profile: ${{ matrix.profile }}
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          disable-animations: true
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; python3 tools/android-smoke/gate.py test-apks/app-debug.apk ${{ matrix.flag }} 2>&1 | tee gate.log; grep -q '^SUMMARY all passed' gate.log || { adb logcat -d > logcat.txt; exit 1; }
+      - if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: gate-${{ matrix.api }}-${{ matrix.mode }}-logs
+          path: |
+            gate.log
+            logcat.txt
+          retention-days: 7
+  confirm-attack:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - api: 30
+            profile: pixel_2
+          - api: 34
+            profile: pixel_6
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: candidate
+          path: test-apks
+      - name: Fetch Shizuku
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find test-apks -type f -exec mv {} test-apks/ \; 2>/dev/null || true
+          gh release download v13.6.0 --repo RikkaApps/Shizuku --pattern '*.apk' --output test-apks/shizuku.apk
+          ls -la test-apks
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          profile: ${{ matrix.profile }}
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          disable-animations: true
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; mkdir -p confirm-out && { python3 tools/android-smoke/confirm_attack.py test-apks/app-debug.apk --out confirm-out > confirm-out/confirm-attack.log 2>&1; rc=$?; adb logcat -d > confirm-out/logcat.txt; cat confirm-out/confirm-attack.log; grep -q '^SUMMARY all passed' confirm-out/confirm-attack.log || exit 1; exit "$rc"; }
+      - if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: confirm-attack-api${{ matrix.api }}
+          path: confirm-out/*
+          if-no-files-found: warn
+          retention-days: 7
+  public-local:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: candidate
+          path: test-apks
+      - run: |
+          find test-apks -type f -exec mv {} test-apks/ \; 2>/dev/null || true
+          ls -la test-apks
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          disable-animations: true
+          script: adb shell settings put global verifier_verify_adb_installs 0; adb shell settings put global package_verifier_enable 0; adb shell settings put global hide_error_dialogs 1; mkdir -p public-out && { python3 tools/android-smoke/public_local.py test-apks/app-debug.apk > public-out/public-local.log 2>&1; rc=$?; adb logcat -d > public-out/logcat.txt; cat public-out/public-local.log; grep -q '^SUMMARY all passed' public-out/public-local.log || exit 1; exit "$rc"; }
+      - if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: public-local-api34
+          path: public-out/*
+          if-no-files-found: warn
+          retention-days: 7
+
+

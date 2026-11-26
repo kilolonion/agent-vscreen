@@ -133,7 +133,7 @@ private fun AddRuleDialog(
                         Text(tr("只读（能看和滚动，不能点击输入）", "Read-only (look and scroll, no tapping or typing)"))
                     }
                     SoftButton(onClick = { onPick(p.second, VScreenStore.Rule.ASK) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(tr("每次询问（操作前在手机上问你）", "Ask every time (asks you on the phone before acting)"))
+                        Text(tr("每次确认（操作前在手机上问你）", "Confirm every time (asks you on the phone before acting)"))
                     }
                 }
             }

@@ -55,6 +55,11 @@ object AgentLedger {
 
     private val FIELDS = listOf("install_at", "remembered_at", "remembered_where", "last_call_at", "comebacks", "last_comeback_at", "last_local_at", "last_remote_at")
 
+    const val REPLY_QUIET = "quiet"
+    const val REPLY_FULL = "full"
+    private val replyModes = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val holdDefaults = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
     fun init(ctx: Context) {
         prefs = ctx.getSharedPreferences("agent_vscreen_ledger", Context.MODE_PRIVATE)
         // Before beta7 the one record had no agent: it belongs to the first token, the only one onboarding gave out.
@@ -64,6 +69,12 @@ object AgentLedger {
             e.apply()
         }
         val ids = prefs.all.keys.filter { it.contains('.') && !it.startsWith("ack") }.map { it.substringBefore('.') }.toSet()
+        replyModes.clear()
+        holdDefaults.clear()
+        ids.forEach { id ->
+            prefs.getString("$id.reply_mode", null)?.let { replyModes[id] = it }
+            if (prefs.contains("$id.hold_default")) holdDefaults[id] = prefs.getBoolean("$id.hold_default", false)
+        }
         _agents.value = ids.associateWith { id ->
             Snapshot(prefs.getLong("$id.install_at", 0L), prefs.getLong("$id.remembered_at", 0L), prefs.getString("$id.remembered_where", null),
                 prefs.getLong("$id.last_call_at", 0L), prefs.getInt("$id.comebacks", 0), prefs.getLong("$id.last_comeback_at", 0L),
@@ -71,6 +82,31 @@ object AgentLedger {
         }
         _snap.value = combined(_agents.value.values)
     }
+
+    /** 2.0.0-beta3 (3.1): per-agent default reply mode ("quiet" or "full"), default "quiet". */
+    fun replyMode(agentId: String): String {
+        val raw = replyModes[agentId] ?: if (::prefs.isInitialized) prefs.getString("$agentId.reply_mode", null) else null
+        return if (raw.equals(REPLY_FULL, ignoreCase = true)) REPLY_FULL else REPLY_QUIET
+    }
+
+    fun setReplyMode(agentId: String, mode: String) {
+        val norm = if (mode.equals(REPLY_FULL, ignoreCase = true)) REPLY_FULL else REPLY_QUIET
+        replyModes[agentId] = norm
+        if (::prefs.isInitialized) prefs.edit().putString("$agentId.reply_mode", norm).apply()
+    }
+
+    internal fun resetReplyModesForTest() { replyModes.clear() }
+
+    /** 2.0.0-beta5 (5.1): per-agent default `--hold` switch (`note hold on|off`), default false. */
+    fun holdDefault(agentId: String): Boolean =
+        holdDefaults[agentId] ?: if (::prefs.isInitialized) prefs.getBoolean("$agentId.hold_default", false) else false
+
+    fun setHoldDefault(agentId: String, on: Boolean) {
+        holdDefaults[agentId] = on
+        if (::prefs.isInitialized) prefs.edit().putBoolean("$agentId.hold_default", on).apply()
+    }
+
+    internal fun resetHoldDefaultsForTest() { holdDefaults.clear() }
 
     private fun combined(all: Collection<Snapshot>): Snapshot {
         fun mx(f: (Snapshot) -> Long) = all.maxOfOrNull(f) ?: 0L
@@ -101,8 +137,21 @@ object AgentLedger {
     /** Forget agent [id]'s record (its token was revoked). */
     fun forget(id: String) {
         _agents.value = _agents.value - id
+        replyModes.remove(id)
+        holdDefaults.remove(id)
         _snap.value = combined(_agents.value.values)
         if (::prefs.isInitialized) prefs.edit().apply { prefs.all.keys.filter { it.startsWith("$id.") || it == "ack_$id" || it == "ack_at_$id" }.forEach { remove(it) } }.apply()
+    }
+
+    /** 2.0.0-beta8 (feedback 5): forget many records with one scan and one write. */
+    fun forgetMany(ids: Set<String>) {
+        if (ids.isEmpty()) return
+        _agents.value = _agents.value - ids
+        ids.forEach { replyModes.remove(it); holdDefaults.remove(it) }
+        _snap.value = combined(_agents.value.values)
+        if (::prefs.isInitialized) prefs.edit().apply {
+            prefs.all.keys.filter { k -> k.substringBefore('.') in ids || k.removePrefix("ack_at_") in ids || k.removePrefix("ack_") in ids }.forEach { remove(it) }
+        }.apply()
     }
 
     // ── 1.3 beta4: which app version each agent's note is for (per token) ──
