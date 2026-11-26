@@ -99,7 +99,10 @@ fun ConnectPage(tab: Boolean = false, bottom: androidx.compose.ui.unit.Dp = 0.dp
     val pend by com.kilon.agentvscreen.host.StrongConfirm.pending.collectAsState()
     val pairings = remember(pend) { pend.filter { it.pairingCode != null } }
     // 2.0.0-beta9 (feedback 6): a lazy list; only the agents on screen are composed.
-    val shown = remember(tokens, agents) { tokens.filter { t -> agents[t.id]?.used == true || t.id != com.kilon.agentvscreen.api.Tokens.MAIN } }
+    // 2.0.0 (rainbow: 过长列表自动折叠): most recently active first, so the folded ones are the agents not used lately.
+    val shown = remember(tokens, agents) { tokens.filter { t -> agents[t.id]?.used == true || t.id != com.kilon.agentvscreen.api.Tokens.MAIN }
+        .sortedByDescending { t -> maxOf(t.lastUsedAt, t.createdAt, agents[t.id]?.lastCallAt ?: 0L) } }
+    val fold = rememberFold(4)
     MiuixLazyPage(tr("接入", "Connect"), back = !tab, bottom = bottom) {
         // 2.0.0-beta11 (rainbow: left the wizard while the agent was still connecting; nothing showed here). A cloud agent
         // exists only once its pairing is approved, so a pairing still waiting is listed here, above the connected ones.
@@ -114,7 +117,7 @@ fun ConnectPage(tab: Boolean = false, bottom: androidx.compose.ui.unit.Dp = 0.dp
         }
         if (shown.isEmpty()) item(key = "empty") { Column(Modifier.padding(horizontal = 12.dp)) { EmptyState(androidx.compose.material.icons.Icons.Outlined.AddLink, tr("还没有接入 agent", "No agent connected yet"),
             tr("接入后，每个 agent 的记录、任务和提问各归各的", "Once connected, each agent's records, tasks and questions stay apart")) } }
-        else cardItems(tr("已经接入的 · ${shown.size}", "Connected · ${shown.size}"), shown, key = { it.id }) { t ->
+        else cardItems(tr("已经接入的 · ${shown.size}", "Connected · ${shown.size}"), shown, key = { it.id }, fold = fold) { t ->
             AgentCard(t.id, agents[t.id] ?: AgentLedger.Snapshot()) { nav.go(Route.Agent(t.id)) }
         }
         item(key = "rest") { Column {
@@ -630,7 +633,7 @@ fun AgentPage(id: String) {
             }
             val grants = remember(approvals, id) { approvals.filter { it.token == id && it.risk.startsWith(com.kilon.agentvscreen.host.StrongConfirm.GRANT_PREFIX) } }
             if (grants.isNotEmpty()) Group(tr("有效的临时许可", "Active temporary allowances")) {
-                grants.forEach { g ->
+                FoldedRows(grants) { g ->
                     BasicComponent(title = grantTitle(g.risk), summary = grantRange(g),
                         endActions = { LinkButton(onClick = { com.kilon.agentvscreen.host.StrongConfirm.revoke(g) }) { Text(tr("撤销", "Revoke"), color = MiuixTheme.colorScheme.error) } })
                 }
@@ -705,7 +708,7 @@ private fun AgentNow(id: String) {
             Dot(Palette.brand); Text(tr("  正在用副屏", "  Using the screen now"), fontSize = 15.sp)
         }
         if (waits > 0) ArrowPreference(title = tr("待处理 $waits 项", "$waits waiting for you"), summary = tr("显示在首页顶部", "At the top of the home page"), onClick = { nav.tab(0) })
-        books.forEach { e ->
+        FoldedRows(books) { e ->
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(tr("预约「${e.name}」", "Booking \"${e.name}\""), fontSize = 15.sp)
@@ -715,7 +718,7 @@ private fun AgentNow(id: String) {
                     modifier = Modifier.clip(RoundedCornerShape(50)).clickable { Thread { com.kilon.agentvscreen.host.Wake.remove(ctx.applicationContext, e.name, id); tick++ }.start() }.padding(horizontal = 12.dp, vertical = 8.dp))
             }
         }
-        watches.forEach { l ->
+        FoldedRows(watches) { l ->
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(tr("盯守「${l.spec.name}」", "Watch \"${l.spec.name}\""), fontSize = 15.sp)

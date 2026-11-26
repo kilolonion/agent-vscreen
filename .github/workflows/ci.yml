@@ -205,8 +205,10 @@ jobs:
           cp dl/toolpkg/agent-vscreen.toolpkg "out/agent-vscreen-${VER}.toolpkg"
           BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
           CERT=$("$ANDROID_HOME/build-tools/$BT/apksigner" verify --print-certs "out/agent-vscreen-${VER}.apk")
-          echo "$CERT" | grep -E 'Signer #1 certificate (DN|SHA-256)'
-          GOT=$(echo "$CERT" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+          # 2.0.0: newer apksigner builds word the signer line differently ("Signer #1 certificate" vs
+          # "Signer (minSdkVersion=…) certificate"); the v2.0.0 release failed here. Match any signer's SHA-256 line.
+          echo "$CERT"
+          GOT=$(echo "$CERT" | grep -m1 -oE 'certificate SHA-256 digest: [0-9a-f]{64}' | awk '{print $NF}' || true)
           if [ "$GOT" != "$RELEASE_CERT_SHA256" ]; then
             echo "::error::APK signer $GOT is not the release certificate $RELEASE_CERT_SHA256"; exit 1
           fi

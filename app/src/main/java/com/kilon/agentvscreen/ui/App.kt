@@ -4,6 +4,8 @@ import androidx.compose.material.icons.outlined.AddLink
 import top.yukonga.miuix.kmp.basic.Icon
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
@@ -568,18 +570,60 @@ fun MiuixLazyPage(
  * the first and last with the card's rounded corners. [key] must be stable (an id), so rows keep their state.
  */
 fun <T> androidx.compose.foundation.lazy.LazyListScope.cardItems(
-    title: String?, rows: List<T>, key: (T) -> Any, row: @Composable (T) -> Unit,
+    title: String?, rows: List<T>, key: (T) -> Any, fold: Fold? = null, row: @Composable (T) -> Unit,
 ) {
     if (rows.isEmpty()) return
+    // 2.0.0 (rainbow: 过长列表自动折叠): with [fold], a long list shows its first rows and one row to show the rest.
+    val folds = fold != null && fold.folds(rows.size)
+    val shown = if (folds && !fold!!.open.value) rows.take(fold.keep) else rows
     item(key = "title:$title:${rows.size}") { if (title != null) SmallTitle(title) else Spacer(Modifier.height(12.dp)) }
-    items(rows.size, key = { i -> key(rows[i]) }) { i ->
+    items(shown.size, key = { i -> key(shown[i]) }) { i ->
         val top = if (i == 0) 16.dp else 0.dp
-        val bottomR = if (i == rows.lastIndex) 16.dp else 0.dp
+        val bottomR = if (i == shown.lastIndex && !folds) 16.dp else 0.dp
         Box(Modifier.padding(horizontal = 12.dp).fillMaxWidth()
             .clip(RoundedCornerShape(topStart = top, topEnd = top, bottomStart = bottomR, bottomEnd = bottomR))
-            .background(MiuixTheme.colorScheme.surfaceContainer)) { row(rows[i]) }
+            .background(MiuixTheme.colorScheme.surfaceContainer)) { row(shown[i]) }
+    }
+    if (folds) item(key = "fold:$title") {
+        Box(Modifier.padding(horizontal = 12.dp).fillMaxWidth()
+            .clip(RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
+            .background(MiuixTheme.colorScheme.surfaceContainer)) { FoldToggle(fold!!, rows.size) }
     }
     item(key = "gap:$title") { Spacer(Modifier.height(6.dp)) }
+}
+
+/**
+ * 2.0.0 (rainbow: 过长列表自动折叠): a list longer than [keep] + 1 rows shows [keep] of them and one row that shows the
+ * rest ("还有 N 个"); expanded, the same row folds it again. A list only one row too long is shown whole (folding one
+ * row away saves nothing). Remembered across rotation, not across visits: a page opens folded.
+ */
+class Fold(val keep: Int, val open: androidx.compose.runtime.MutableState<Boolean>) {
+    fun folds(size: Int) = size > keep + 1
+}
+
+@Composable
+fun rememberFold(keep: Int = 4): Fold = Fold(keep, androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) })
+
+/** The row that opens or folds a [Fold]ed list of [size] rows. */
+@Composable
+fun FoldToggle(fold: Fold, size: Int) {
+    Row(Modifier.fillMaxWidth().clickable { fold.open.value = !fold.open.value }.padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(if (fold.open.value) tr("收起", "Show less") else tr("还有 ${size - fold.keep} 个", "${size - fold.keep} more"),
+            modifier = Modifier.weight(1f), fontSize = 15.sp, color = MiuixTheme.colorScheme.primary)
+        top.yukonga.miuix.kmp.basic.Icon(
+            if (fold.open.value) androidx.compose.material.icons.Icons.Outlined.KeyboardArrowUp else androidx.compose.material.icons.Icons.Outlined.KeyboardArrowDown,
+            contentDescription = null, tint = MiuixTheme.colorScheme.primary)
+    }
+}
+
+/** Inside a card ([Group]): the rows of [items], folded as [cardItems] folds them. */
+@Composable
+fun <T> FoldedRows(items: List<T>, keep: Int = 3, row: @Composable (T) -> Unit) {
+    val fold = rememberFold(keep)
+    val folds = fold.folds(items.size)
+    (if (folds && !fold.open.value) items.take(keep) else items).forEach { row(it) }
+    if (folds) FoldToggle(fold, items.size)
 }
 
 /** Miuix's string-only TopAppBar wraps the expanded title and truncates the collapsed one. Task titles
