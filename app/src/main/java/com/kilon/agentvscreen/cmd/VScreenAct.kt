@@ -644,7 +644,7 @@ internal fun formatTextTimeout(
         "“$text”只在刚输入的框里出现；until text: 等的是框外新出现的字；要确认输入请用 until stable，或者看这一步的 fact（它已经读出了框里的内容）",
         "\"$text\" appeared only inside the box just typed into; until text: waits for new text outside the box; use until stable to confirm typing, or check this step's fact (it already read the box)",
     )
-    TextTimeoutKind.NOT_READ -> if (com.kilon.agentvscreen.host.ThermalGuard.limitedOrFalse()) {
+    TextTimeoutKind.NOT_READ -> if (com.kilon.agentvscreen.host.ThermalGuard.ocrPausedOrFalse()) {
         tr("手机发热，文字识别为降温暂停了，没读到动作后的画面上的字（不是故障，看截图）", "the phone is hot and text recognition is paused to cool it down, so words after the action were not read (not a fault; look at the screenshot)")
     } else if (ocrBusy) {
         tr("读屏没跟上（OCR 忙），没读到动作后的画面", "screen reading did not keep up (OCR busy); no post-action reading was obtained")

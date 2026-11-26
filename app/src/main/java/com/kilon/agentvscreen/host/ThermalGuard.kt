@@ -28,8 +28,10 @@ internal object ThermalGuard {
     private val pref get() = app.getSharedPreferences("thermal_safety_v1", Context.MODE_PRIVATE)
     val locked get() = policy.locked
     val limited get() = policy.limited
+    val ocrPaused get() = policy.ocrPaused
     /** For pure code paths run in unit tests, where the guard was never set up. */
     fun limitedOrFalse(): Boolean = runCatching { limited }.getOrDefault(false)
+    fun ocrPausedOrFalse(): Boolean = runCatching { ocrPaused }.getOrDefault(false)
     fun reason() = tr("过热保护：后台任务已停止。电池低于 39°C 且系统降温 3 分钟后，在首页电源菜单手动恢复。", "Overheat protection: work stopped. After 3 min below 39°C with low system thermal status, resume in the Home power menu.")
     private fun temperature(i: Intent?): Int? = i?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE)?.takeIf { it in -400..1500 }
     private fun battery() = runCatching { app.registerReceiver(null, filter) }.getOrNull()

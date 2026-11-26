@@ -105,7 +105,7 @@ internal object VScreenOcr {
      */
     fun downLine(err: String?): String? {
         // 2.0.0-beta12: the heat limit (ThermalGuard) pauses reading on purpose; say so, not "OCR is broken".
-        if (err == THERMAL_LIMIT || (err == null && com.kilon.agentvscreen.host.ThermalGuard.limited)) return thermalLine()
+        if (err == THERMAL_LIMIT || (err == null && com.kilon.agentvscreen.host.ThermalGuard.ocrPaused)) return thermalLine()
         BackgroundOperation.appContextOrNull()?.let { recoverIfNeeded(it) }
         if (mlkitCrashed && paddleCrashed) {
             return tr("文字识别不可用：PP-OCRv6 与 ML Kit 在自检时均崩溃，本版本已禁用。下面的元素只来自无障碍，画面上的字可能没列出来，以截图为准；vscreen diag 可重新自检，并告诉用户",
@@ -344,7 +344,7 @@ internal object VScreenOcr {
     }
 
     private fun runSelfTest(ctx: android.content.Context, manual: Boolean): String = synchronized(selfTestRunLock) {
-        if (com.kilon.agentvscreen.host.ThermalGuard.limited) return@synchronized "THERMAL_LIMIT"
+        if (if (manual) com.kilon.agentvscreen.host.ThermalGuard.ocrPaused else com.kilon.agentvscreen.host.ThermalGuard.limited) return@synchronized "THERMAL_LIMIT"
         val ver = versionCodeProvider()
         val p = selfTestPrefs(ctx)
         if (manual) {
@@ -449,7 +449,7 @@ internal object VScreenOcr {
      * it is not loaded in this versionCode and the other engine takes over.
      */
     fun recognize(displayId: Int, frame: Bitmap, version: Long, accurate: Boolean = false): Result {
-        if (com.kilon.agentvscreen.host.ThermalGuard.limited) return Result(emptyList(), displayId, version, 0L, THERMAL_LIMIT)
+        if (com.kilon.agentvscreen.host.ThermalGuard.ocrPaused) return Result(emptyList(), displayId, version, 0L, THERMAL_LIMIT)
         val ctx = BackgroundOperation.appContextOrNull()
         if (ctx != null) recoverIfNeeded(ctx)
         if (mlkitCrashed && paddleCrashed) {
@@ -457,10 +457,13 @@ internal object VScreenOcr {
             fastError = msg
             return Result(emptyList(), displayId, version, 0L, msg)
         }
+        val ac = accurateCache
+        if (accurate && reusable(ac, displayId, frame, version)) return ac!!
         var fallback: String? = null
-        val wantPaddle = !paddleCrashed && (accurateEnabled() && accurate || (mlkitCrashed && ctx != null && VScreenPaddleOcr.available(ctx)))
+        // While warm (`limited` && !`ocrPaused`), skip heavy ONNX PP-OCRv6 and use fast ML Kit instead so on-demand OCR stays available.
+        val throttleHeavy = com.kilon.agentvscreen.host.ThermalGuard.limited && !mlkitCrashed
+        val wantPaddle = !paddleCrashed && !throttleHeavy && (accurateEnabled() && accurate || (mlkitCrashed && ctx != null && VScreenPaddleOcr.available(ctx)))
         if (wantPaddle && ctx != null) {
-            val ac = accurateCache
             if (reusable(ac, displayId, frame, version)) return ac!!
             // 2.0.0-beta12 (test: 19 "PP-OCRv6 busy … switched to ML Kit" in one round): a reading already running is
             // almost always the background watcher reading this same picture. Wait for it as long as a reading takes
@@ -517,7 +520,7 @@ internal object VScreenOcr {
 
     /** OCR of [r0] alone: enlarged (small regions up to 3×) and set on a plain margin of its own edge colour. */
     fun readCrop(frame: Bitmap, r0: Rect): List<Item> {
-        if (com.kilon.agentvscreen.host.ThermalGuard.limited) return emptyList()
+        if (com.kilon.agentvscreen.host.ThermalGuard.ocrPaused) return emptyList()
         val r = Rect(r0)
         if (!r.intersect(0, 0, frame.width, frame.height) || r.width() < 4 || r.height() < 4) return emptyList()
         val zoom = (160.0 / minOf(r.width(), r.height())).coerceIn(1.0, 3.0)
@@ -532,9 +535,10 @@ internal object VScreenOcr {
         try {
             val ctx = BackgroundOperation.appContextOrNull()
             if (ctx != null) recoverIfNeeded(ctx)
+            val throttleHeavy = com.kilon.agentvscreen.host.ThermalGuard.limited && !mlkitCrashed
             val items = when {
                 mlkitCrashed && paddleCrashed -> emptyList()
-                ctx != null && !paddleCrashed && (accurateEnabled() || (mlkitCrashed && VScreenPaddleOcr.available(ctx))) -> {
+                ctx != null && !paddleCrashed && !throttleHeavy && (accurateEnabled() || (mlkitCrashed && VScreenPaddleOcr.available(ctx))) -> {
                     if (VScreenPaddleOcr.busy() && !mlkitCrashed) {
                         recognizeFast(-4, padded, -System.nanoTime()).items
                     } else {
