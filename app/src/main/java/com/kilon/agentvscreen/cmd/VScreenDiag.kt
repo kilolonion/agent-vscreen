@@ -28,6 +28,13 @@ internal fun diagText(context: android.content.Context): String = buildString {
     append("connection: ${st.connection.name}" + (st.connectionError?.let { " ($it)" } ?: "") + ", screen: " + (st.displayId?.let { "display $it" } ?: "none") + ", tasks running: ${Tasks.running()}\n")
     append("queue: " + (VScreenOffloadHandler.queueHolder ?: "idle") + "\n")
     BackgroundOperation.currentDisplay()?.let { appendLine("frame pump: ${it.frameWork()}") }
+    // 2.0.0 (issue #48): which display flags the screen got, which were refused and why, and whether it stays awake alone.
+    BackgroundOperation.currentDisplay()?.let { d ->
+        appendLine("display flags: ${VScreenDisplayService.flagNames(d.flags).joinToString("|")}, shell_owned=${d.shellOwned}, own_power_group=${com.kilon.agentvscreen.core.VScreenAwake.canWakeAlone(d)}")
+    }
+    com.kilon.agentvscreen.core.VScreenDisplay.lastRemoteError?.let { appendLine("screen service error: $it") }
+    com.kilon.agentvscreen.core.VScreenRemoteDisplay.rejectedFlags.forEach { appendLine("display flags refused: $it") }
+    appendLine("keep screen on: enabled=${com.kilon.agentvscreen.core.VScreenStore.keepScreenOn.value}, held=${com.kilon.agentvscreen.core.VScreenAwake.screenLockHeld}")
     appendLine("app heap: managed_used_kib=${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024}, " +
         "native_allocated_kib=${android.os.Debug.getNativeHeapAllocatedSize() / 1024}")
     appendLine(com.kilon.agentvscreen.host.Privileged.diagnostics(context))

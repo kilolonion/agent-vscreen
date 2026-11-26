@@ -145,6 +145,9 @@ internal object VScreenRemoteDisplay {
         shizukuBinder = null
     }
 
+    /** 2.0.0: flag sets the service tried before the one the screen got, with the reason each was refused. */
+    @Volatile var rejectedFlags: List<String> = emptyList(); private set
+
     fun create(name: String, width: Int, height: Int, dpi: Int, surface: Surface): Result<Created> = runCatching {
         val b = service().getOrThrow()
         timed("create") {
@@ -156,7 +159,10 @@ internal object VScreenRemoteDisplay {
                 surface.writeToParcel(data, 0)
                 b.transact(VScreenDisplayService.CREATE, data, reply, 0)
                 if (reply.readInt() != 0) error(reply.readString() ?: "unknown error")
-                Created(reply.readInt(), reply.readInt())
+                Created(reply.readInt(), reply.readInt()).also {
+                    // 2.0.0: an older service sends no reasons; a newer one lists the refused flag sets.
+                    rejectedFlags = if (reply.dataAvail() > 0) reply.readString().orEmpty().lines().filter { l -> l.isNotBlank() } else emptyList()
+                }
             } finally { data.recycle(); reply.recycle() }
         }
     }.onFailure { AppLogger.warning(TAG, "remote create failed: ${it.message}") }

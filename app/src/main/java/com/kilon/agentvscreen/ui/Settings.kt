@@ -154,6 +154,13 @@ fun SettingsTab(bottom: Dp) {
             val idleSave by com.kilon.agentvscreen.core.VScreenStore.idlePowerSave.collectAsState()
             SwitchPreference(checked = idleSave, onCheckedChange = { BackgroundOperation.setIdlePowerSave(it) },
                 title = tr("空闲省电", "Idle power saving"), summary = tr("每轮任务结束后暂停副屏渲染", "Pause background-screen rendering after each turn"))
+            // 2.0.0 (issue #48): for phones where the background screen sleeps with the phone.
+            val keepOn by com.kilon.agentvscreen.core.VScreenStore.keepScreenOn.collectAsState()
+            val sleepsWithPhone = BackgroundOperation.currentDisplay()?.let { !com.kilon.agentvscreen.core.VScreenAwake.canWakeAlone(it) } == true
+            SwitchPreference(checked = keepOn, onCheckedChange = { com.kilon.agentvscreen.core.VScreenStore.setKeepScreenOn(it); com.kilon.agentvscreen.core.VScreenAwake.syncScreenLock() },
+                title = tr("任务中保持亮屏", "Keep screen on during tasks"),
+                summary = if (sleepsWithPhone) tr("这台手机熄屏后任务会停住，建议打开", "On this phone tasks pause when the screen turns off; turning this on is recommended")
+                    else tr("agent 任务进行时手机屏幕不自动熄灭", "The phone screen does not time out while an agent task runs"))
             val opts = listOf(1, 3, 5, 10, 30)
             var quiet by remember { mutableIntStateOf(ApiConfig.quietMinutes) }
             OverlayDropdownPreference(items = opts.map { tr("$it 分钟", "$it min") }, selectedIndex = opts.indexOf(quiet).coerceAtLeast(0),
@@ -422,6 +429,7 @@ fun HelpPage() {
             tr("应用规则", "App rules") to H.rules,
             tr("悬浮窗", "Floating window") to H.window,
             tr("空闲省电", "Idle power saving") to H.idle,
+            tr("任务中保持亮屏", "Keep screen on during tasks") to H.keepOn,
             tr("副屏静音", "Mute the screen") to H.mute,
             tr("任务轮次时长", "Turn length") to H.turn,
             tr("定时预约", "Schedules") to H.schedule,
@@ -459,6 +467,8 @@ internal object H {
         "Shown above all apps while the background screen exists. Drag to move, pinch to resize, push to an edge to fold it into a side tab, hold the picture 0.5 s to take over. While an agent waits for your reply, the tab shows a violet question mark.")
     val idle get() = tr("每轮任务结束后暂停副屏渲染以节省电量；页面状态保留，收到下一条命令时自动恢复。少数应用恢复时会重新加载，遇到这种情况可关闭此项。",
         "Pauses background-screen rendering after each turn to save power; the page is kept and resumes with the next command. A few apps reload on resume; turn this off if that happens.")
+    val keepOn get() = tr("熄屏运行需要副屏能单独保持唤醒。有些手机上副屏会随主屏一起休眠（状态页会写明），这时手机自动熄屏、锁屏后，agent 的任务就停住了。打开此项后，只在 agent 任务进行时让手机屏幕保持亮着（可以变暗），任务结束、出错或被停止时立刻恢复。你按电源键熄屏仍然有效，不会被重新点亮。注意：任务期间手机不会自动锁屏，别人拿到手机就能操作；也会多耗电。",
+        "Running with the screen off needs the background screen to stay awake on its own. On some phones it sleeps with the main screen (the status page says so); then an agent's task stops once the phone times out and locks. With this on, the phone screen stays on (it may dim) only while an agent task runs, and is let go as soon as the task ends, fails or is stopped. Pressing the power button still turns the screen off, and it is not turned back on. Note: the phone does not lock itself during a task, so anyone holding it can use it, and it uses more battery.")
     val mute get() = tr("副屏中的应用不通过手机扬声器播放声音（如视频、直播）。应用移到主屏或副屏释放时恢复声音；App 异常退出后，下次连接时自动恢复。",
         "Apps on the background screen do not play sound through the phone (videos, live streams). Sound returns when an app moves to the main screen or the screen is released; after a crash it is restored on the next connection.")
     val turn get() = tr("agent 超过该时长未发送新命令即视为本轮任务结束：副屏随后进入省电暂停，10 分钟后释放。agent 也可以用 vscreen done 立即结束本轮。该时长同时决定“本轮任务内”许可的有效期。",

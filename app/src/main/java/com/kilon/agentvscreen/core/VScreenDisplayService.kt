@@ -272,7 +272,7 @@ class VScreenDisplayService : Binder {
                         touched[id] = SystemClock.elapsedRealtime()
                     }
                     startReaper()
-                    out.writeInt(0); out.writeInt(id); out.writeInt(lastFlags)
+                    out.writeInt(0); out.writeInt(id); out.writeInt(lastFlags); out.writeString(lastRejected)
                 }
                 CREATE_PARKING -> {
                     val active = data.readInt()
@@ -565,6 +565,8 @@ class VScreenDisplayService : Binder {
     }
 
     @Volatile private var lastFlags = 0
+    /** 2.0.0: the flag sets [create] tried before [lastFlags] and why each was refused (one per line). */
+    @Volatile private var lastRejected = ""
 
     // ── Honor/Huawei APS (per-app render resolution) ─────────────────────
 
@@ -1037,14 +1039,21 @@ class VScreenDisplayService : Binder {
         val dm = displayManager()
         val candidates = if (requested != 0) listOf(requested) else defaultFlagLadder()
         var last: Throwable? = null
+        val rejected = ArrayList<String>()
         for (f in candidates) {
             try {
                 val vd = dm.createVirtualDisplay(name, w, h, dpi, surface, f)
                     ?: throw IllegalStateException("createVirtualDisplay returned null")
                 lastFlags = f
+                lastRejected = rejected.joinToString("\n")
                 return vd
-            } catch (t: Throwable) { last = t }
+            } catch (t: Throwable) {
+                last = t
+                // 2.0.0: why each richer rung was refused, for status / diag (which permission a ROM withholds).
+                rejected += flagNames(f).joinToString("|") + " -> " + "${t.javaClass.simpleName}: ${t.message.orEmpty()}".take(200)
+            }
         }
+        lastRejected = rejected.joinToString("\n")
         throw last ?: IllegalStateException("no flags tried")
     }
 
@@ -1189,6 +1198,11 @@ class VScreenDisplayService : Binder {
             }
             if (Build.VERSION.SDK_INT >= 33) {
                 out += basic or TRUSTED or OWN_DISPLAY_GROUP or ALWAYS_UNLOCKED or TOUCH_FEEDBACK_DISABLED
+                // 2.0.0 (issue #48, HyperOS): its own display group is what lets the screen stay awake while the phone
+                // sleeps. ALWAYS_UNLOCKED needs its own permission (ADD_ALWAYS_UNLOCKED_DISPLAY) that some ROMs withhold
+                // from the shell; before, losing it also dropped the own group. Keep the group as long as possible.
+                out += basic or TRUSTED or OWN_DISPLAY_GROUP or TOUCH_FEEDBACK_DISABLED
+                out += basic or TRUSTED or OWN_DISPLAY_GROUP
                 out += basic or TRUSTED
             }
             out += basic

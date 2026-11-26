@@ -35,7 +35,7 @@ import org.json.JSONObject
 object VScreenAwake {
     private val wakeBudget = com.kilon.agentvscreen.host.WakeBudget()
     internal fun suspendForHeat() {
-        keeper?.interrupt(); releaseLock()
+        keeper?.interrupt(); releaseLock(); releaseScreenLock()
         val ctx = appContext ?: return
         val pi = PendingIntent.getBroadcast(ctx, 7291, Intent(ACTION_TICK).setPackage(ctx.packageName), PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE) ?: return
         ctx.getSystemService(AlarmManager::class.java)?.cancel(pi)
@@ -63,8 +63,8 @@ object VScreenAwake {
         val rx = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
                 when (i.action) {
-                    Intent.ACTION_SCREEN_OFF -> { screenOff = true; kick(tr("熄屏", "screen off")) }
-                    Intent.ACTION_SCREEN_ON -> { screenOff = false; releaseLock() }
+                    Intent.ACTION_SCREEN_OFF -> { screenOff = true; syncScreenLock(); kick(tr("熄屏", "screen off")) }
+                    Intent.ACTION_SCREEN_ON -> { screenOff = false; releaseLock(); syncScreenLock() }
                     ACTION_TICK -> kick(tr("定时", "timer"))
                 }
             }
@@ -92,7 +92,7 @@ object VScreenAwake {
         if (d.released || d.parked) return null
         val st = stateOf(d) ?: return null
         if (st == Display.STATE_ON) return null
-        if (!canWakeAlone(d)) return tr("副屏处于休眠（状态 ${stateName(st)}），这台手机上它和主屏一起休眠，单独唤醒会点亮主屏，所以没唤醒：画面可能不动", "The screen is asleep (state ${stateName(st)}); on this phone it sleeps with the main screen and waking it alone would light the main screen, so it was not woken: the picture may not move")
+        if (!canWakeAlone(d)) return tr("副屏处于休眠（状态 ${stateName(st)}），这台手机上它和主屏一起休眠，单独唤醒会点亮主屏，所以没唤醒：画面可能不动", "The screen is asleep (state ${stateName(st)}); on this phone it sleeps with the main screen and waking it alone would light the main screen, so it was not woken: the picture may not move") + keepScreenHint()
         require(d.displayId != Display.DEFAULT_DISPLAY) { "VScreenAwake must never run input on display 0" }
         if (!wakeBudget.allow(SystemClock.elapsedRealtime())) return tr("副屏唤醒过于频繁，已暂停发键", "Repeated display wake suppressed")
         val ok = runCatching { VScreenShell.run(arrayOf("input", "-d", d.displayId.toString(), "keyevent", "KEYCODE_WAKEUP"), 4_000L).exitCode == 0 }.getOrDefault(false)
@@ -117,6 +117,7 @@ object VScreenAwake {
     /** Start the keeper if work is pending (called on screen off, on the timer, and when a screen / watch starts). */
     fun kick(why: String) {
         val ctx = appContext ?: return
+        syncScreenLock()
         if (!needed()) { releaseLock(); return }
         if (screenOff) { holdLock(ctx); scheduleTick(ctx) }
         synchronized(this) {
@@ -125,11 +126,12 @@ object VScreenAwake {
                 AppLogger.info(TAG, "keeper start ($why)")
                 try {
                     while (needed()) {
+                        syncScreenLock()
                         BackgroundOperation.currentDisplay()?.let { ensure(it) }
                         Thread.sleep(CHECK_MS)
                     }
                 } catch (_: InterruptedException) {
-                } finally { releaseLock() }
+                } finally { releaseLock(); syncScreenLock() }
             }.apply { isDaemon = true; name = "vscreen-awake"; start() }
         }
     }
@@ -155,14 +157,64 @@ object VScreenAwake {
         }.onFailure { AppLogger.warning(TAG, "alarm: ${it.message}") }
     }
 
+    // ── 2.0.0 (issue #48): keep the phone's own screen on while an agent turn runs ─────────────────────────────────
+    //
+    // On phones where the background screen sleeps with the main one (no own display group), a turn longer than the
+    // screen timeout stalls once the phone sleeps and locks. With the setting on, a dim screen wake lock is held while an
+    // agent turn owns the screen: the screen may dim but does not time out or lock. It is never used to turn a dark
+    // screen on (no ACQUIRE_CAUSES_WAKEUP): if the user presses power, the lock is let go and only taken again after the
+    // user turns the screen back on. Watches between turns do not hold it (they can run for hours). It is renewed with a
+    // time limit, so a dead process cannot leave the screen on.
+
+    private var screenLock: PowerManager.WakeLock? = null
+    @Volatile var screenLockHeld = false; private set
+
+    /** Whether the screen lock should be held now: pure, for tests. */
+    internal fun wantsScreenLock(enabled: Boolean, turnActive: Boolean, phoneScreenOff: Boolean, heatLimited: Boolean): Boolean =
+        enabled && turnActive && !phoneScreenOff && !heatLimited
+
+    /** Take or let go of the screen lock to match the setting and the turn. Cheap; called on every change and tick. */
+    fun syncScreenLock() {
+        val ctx = appContext ?: return
+        val want = wantsScreenLock(VScreenStore.keepScreenOn.value, BackgroundOperation.agentTurnActive(), screenOff,
+            com.kilon.agentvscreen.host.ThermalGuard.limited)
+        if (want) holdScreenLock(ctx) else releaseScreenLock()
+    }
+
+    @Suppress("DEPRECATION") // SCREEN_DIM_WAKE_LOCK: still works; a background service has no window for FLAG_KEEP_SCREEN_ON.
+    private fun holdScreenLock(ctx: Context) = synchronized(this) {
+        val lock = screenLock ?: runCatching {
+            ctx.getSystemService(PowerManager::class.java)?.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "agentvscreen:keep-screen-on")
+                ?.apply { setReferenceCounted(false) }
+        }.getOrNull()?.also { screenLock = it } ?: return@synchronized
+        // Renewed on every keeper tick (15 s); the limit only matters if the process dies holding it.
+        runCatching { lock.acquire(SCREEN_LOCK_MS) }.onFailure { AppLogger.warning(TAG, "screen lock: ${it.message}") }
+        if (!screenLockHeld) AppLogger.info(TAG, "keeping the phone screen on during the agent turn")
+        screenLockHeld = lock.isHeld
+    }
+
+    private fun releaseScreenLock() = synchronized(this) {
+        if (screenLock?.isHeld == true) { runCatching { screenLock?.release() }; AppLogger.info(TAG, "phone screen let go") }
+        screenLockHeld = false
+    }
+
+    private const val SCREEN_LOCK_MS = 2 * 60_000L
+
+    /** One line for agents when a screen slept with the phone: what the user can do about it. */
+    internal fun keepScreenHint(): String = if (VScreenStore.keepScreenOn.value) "" else
+        tr("。可请用户在设置里打开“任务中保持亮屏”", ". The user can turn on \"Keep screen on during tasks\" in Settings")
+
     /** For status. */
     fun json(d: VScreenDisplay?): JSONObject = JSONObject()
         .put("phone_screen_off", screenOff)
         .put("display_state", d?.let { stateOf(it)?.let { s -> stateName(s) } } ?: JSONObject.NULL)
         .put("own_power_group", d?.let { canWakeAlone(it) } ?: JSONObject.NULL)
         .put("runs_when_locked", d?.let { (it.flags and ALWAYS_UNLOCKED) != 0 } ?: JSONObject.NULL)
+        .put("keep_screen_on", JSONObject().put("enabled", VScreenStore.keepScreenOn.value).put("held", screenLockHeld))
+        .put("flags_refused", org.json.JSONArray(VScreenRemoteDisplay.rejectedFlags))
         .put("wakes", wakes)
         .put("last_wake", lastWake ?: JSONObject.NULL)
-        .put("note", if (d != null && !canWakeAlone(d)) tr("这台手机上副屏随主屏休眠：熄屏后后台任务会停住，亮屏后继续", "On this phone the screen sleeps with the main screen: background tasks pause while the screen is off and go on when it is on")
+        .put("note", if (d != null && !canWakeAlone(d)) tr("这台手机上副屏随主屏休眠：熄屏后后台任务会停住，亮屏后继续", "On this phone the screen sleeps with the main screen: background tasks pause while the screen is off and go on when it is on") +
+                (if (VScreenStore.keepScreenOn.value) tr("；已开“任务中保持亮屏”，任务进行时主屏不会自动熄灭", "; \"Keep screen on during tasks\" is on, so the phone screen does not time out while a task runs") else keepScreenHint())
             else tr("熄屏时副屏单独保持唤醒（每 15 秒检查，熄屏时另有定时器），主屏不会被点亮", "While the phone screen is off the background screen is kept awake on its own (checked every 15 s, plus a timer while off); the main screen is not lit"))
 }

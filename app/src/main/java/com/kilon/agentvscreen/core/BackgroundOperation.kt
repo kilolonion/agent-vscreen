@@ -582,6 +582,14 @@ object BackgroundOperation {
     fun currentDisplay(): VScreenDisplay? = display?.takeIf { !it.released }
 
     /** v0.5: work is pending on the background screen — the owner's chat turn is running, or a watch holds it. */
+    /** 2.0.0: an agent's chat turn owns the screen right now (not a watch between turns, not the user's takeover). */
+    fun agentTurnActive(): Boolean {
+        val d = display ?: return false
+        if (d.released) return false
+        val owner = _state.value.ownerSessionId ?: return false
+        return !_state.value.userStopped && synchronized(lock) { owner in turns }
+    }
+
     fun needsAwake(): Boolean {
         val d = display ?: return false
         if (d.released) return false
@@ -665,6 +673,8 @@ object BackgroundOperation {
         if (sessionId.isEmpty()) return
         synchronized(lock) { tasks.remove(sessionId); turns.remove(sessionId) }
         clearParking(sessionId)
+        // 2.0.0: the phone's screen is let go as soon as the turn ends, not at the keeper's next check.
+        VScreenAwake.syncScreenLock()
         // 1.4.2-beta6: the turn's title goes with the turn, whether or not its screen is still there.
         _state.update { if (it.titleSession == sessionId) it.copy(titleText = null, titleSession = null) else it }
         TaskLog.captureNow(sessionId)
