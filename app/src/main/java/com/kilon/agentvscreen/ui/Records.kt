@@ -352,7 +352,7 @@ fun DiagPage() {
             }
         }
     }
-    MiuixPage(tr("诊断", "Diagnostics")) {
+    MiuixPage(tr("诊断与反馈", "Diagnostics and feedback")) {
         Group {
             ArrowPreference(title = tr("复制诊断信息", "Copy diagnostics"), summary = tr("版本、配置状态和最近日志；不含令牌和输入内容", "Version, setup state and recent log; no token, nothing you typed"),
                 onClick = { collectDiagnostics { host.copy(tr("诊断信息", "Diagnostics"), it) } })
@@ -360,10 +360,38 @@ fun DiagPage() {
                 runCatching {
                     ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
                         .putExtra(android.content.Intent.EXTRA_SUBJECT, tr("Agent-VScreen 诊断", "Agent-VScreen diagnostics"))
-                        .putExtra(android.content.Intent.EXTRA_TEXT, report), tr("发送诊断", "Send diagnostics")))
+                        .putExtra(android.content.Intent.EXTRA_TEXT, com.kilon.agentvscreen.host.Feedback.redact(report, com.kilon.agentvscreen.host.Feedback.userHosts())), tr("发送诊断", "Send diagnostics")))
                 }
             } })
             SwitchPreference(checked = open, onCheckedChange = { open = it }, title = tr("显示最近日志", "Show the recent log"))
+        }
+        // 2.0.1 (rainbow): feedback in one tap, with the report redacted once more (a GitHub issue is public).
+        Group(tr("反馈问题", "Report a problem")) {
+            fun redacted(report: String) = com.kilon.agentvscreen.host.Feedback.redact(report, com.kilon.agentvscreen.host.Feedback.userHosts())
+            ArrowPreference(title = tr("去 GitHub 反馈", "Report on GitHub"),
+                summary = tr("打开新建 issue，附脱敏后的摘要；完整诊断已复制，可粘贴", "Opens a new issue with a redacted summary; the full report is copied for pasting"),
+                onClick = { collectDiagnostics { report ->
+                    val r = redacted(report)
+                    host.copy(tr("诊断信息", "Diagnostics"), r)
+                    val url = com.kilon.agentvscreen.host.Feedback.issueUrl(
+                        title = "[${com.kilon.agentvscreen.BuildConfig.VERSION_NAME}] ",
+                        intro = tr("**问题：**\n\n**怎么出现的：**\n\n**诊断摘要（已脱敏；完整诊断已复制到剪贴板，可粘贴在下面）：**",
+                            "**What happened:**\n\n**Steps:**\n\n**Diagnostics summary (redacted; the full report is on the clipboard, paste it below):**"),
+                        redacted = r)
+                    runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                } })
+            com.kilon.agentvscreen.host.Feedback.EMAIL?.let { mail ->
+                ArrowPreference(title = tr("发邮件反馈", "Report by email"), summary = tr("正文是脱敏后的完整诊断", "The body is the full redacted report"),
+                    onClick = { collectDiagnostics { report ->
+                        runCatching {
+                            ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:"))
+                                .putExtra(android.content.Intent.EXTRA_EMAIL, arrayOf(mail))
+                                .putExtra(android.content.Intent.EXTRA_SUBJECT, "Agent-VScreen ${com.kilon.agentvscreen.BuildConfig.VERSION_NAME} " + tr("反馈", "feedback"))
+                                .putExtra(android.content.Intent.EXTRA_TEXT, redacted(report))
+                                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                        }
+                    } })
+            }
         }
         if (open) Group(padded = true) {
             SelectionContainer {

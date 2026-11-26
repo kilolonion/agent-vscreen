@@ -46,6 +46,11 @@ object Changes {
                     "Long lists fold",
                     "Connected agents, tokens, temporary allowances, bookings and watches show their first few rows when long; tap \"N more\" to see the rest. Connected agents are listed most recently used first.",
                     Route.Connect),
+                Item(Kind.NEW, Audience.USER, "关于项目和快捷反馈",
+                    "设置里新增“关于项目”，直达 GitHub 仓库。诊断页可以一键去 GitHub 提问题：诊断信息会先去掉 IP、域名、邮箱和令牌样的字符串，再填进 issue，完整版复制到剪贴板。",
+                    "About and quick feedback",
+                    "Settings has a new About row that opens the GitHub repository. The diagnostics page can open a GitHub issue in one tap: IPs, host names, emails and token-like strings are removed first, and the full report is copied to the clipboard.",
+                    null),
             ),
         ),
         Release(
