@@ -494,7 +494,7 @@ class ApiServer(private val ctx: Context) {
                 val inp = BufferedInputStream(sock.getInputStream())
                 val out = sock.getOutputStream()
                 synchronized(reading) { reading[sock] = System.currentTimeMillis() }
-                val req = try { HttpCore.readRequest(inp) } catch (e: HttpError) { write(out, Resp.err(e.status, e.code, e.message ?: e.code)); return }
+                val req = try { HttpCore.readRequest(inp, sock) } catch (e: HttpError) { write(out, Resp.err(e.status, e.code, e.message ?: e.code)); return }
                     catch (e: java.net.SocketTimeoutException) { quiet("http-408") { write(out, Resp.err(408, "REQUEST_TIMEOUT", "the request did not arrive in time")) }; return }
                     finally { synchronized(reading) { reading.remove(sock) } } ?: return
                 req.peer = sock.inetAddress

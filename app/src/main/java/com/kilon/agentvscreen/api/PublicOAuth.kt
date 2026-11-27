@@ -49,6 +49,10 @@ object PublicOAuth {
     const val AUTH_CODE_TTL_MS = 10 * 60_000L
     const val ACCESS_TOKEN_TTL_MS = 60 * 60_000L
     const val REFRESH_TOKEN_TTL_MS = 30L * 24 * 60 * 60_000L
+    /** 30s in-memory idempotent retry window for a rotated refresh token whose response was lost in transit. */
+    const val REFRESH_GRACE_MS = 30_000L
+    const val TOKEN_MAX_PER_MIN = 60
+    const val TOKEN_WINDOW_MS = 60_000L
     const val TOKEN_BYTES = 32
 
     /** 8-char pairing code alphabet without 0 / O / 1 / I (7.2). */
@@ -57,6 +61,7 @@ object PublicOAuth {
 
     const val DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
     private val SUPPORTED_GRANTS = setOf("authorization_code", "refresh_token", DEVICE_GRANT)
+    private val SUPPORTED_APP_TYPES = setOf("native", "web")
     /** RFC 8628 polling interval (s); polling faster answers slow_down. */
     const val DEVICE_INTERVAL_S = 3L
     private val PKCE_VERIFIER_RE = Regex("^[A-Za-z0-9._~-]{43,128}$")
@@ -124,6 +129,7 @@ object PublicOAuth {
         val resource: String,
         val scope: String,
         var retired: Boolean = false,
+        var retiredAt: Long = 0L,
     ) {
         fun json(): JSONObject = JSONObject()
             .put("token_id", tokenId)
@@ -132,6 +138,7 @@ object PublicOAuth {
             .put("resource", resource)
             .put("scope", scope)
             .put("retired", retired)
+            .apply { if (retiredAt > 0L) put("retired_at", retiredAt) }
 
         companion object {
             fun fromJson(o: JSONObject): RefreshTokenRecord? {
@@ -139,10 +146,26 @@ object PublicOAuth {
                 val cid = o.optString("client_id").takeIf { it.isNotBlank() } ?: return null
                 val res = o.optString("resource").takeIf { it.isNotBlank() } ?: return null
                 val sc = o.optString("scope").takeIf { it in ALLOWED_SCOPES } ?: "look"
-                return RefreshTokenRecord(tid, cid, o.optLong("expires_at", 0L), res, sc, o.optBoolean("retired", false))
+                return RefreshTokenRecord(
+                    tid, cid, o.optLong("expires_at", 0L), res, sc,
+                    o.optBoolean("retired", false),
+                    o.optLong("retired_at", 0L),
+                )
             }
         }
     }
+
+    /** In-memory-only idempotent grace record for a single rotated refresh response (never persisted to disk). */
+    private class RefreshGraceEntry(
+        val clientId: String,
+        val tokenId: String,
+        val resource: String,
+        val newAccessHash: String,
+        val newRefreshHash: String,
+        val responseJson: String,
+        val expiresAt: Long,
+        var retried: Boolean = false,
+    )
 
     private data class AuthCodeRecord(
         val clientId: String,
@@ -168,6 +191,7 @@ object PublicOAuth {
         val createdAt: Long,
         val sourceBucket: String = "unknown",
         val sourceDisplay: String? = null,
+        val issuer: String = "",
     ) {
         /**
          * Pairing lifecycle:
@@ -216,6 +240,7 @@ object PublicOAuth {
     private val clients = LinkedHashMap<String, RegisteredClient>()
     private val accessTokens = HashMap<String, AccessTokenRecord>()
     private val refreshTokens = HashMap<String, RefreshTokenRecord>()
+    private val refreshGrace = HashMap<String, RefreshGraceEntry>()
     private val authCodes = HashMap<String, AuthCodeRecord>()
     private val pairings = LinkedHashMap<String, Pairing>()
     /** Bounded history of access-token hash -> clientId so expired/revoked tokens from known clients still bucket by client_id. */
@@ -224,6 +249,7 @@ object PublicOAuth {
     }
     private val registerTimesGlobal = ArrayDeque<Long>()
     private val registerTimesBySource = HashMap<String, ArrayDeque<Long>>()
+    private val tokenTimesBySource = HashMap<String, ArrayDeque<Long>>()
     private val deniesBySource = HashMap<String, Int>()
     private val denyCooldownBySource = HashMap<String, Long>()
 
@@ -256,6 +282,7 @@ object PublicOAuth {
             clients.clear()
             accessTokens.clear()
             refreshTokens.clear()
+            refreshGrace.clear()
             if (file.isFile) {
                 runCatching {
                     val root = JSONObject(file.readText(Charsets.UTF_8))
@@ -318,6 +345,7 @@ object PublicOAuth {
     private fun pruneExpiredLocked(now: Long) {
         accessTokens.entries.removeAll { it.value.expiresAt <= now }
         refreshTokens.entries.removeAll { it.value.expiresAt <= now }
+        refreshGrace.entries.removeAll { it.value.expiresAt <= now }
         authCodes.entries.removeAll { it.value.expiresAt <= now }
         val it = pairings.entries.iterator()
         while (it.hasNext()) {
@@ -505,11 +533,19 @@ object PublicOAuth {
                 .put("device_authorization_endpoint", "$cleanBase/oauth/device_authorization")
                 .put("code_challenge_methods_supported", JSONArray().put("S256"))
                 .put("token_endpoint_auth_methods_supported", JSONArray().put("none"))
+                .put("authorization_response_iss_parameter_supported", true)
                 .put("scopes_supported", JSONArray(ALLOWED_SCOPES)),
         )
     }
 
     // ── Source bucketing (beta8 Section I: IPv4 /32, IPv6 /64, tailnet:<bucket>) ──
+
+    /** Strict syntactic IPv4 / IPv6 literal validation without DNS resolution. */
+    fun isValidIpLiteral(raw: String?): Boolean {
+        val s = raw?.trim() ?: return false
+        if (s.length !in 2..45) return false
+        return parseIpv4(s) != null || parseIpv6(s) != null
+    }
 
     /**
      * Normalize the `X-AVS-Public-Src` header injected by `tsbridge` into a stable rate-limit bucket key:
@@ -698,6 +734,11 @@ object PublicOAuth {
             }
         }
 
+        val appType = body.optString("application_type").takeIf { it.isNotBlank() && !body.isNull("application_type") }
+        if (appType != null && appType !in SUPPORTED_APP_TYPES) {
+            return oauthError(400, "invalid_client_metadata", "Supported application_type: native, web")
+        }
+
         val rawName = body.optString("client_name").trim().replace(Regex("[\\r\\n\\t]+"), " ").take(64)
         val clientName = rawName.ifEmpty { "MCP Client" }
         val reqScope = body.optString("scope").takeIf { it.isNotBlank() && !body.isNull("scope") }?.take(128)
@@ -718,6 +759,7 @@ object PublicOAuth {
             .put("response_types", JSONArray().put("code"))
             .put("token_endpoint_auth_method", "none")
             .put("client_id_issued_at", now / 1000L)
+        if (appType != null) resp.put("application_type", appType)
         return ApiServer.Resp.json(resp, 201)
     }
 
@@ -772,7 +814,7 @@ object PublicOAuth {
         val src = sourceBucket(rawSrc)
         val srcDisplay = sourceDisplay(rawSrc)
 
-        val pairing = when (val started = startPairing(client, redirectUri, redirectHost, challenge, boundResource, state, selectableScopes, src, srcDisplay, null)) {
+        val pairing = when (val started = startPairing(client, redirectUri, redirectHost, challenge, boundResource, state, selectableScopes, src, srcDisplay, null, base.trimEnd('/'))) {
             is Started.Ok -> started.pairing
             is Started.Refused -> return started.resp
         }
@@ -802,6 +844,7 @@ object PublicOAuth {
         src: String,
         srcDisplay: String?,
         deviceCodeHash: String?,
+        issuer: String = "",
     ): Started {
         val now = nowMs()
         val clientId = client.clientId
@@ -851,6 +894,7 @@ object PublicOAuth {
                 createdAt = now,
                 sourceBucket = src,
                 sourceDisplay = srcDisplay,
+                issuer = issuer,
             )
             p.deviceCodeHash = deviceCodeHash
             pairings[pid] = p
@@ -1131,7 +1175,7 @@ object PublicOAuth {
                 expiresAt = now + AUTH_CODE_TTL_MS,
             )
             if (pairing.isDevice) pairing.deviceAuthCode = rawCode
-            else pairing.redirectLocation = buildRedirectUrl(pairing.redirectUri, rawCode, pairing.state)
+            else pairing.redirectLocation = buildRedirectUrl(pairing.redirectUri, rawCode, pairing.state, pairing.issuer)
             pairing.status = "approved"
             saveLocked()
             true
@@ -1170,7 +1214,7 @@ object PublicOAuth {
         pairings.values.lastOrNull { it.status == "queued" || it.status == "claimed" }
     }
 
-    private fun buildRedirectUrl(redirectUri: String, code: String, state: String?): String {
+    private fun buildRedirectUrl(redirectUri: String, code: String, state: String?, issuer: String? = null): String {
         val sep = if ('?' in redirectUri) '&' else '?'
         val sb = StringBuilder(redirectUri)
             .append(sep)
@@ -1178,12 +1222,36 @@ object PublicOAuth {
         if (!state.isNullOrEmpty()) {
             sb.append("&state=").append(URLEncoder.encode(state, "UTF-8"))
         }
+        if (!issuer.isNullOrBlank()) {
+            sb.append("&iss=").append(URLEncoder.encode(issuer, "UTF-8"))
+        }
         return sb.toString()
     }
 
     // ── Token endpoint (authorization_code & rotating refresh_token) ───────
 
     fun handleToken(r: ApiServer.Req, base: String): ApiServer.Resp {
+        val now = nowMs()
+        val src = sourceBucket(r.headers["x-avs-public-src"])
+        val tokenLimited = synchronized(lock) {
+            val sq = tokenTimesBySource.getOrPut(src) { ArrayDeque() }
+            while (sq.isNotEmpty() && now - sq.first() >= TOKEN_WINDOW_MS) sq.removeFirst()
+            if (tokenTimesBySource.size > 500) {
+                tokenTimesBySource.entries.removeAll { (k, q) ->
+                    k != src && (q.isEmpty() || now - q.last() >= TOKEN_WINDOW_MS)
+                }
+            }
+            if (sq.size >= TOKEN_MAX_PER_MIN) {
+                true
+            } else {
+                sq.addLast(now)
+                false
+            }
+        }
+        if (tokenLimited) {
+            Audit.security("public_token_rate_limited", "src=$src limit=$TOKEN_MAX_PER_MIN/min")
+            return oauthError(429, "too_many_requests", "Token endpoint rate limit exceeded (max $TOKEN_MAX_PER_MIN per minute)")
+        }
         val form = HttpCore.parseForm(r.bodyText)
         fun f(k: String): String? = form[k]?.firstOrNull()?.takeIf { it.isNotBlank() }
         return when (f("grant_type")) {
@@ -1306,6 +1374,7 @@ object PublicOAuth {
 
         var reuseClientId: String? = null
         var reuseTokenId: String? = null
+        var graceRetryLog: String? = null
         var errorResp: ApiServer.Resp? = null
         var issued: JSONObject? = null
         var issuedLog: String? = null
@@ -1317,6 +1386,23 @@ object PublicOAuth {
                 return@synchronized
             }
             if (rec.retired) {
+                val grace = refreshGrace[hash]
+                if (grace != null &&
+                    !grace.retried &&
+                    now < grace.expiresAt &&
+                    grace.clientId == clientId &&
+                    (resource == null || matchesResource(resource, grace.resource)) &&
+                    accessTokens.containsKey(grace.newAccessHash) &&
+                    refreshTokens[grace.newRefreshHash]?.retired == false &&
+                    Tokens.byId(grace.tokenId)?.publicOnly == true
+                ) {
+                    // Single idempotent retry within 30s when the rotated response may have been lost in transit
+                    // before the client ever used the new access/refresh token.
+                    grace.retried = true
+                    graceRetryLog = "client=${rec.clientId} token=${rec.tokenId}"
+                    issued = JSONObject(grace.responseJson)
+                    return@synchronized
+                }
                 // 7.2: reuse of a rotated/retired refresh token revokes ALL tokens of this client.
                 revokeAllForClientLocked(rec.clientId)
                 saveLocked()
@@ -1349,13 +1435,18 @@ object PublicOAuth {
                 return@synchronized
             }
 
+            // Client proved possession of this refresh token: evict any prior grace entry that minted it.
+            refreshGrace.entries.removeAll { it.value.newRefreshHash == hash }
+
             // Rotate: mark old refresh token retired (keep hash until original expiry to detect reuse),
             // mint new access + refresh tokens WITHOUT modifying the Tokens entry (7.7).
             rec.retired = true
+            rec.retiredAt = now
             val currentScope = if (rec.scope == "operate") "operate" else "look" // the bound stays the pairing's
             val rawAccess = randomToken()
             val rawRefresh = randomToken()
             val newAccessHash = Tokens.sha256(rawAccess)
+            val newRefreshHash = Tokens.sha256(rawRefresh)
             accessTokens[newAccessHash] = AccessTokenRecord(
                 tokenId = tok.id,
                 clientId = rec.clientId,
@@ -1364,7 +1455,7 @@ object PublicOAuth {
                 scope = currentScope,
             )
             knownTokenClients[newAccessHash] = rec.clientId
-            refreshTokens[Tokens.sha256(rawRefresh)] = RefreshTokenRecord(
+            refreshTokens[newRefreshHash] = RefreshTokenRecord(
                 tokenId = tok.id,
                 clientId = rec.clientId,
                 expiresAt = now + REFRESH_TOKEN_TTL_MS,
@@ -1372,20 +1463,31 @@ object PublicOAuth {
                 scope = currentScope,
                 retired = false,
             )
-            pruneExpiredLocked(now)
-            saveLocked()
-            issuedLog = "client=${rec.clientId} token=${tok.id} scope=$currentScope"
-            issued = JSONObject()
+            val respObj = JSONObject()
                 .put("access_token", rawAccess)
                 .put("token_type", "Bearer")
                 .put("expires_in", ACCESS_TOKEN_TTL_MS / 1000L)
                 .put("refresh_token", rawRefresh)
                 .put("scope", effectiveScope(currentScope, tok))
+            refreshGrace[hash] = RefreshGraceEntry(
+                clientId = rec.clientId,
+                tokenId = tok.id,
+                resource = rec.resource,
+                newAccessHash = newAccessHash,
+                newRefreshHash = newRefreshHash,
+                responseJson = respObj.toString(),
+                expiresAt = now + REFRESH_GRACE_MS,
+            )
+            pruneExpiredLocked(now)
+            saveLocked()
+            issuedLog = "client=${rec.clientId} token=${tok.id} scope=$currentScope"
+            issued = respObj
         }
 
         if (reuseClientId != null) {
             Audit.security("public_refresh_reuse", "client=$reuseClientId token=$reuseTokenId")
         }
+        graceRetryLog?.let { Audit.security("public_refresh_grace_retry", it) }
         errorResp?.let { return it }
         issuedLog?.let { Audit.security("public_token_refreshed", it) }
         return ApiServer.Resp.json(issued!!)
@@ -1395,10 +1497,7 @@ object PublicOAuth {
 
     /**
      * Verify a Bearer access token presented to `POST /mcp` on [PublicServer], returning
-     * either [AccessCheck.Valid] or [AccessCheck.Invalid] with `knownClientId` populated
-     * when the token belonged to a known client (expired, wrong resource, or revoked) so
-     * [PublicServer] can bucket known-client failures by `client_id` while isolating unknown
-     * Bearer tokens strictly to the source IP bucket (beta8 Section I).
+     * either [AccessCheck.Valid] or [AccessCheck.Invalid].
      */
     fun inspectAccessToken(rawToken: String?, expectedResource: String): AccessCheck {
         if (rawToken.isNullOrBlank()) return AccessCheck.Invalid(null)
@@ -1412,6 +1511,10 @@ object PublicOAuth {
         if (now >= rec.expiresAt) return AccessCheck.Invalid(rec.clientId)
         if (!matchesResource(rec.resource, expectedResource)) return AccessCheck.Invalid(rec.clientId)
         val tok = Tokens.byId(rec.tokenId)?.takeIf { it.publicOnly } ?: return AccessCheck.Invalid(rec.clientId)
+        // Once the client successfully presents the newly rotated access token, close the grace window immediately.
+        synchronized(lock) {
+            refreshGrace.entries.removeAll { it.value.newAccessHash == hash }
+        }
         return AccessCheck.Valid(AccessAuth(tok, rec.clientId, effectiveScope(rec.scope, tok)))
     }
 
@@ -1424,6 +1527,7 @@ object PublicOAuth {
             val cids = clients.values.filter { it.tokenId == tokenId }.map { it.clientId }
             var changed = accessTokens.entries.removeAll { it.value.tokenId == tokenId }
             if (refreshTokens.entries.removeAll { it.value.tokenId == tokenId }) changed = true
+            refreshGrace.entries.removeAll { it.value.tokenId == tokenId }
             if (authCodes.entries.removeAll { it.value.tokenId == tokenId }) changed = true
             cids.forEach { cid ->
                 clients.remove(cid)
@@ -1436,6 +1540,7 @@ object PublicOAuth {
     private fun revokeAllForClientLocked(clientId: String) {
         accessTokens.entries.removeAll { it.value.clientId == clientId }
         refreshTokens.entries.removeAll { it.value.clientId == clientId }
+        refreshGrace.entries.removeAll { it.value.clientId == clientId }
         authCodes.entries.removeAll { it.value.clientId == clientId }
     }
 
@@ -1444,6 +1549,7 @@ object PublicOAuth {
             clients.clear()
             accessTokens.clear()
             refreshTokens.clear()
+            refreshGrace.clear()
             authCodes.clear()
             pairings.clear()
             saveLocked()
@@ -1566,11 +1672,13 @@ h1{font-size:20px;margin:0 0 8px}
             clients.clear()
             accessTokens.clear()
             refreshTokens.clear()
+            refreshGrace.clear()
             authCodes.clear()
             pairings.clear()
             knownTokenClients.clear()
             registerTimesGlobal.clear()
             registerTimesBySource.clear()
+            tokenTimesBySource.clear()
             deniesBySource.clear()
             denyCooldownBySource.clear()
             storageFile = file

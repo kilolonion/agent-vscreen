@@ -98,7 +98,11 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
             UserWait.attach(handleCommand(request), argv.firstOrNull(), call?.tokenId)
         } catch (t: Throwable) {
             AppLogger.error(TAG, "vscreen command crashed", t)
-            err("INTERNAL_ERROR", run { val why = "${t.javaClass.simpleName}: ${(t.cause?.message ?: t.message ?: "").take(300)}"; tr("工具内部错误（$why），命令没有执行完。vscreen diag 能导出诊断，交给开发者", "Internal tool error ($why); the command did not finish. vscreen diag exports a diagnostic bundle for the developer") })
+            if (call?.source == Call.Source.PUBLIC) {
+                err("INTERNAL_ERROR", tr("工具内部错误，命令没有执行完，请稍后重试。", "Internal tool error; the command did not finish. Please retry shortly."))
+            } else {
+                err("INTERNAL_ERROR", run { val why = "${t.javaClass.simpleName}: ${(t.cause?.message ?: t.message ?: "").take(300)}"; tr("工具内部错误（$why），命令没有执行完。vscreen diag 能导出诊断，交给开发者", "Internal tool error ($why); the command did not finish. vscreen diag exports a diagnostic bundle for the developer") })
+            }
         }
         val sid = request.sessionId?.takeIf { it.isNotBlank() } ?: DEFAULT_SESSION
         if (argv.firstOrNull() != "release") com.kilon.agentvscreen.api.Turns.bumpTurn(sid)
@@ -160,7 +164,11 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
             err("INVALID_ARGS", e.message ?: tr("参数不对", "bad arguments"), 2)
         } catch (t: Exception) {
             AppLogger.error(TAG, "$sub failed", t)
-            err("OPERATION_FAILED", "${t.javaClass.simpleName}: ${t.message}")
+            if (Call.current()?.source == Call.Source.PUBLIC) {
+                err("OPERATION_FAILED", tr("操作执行失败，请稍后重试。", "Operation failed; please retry shortly."))
+            } else {
+                err("OPERATION_FAILED", "${t.javaClass.simpleName}: ${t.message}")
+            }
         })
     }
 
