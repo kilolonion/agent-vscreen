@@ -476,7 +476,7 @@ build.sh[OV6T]: F:将锁定版本的cloudflared与Android DNS overlay静态编�
 ===/<repository>/docs/release-notes/===
 v2.0.0-beta15.md[SV2T]: F:v2.0.0-beta15预发布版说明，供CI发布Job直接用作GitHub Release正文，概述公网MCP、权限档位、强确认与手势闭环 | R:code:.github/workflows/ci.yml | A:- | S:-
 v2.0.0.md[SV2T]: F:v2.0.0正式版发布说明，供CI发布Job直接用作GitHub Release正文，汇总相对1.4.1的全部功能、改进与下载包信息 | R:code:.github/workflows/ci.yml | A:- | S:-
-v2.0.1-beta1.md[SV2T]: F:v2.0.1-beta1预发布版说明，供CI发布Job直接用作GitHub Release正文，概述安全加固、双栈MCP、CIMD、金融与屏幕隔离、#48/#60/#61、fn及待真机确认项 | R:code:.github/workflows/ci.yml | A:- | S:-
+v2.0.1-beta1.md[SV2T]: F:v2.0.1-beta1预发布版说明，供CI发布Job直接用作GitHub Release正文，顶部醒目警示仅经单测与模拟器测试尚未真机实测，并概述本版改动与待真机确认项 | R:code:.github/workflows/ci.yml | A:- | S:-
 
 ===/<repository>/element-detector/tools/detector/===
 train_colab.ipynb[XA2L]: F:含Colab A100实跑输出日志的无字元素检测训练笔记本副本，配置MODE=full与默认模型student-992x448，记录至第7轮 | R:code:tools/detector/train_colab.ipynb,code:tools/detector/prepare.py | A:- | S:属含运行日志的副本，正式训练模板在tools/detector/train_colab.ipynb
