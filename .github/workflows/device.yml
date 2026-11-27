@@ -75,11 +75,18 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    continue-on-error: ${{ matrix.observe }}
     strategy:
       fail-fast: false
       matrix:
-        # Android 14/15 own display group coverage (debug APK ships native x86_64 libs for emulator speed/stability).
-        api: [34, 35]
+        # Android 14/15 strict gate; Android 16 (API 36) observation leg for targetSdk 36 readiness.
+        include:
+          - api: 34
+            observe: false
+          - api: 35
+            observe: false
+          - api: 36
+            observe: true
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
@@ -119,10 +126,20 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    continue-on-error: ${{ matrix.observe }}
     strategy:
       fail-fast: false
       matrix:
-        mode: [root, root-uid0]
+        include:
+          - api: 34
+            mode: root
+            observe: false
+          - api: 34
+            mode: root-uid0
+            observe: false
+          - api: 36
+            mode: root
+            observe: true
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
@@ -139,7 +156,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
-          api-level: 34
+          api-level: ${{ matrix.api }}
           arch: x86_64
           target: google_apis
           profile: pixel_6
@@ -149,7 +166,7 @@ jobs:
       - if: failure()
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
-          name: root-${{ matrix.mode }}-logs
+          name: root-${{ matrix.api }}-${{ matrix.mode }}-logs
           path: |
             e2e.log
             logcat.txt

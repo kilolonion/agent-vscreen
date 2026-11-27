@@ -173,7 +173,9 @@ internal fun VScreenOffloadHandler.requireNotOwnPackage(pkg: String?) {
 }
 
 internal fun VScreenOffloadHandler.handoffSkip(): Set<String> =
-    setOf(context.packageName, "com.android.systemui", "moe.shizuku.privileged.api") + runCatching { VScreenHandoff.homePackages() }.getOrDefault(emptySet())
+    setOf(context.packageName, "com.android.systemui") +
+        com.kilon.agentvscreen.host.ShizukuManager.discoveredManagerPackages() +
+        runCatching { VScreenHandoff.homePackages() }.getOrDefault(emptySet())
 
 /**
  * `handoff park <应用>`: the app moves to the hidden parking display, its page untouched, and is out of the agent's

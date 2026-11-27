@@ -86,13 +86,20 @@ object ShizukuManager {
     /** First installed Shizuku-protocol manager package, or null. */
     fun installedManagerPackage(): String? = backend?.installedManagerPackage()
 
+    /** All dynamically discovered Shizuku-protocol manager packages (including forks). */
+    fun discoveredManagerPackages(): Set<String> =
+        (backend?.discoveredManagerPackages().orEmpty() + ShizukuBackend.KNOWN_MANAGER_PACKAGES).toSet()
+
+    /** Human-readable provider label ("Shizuku", "AXManager", "Sui", or fork app label). */
+    fun providerLabel(): String? = backend?.providerLabel()
+
     fun diagnostics(ctx: Context): String {
         val b = backend ?: return "Shizuku: not initialized"
         val manager = b.installedManagerPackage()
         val version = manager?.let { runCatching { ctx.packageManager.getPackageInfo(it, 0).versionName }.getOrNull() }
         val managed = ctx.getSystemService(android.os.UserManager::class.java)?.isManagedProfile
         return "Shizuku: state=${b.snapshot().state} binder=${b.isBinderAlive()} permission=${b.isPermissionGranted()} " +
-            "manager=${manager ?: "none"} version=${version ?: "-"} appUid=${android.os.Process.myUid()} managedProfile=$managed"
+            "provider=${b.providerLabel() ?: "none"} manager=${manager ?: "none"} version=${version ?: "-"} appUid=${android.os.Process.myUid()} managedProfile=$managed"
     }
 
     fun missingBinderHint() = com.kilon.agentvscreen.tr(

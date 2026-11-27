@@ -183,9 +183,18 @@ fun SettingsTab(bottom: Dp) {
             }, onClick = { nav.go(Route.Setup) })
             // 1.4.2-beta3: where the shell-level permission comes from (what each means: the "?" on the setup step).
             val pv by com.kilon.agentvscreen.host.Privileged.snapshot.collectAsState()
-            OverlayDropdownPreference(items = listOf("Shizuku", "Root"), selectedIndex = pv.via.ordinal,
+            val detected = com.kilon.agentvscreen.host.ShizukuManager.providerLabel()
+            val pvSummary = when {
+                pv.state == com.kilon.agentvscreen.host.ShizukuManager.State.READY -> pv.label
+                pv.via == com.kilon.agentvscreen.host.Privileged.Via.SHIZUKU && detected != null ->
+                    tr("检测到 $detected · ", "Detected $detected · ") + com.kilon.agentvscreen.host.Privileged.notReadyHint().take(48)
+                android.os.Build.VERSION.SDK_INT >= 37 && pv.via == com.kilon.agentvscreen.host.Privileged.Via.SHIZUKU ->
+                    tr("Android 17+ 建议使用兼容分支或改用 Root", "On Android 17+, use a compatible fork or switch to Root")
+                else -> com.kilon.agentvscreen.host.Privileged.notReadyHint().take(60)
+            }
+            OverlayDropdownPreference(items = listOf(tr("Shizuku / 兼容分支", "Shizuku / forks"), "Root"), selectedIndex = pv.via.ordinal,
                 title = tr("权限来源", "Permission source"),
-                summary = if (pv.state == com.kilon.agentvscreen.host.ShizukuManager.State.READY) pv.label else com.kilon.agentvscreen.host.Privileged.notReadyHint().take(60),
+                summary = pvSummary,
                 onSelectedIndexChange = { i -> val v = com.kilon.agentvscreen.host.Privileged.Via.entries[i]
                     if (v != pv.via) scope.launch(Dispatchers.IO) { com.kilon.agentvscreen.host.Privileged.choose(ctx, v) } })
             val names = listOf(tr("跟随系统", "System"), "中文", "English")
@@ -486,8 +495,8 @@ internal object H {
         "Records each command's source (token, device or public source address), time, content and result. Typed text is recorded as a length only.")
     val events get() = tr("盯守条件满足时产生的事件默认只进入队列，由 agent 通过 vscreen events 读取。填写应用包名后，事件会同时以广播发送给该应用，其他应用无法接收。",
         "Events from watches are queued by default and read by agents with vscreen events. With a package name set, each event is also broadcast to that app only.")
-    val privilege get() = tr("Agent-VScreen 需要 shell 级权限来创建副屏、注入点击和启动应用，可从以下两种来源中选择一种：\n\n• Shizuku（默认）：无需 root。手机每次重启后需在 Shizuku App 中重新启动服务。\n• Root：适用于已通过 Magisk、KernelSU、APatch 等获取 root 的手机，无需安装 Shizuku。首次使用时需在 root 管理器中授权，之后打开 App 即自动启动。副屏服务优先以 shell 身份运行，行为与 Shizuku 的 ADB 模式一致。\n\n切换来源时当前副屏会关闭，下一条命令通过新来源自动重新连接。",
-        "Agent-VScreen needs shell-level permission to open the background screen, tap and start apps. It comes from one of two sources:\n\n• Shizuku (default): no root needed. Shizuku must be started again in its app after each phone restart.\n• Root: for phones rooted with Magisk, KernelSU, APatch and the like; Shizuku is not needed. The root manager asks once; after that it starts by itself when the app opens. The screen service runs as the shell user where it can, exactly as under Shizuku's ADB mode.\n\nSwitching closes the current screen; the next command reconnects through the new source by itself.")
+    val privilege get() = tr("Agent-VScreen 需要 shell 级权限来创建副屏、注入点击和启动应用，可从以下两种来源中选择一种：\n\n• Shizuku / 兼容分支（默认）：无需 root，自动识别官方 Shizuku、Sui、AXManager 及遵循 Shizuku API_V23 协议的社区分支（如 Nightzuku、Shevery）。其中官方 Shizuku 与 Sui 已实测验证，社区分支按协议动态发现。手机每次重启后需重新启动服务；Android 17+ 如官方 Shizuku 受限，可选兼容分支或改用 Root。\n• Root：适用于已通过 Magisk、KernelSU、APatch 等获取 root 的手机，无需安装 Shizuku。首次使用时需在 root 管理器中授权，之后打开 App 即自动启动。副屏服务优先以 shell 身份运行，行为与 Shizuku 的 ADB 模式一致。\n\n切换来源时当前副屏会关闭，下一条命令通过新来源自动重新连接。",
+        "Agent-VScreen needs shell-level permission to open the background screen, tap and start apps. It comes from one of two sources:\n\n• Shizuku / compatible forks (default): no root needed. Dynamically recognizes official Shizuku, Sui, AXManager, and community forks speaking the Shizuku API_V23 protocol (such as Nightzuku and Shevery). Official Shizuku and Sui are verified in CI; community forks are discovered dynamically. Restart the manager after each phone reboot; on Android 17+, if official Shizuku is limited, use a compatible fork or Root.\n• Root: for phones rooted with Magisk, KernelSU, APatch and the like; Shizuku is not needed. The root manager asks once; after that it starts by itself when the app opens. The screen service runs as the shell user where it can, exactly as under Shizuku's ADB mode.\n\nSwitching closes the current screen; the next command reconnects through the new source by itself.")
     val setup get() = tr("仅使用 Shizuku（或 Root）作为特权通道：不占用 adb、不修改无线调试、不重启 adbd。每一项只为本应用添加授权，不改动其他应用的设置；agent 自己使用的 adb / Shizuku 不受影响。",
         "Uses only Shizuku (or root) as the privilege channel: adb is not taken, wireless debugging is not changed, adbd is not restarted. Each item only grants this app and leaves other apps' settings alone; your agent's own adb / Shizuku keep working.")
     val diag get() = tr("汇总版本、配置状态和最近日志，用于问题反馈；不包含令牌和你输入的文字。",

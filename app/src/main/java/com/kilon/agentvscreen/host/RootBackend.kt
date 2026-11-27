@@ -8,6 +8,9 @@ import com.kilon.agentvscreen.BuildConfig
 import com.kilon.agentvscreen.core.RootMain
 import com.kilon.agentvscreen.core.VScreenDisplayService
 import com.kilon.agentvscreen.tr
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -31,7 +34,9 @@ object RootBackend {
 
     enum class Phase { IDLE, STARTING, READY, NO_SU, DENIED, FAILED }
 
-    @Volatile var phase = Phase.IDLE; private set
+    private val _phase = MutableStateFlow(Phase.IDLE)
+    val phaseFlow: StateFlow<Phase> = _phase.asStateFlow()
+    val phase: Phase get() = _phase.value
     @Volatile var binder: IBinder? = null; private set
     /** The service's uid: 2000 (shell, as under Shizuku in ADB mode) or 0 (root manager without `su <uid>`). */
     @Volatile var uid = -1; private set
@@ -46,7 +51,7 @@ object RootBackend {
     fun init(onChange: () -> Unit) { this.onChange = onChange }
 
     private fun changed(p: Phase, error: String? = lastError) {
-        phase = p; lastError = error
+        _phase.value = p; lastError = error
         runCatching { onChange() }
     }
 

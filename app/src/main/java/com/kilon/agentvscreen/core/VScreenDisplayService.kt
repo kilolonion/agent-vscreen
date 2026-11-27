@@ -1271,11 +1271,16 @@ class VScreenDisplayService : Binder {
         override fun getOpPackageName(): String = SHELL_PKG
         override fun getApplicationContext(): Context = this
         override fun getAttributionSource(): AttributionSource =
-            if (Build.VERSION.SDK_INT >= 31) AttributionSource.Builder(android.os.Process.myUid()).setPackageName(SHELL_PKG).build()
-            else super.getAttributionSource()
+            if (Build.VERSION.SDK_INT >= 31) {
+                val uid = android.os.Process.myUid()
+                val builder = AttributionSource.Builder(uid)
+                attributionPackageForUid(uid)?.let { builder.setPackageName(it) }
+                builder.build()
+            } else super.getAttributionSource()
     }
 
     companion object {
+        internal fun attributionPackageForUid(uid: Int): String? = if (uid == 0) null else SHELL_PKG
         const val DESCRIPTOR = "com.kilon.agentvscreen.core.VScreenDisplayService"
         const val CREATE = FIRST_CALL_TRANSACTION
         const val RELEASE = FIRST_CALL_TRANSACTION + 1

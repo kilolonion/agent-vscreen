@@ -3,6 +3,7 @@ package com.kilon.agentvscreen.core
 import com.kilon.agentvscreen.tr
 
 import android.content.Context
+import com.kilon.agentvscreen.host.Privileged
 import com.kilon.agentvscreen.host.ShizukuManager
 
 /**
@@ -361,7 +362,15 @@ internal object VScreenShell {
         // with a cancel) says so (USER_STOPPED / USER_TAKEOVER / CONTROL_CHANGED), not "the system refused".
         r.getOrNull() == false && !Control.isUser() -> { Control.admitInput(); fail("INPUT_FAILED", tr("系统拒绝了副屏 $displayId 上的 $what 注入", "The system refused injecting $what on screen $displayId")) }
         r.getOrNull() == true -> ok(tr("副屏 $displayId：$what 已注入", "screen $displayId: $what injected"))
-        r.isFailure -> fail("NOT_CONNECTED", tr("副屏服务（Shizuku）不可用，$what 没有做：${r.exceptionOrNull()?.message}。多半是 Shizuku 停了：请用户打开 Shizuku 启动它", "The screen service (Shizuku) is unavailable, $what was not done: ${r.exceptionOrNull()?.message}. Most likely Shizuku stopped: ask the user to start it in Shizuku"))
+        r.isFailure -> {
+            val srcName = Privileged.name()
+            val fixHint = if (Privileged.via == Privileged.Via.ROOT) {
+                tr("请用户在 Agent-VScreen 里重新启动 Root 服务", "ask the user to restart the Root service in Agent-VScreen")
+            } else {
+                tr("多半是 $srcName 停了：请用户打开 $srcName 启动它", "Most likely $srcName stopped: ask the user to start it in $srcName")
+            }
+            fail("NOT_CONNECTED", tr("副屏服务（$srcName）不可用，$what 没有做：${r.exceptionOrNull()?.message}。$fixHint", "The screen service ($srcName) is unavailable, $what was not done: ${r.exceptionOrNull()?.message}. $fixHint"))
+        }
         else -> fail("INPUT_FAILED", tr("系统拒绝了副屏 $displayId 上的 $what 注入", "The system refused injecting $what on screen $displayId"))
     }
 
@@ -399,7 +408,8 @@ internal object VScreenShell {
         if (code != 3) Control.admitInput()
         val (ix, iy) = if (x < 0 || y < 0) (-1 to -1) else mx(displayId, x, y)
         val r = injector.pointer(displayId, code, pointerId, ix.toFloat(), iy.toFloat())
-        val v = r.getOrNull() ?: return fail("NOT_CONNECTED", tr("副屏服务（Shizuku）不可用：${r.exceptionOrNull()?.message}", "The screen service (Shizuku) is unavailable: ${r.exceptionOrNull()?.message}")) to 0
+        val srcName = Privileged.name()
+        val v = r.getOrNull() ?: return fail("NOT_CONNECTED", tr("副屏服务（$srcName）不可用：${r.exceptionOrNull()?.message}", "The screen service ($srcName) is unavailable: ${r.exceptionOrNull()?.message}")) to 0
         return (if (v.first) ok(tr("手指 $pointerId $op ($x,$y)", "finger $pointerId $op ($x,$y)")) else fail("INPUT_FAILED", tr("手指 $pointerId $op 注入失败（这根手指可能没按下）", "finger $pointerId $op injection failed (this finger may not be down)"))) to v.second
     }
 

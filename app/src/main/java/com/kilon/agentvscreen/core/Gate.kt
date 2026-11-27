@@ -815,22 +815,27 @@ internal class Gate(
             "system_server",
             "android",
             "com.android.systemui",
-            "moe.shizuku.privileged.api",
             com.kilon.agentvscreen.BuildConfig.APPLICATION_ID,
-        )
+        ) + com.kilon.agentvscreen.host.ShizukuBackend.KNOWN_MANAGER_PACKAGES
 
         /** Valid Android app process name: `pkg.name` (at least one dot) with optional `:subproc`. */
         private val APP_PROC_PATTERN = Regex("^[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z0-9_]+)+(:[a-zA-Z0-9_.-]+)?$")
 
         /**
          * 2.0.0-beta6 (5.9 / 6.9): whether [proc] may be frozen by Gate.HOLD.
-         * Rejects `system_server`, `com.android.systemui`, current [launchers], Shizuku, our own package ([ownPkg])
-         * including sub-processes (`pkg:sub`), and any process name not shaped like an Android application package.
+         * Rejects `system_server`, `com.android.systemui`, current [launchers], Shizuku & compatible forks,
+         * our own package ([ownPkg]) including sub-processes (`pkg:sub`), and non-package process names.
          */
-        internal fun isHoldableProcess(proc: String, ownPkg: String, launchers: Set<String>): Boolean {
+        internal fun isHoldableProcess(
+            proc: String,
+            ownPkg: String,
+            launchers: Set<String>,
+            extraDenied: Set<String> = emptySet(),
+        ): Boolean {
             if (!APP_PROC_PATTERN.matches(proc)) return false
             val base = proc.substringBefore(':')
             if (base in HOLD_DENY_PACKAGES) return false
+            if (base in extraDenied) return false
             if (ownPkg.isNotBlank() && base == ownPkg) return false
             if (base in launchers) return false
             return true

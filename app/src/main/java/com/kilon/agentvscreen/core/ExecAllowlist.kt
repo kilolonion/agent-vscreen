@@ -360,7 +360,7 @@ object ExecAllowlist {
                 }
                 if (!PackageNames.isValidProcess(proc)) return "invalid process name for am ${argv[1]}"
                 val base = proc.substringBefore(':')
-                if (argv[1] == "freeze" && (base == ownPkg || base in PROTECTED_STOP_PKGS || base == "moe.shizuku.privileged.api")) {
+                if (argv[1] == "freeze" && (base == ownPkg || base in PROTECTED_STOP_PKGS || base in com.kilon.agentvscreen.host.ShizukuBackend.KNOWN_MANAGER_PACKAGES)) {
                     return "protected process cannot be frozen"
                 }
                 null

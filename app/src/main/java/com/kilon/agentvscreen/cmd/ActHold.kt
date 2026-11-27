@@ -403,7 +403,11 @@ internal object ActHold {
         appInfo: AppInfoSnapshot?,
         currentImePkg: String?,
         dumpsysMedia: String?,
+        protectedManagers: Collection<String> = emptyList(),
     ): String? {
+        if (pkg in protectedManagers) {
+            return tr("特权管理应用，不允许暂停", "privilege manager app; refusing to pause")
+        }
         if (appInfo != null && appInfo.uid < FIRST_APP_UID) {
             return tr("系统进程（uid ${appInfo.uid}），不允许暂停", "system process (uid ${appInfo.uid}); refusing to pause")
         }
@@ -506,7 +510,8 @@ internal object ActHold {
         val info = runCatching { appInfoFn(context, pkg) }.getOrNull()
         val imePkg = runCatching { currentImePkgFn(context) }.getOrNull()
         val mediaDump = if (info != null && info.uid < FIRST_APP_UID) null else runCatching { mediaSessionDumpFn() }.getOrNull()
-        val upfront = upfrontRefusalReason(pkg, info, imePkg, mediaDump)
+        val managers = runCatching { com.kilon.agentvscreen.host.ShizukuManager.discoveredManagerPackages() }.getOrDefault(emptyList())
+        val upfront = upfrontRefusalReason(pkg, info, imePkg, mediaDump, managers)
         if (upfront != null) {
             val msg = tr("拒绝暂停 $appName：$upfront", "Refused to pause $appName: $upfront")
             recordDiag(pkg, info?.uid ?: -1, "REFUSED_UPFRONT", upfront, emptyList())

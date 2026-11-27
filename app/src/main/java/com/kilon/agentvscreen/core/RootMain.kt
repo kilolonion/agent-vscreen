@@ -140,26 +140,64 @@ class RootMain {
 
         /** Arguments for one IContentProvider.call overload, or null when it is not one we know. */
         internal fun callArgs(types: Array<Class<*>>, authority: String, extras: Bundle): Array<Any?>? {
-            val caller = if (android.os.Process.myUid() == 0) "root" else "com.android.shell"
+            val uid = android.os.Process.myUid()
+            val caller = if (uid == 0) "root" else "com.android.shell"
             val s = String::class.java
+            val b = Bundle::class.java
+            if (types.size >= 5 && types[0].name == "android.content.AttributionSource") {
+                val bundleIdx = types.indexOfFirst { it == b }
+                // Android 12+ standard: call(AttributionSource, authority, method, arg, extras[, ...optional trailing])
+                if (bundleIdx == 4 && types[1] == s && types[2] == s && types[3] == s) {
+                    return Array<Any?>(types.size) { i ->
+                        when (i) {
+                            0 -> attribution(if (uid == 0) null else caller)
+                            1 -> authority
+                            2 -> METHOD
+                            3 -> null
+                            4 -> extras
+                            else -> defaultArg(types[i])
+                        }
+                    }
+                }
+                // Forward-compatible: call(AttributionSource, feature/tag, authority, method, arg, extras[, ...])
+                if (bundleIdx == 5 && types[1] == s && types[2] == s && types[3] == s && types[4] == s) {
+                    return Array<Any?>(types.size) { i ->
+                        when (i) {
+                            0 -> attribution(if (uid == 0) null else caller)
+                            1 -> null
+                            2 -> authority
+                            3 -> METHOD
+                            4 -> null
+                            5 -> extras
+                            else -> defaultArg(types[i])
+                        }
+                    }
+                }
+            }
             return when {
-                // Android 12+: call(AttributionSource, authority, method, arg, extras)
-                types.size == 5 && types[0].name == "android.content.AttributionSource" ->
-                    arrayOf(attribution(caller), authority, METHOD, null, extras)
                 // Android 11: call(callingPkg, featureId, authority, method, arg, extras)
-                types.size == 6 && types.take(5).all { it == s } && types[5] == Bundle::class.java ->
+                types.size == 6 && types.take(5).all { it == s } && types[5] == b ->
                     arrayOf(caller, null, authority, METHOD, null, extras)
                 // Android 10: call(callingPkg, authority, method, arg, extras)
-                types.size == 5 && types.take(4).all { it == s } && types[4] == Bundle::class.java ->
+                types.size == 5 && types.take(4).all { it == s } && types[4] == b ->
                     arrayOf(caller, authority, METHOD, null, extras)
                 else -> null
             }
         }
 
-        private fun attribution(pkg: String): Any {
+        private fun defaultArg(t: Class<*>): Any? = when (t) {
+            Boolean::class.javaPrimitiveType -> false
+            Int::class.javaPrimitiveType -> 0
+            Long::class.javaPrimitiveType -> 0L
+            else -> null
+        }
+
+        private fun attribution(pkg: String?): Any {
             val b = Class.forName("android.content.AttributionSource\$Builder")
                 .getConstructor(Int::class.javaPrimitiveType).newInstance(android.os.Process.myUid())
-            b.javaClass.getMethod("setPackageName", String::class.java).invoke(b, pkg)
+            if (pkg != null) {
+                b.javaClass.getMethod("setPackageName", String::class.java).invoke(b, pkg)
+            }
             return b.javaClass.getMethod("build").invoke(b)!!
         }
 

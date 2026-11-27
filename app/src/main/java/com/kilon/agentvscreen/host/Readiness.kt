@@ -92,14 +92,17 @@ object Readiness {
             add(Item("accessibility_cannot_see_display", false, tr("无障碍已开启，但系统没有把副屏窗口交给它：控件树为空，元素列表只有 OCR 文字和截图。", "Accessibility is on, but the system does not give it the screen's windows: the widget tree is empty and element lists have only OCR text and screenshots.")))
         if (!i.powerProblems.isNullOrEmpty()) {
             val p = i.powerProblems.joinToString(tr("、", ", "))
+            val srcName = Privileged.name()
             add(Item("background_network", false, tr("Agent-VScreen 切到后台后系统可能切断它的网络（$p），模型请求会报 connection abort。", "The system may cut Agent-VScreen's network in the background ($p); model requests may fail with connection abort. ") +
-                (if (i.privilege == "READY") tr("fix background_network 可用 Shizuku 自动加白名单（改系统设置，先征得用户同意）。", "fix background_network can add the exemptions via Shizuku (changes system settings; ask the user first).")
+                (if (i.privilege == "READY") tr("fix background_network 可用 $srcName 自动加白名单（改系统设置，先征得用户同意）。", "fix background_network can add the exemptions via $srcName (changes system settings; ask the user first).")
                  else tr("请用户手动设置：${com.kilon.agentvscreen.core.VScreenPower.manualSteps()}", "Ask the user to set by hand: ${com.kilon.agentvscreen.core.VScreenPower.manualSteps()}"))))
         }
         if (i.ownFocus == false)
             add(Item("no_display_focus", false, tr("副屏没有独立输入焦点（需要 Android 14+）：key back/enter 可能送不到；无效时直接 tap 页面上的返回/搜索按钮。", "The screen has no input focus of its own (needs Android 14+): key back/enter may not arrive; if they do nothing, tap the page's back / search buttons.")))
-        if (i.shellOwned == false)
-            add(Item("app_owned_display", false, tr("Shizuku 副屏服务不可用，只能用 App 自建副屏：系统可能把应用开到主屏。请用户在设置里重新连接后台操作。", "The Shizuku screen service is unavailable, so only the app's own screen can be used: the system may open apps on the main screen. Ask the user to reconnect background operation in settings.")))
+        if (i.shellOwned == false) {
+            val srcName = Privileged.name()
+            add(Item("app_owned_display", false, tr("$srcName 副屏服务不可用，只能用 App 自建副屏：系统可能把应用开到主屏。请用户在设置里重新连接后台操作。", "The $srcName screen service is unavailable, so only the app's own screen can be used: the system may open apps on the main screen. Ask the user to reconnect background operation in settings.")))
+        }
         val mlCrashed = com.kilon.agentvscreen.core.VScreenOcr.ENGINE_MLKIT in i.ocrCrashedEngines
         val pdCrashed = com.kilon.agentvscreen.core.VScreenOcr.ENGINE_PADDLE in i.ocrCrashedEngines
         if (mlCrashed && pdCrashed) {

@@ -232,21 +232,27 @@ internal fun VScreenOffloadHandler.fixOne(sid: String?, code: String, args: Offl
             if (r.connection.name == "READY") true to tr("已重新连接", "reconnected") else false to tr("重连失败：${r.connectionError ?: r.connection.name}", "reconnect failed: ${r.connectionError ?: r.connection.name}")
         }
         "no_privilege" -> {
-            val steps = when (s.privilege.name) {
-                "NOT_INSTALLED" -> tr("手机上没有安装 Shizuku：请用户安装 Shizuku，用无线调试启动后，打开 Agent-VScreen 点“授权 Shizuku”。", "Shizuku is not installed: ask the user to install Shizuku, start it with wireless debugging, then open Agent-VScreen and tap \"Grant Shizuku\".")
-                "NOT_RUNNING" -> tr("Shizuku 服务没在运行（重启手机后会停）：请用户打开 Shizuku，用无线调试点“启动”，再回来执行 fix not_connected。", "The Shizuku service is not running (it stops after a reboot): ask the user to open Shizuku and tap Start (wireless debugging), then run fix not_connected.")
-                "NOT_AUTHORIZED" -> tr("Agent-VScreen 还没获得 Shizuku 授权：请用户打开 Agent-VScreen 点“授权 Shizuku”并允许。", "Agent-VScreen has no Shizuku permission yet: ask the user to open Agent-VScreen, tap \"Grant Shizuku\" and allow.")
-                else -> tr("Shizuku 已可用", "Shizuku is available")
+            val viaRoot = com.kilon.agentvscreen.host.Privileged.via == com.kilon.agentvscreen.host.Privileged.Via.ROOT
+            val srcName = com.kilon.agentvscreen.host.Privileged.name()
+            val steps = if (viaRoot) {
+                if (s.privilege.name == "READY") tr("Root 已可用", "Root is available")
+                else com.kilon.agentvscreen.host.Privileged.notReadyHint()
+            } else when (s.privilege.name) {
+                "NOT_INSTALLED" -> tr("手机上没有安装 Shizuku（或其兼容分支 / Sui）：请用户安装并启动 Shizuku，或在 Agent-VScreen 首页配置里改用 Root。", "Shizuku (or a compatible fork / Sui) is not installed: ask the user to install and start it, or switch to Root in Agent-VScreen's setup.")
+                "NOT_RUNNING" -> tr("$srcName 服务没在运行（重启手机后会停）：请用户打开 $srcName 重新启动服务，再回来执行 fix not_connected。", "$srcName is not running (it stops after a reboot): ask the user to open $srcName and start it, then run fix not_connected.")
+                "NOT_AUTHORIZED" -> tr("Agent-VScreen 还没获得 $srcName 授权：请用户打开 Agent-VScreen 点“授权 $srcName”并允许。", "Agent-VScreen has no $srcName permission yet: ask the user to open Agent-VScreen, tap \"Grant $srcName\" and allow.")
+                else -> tr("$srcName 已可用", "$srcName is available")
             }
             if (s.privilege.name == "READY") return true to steps
             var opened = ""
-            if (args.hasFlag("open")) {
+            if (args.hasFlag("open") && !viaRoot) {
                 val pm = context.packageManager
-                val intent = listOf("moe.shizuku.privileged.api", "rikka.shizuku").firstNotNullOfOrNull { pm.getLaunchIntentForPackage(it) }
+                val candidates = com.kilon.agentvscreen.host.ShizukuManager.discoveredManagerPackages().toList() + "rikka.shizuku"
+                val intent = candidates.distinct().firstNotNullOfOrNull { pm.getLaunchIntentForPackage(it) }
                 opened = if (intent != null) {
                     runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                        .fold({ tr("（已在主屏打开 Shizuku）", " (opened Shizuku on the main screen)") }, { tr("（打开 Shizuku 失败：${it.message}）", " (opening Shizuku failed: ${it.message})") })
-                } else tr("（没找到 Shizuku 应用）", " (Shizuku app not found)")
+                        .fold({ tr("（已在主屏打开 $srcName）", " (opened $srcName on the main screen)") }, { tr("（打开 $srcName 失败：${it.message}）", " (opening $srcName failed: ${it.message})") })
+                } else tr("（没找到 $srcName 应用）", " ($srcName app not found)")
             }
             false to steps + opened
         }
@@ -277,7 +283,8 @@ internal fun VScreenOffloadHandler.fixOne(sid: String?, code: String, args: Offl
             val r = BackgroundOperation.connect()
             if (r.connection.name != "READY") return false to tr("重连失败：${r.connectionError}", "reconnect failed: ${r.connectionError}")
             if (sid != null) BackgroundOperation.releaseNow(sid)
-            true to tr("已重新连接并释放旧副屏；下一次 launch 会用 Shizuku 副屏重建（页面不保留）", "Reconnected and released the old screen; the next launch rebuilds it as a Shizuku screen (page not kept)")
+            val srcName = com.kilon.agentvscreen.host.Privileged.name()
+            true to tr("已重新连接并释放旧副屏；下一次 launch 会用 $srcName 副屏重建（页面不保留）", "Reconnected and released the old screen; the next launch rebuilds it as a $srcName screen (page not kept)")
         }
         "background_network" -> {
             val pw = com.kilon.agentvscreen.core.VScreenPower

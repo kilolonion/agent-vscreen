@@ -31,8 +31,11 @@ object Heal {
      * out first and put it back (re-binds a service that is on but sees nothing). Needs Shizuku.
      */
     fun accessibility(ctx: Context, restart: Boolean = false): Pair<Boolean, String> {
-        if (!Privileged.isReady()) return false to tr("需要先修好 Shizuku（fix no_privilege），或请用户在 系统设置 › 无障碍 › 已安装的应用 › Agent-VScreen 手动打开",
-            "Fix Shizuku first (fix no_privilege), or ask the user to turn it on in Settings › Accessibility › Installed apps › Agent-VScreen")
+        if (!Privileged.isReady()) {
+            val srcName = Privileged.name()
+            return false to tr("需要先修好 $srcName（fix no_privilege），或请用户在 系统设置 › 无障碍 › 已安装的应用 › Agent-VScreen 手动打开",
+                "Fix $srcName first (fix no_privilege), or ask the user to turn it on in Settings › Accessibility › Installed apps › Agent-VScreen")
+        }
         val me = comp(ctx)
         val rest = enabledList().filter { it != me }
         if (restart) {
@@ -92,7 +95,7 @@ object Heal {
      */
     fun sound(): Pair<Boolean, String> {
         val M = com.kilon.agentvscreen.core.VScreenMute
-        val r = M.repair(keepIntended = true) ?: return false to tr("需要 Shizuku 已连接", "Shizuku must be connected")
+        val r = M.repair(keepIntended = true) ?: return false to tr("需要 ${Privileged.name()} 已连接", "${Privileged.name()} must be connected")
         if (r.fixed.isEmpty() && r.failed.isEmpty()) return true to tr("没有被留下静音的应用", "no app was left silent")
         val names = r.fixed.joinToString(tr("、", ", ")) { it.pkg }
         return r.failed.isEmpty() to (tr("恢复了 ${r.fixed.size} 个应用的声音（$names），要在应用里重新点一次播放", "gave sound back to ${r.fixed.size} apps ($names); playback must be started again in the app") +
