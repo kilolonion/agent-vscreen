@@ -59,8 +59,8 @@ class DocsSyncTest {
             }
         }
 
-        val zhVersion = "- `main` 分支版本：$ver（versionCode $code） · [本版 APK](https://github.com/kilolonion/agent-vscreen/releases/tag/v$ver) · [最新正式版 APK](https://github.com/kilolonion/agent-vscreen/releases/latest)"
-        val enVersion = "- Version on `main`: $ver (versionCode $code) · [Release APK](https://github.com/kilolonion/agent-vscreen/releases/tag/v$ver) · [Latest stable APK](https://github.com/kilolonion/agent-vscreen/releases/latest)"
+        val zhVersion = "- `main` 分支版本：$ver（versionCode $code） · [最新正式版 APK](https://github.com/kilolonion/agent-vscreen/releases/latest) · [全部版本 / 测试版](https://github.com/kilolonion/agent-vscreen/releases)"
+        val enVersion = "- Version on `main`: $ver (versionCode $code) · [Latest stable APK](https://github.com/kilolonion/agent-vscreen/releases/latest) · [All releases / betas](https://github.com/kilolonion/agent-vscreen/releases)"
         val apiVersion = "- 包名 `com.kilon.agentvscreen`，`main` 分支版本 $ver（versionCode $code）。官方测试版与正式版同签名可覆盖安装；安装前可按 [README 的说明](README.zh-CN.md#验证下载的-apk)验证签名。"
 
         sync(File(root, "README.zh-CN.md"), "<!-- version:start -->", "<!-- version:end -->", zhVersion)
@@ -71,6 +71,17 @@ class DocsSyncTest {
             "out of date, generated from BuildConfig (./build.sh regen rewrites them): $changed",
             regen || changed.isEmpty(),
         )
+
+        // `main` routinely bumps versionName before cutting the matching git tag / GitHub Release,
+        // so linking directly to /releases/tag/v<ver> produces a 404 until the release is cut.
+        val tagUrl = "/releases/tag/v$ver"
+        for (name in listOf("README.md", "README.zh-CN.md", "API.md")) {
+            val text = File(root, name).readText(Charsets.UTF_8)
+            assertFalse(
+                "$name must not hardcode potentially unreleased tag URL $tagUrl; use /releases/latest or /releases",
+                text.contains(tagUrl),
+            )
+        }
     }
 
     @Test
