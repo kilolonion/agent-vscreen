@@ -103,6 +103,8 @@ jobs:
             exit 1
           fi
 
+      - name: AOCI index covers all main Kotlin sources
+        run: python3 tools/ci/check_aoci_coverage.py
 
       # Release signing NEVER happens in the build job: CI always produces an unsigned release APK signed only
       # in the isolated `release` job (environment: release) that has no checkout, build tools, or untrusted deps.

@@ -101,3 +101,27 @@ Entry 的语义必须来自模型对真实证据的理解。不得仅依据路�
 
 不预加载、不猜测，也不自行重建这些专项流程。平台调用方式、请求格式、批次上限、审批规则、索引格式细节和恢复步骤由对应Guide、工具说明、模型Prompt和CLI帮助按需提供。
 <!-- aoci:end -->
+
+## 项目约定（Agent-VScreen）
+
+以下为本仓库代码、构建、测试与安全发版的强制工程约定（修改受管理文件后仍须遵循上方 AOCI 维护流程）：
+
+1. **构建与生成文件守门**：
+   - 修改 `CommandSpec.kt`、`Abilities.kt`、`Codes.kt`、`Changes.kt` 或 `app/build.gradle.kts` 版本号后，必须执行 `./build.sh regen`（或 `AVS_REGEN=1 ./gradlew --no-daemon :app:testDebugUnitTest`）并提交全部同步更新的生成文档与插件文本（`README.md`、`README.zh-CN.md`、`API.md`、`docs/REFERENCE.md`、`integrations/operit/dist/packages/agent_vscreen.js`）。
+   - CI 会检查 `git status --porcelain` 为空，并运行 `python3 tools/ci/check_aoci_coverage.py` 强制 `aoci.code.txt` 覆盖全部 `app/src/main/java/**/*.kt` 且无孤儿或重复条目。
+2. **单一事实来源与预算门禁**：
+   - 命令、结果码、能力清单分别以 `CommandSpec.kt`、`Codes.kt`、`Abilities.kt` 为单一事实源；图片编码统一经 `Pictures.kt`（严禁在其他文件直接调用 `Bitmap.compress`）；帧变化判定统一经 `Change.kt`；特权执行统一经 `Privileged.kt` 与 `ExecAllowlist.kt`（禁止运行时 `sh -c`）。
+   - `AgentGuide.guide()` 必须满足 `<= 1500` tokens；`AgentGuide.memoryFor()` 必须满足 `< 1880` 字符（中文）/ `< 4170` 字符（英文）；严禁针对特定第三方应用编写硬编码特判。
+3. **双语与正则红线**：
+   - 所有面向用户与 agent 的文案一律使用 `tr("中", "En")`，英文输出严禁出现全角标点（`V200Beta16Test` 守门）。
+   - `cmd/`、`core/`、`api/` 中的 `Regex("...")` 严禁裸 `{` 或 `}`（Android ICU 会导致类初始化崩溃，`VScreenRegexLintTest` 守门）。
+4. **线程与错误处理红线**：
+   - 后台常驻循环必须在内层做好 `try/catch`；禁止在 `while (true)` 循环内把 `Thread.sleep` 包进 `quiet()` 掩盖中断或忙等；禁止在 `Dispatchers.Main` 上运行无异常捕获的无限循环。
+   - 特权 Binder 服务（`VScreenDisplayService`）对所有事务码强制校验调用方 UID（仅允许本应用 UID / `0` / `2000`），且绝不向主屏（`display 0`）注入输入或移入自身包。
+5. **测试命名与架构演进**：
+   - 新增单元测试按功能域命名并放入对应子包（如 `api/OnboardingCodesTest.kt`、`core/ExecAllowlistTest.kt`、`host/ShizukuDiscoveryTest.kt`），不再新增按版本号命名的 `V2xxBetaNTest.kt`。
+   - 单个源码文件建议控制在 `<= 800` 行；持久性架构决策记录在 `docs/decisions/ADR-NNN-*.md` 或对应模块注释中，避免散落一次性版本号注释。
+6. **发版安全红线**：
+   - `app/src/debug/` 测试钩子与 `x86_64` 原生库绝不得进入 release APK（`tools/android-smoke/check_abis.sh` 与 `tools/android-smoke/check_release_hooks.sh` 守门）。
+   - CI 构建阶段只产出未签名 APK（`-PavsUnsignedRelease=true`），不接触签名私钥；签名发布仅在 `environment: release` 人工审批后执行且校验官方证书 SHA-256。
+

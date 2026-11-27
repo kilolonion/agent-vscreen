@@ -14,8 +14,8 @@
 
 ## 2. 候选版本检查清单
 
-1. 更新 `app/build.gradle.kts` 的 `versionCode`、`versionName` 和 `Changes.kt` 顶部的中英 `Release` 条目。运行 `AVS_REGEN=1 ./gradlew --no-daemon :app:testDebugUnitTest`（instabox 用 `./build.sh regen`）。确认 `README.md`、`README.zh-CN.md`、`API.md`、`docs/REFERENCE.md` 和 `integrations/operit/dist/packages/agent_vscreen.js` 已同步，二次运行不产生额外 diff。更新中英 `docs/CHANGELOG*.md` 和非空的 `docs/release-notes/v<version>.md`。
-2. 核对候选提交 CI：`android` 的单元测试、regen、ABI、debug hook 和 OCR 资产检查，`operit` 打包以及 `secrets` 全历史扫描都须通过。模拟器矩阵含 `agent-e2e`、`root-e2e`、`shizuku`、`gate`、`confirm-attack`、`public-local` 和 `eval`；推 `v*` 标签时 CI 会为该标签提交再跑整套矩阵。
+1. 更新 `app/build.gradle.kts` 的 `versionCode`、`versionName` 和 `Changes.kt` 顶部的中英 `Release` 条目。运行 `AVS_REGEN=1 ./gradlew --no-daemon :app:testDebugUnitTest`（构建机用 `./build.sh regen`）。确认 `README.md`、`README.zh-CN.md`、`API.md`、`docs/REFERENCE.md` 和 `integrations/operit/dist/packages/agent_vscreen.js` 已同步，二次运行不产生额外 diff，且 `python3 tools/ci/check_aoci_coverage.py` 通过。更新中英 `docs/CHANGELOG*.md` 和非空的 `docs/release-notes/v<version>.md`。
+2. 核对候选提交 CI：`android` 的单元测试、regen、AOCI 覆盖率、ABI、debug hook 和 OCR 资产检查，`operit` 打包以及 `secrets` 全历史扫描都须通过。模拟器矩阵含 `agent-e2e`、`root-e2e`、`shizuku`、`gate`、`confirm-attack`、`public-local` 和 `eval`；推 `v*` 标签时 CI 会为该标签提交再跑整套矩阵。
 3. 在真机按 [TASKS.md](TASKS.md) 验受影响功能和基础任务，记下版本、设备、日期及通过/失败情况。有 P0/P1、缺测试证据或沉淀期不足时，不批准正式版。
 4. 审核以上证据后推 `v<version>`，预发布用带 `-` 后缀的标签。复核待审批 Actions run 的标签、提交及各前置 Job 后再点击批准。发布后对照官方证书与 `SHA256SUMS.txt`，确认 APK 和 Operit ToolPkg 都挂在对应 Release 上。
 
@@ -27,6 +27,6 @@
 - **Deployment branches and tags**：选 *Selected branches and tags*，只添加 **Tag** 规则 `v*`，不添加 Branch 规则。
 - **Environment secrets**：设置 `AVS_KEYSTORE_BASE64`、`AVS_KEYSTORE_PASSWORD`、`AVS_KEY_ALIAS`、`AVS_KEY_PASSWORD`，再删除普通 Repository secrets 中同名的四项。GitHub 不返回已保存的值，迁移必须使用维护者保管的原始 keystore 和配套凭据；不要把它们写进仓库、PR、日志或临时构建产物。
 
-`android` 用 `-PavsUnsignedRelease=true` 产出未签名 APK，不读取签名密钥。`release` 必须等 `android`、`operit`、`secrets` 和同标签模拟器矩阵通过，并通过 `release` 环境审批。签名 Job 不 checkout、不执行仓库脚本，也不运行 Gradle / Go / pip / Node；只下载该次 run 的 APK、ToolPkg 和说明文件，用 Runner 预装的 `zipalign` / `apksigner` 签名，并核对证书 SHA-256 `56b14824549e698017eba907cbc3347ee3a4ba30907efbd6068ea51ff4495756`。随后生成校验清单并创建 GitHub Release，不覆盖已有发布资产。
+`android` 用 `-PavsUnsignedRelease=true` 产出未签名 APK，不读取签名密钥。`release` 必须等 `android`、`operit`、`secrets` 和同标签模拟器矩阵（`release-device`）通过，并通过 `release` 环境审批。签名 Job 不 checkout、不执行仓库脚本，也不运行 Gradle / Go / pip / Node；只下载该次 run 的 APK、ToolPkg 和说明文件，拒绝已签名输入，用 Runner 预装的 `zipalign`（16 KB 对齐）/ `apksigner` 签名，并核对证书 SHA-256 `56b14824549e698017eba907cbc3347ee3a4ba30907efbd6068ea51ff4495756`。随后生成校验清单并创建 GitHub Release，不覆盖已有发布资产。
 
 已发版本不会因这套流程被重打或改写。不要用旧提交的标签验证迁移；旧发布工作流不认识 Environment，应从经审核的新提交打后续发布标签。
