@@ -486,10 +486,38 @@ class StrongConfirmActivity : ComponentActivity() {
                                     letterSpacing = 2.sp,
                                 )
                             }
-                            InfoLine(
-                                label = tr("客户端（对方填写）", "Client (self-reported)"),
-                                value = req.publicClientName ?: req.tokenName,
-                            )
+                            if (!req.clientVerifiedDomain.isNullOrBlank()) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color(0x1F16A34A))
+                                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        tr("已验证来源域名：${req.clientVerifiedDomain}", "Verified domain: ${req.clientVerifiedDomain}"),
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = Color(0xFF15803D),
+                                    )
+                                }
+                                InfoLine(
+                                    label = tr("客户端", "Client"),
+                                    value = req.publicClientName ?: req.tokenName,
+                                )
+                            } else {
+                                InfoLine(
+                                    label = tr("客户端", "Client"),
+                                    value = req.publicClientName ?: req.tokenName,
+                                )
+                                Text(
+                                    tr("未验证（动态注册，名称由对方填写）", "Unverified (dynamic registration; self-reported name)"),
+                                    fontSize = 12.sp,
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                )
+                            }
                             InfoLine(
                                 label = tr("来源地址", "Source address"),
                                 value = req.sourceAddress?.takeIf { it.isNotBlank() } ?: tr("未知", "Unknown"),
@@ -558,6 +586,12 @@ class StrongConfirmActivity : ComponentActivity() {
                                 label = tr("操作", "Action"),
                                 value = req.commandName,
                             )
+                            req.screenLabel?.takeIf { it.isNotBlank() }?.let { lbl ->
+                                InfoLine(
+                                    label = tr("应用画面显示文字", "App screen text"),
+                                    value = com.kilon.agentvscreen.cmd.ScreenText.quote(lbl, maxLen = 40),
+                                )
+                            }
                             if (req.detail.isNotBlank()) {
                                 InfoLine(
                                     label = tr("说明", "Details"),

@@ -64,6 +64,23 @@ internal object Tasks {
         return NativeOffloadResult(0, tr("任务 ${t.id} 已开始（$sub）。取结果：vscreen task ${t.id} --wait 60s；取消：vscreen task cancel ${t.id}", "Task ${t.id} started ($sub). Result: vscreen task ${t.id} --wait 60s; cancel: vscreen task cancel ${t.id}") + "\n", "TASK_STARTED", data)
     }
 
+    internal fun findForToken(tokenId: String, id: String): Task? = synchronized(tasks) {
+        prune()
+        tasks[id]?.takeIf { it.owner == tokenId }
+    }
+
+    internal fun listForToken(tokenId: String): List<Task> = synchronized(tasks) {
+        prune()
+        tasks.values.filter { it.owner == tokenId }.toList()
+    }
+
+    internal fun cancelForToken(tokenId: String, id: String): Task? = synchronized(tasks) {
+        prune()
+        val t = tasks[id]?.takeIf { it.owner == tokenId } ?: return@synchronized null
+        if (t.result == null) t.call.cancelled = true
+        t
+    }
+
     private fun mine(t: Task, sid: String): Boolean = t.owner == (Call.current()?.tokenId ?: "main") && (t.session == sid || Call.current() == null)
 
     fun command(sid: String, args: OffloadArgs): NativeOffloadResult {
@@ -78,7 +95,7 @@ internal object Tasks {
         if (p[0].equals("recap", ignoreCase = true)) return recap(sid)
         val cancel = p[0] == "cancel"
         val id = (if (cancel) p.getOrNull(1) else p[0]) ?: throw ActionError("INVALID_ARGS", tr("task cancel <任务号>", "task cancel <task id>"))
-        val t = synchronized(tasks) { tasks[id] }?.takeIf { mine(it, sid) } ?: throw ActionError("NOT_FOUND", tr("没有任务 $id（结果只保留 30 分钟）：task 看列表", "No task $id (results are kept for 30 minutes): task lists them"))
+        val t = synchronized(tasks) { tasks[id] }?.takeIf { mine(it, sid) } ?: throw ActionError("TASK_NOT_FOUND", tr("没有任务 $id（结果只保留 30 分钟）：task 看列表", "No task $id (results are kept for 30 minutes): task lists them"))
         if (cancel) {
             if (t.result == null) t.call.cancelled = true
             return NativeOffloadResult(0, (if (t.result == null) tr("已要求任务 $id 停下：它会在当前这一步之后停。task $id 看它停在哪", "Task $id was asked to stop: it stops after its current step. task $id shows where it stopped") else tr("任务 $id 已经结束了（不一定成功），没有可取消的：task $id 看它的结果", "Task $id has already ended (not necessarily successfully), nothing to cancel: task $id shows its result")) + "\n", "OK", JSONObject().put("task", id).put("state", t.state))
@@ -177,21 +194,21 @@ internal object Tasks {
                 toks += Tok(label, isStep = true)
             }
             if (e.pageId != null && e.pageId != lastPageId) {
-                val p = listOfNotNull(e.pageId, e.pageTitle?.take(16)?.takeIf { it.isNotBlank() }).joinToString(" ")
+                val p = listOfNotNull(e.pageId, e.pageTitle?.let { ScreenText.clean(it, maxLen = 16) }?.takeIf { it.isNotBlank() }).joinToString(" ")
                 toks += Tok(p, isStep = false)
                 lastPageId = e.pageId
             }
         }
         if (toks.isEmpty() && current != null) {
-            toks += Tok("P${current.id} ${current.title}".trim(), isStep = false)
+            toks += Tok("P${current.id} ${ScreenText.clean(current.title, maxLen = 16)}".trim(), isStep = false)
         }
 
         val nowLine = if (current != null) {
             val clickables = current.els
                 .filter { (it.clickable || it.editable) && !it.placeholder && it.text.isNotBlank() }
-                .map { it.text.take(16) }
+                .map { ScreenText.quote(it.text, maxLen = 16) }
                 .distinct()
-                .ifEmpty { current.els.filter { !it.placeholder && it.text.isNotBlank() }.map { it.text.take(16) }.distinct() }
+                .ifEmpty { current.els.filter { !it.placeholder && it.text.isNotBlank() }.map { ScreenText.quote(it.text, maxLen = 16) }.distinct() }
                 .take(RECAP_MAX_CLICKABLES)
             if (clickables.isEmpty()) tr("现在 P${current.id}。", "Now P${current.id}.")
             else tr(

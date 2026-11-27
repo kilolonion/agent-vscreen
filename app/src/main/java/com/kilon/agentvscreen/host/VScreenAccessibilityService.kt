@@ -45,7 +45,7 @@ class VScreenAccessibilityService : AccessibilityService() {
 
         internal fun recordToast(pkg: String, text: String, epochMs: Long = System.currentTimeMillis(), monoMs: Long = android.os.SystemClock.elapsedRealtime()) {
             val cleanPkg = pkg.trim()
-            val cleanText = text.trim()
+            val cleanText = com.kilon.agentvscreen.cmd.ScreenText.clean(text, maxLen = 200)
             if (cleanPkg.isEmpty() || cleanText.isEmpty()) return
             synchronized(toastLock) {
                 val dup = toastRing.lastOrNull()?.let { last ->
@@ -110,7 +110,10 @@ class VScreenAccessibilityService : AccessibilityService() {
                 val cls = e.className?.toString().orEmpty()
                 if (cls == "android.widget.Toast") {
                     val pkg = e.packageName?.toString().orEmpty()
-                    val joined = e.text.mapNotNull { it?.toString()?.trim()?.takeIf { s -> s.isNotEmpty() } }.joinToString(" ")
+                    val joined = com.kilon.agentvscreen.cmd.ScreenText.clean(
+                        e.text.mapNotNull { it?.toString()?.trim()?.takeIf { s -> s.isNotEmpty() } }.joinToString(" "),
+                        maxLen = 200,
+                    )
                     if (pkg.isNotEmpty() && joined.isNotEmpty()) {
                         recordToast(pkg, joined, System.currentTimeMillis(), now)
                         AppLogger.info("A11yToast", "pkg=$pkg text=${joined.take(120)}")

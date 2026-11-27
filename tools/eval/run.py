@@ -365,6 +365,7 @@ def run_task(token, task, return_events=False):
     turns = 0
     chars = 0
     est_tokens = 0
+    structured_est_tokens = 0
     image_tokens = 0
     phone_ms = 0
     reply_est_tokens = []
@@ -397,6 +398,7 @@ def run_task(token, task, return_events=False):
             chars += int(meter.get("chars", 0))
             et = int(meter.get("est_tokens", 0))
             est_tokens += et
+            structured_est_tokens += int(meter.get("structured_est_tokens", 0))
             reply_est_tokens.append(et)
             itok = int(meter.get("image_tokens", 0))
             image_tokens += itok
@@ -457,6 +459,7 @@ def run_task(token, task, return_events=False):
             pass
         adb_shell("am", "force-stop", TORTURE_PKG)
 
+    wall_ms = int((time.monotonic() - t0) * 1000)
     false_quiet, false_quiet_details = count_false_quiet(cmd_records, events)
     all_text = "\n".join(reply_texts)
     ok = (not timed_out) and (not error_detail) and evaluate_events(events, expect_list, forbid_list)
@@ -469,8 +472,10 @@ def run_task(token, task, return_events=False):
         "turns": turns,
         "chars": chars,
         "est_tokens": est_tokens,
+        "structured_est_tokens": structured_est_tokens,
         "image_tokens": image_tokens,
         "phone_ms": phone_ms,
+        "wall_ms": wall_ms,
         "reply_est_tokens": reply_est_tokens,
         "reply_image_tokens": reply_image_tokens,
         "quiet_replies": quiet_replies,
@@ -490,10 +495,20 @@ def run_task(token, task, return_events=False):
     return row
 
 
+def _percentile(vals, p):
+    if not vals:
+        return 0
+    s = sorted(vals)
+    idx = min(len(s) - 1, max(0, int((len(s) - 1) * p)))
+    return s[idx]
+
+
 def compute_totals(rows):
     total = len(rows)
     passed = sum(1 for r in rows if r["ok"])
     all_replies = [t for r in rows for t in r.get("reply_est_tokens", [])]
+    phone_list = [int(r.get("phone_ms", 0)) for r in rows]
+    wall_list = [int(r.get("wall_ms", 0)) for r in rows]
     return {
         "total": total,
         "passed": passed,
@@ -502,8 +517,14 @@ def compute_totals(rows):
         "turns": sum(r["turns"] for r in rows),
         "chars": sum(r["chars"] for r in rows),
         "est_tokens": sum(r["est_tokens"] for r in rows),
+        "structured_est_tokens": sum(int(r.get("structured_est_tokens", 0)) for r in rows),
         "image_tokens": sum(r["image_tokens"] for r in rows),
-        "phone_ms": sum(r["phone_ms"] for r in rows),
+        "phone_ms": sum(phone_list),
+        "phone_ms_p50": _percentile(phone_list, 0.50),
+        "phone_ms_p95": _percentile(phone_list, 0.95),
+        "wall_ms": sum(wall_list),
+        "wall_ms_p50": _percentile(wall_list, 0.50),
+        "wall_ms_p95": _percentile(wall_list, 0.95),
         "median_reply_est_tokens": round(statistics.median(all_replies), 1) if all_replies else 0.0,
         "quiet_replies": sum(int(r.get("quiet_replies", 0)) for r in rows),
         "false_quiet": sum(int(r.get("false_quiet", 0)) for r in rows),
@@ -1765,7 +1786,15 @@ def run_beta8_checks(token, out_dir, app_version):
         t_rep = call_api(token, ["act", 'tap "弹系统 Toast" until text:已触发 5s; wait 0.6s'], session=session, timeout=60)
         loud = list(t_rep.get("loud") or []) if isinstance(t_rep.get("loud"), list) else []
         txt = str(t_rep.get("text") or "")
-        has_toast_line = ("toast：AVS_SYSTEM_TOAST_1" in txt) or ("toast: AVS_SYSTEM_TOAST_1" in txt)
+        has_toast_line = any(
+            pat in txt
+            for pat in (
+                "toast：“AVS_SYSTEM_TOAST_1”",
+                'toast: "AVS_SYSTEM_TOAST_1"',
+                "toast：AVS_SYSTEM_TOAST_1",
+                "toast: AVS_SYSTEM_TOAST_1",
+            )
+        )
         s15_ok = bool(t_rep.get("ok")) and ("TOAST" in loud) and ("NO_EXPECT" not in loud) and has_toast_line
         out["s15_toast"] = {
             "ok": s15_ok,

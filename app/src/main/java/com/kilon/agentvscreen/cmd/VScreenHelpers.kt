@@ -396,7 +396,15 @@ internal fun VScreenOffloadHandler.collectCmd(sid: String?, args: OffloadArgs): 
         val sb = StringBuilder(tr("收集了 ${entries.size} 条，看了 $scanned 屏，停下原因：$why（控件文字为主、OCR 补充，可能有错字；一张卡片或一行列表是一条，同一条在几屏里重复出现只记一次" + (if (chrome > 0) "；不随滚动移动的吸顶栏、标签栏、底栏（$chrome 处）不算条目" else "") + "）\n",
             "Collected ${entries.size} items over $scanned screens, stopped because: $why (widget text first, OCR fills in, may have typos; one card or list row is one item, an item repeated across screens is counted once" + (if (chrome > 0) "; $chrome bars that stay in place while scrolling (top, tabs, bottom) are not items" else "") + ")\n"))
         startNote?.let { sb.append(it).append('\n') }
-        entries.forEachIndexed { i, l -> sb.append(i + 1).append(". ").append(if (l.length > 160) l.take(150) + tr("…（这条共 ${l.length} 字）", "… (${l.length} characters in all)") else l).append('\n') }
+        if (entries.isNotEmpty()) {
+            sb.append(ScreenText.FENCE_OPEN).append('\n')
+            entries.forEachIndexed { i, raw ->
+                val l = ScreenText.clean(raw, maxLen = 0)
+                val bodyLine = if (l.length > 160) l.take(150) + tr("…（这条共 ${l.length} 字）", "… (${l.length} characters in all)") else l
+                sb.append(i + 1).append(". ").append(bodyLine).append('\n')
+            }
+            sb.append(ScreenText.FENCE_CLOSE).append('\n')
+        }
         sb.toString()
     }
     cancelled?.let { return NativeOffloadResult(1, body, it, softFail = true) }

@@ -433,7 +433,7 @@ class V200Beta8Test {
         assertEquals(1, matched.size)
 
         val lines = formatSystemToasts(matched, vdPkg = "com.demo.app", mainTopPkg = "com.launcher", fromMs = 10_000L, toMs = 11_000L)
-        assertEquals(listOf("toast：您已处于开发者模式（-0.8s）"), lines)
+        assertEquals(listOf("toast：“您已处于开发者模式”（-0.8s）"), lines)
 
         val sameMainLines = formatSystemToasts(matched, vdPkg = "com.demo.app", mainTopPkg = "com.demo.app", fromMs = 10_000L, toMs = 11_000L)
         assertEquals(1, sameMainLines.size)

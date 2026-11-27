@@ -33,7 +33,9 @@ object AppCatalog {
         val rx = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
                 cache = null
-                i.data?.schemeSpecificPart?.let { icons.remove(it) } ?: icons.evictAll()
+                val pkg = i.data?.schemeSpecificPart
+                pkg?.let { icons.remove(it) } ?: icons.evictAll()
+                AppFunctions.invalidate(pkg)
                 warm()
             }
         }
@@ -64,10 +66,12 @@ object AppCatalog {
             val pm = c.packageManager
             val launcher = runCatching {
                 pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
-                    .map { App(it.loadLabel(pm).toString().trim(), it.activityInfo.packageName, true) }
+                    .map { App(com.kilon.agentvscreen.cmd.ScreenText.clean(it.loadLabel(pm).toString(), maxLen = 64), it.activityInfo.packageName, true) }
             }.getOrDefault(emptyList()).distinctBy { it.pkg }
             val appLabels = runCatching {
-                pm.getInstalledApplications(0).mapNotNull { ai -> runCatching { ai.packageName to pm.getApplicationLabel(ai).toString().trim() }.getOrNull() }
+                pm.getInstalledApplications(0).mapNotNull { ai ->
+                    runCatching { ai.packageName to com.kilon.agentvscreen.cmd.ScreenText.clean(pm.getApplicationLabel(ai).toString(), maxLen = 64) }.getOrNull()
+                }
             }.getOrDefault(emptyList()).toMap()
             val seen = launcher.map { it.pkg }.toHashSet()
             val withAlt = launcher.map { a -> appLabels[a.pkg]?.takeIf { it != a.label }?.let { App(a.label, a.pkg, true, it) } ?: a }

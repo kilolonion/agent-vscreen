@@ -272,8 +272,8 @@ internal class Probe(
         if (cropOnly && area != null) {
             val items = readCropCached(full ?: d.latestFrame(), area) ?: return null
             hadPostActionOcr = true
-            items.firstOrNull { pat.hit(it.text) }?.let { return it.text.take(40) }
-            return VScreenPerception.joinSplit(items).firstOrNull { pat.hit(it) }?.take(40)
+            items.firstOrNull { pat.hit(it.text) }?.let { return ScreenText.clean(it.text, maxLen = 40) }
+            return VScreenPerception.joinSplit(items).firstOrNull { pat.hit(it) }?.let { ScreenText.clean(it, maxLen = 40) }
         }
         val ocr = VScreenPerception.readingWithVersion(d.displayId, readFrom(), 0)
         if (ocr != null) {
@@ -286,13 +286,13 @@ internal class Probe(
                 if (!afterAction || actionAt == 0L) {
                     lastObsId = -(ocr.version + 1L)
                     lastObsEpochMs = ocr.epochMs.takeIf { e -> e > 0L }
-                    return it.text.take(40)
+                    return ScreenText.clean(it.text, maxLen = 40)
                 }
                 val dec = checkBox(box)
                 if (dec.ok) {
                     lastObsId = -(ocr.version + 1L)
                     lastObsEpochMs = ocr.epochMs.takeIf { e -> e > 0L }
-                    return it.text.take(40)
+                    return ScreenText.clean(it.text, maxLen = 40)
                 }
                 recordRejection(dec)
             }
@@ -815,7 +815,7 @@ internal class SegmentOpts(
 )
 
 /** A step that was not done, and why (it ends the stretch; the reason goes to the notes). */
-internal class StepRefused(val code: String, message: String) : Exception(message)
+internal class StepRefused(val code: String, message: String, val data: org.json.JSONObject? = null) : Exception(message)
 
 /**
  * What a stretch did. [outcome]: done | stopped (a stop condition fired) | missed (a step was done but what it expected
@@ -835,6 +835,7 @@ internal class SegmentOut(
     val afterStartMs: Long = 0L,
     val excludeWindows: List<LongRange> = emptyList(),
     val rulesFired: List<RuleFired> = emptyList(),
+    val errorData: org.json.JSONObject? = null,
 )
 
 private fun s1(ms: Long) = "${(ms / 100) / 10.0}s"
@@ -911,6 +912,7 @@ internal fun VScreenOffloadHandler.runSegment(
     // to go on from the step after it (`use NAME … from N` inside a segment, the remaining steps in a plain act).
     class Checkpoint(val label: String, val what: String, val resumeWith: String?)
     var checkpoint: Checkpoint? = null
+    var errorData: org.json.JSONObject? = null
     // Where each running `use` is (its name, values and which of its own steps), innermost last; and the top-level step.
     class UseAt(val name: String, val params: List<String>, val size: Int) { var at = 0 }
     val useStack = ArrayList<UseAt>()
@@ -918,9 +920,10 @@ internal fun VScreenOffloadHandler.runSegment(
     var topSteps: List<Step> = emptyList()
     fun screenNow(): String = runCatching {
         val sn = snapshot(d)
-        val words = sn.els.filter { !it.placeholder }.map { it.text.take(16) }.distinct().take(10)
-        if (I18n.en) "Now: ${sn.activity?.substringAfterLast('/') ?: "front app unreadable"}" + if (words.isEmpty()) ", no text read on the screen" else ", visible: ${words.joinToString(", ") { "\"$it\"" }}"
-        else "现在：${sn.activity?.substringAfterLast('/') ?: "前台读不到"}" + if (words.isEmpty()) "，画面上没有读到字" else "，能看到 ${words.joinToString("、") { "“$it”" }}"
+        val words = sn.els.filter { !it.placeholder }.map { ScreenText.quote(it.text, maxLen = 16) }.distinct().take(10)
+        val actName = sn.activity?.substringAfterLast('/')?.let { ScreenText.clean(it, maxLen = 40) }
+        if (I18n.en) "Now: ${actName ?: "front app unreadable"}" + if (words.isEmpty()) ", no text read on the screen" else ", visible: ${words.joinToString(", ")}"
+        else "现在：${actName ?: "前台读不到"}" + if (words.isEmpty()) "，画面上没有读到字" else "，能看到 ${words.joinToString("、")}"
     }.getOrDefault("")
     // Where the agent last tapped in this stretch: typing must go to a field there (BackgroundOperation.typeFact).
     var lastTap: Pair<Int, Int>? = null
@@ -1299,6 +1302,7 @@ internal fun VScreenOffloadHandler.runSegment(
             val so = StepOut(label, step.raw, "done", "").also {
                 it.fact = fact
                 it.via = done1.via
+                it.readback = done1.typedField
                 it.point = ctxAct.point.takeIf { step.kind == StepKind.TAP || step.kind == StepKind.PRESS }
                 it.typeVerified = done1.typeVerified
                 it.isActionOrRepeatUntil = own
@@ -1438,9 +1442,11 @@ internal fun VScreenOffloadHandler.runSegment(
                 lines += if (w.stopped != null) { stoppedBy = w.stopped; tr("观察 ${s1(watch)}：${s1(w.ms)} 时停止条件 ${w.stopped}", "watch ${s1(watch)}: stop condition ${w.stopped} at ${s1(w.ms)}") } else tr("观察了 ${s1(w.ms)}", "watched ${s1(w.ms)}")
             }
         } catch (e: StepRefused) {
+            if (e.data != null) errorData = e.data
             fail(e.code, e.message ?: e.code, (outs.count { it.status != "skipped" && !it.n.contains(' ') } + 1).toString())
         }
     } catch (e: ActionError) {
+        if (e.data != null) errorData = e.data
         fail(e.code, e.message ?: e.code, (outs.count { it.status != "skipped" } + 1).toString())
         connectionLost(d)?.let { notes.add("CONNECTION_LOST", it) }
     } finally {
@@ -1496,6 +1502,7 @@ internal fun VScreenOffloadHandler.runSegment(
         afterStartMs = afterStartMs,
         excludeWindows = claimedWindows.toList(),
         rulesFired = rulesFired.toList(),
+        errorData = errorData,
     )
 }
 
@@ -1600,8 +1607,11 @@ internal fun VScreenOffloadHandler.target(sid: String, d: VScreenDisplay, t: Ste
         val e = set.list.firstOrNull { it.n == t.n } ?: run {
             // A number from an earlier list: its element left the screen (numbers are never reused, see numbered()).
             val was = Numbers.label("$sid@${d.generation}", t.n)
-            if (was != null) throw StepRefused("STALE_ELEMENT", tr("#${t.n}（“${was.take(24)}”）是之前列表里的编号，它已经不在画面上了，没点。用最新【现在】里的编号，或用文字、坐标",
-                "#${t.n} (\"${was.take(24)}\") is a number from an earlier list and that element is no longer on the screen; nothing was tapped. Use the numbers of the latest [Now], or text / coordinates"))
+            if (was != null) {
+                val qw = ScreenText.quote(was, maxLen = 24)
+                throw StepRefused("STALE_ELEMENT", tr("#${t.n}（$qw）是之前列表里的编号，它已经不在画面上了，没点。用最新【现在】里的编号，或用文字、坐标",
+                    "#${t.n} ($qw) is a number from an earlier list and that element is no longer on the screen; nothing was tapped. Use the numbers of the latest [Now], or text / coordinates"))
+            }
             throw StepRefused("NOT_FOUND", tr("没有 #${t.n} 这个编号（最新列表共 ${set.list.size} 个）", "There is no #${t.n} (the latest list has ${set.list.size})"))
         }
         val fresh = !ctx.acted && System.currentTimeMillis() - set.atMs <= 3_000L
@@ -1626,13 +1636,14 @@ internal fun VScreenOffloadHandler.target(sid: String, d: VScreenDisplay, t: Ste
             val here = same.firstOrNull { near(it, e) }
                 ?: if (page && (still || e.editable)) now.filter { sameBox(it) }.singleOrNull() else null
             fun withList(m: El) = shift != null && shift.third >= 2 && Math.abs(m.box.centerX() - e.box.centerX() - shift.first) <= 24 && Math.abs(m.box.centerY() - e.box.centerY() - shift.second) <= 24
+            val ql = ScreenText.quote(e.label, maxLen = 24)
             when {
-                !page -> throw StepRefused("STALE_ELEMENT", tr("#${t.n}“${e.label.take(24)}”是上一页的编号，页面已经换了，没点。看【现在】的新列表再用编号", "#${t.n} \"${e.label.take(24)}\" is a number from the previous page and the page has changed; nothing was tapped. Use the numbers of the new list in [Now]"))
+                !page -> throw StepRefused("STALE_ELEMENT", tr("#${t.n} $ql 是上一页的编号，页面已经换了，没点。看【现在】的新列表再用编号", "#${t.n} $ql is a number from the previous page and the page has changed; nothing was tapped. Use the numbers of the new list in [Now]"))
                 here != null -> Target(here.box.centerX(), here.box.centerY(), here.label, box = here.box, isElement = true)
                 // Wordless elements (icons) cannot be told apart by what they say: only the same place counts.
                 same.size == 1 && !e.placeholder && withList(same[0]) -> same[0].let { Target(it.box.centerX(), it.box.centerY(), it.label, tr("它从 (${e.box.centerX()},${e.box.centerY()}) 移到了这里", "it moved here from (${e.box.centerX()},${e.box.centerY()})"), box = it.box, isElement = true) }
-                else -> throw StepRefused("STALE_ELEMENT", tr("#${t.n}“${e.label.take(24)}”已经不在 (${e.box.centerX()},${e.box.centerY()}) 了（页面变了" + (if (same.size > 1) "，现在有 ${same.size} 处一样的字" else "") + "），没点。看【现在】的新列表再用编号",
-                    "#${t.n} \"${e.label.take(24)}\" is no longer at (${e.box.centerX()},${e.box.centerY()}) (the page changed" + (if (same.size > 1) "; the same text is now in ${same.size} places" else "") + "); nothing was tapped. Use the numbers of the new list in [Now]"))
+                else -> throw StepRefused("STALE_ELEMENT", tr("#${t.n} $ql 已经不在 (${e.box.centerX()},${e.box.centerY()}) 了（页面变了" + (if (same.size > 1) "，现在有 ${same.size} 处一样的字" else "") + "），没点。看【现在】的新列表再用编号",
+                    "#${t.n} $ql is no longer at (${e.box.centerX()},${e.box.centerY()}) (the page changed" + (if (same.size > 1) "; the same text is now in ${same.size} places" else "") + "); nothing was tapped. Use the numbers of the new list in [Now]"))
             }
         }
     }
@@ -1643,9 +1654,10 @@ internal fun VScreenOffloadHandler.target(sid: String, d: VScreenDisplay, t: Ste
                 // 1.4.0-beta8 (test: `tap 蓝牙 +60%,+0%` tapped off the screen and only said "nothing changed"): a point
                 // beside words that falls off the screen is refused, as a point off the screen is.
                 val x = e.box.centerX() + t.dx; val y = e.box.centerY() + t.dy
+                val ql = ScreenText.quote(e.label.orEmpty(), maxLen = 24)
                 if (x !in 0 until d.width || y !in 0 until d.height)
-                    throw StepRefused("OUT_OF_BOUNDS", tr("「${e.label.orEmpty().take(24)}」在 (${e.box.centerX()},${e.box.centerY()})，偏移后 ($x,$y) 在副屏 ${d.width}x${d.height} 外面；百分比偏移按整屏宽高算", "\"${e.label.orEmpty().take(24)}\" is at (${e.box.centerX()},${e.box.centerY()}); with the offset ($x,$y) is outside the ${d.width}x${d.height} screen; % offsets are shares of the whole screen"))
-                Target(x, y, tr("「${e.label.orEmpty().take(24)}」旁", "beside \"${e.label.orEmpty().take(24)}\""), atPoint = wordsAt(sid, d, x, y), isElement = false)
+                    throw StepRefused("OUT_OF_BOUNDS", tr("$ql 在 (${e.box.centerX()},${e.box.centerY()})，偏移后 ($x,$y) 在副屏 ${d.width}x${d.height} 外面；百分比偏移按整屏宽高算", "$ql is at (${e.box.centerX()},${e.box.centerY()}); with the offset ($x,$y) is outside the ${d.width}x${d.height} screen; % offsets are shares of the whole screen"))
+                Target(x, y, tr("$ql 旁", "beside $ql"), atPoint = wordsAt(sid, d, x, y), isElement = false)
             }
         fun choose(hits: List<El>): El? = if (t.nth != 0) hits.getOrNull(if (t.nth > 0) t.nth - 1 else hits.size + t.nth)
             else hits.singleOrNull() ?: hits.filter { it.clickable || it.editable }.singleOrNull()
@@ -1668,7 +1680,7 @@ internal fun VScreenOffloadHandler.target(sid: String, d: VScreenDisplay, t: Ste
             ?: throw StepRefused("NOT_FOUND", tr("“${t.text}”在画面上只有 ${hits.size} 处，没有第 ${t.nth} 处", "\"${t.text}\" is on the screen in only ${hits.size} places, there is no @${t.nth}"))
         else hits.singleOrNull() ?: hits.filter { it.clickable || it.editable }.singleOrNull()
             ?: throw StepRefused("AMBIGUOUS", tr("“${t.text}”在画面上有 ${hits.size} 处，没点：", "\"${t.text}\" is on the screen in ${hits.size} places; nothing was tapped: ") +
-                hits.take(8).withIndex().joinToString(tr("；", "; ")) { (i, h) -> "@${i + 1} “${h.text.take(24)}” (${h.box.centerX()},${h.box.centerY()})" + h.flags.let { f -> if (f.isNotEmpty()) " $f" else "" } } +
+                hits.take(8).withIndex().joinToString(tr("；", "; ")) { (i, h) -> "@${i + 1} ${ScreenText.quote(h.text, maxLen = 24)} (${h.box.centerX()},${h.box.centerY()})" + h.flags.let { f -> if (f.isNotEmpty()) " $f" else "" } } +
                 tr("。写 ${t.text}@N 点从上往下第 N 处，或用坐标（tap x y）", ". Write ${t.text}@N for the N-th from the top, or tap by coordinates (tap x y)"))
         hit(pick)
     }
@@ -1690,8 +1702,8 @@ internal fun nearMiss(els: List<El>, want: String): String {
         return common.toDouble() / minOf(q.toSet().size, n.toSet().size)
     }
     val close = els.filter { !it.placeholder }.map { it to score(it.text) }.filter { it.second >= 0.5 }
-        .sortedByDescending { it.second }.take(3).map { "“${it.first.text.take(24)}”(${it.first.box.centerX()},${it.first.box.centerY()})" }
-    val fields = els.filter { it.editable }.take(3).map { "${it.label.take(20)}(${it.box.centerX()},${it.box.centerY()})" }
+        .sortedByDescending { it.second }.take(3).map { "${ScreenText.quote(it.first.text, maxLen = 24)}(${it.first.box.centerX()},${it.first.box.centerY()})" }
+    val fields = els.filter { it.editable }.take(3).map { "${ScreenText.quote(it.label, maxLen = 20)}(${it.box.centerX()},${it.box.centerY()})" }
     val parts = buildList {
         if (close.isNotEmpty()) add(tr("相近的字：", "similar text: ") + close.joinToString(tr("、", ", ")))
         if (fields.isNotEmpty()) add(tr("输入框：", "input boxes: ") + fields.joinToString(tr("、", ", ")))
@@ -1708,31 +1720,39 @@ internal fun VScreenOffloadHandler.payGuard(sid: String, d: VScreenDisplay, labe
 
 internal fun VScreenOffloadHandler.payGuardCheck(sid: String, displayId: Int, label: String?, x: Int, y: Int, fromRule: Boolean = false) {
     val l = label ?: return
+    val safeL = ScreenText.clean(l, maxLen = 30)
     // A button on the row of an input box (its "clear" ×) acts on the box, not on the user's data.
     val besideInput = synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] }?.list
         ?.any { it.editable && y in it.box.top..it.box.bottom } == true
     val pkg = runCatching { VScreenShell.topPackage(displayId) }.getOrNull() ?: "?"
     val screenText = synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[sid] }?.list?.joinToString(" ") { it.text }.orEmpty()
     val kind = consentClass(context, pkg, l, besideInput, screenText) ?: return
-    val app = VScreenKnowledge.label(pkg) ?: pkg
+    val app = ScreenText.clean(VScreenKnowledge.label(pkg) ?: pkg, maxLen = 40)
     if (fromRule) {
         throw StepRefused(
             "CONFIRM_PENDING",
             tr(
-                "规则不能自动点击付费/不可撤销按钮“${l.take(20)}”（$app）：需要用户确认，整条 act 已中止",
-                "Rules cannot auto-tap payment / irreversible button \"${l.take(20)}\" ($app): user confirmation required, act aborted",
+                "规则不能自动点击付费/不可撤销按钮 ${ScreenText.quote(safeL, maxLen = 20)}（$app）：需要用户确认，整条 act 已中止",
+                "Rules cannot auto-tap payment / irreversible button ${ScreenText.quote(safeL, maxLen = 20)} ($app): user confirmation required, act aborted",
             ),
         )
     }
     try {
         val what = when (kind) {
-            com.kilon.agentvscreen.host.Consent.MONEY -> tr("点击支付按钮“${l.take(20)}”", "tap the payment button \"${l.take(20)}\"")
-            com.kilon.agentvscreen.host.Consent.DESTROY -> tr("点击不可撤销操作“${l.take(20)}”", "tap \"${l.take(20)}\" (irreversible)")
-            else -> tr("点击敏感操作“${l.take(20)}”", "tap \"${l.take(20)}\" (sensitive)")
+            com.kilon.agentvscreen.host.Consent.MONEY -> tr("点击支付按钮 ${ScreenText.quote(safeL, maxLen = 20)}", "tap the payment button ${ScreenText.quote(safeL, maxLen = 20)}")
+            com.kilon.agentvscreen.host.Consent.DESTROY -> tr("点击不可撤销操作 ${ScreenText.quote(safeL, maxLen = 20)}", "tap ${ScreenText.quote(safeL, maxLen = 20)} (irreversible)")
+            else -> tr("点击敏感操作 ${ScreenText.quote(safeL, maxLen = 20)}", "tap ${ScreenText.quote(safeL, maxLen = 20)} (sensitive)")
         }
-        com.kilon.agentvscreen.host.Consent.require(context, "commit:$pkg:${VScreenOcr.norm(l).take(40)}", what,
-            tr("在 $app 里点 ($x,$y) 的“${l.take(30)}”", "tap \"${l.take(30)}\" at ($x,$y) in $app"), kind = kind, pkg = pkg)
-    } catch (e: ActionError) { throw StepRefused(e.code, e.message ?: e.code) }
+        com.kilon.agentvscreen.host.Consent.require(
+            context,
+            "commit:$pkg:${VScreenOcr.norm(l).take(40)}",
+            what,
+            tr("在 $app 里点 ($x,$y) 的 ${ScreenText.quote(safeL, maxLen = 30)}", "tap ${ScreenText.quote(safeL, maxLen = 30)} at ($x,$y) in $app"),
+            kind = kind,
+            pkg = pkg,
+            screenLabel = safeL,
+        )
+    } catch (e: ActionError) { throw StepRefused(e.code, e.message ?: e.code, e.data) }
 }
 
 /**
@@ -1744,6 +1764,9 @@ internal fun VScreenOffloadHandler.payGuardCheck(sid: String, displayId: Int, la
 internal fun consentClass(ctx: android.content.Context, pkg: String, label: String, besideInput: Boolean, screenText: String): String? {
     VScreenGame.consentKind(label, besideInput)?.let { return it }
     if (!CONFIRM_WORD.matches(label.trim())) return null
+    if (VScreenGame.REAL_MONEY.containsMatchIn(screenText) && PAYMENT_CONTEXT.containsMatchIn(screenText)) {
+        return com.kilon.agentvscreen.host.Consent.MONEY
+    }
     val sys = SystemDialogs.of(ctx)
     return when {
         pkg in sys.uninstallers && UNINSTALL_TEXT.containsMatchIn(screenText) -> com.kilon.agentvscreen.host.Consent.DESTROY
@@ -1753,6 +1776,7 @@ internal fun consentClass(ctx: android.content.Context, pkg: String, label: Stri
 }
 
 private val CONFIRM_WORD = Regex("^(确定|确认|好|好的|是|继续|卸载|删除|清除|ok|yes|continue|uninstall|delete|clear)$", RegexOption.IGNORE_CASE)
+private val PAYMENT_CONTEXT = Regex("付款方式|支付方式|账户余额|零钱|银行卡|信用卡|储蓄卡|花呗|白条|免密|刷脸支付|指纹支付|实付款|应付金额|payment method|pay with|wallet balance|bank card|credit card|debit card|autopay|checkout|order total", RegexOption.IGNORE_CASE)
 private val UNINSTALL_TEXT = Regex("卸载|uninstall", RegexOption.IGNORE_CASE)
 private val CLEAR_DATA_TEXT = Regex("清除数据|清除存储|清除应用数据|删除应用数据|清空数据|删除所有数据|clear data|clear storage|delete app data|all.*data.*deleted", RegexOption.IGNORE_CASE)
 
@@ -1772,9 +1796,8 @@ internal class SystemDialogs(val uninstallers: Set<String>, val settings: Set<St
     }
 }
 
-/** The user's per-app rule for the app on the screen (read-only: no taps / typing / gestures; blocked: only key back; ask: confirmed on the phone). */
+/** The user's per-app rule (and built-in financial app default) for the app on the screen. */
 internal fun VScreenOffloadHandler.appRule(d: VScreenDisplay, step: Step, fromRule: Boolean = false) {
-    if (VScreenStore.rules.value.isEmpty()) return
     val pkg = runCatching { VScreenShell.topPackage(d.displayId) }.getOrNull() ?: return
     appRuleForPkg(pkg, step, fromRule)
 }
@@ -1788,7 +1811,7 @@ internal fun VScreenOffloadHandler.appRuleForPkg(pkg: String, step: Step, fromRu
     when (val v = com.kilon.agentvscreen.core.Guard.check(act, pkg)) {
         is com.kilon.agentvscreen.core.Guard.Verdict.Deny -> throw StepRefused(v.code, v.text)
         is com.kilon.agentvscreen.core.Guard.Verdict.Ask -> {
-            val app = VScreenKnowledge.label(pkg) ?: pkg
+            val app = ScreenText.clean(VScreenKnowledge.label(pkg) ?: pkg, maxLen = 40)
             if (fromRule) {
                 throw StepRefused(
                     "CONFIRM_PENDING",
@@ -1799,7 +1822,7 @@ internal fun VScreenOffloadHandler.appRuleForPkg(pkg: String, step: Step, fromRu
                 )
             }
             try { com.kilon.agentvscreen.host.Consent.require(context, v.key, tr("在 $app 里操作", "act in $app"), tr("这一段从“${step.raw.take(40)}”开始", "this stretch starts with \"${step.raw.take(40)}\""), kind = com.kilon.agentvscreen.host.Consent.APP, pkg = pkg) }
-            catch (e: ActionError) { throw StepRefused(e.code, e.message ?: e.code) }
+            catch (e: ActionError) { throw StepRefused(e.code, e.message ?: e.code, e.data) }
         }
         else -> {}
     }
@@ -1872,7 +1895,7 @@ private fun VScreenOffloadHandler.doAction(
     appRule(d, step, fromRule = fromRule)
     if (fromRule || step.kind in setOf(StepKind.TAP, StepKind.PRESS, StepKind.SWIPE, StepKind.DRAG, StepKind.SCROLL, StepKind.TYPE, StepKind.KEY)) {
         com.kilon.agentvscreen.host.Risk.recordInputAction(Call.current()?.tokenId)
-        try { com.kilon.agentvscreen.host.Risk.checkRate(context, Call.current()) } catch (e: ActionError) { throw StepRefused(e.code, e.message ?: e.code) }
+        try { com.kilon.agentvscreen.host.Risk.checkRate(context, Call.current()) } catch (e: ActionError) { throw StepRefused(e.code, e.message ?: e.code, e.data) }
     }
     ctx.point = null
     var miss: String? = null
@@ -2101,19 +2124,26 @@ private fun VScreenOffloadHandler.doAction(
                     f.field == null -> {
                         tr("按 ${f.method} 发了 ${text.length} 个字；读不到输入框（网页或自绘的界面），确认不了字落在哪，看截图核对", "sent ${text.length} characters by ${f.method}; no input box could be read (a web page or self-drawn screen), so where the text landed is unconfirmed: check the screenshot")
                     }
-                    f.unreadable -> tr("按 ${f.method} 发了 ${text.length} 个字；输入框$where 的内容读不出来（网页或自绘的框，读到的还是原来的“${f.field.take(40)}”），看截图核对",
-                        "sent ${text.length} characters by ${f.method}; the input box$where cannot be read back (a web page or self-drawn box still reads \"${f.field.take(40)}\"); check the screenshot")
+                    f.unreadable -> {
+                        typedField = f.field
+                        val qf = ScreenText.quote(f.field, maxLen = 40)
+                        tr("按 ${f.method} 发了 ${text.length} 个字；输入框$where 的内容读不出来（网页或自绘的框，读到的还是原来的 $qf），看截图核对",
+                            "sent ${text.length} characters by ${f.method}; the input box$where cannot be read back (a web page or self-drawn box still reads $qf); check the screenshot")
+                    }
                     f.password -> tr("输入 ${text.length} 个字（${f.method}）；密码框$where 现在 ${f.field.length} 个字符", "typed ${text.length} characters (${f.method}); password box$where now holds ${f.field.length} characters")
-                    !f.field.contains(text) -> {
+                    !f.field.contains(ScreenText.clean(text, maxLen = 0)) -> {
+                        typedField = f.field
+                        val qf = ScreenText.quote(f.field, maxLen = 60)
                         missCode = "TYPE_FAILED"
-                        miss = tr("输入框$where 现在是“${f.field.take(60)}”，不含你输入的字（这个框可能不收这种输入，或焦点在别处）", "The input box$where now reads \"${f.field.take(60)}\" without your text (this box may not accept this kind of input, or focus is elsewhere)")
-                        tr("按 ${f.method} 发了 ${text.length} 个字；输入框$where 现在是“${f.field.take(60)}”，不含你输入的字", "sent ${text.length} characters by ${f.method}; the input box$where now reads \"${f.field.take(60)}\" without your text")
+                        miss = tr("输入框$where 现在是 $qf，不含你输入的字（这个框可能不收这种输入，或焦点在别处）", "The input box$where now reads $qf without your text (this box may not accept this kind of input, or focus is elsewhere)")
+                        tr("按 ${f.method} 发了 ${text.length} 个字；输入框$where 现在是 $qf，不含你输入的字", "sent ${text.length} characters by ${f.method}; the input box$where now reads $qf without your text")
                     }
                     else -> {
                         typeVerified = true
                         typedField = f.field
                         typedBounds = f.bounds
-                        tr("输入 ${text.length} 个字（${f.method}）；输入框$where 现在是“${f.field.take(60)}”", "typed ${text.length} characters (${f.method}); the input box$where now reads \"${f.field.take(60)}\"")
+                        val qf = ScreenText.quote(f.field, maxLen = 60)
+                        tr("输入 ${text.length} 个字（${f.method}）；输入框$where 现在是 $qf", "typed ${text.length} characters (${f.method}); the input box$where now reads $qf")
                     }
                 }) + viaTag(actionVia)
             }
@@ -2274,7 +2304,7 @@ internal fun VScreenOffloadHandler.act(sid: String?, args: OffloadArgs): NativeO
         VScreenMap.saveSegment(app, name.trim(), body)
         lines += tr("已存为 $app 的段“${name.trim()}”（以后 use ${name.trim()}）", "Saved as segment \"${name.trim()}\" of $app (use ${name.trim()} from now on)")
     } else if (args.get("save") != null && steps.isNotEmpty()) out.notes += tr("这段没按预期做完，没有存成段", "The stretch did not go as expected, so it was not saved as a segment")
-    keep?.let { k -> startKeep(s, d, args.get("stop")!!, k, args.getLong("for") ?: 3_600_000L, out.notes) }
+    val keepName = keep?.let { k -> startKeep(s, d, args.get("stop")!!, k, args.getLong("for") ?: 3_600_000L, out.notes) }
     takeAdjusted().forEach { out.notes += tr("参数被调整：$it", "options adjusted: $it") }
     // The user's "blocked" apps are never read or shown, whichever way the stretch got there.
     val pkgNow = runCatching { VScreenShell.topPackage(d.displayId) }.getOrNull()
@@ -2320,7 +2350,7 @@ internal fun VScreenOffloadHandler.act(sid: String?, args: OffloadArgs): NativeO
         hasRules = rules.isNotEmpty(),
         usedHold = wantHold,
     )
-    return fourBlocks(
+    val res = fourBlocks(
         s, d, lines, out.notes, out.start, out.actionMs, "act",
         fullList = steps.isEmpty() || fullFlag,
         steps = out.steps,
@@ -2328,6 +2358,16 @@ internal fun VScreenOffloadHandler.act(sid: String?, args: OffloadArgs): NativeO
         stoppedAt = out.stoppedAt,
         actLoud = loudCtx,
     )
+    out.errorData?.let { extra ->
+        val dJson = res.data
+        if (dJson != null) {
+            for (k in extra.keys()) {
+                if (!dJson.has(k)) dJson.put(k, extra.get(k))
+            }
+        }
+    }
+    if (keepName != null) res.data?.put("keep", keepName)
+    return res
 }
 
 /** The now block of an app the user blocked: nothing of it is read or shown. */
@@ -2365,16 +2405,17 @@ internal fun VScreenOffloadHandler.keepHost(spec: String): VScreenRules.Host {
 object KeepHosts { internal fun VScreenOffloadHandler.host(cond: String): VScreenRules.Host = keepHost(cond) }
 
 /** Start watching the stop condition after the turn; what was started (or why not) goes to [notes]. */
-private fun VScreenOffloadHandler.startKeep(sid: String, d0: VScreenDisplay, spec: String, how: String, forMs0: Long, notes: Notes) {
+private fun VScreenOffloadHandler.startKeep(sid: String, d0: VScreenDisplay, spec: String, how: String, forMs0: Long, notes: Notes): String? {
     val forMs = bounded("for", forMs0, 10_000L, 12 * 3_600_000L)
     val app = runCatching { VScreenShell.topPackage(d0.displayId) }.getOrNull()
     val me = Call.current()?.tokenId ?: com.kilon.agentvscreen.api.Agents.ofSession(sid)
     val spec2 = VScreenRules.Spec(VScreenRules.nextName(me), sid, spec, app, 1_000L, forMs, wake = how == "wake", notify = how == "notify", agentId = me)
-    val l = try { VScreenRules.start(spec2, keepHost(spec)) } catch (e: IllegalStateException) { notes.add("KEEP_LIMIT", e.message ?: "KEEP_LIMIT"); return }
+    val l = try { VScreenRules.start(spec2, keepHost(spec)) } catch (e: IllegalStateException) { notes.add("KEEP_LIMIT", e.message ?: "KEEP_LIMIT"); return null }
     val warn = if (how == "notify") VScreenHandoff.notifyBlocked(context)?.let { tr("；但通知发不出去（$it）：请用户打开 Agent-VScreen 的通知，或改用 --keep wake", "; but notifications can't be sent ($it): ask the user to allow Agent-VScreen notifications, or use --keep wake") } else null
     notes += tr("本轮之后继续盯「${l.spec.name}」：$spec，最长 ${forMs / 60_000} 分钟，看到就${if (how == "wake") "发一条事件（vscreen events --wait 取）" else "通知用户"}，然后结束",
         "After this turn, keep watching \"${l.spec.name}\": $spec, for up to ${forMs / 60_000} minutes; when seen it ${if (how == "wake") "sends an event (collect with vscreen events --wait)" else "notifies the user"}, then ends") +
         (warn ?: "") + tr("。副屏会保持在这一页；App 重启后盯守还在；keep 查看，keep off ${l.spec.name} 取消。告诉用户你在盯什么、多久", ". The screen stays on this page; the watch survives an app restart; keep lists watches, keep off ${l.spec.name} cancels. Tell the user what you are watching and for how long")
+    return l.spec.name
 }
 
 // ── launch ──────────────────────────────────────────────────────────
@@ -2456,7 +2497,23 @@ internal fun VScreenOffloadHandler.launchCmd(sid: String?, args: OffloadArgs): N
     val m = VScreenMap.load(pkg)
     val verNow = appVersion(pkg)
     done += formatLaunchMapLines(m, verNow)
+    val fnCount = com.kilon.agentvscreen.core.AppFunctions.cachedCount(pkg)
+    if (fnCount > 0) {
+        done += tr(
+            "可用结构化接口：$fnCount 个 AppFunctions（用 fn $pkg 查看）",
+            "Available structured functions: $fnCount AppFunctions (inspect with fn $pkg)",
+        )
+    }
     val notes = facts.notes
+    if (com.kilon.agentvscreen.core.FinanceApps.isFinancial(pkg) && VScreenStore.explicitRuleFor(pkg) != VScreenStore.Rule.ALLOW) {
+        notes.add(
+            "FINANCE_APP_RISK",
+            tr(
+                "该应用属于金融/支付类，已默认设为每次确认；自动化操作可能触发账号安全风控，必要时建议用 handoff out 交给用户在主屏完成",
+                "This is a finance/payment app with confirm-every-time enabled by default; automated actions may trigger account risk controls. Consider using handoff out so the user finishes sensitive steps on the main screen",
+            ),
+        )
+    }
     mainCheckLines(main0, s)?.let { notes.add("MAIN_SCREEN_CHANGED", it) }
     muteNote(d)?.let { notes += it }
     takeAdjusted().forEach { notes += tr("参数被调整：$it", "options adjusted: $it") }

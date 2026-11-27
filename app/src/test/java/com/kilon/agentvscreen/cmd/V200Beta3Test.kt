@@ -405,7 +405,7 @@ class V200Beta3Test {
             "2 tap #12 → text:已连接 ✓ 1.1s",
             "3 key back → app:设置 ✓ 0.1s",
             "现在 P5：和第 6 轮相比 +1 −0，其余 22 个不变",
-            "+ #24 耳机 Pro [120,880,960,960]",
+            "+ #24 “耳机 Pro” [120,880,960,960]",
             quietEscapeLine(),
         ).joinToString("\n") + "\n"
 

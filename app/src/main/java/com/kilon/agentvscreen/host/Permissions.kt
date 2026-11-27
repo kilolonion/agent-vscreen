@@ -87,6 +87,7 @@ object Permissions {
             .put("apps_confirm_every_time", JSONArray(VScreenStore.rules.value.filter { it.value == VScreenStore.Rule.ASK }.keys.toList()))
             .put("apps_blocked", JSONArray(VScreenStore.rules.value.filter { it.value == VScreenStore.Rule.BLOCK }.keys.toList()))
             .put("apps_read_only", JSONArray(VScreenStore.rules.value.filter { it.value == VScreenStore.Rule.READONLY }.keys.toList()))
+            .put("finance_apps_default_ask", true)
             .put("fixed", JSONArray().apply {
                 put(tr("支付每次都单独确认，不能申请免确认", "every payment is confirmed on its own and cannot be asked away"))
                 if (public) put(tr("公网 MCP 不开放系统操作", "system actions are never available over public MCP"))

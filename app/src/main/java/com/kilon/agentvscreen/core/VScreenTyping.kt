@@ -199,14 +199,15 @@ object VScreenTyping {
             if (seen || android.os.SystemClock.elapsedRealtime() >= until || com.kilon.agentvscreen.cmd.Call.current()?.cancelled == true) break
         }
         // A password box gives its length only: what is in it never leaves the phone.
-        val now = after?.let { if (it.isPassword) "•".repeat(fieldText(it).length) else fieldText(it) }
+        val nowRaw = after?.let { if (it.isPassword) "•".repeat(fieldText(it).length) else fieldText(it) }
         val ab = after?.let { n -> Rect().also { n.getBoundsInScreen(it) } }?.let { d?.toFrame(it) ?: it }
-        val unreadable = !wrote && after != null && !after.isPassword && now?.contains(text) != true && after.text?.toString() == rawBefore
+        val unreadable = !wrote && after != null && !after.isPassword && nowRaw?.contains(text) != true && after.text?.toString() == rawBefore
+        val now = nowRaw?.let { if (after?.isPassword == true) it else com.kilon.agentvscreen.cmd.ScreenText.clean(it, maxLen = 120) }
         return TypeFact(
             method = method,
             field = now,
             bounds = ab,
-            fieldId = after?.viewIdResourceName?.substringAfterLast('/'),
+            fieldId = after?.viewIdResourceName?.substringAfterLast('/')?.let { com.kilon.agentvscreen.cmd.ScreenText.clean(it, maxLen = 64) },
             password = after?.isPassword == true,
             unreadable = unreadable,
             viaA11y = wrote,

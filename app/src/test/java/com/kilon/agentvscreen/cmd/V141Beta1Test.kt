@@ -117,8 +117,8 @@ class V141Beta1Test {
         assertEquals(id, query(owner, id).data!!.getString("task"))
         for (other in listOf(Call("other", Tokens.MAIN, "main", scopes, "local"), Call("work", "other", "other", scopes, "local"))) {
             assertFalse(query(other).output.contains(id))
-            assertEquals("NOT_FOUND", query(other, id).code)
-            assertEquals("NOT_FOUND", query(other, "cancel", id).code)
+            assertEquals("TASK_NOT_FOUND", query(other, id).code)
+            assertEquals("TASK_NOT_FOUND", query(other, "cancel", id).code)
         }
     }
 

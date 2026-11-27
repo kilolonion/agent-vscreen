@@ -486,13 +486,35 @@ class ApiServer(private val ctx: Context) {
     }
 
     /** Writes server-sent events on a response that stays open while a command runs. */
-    class Emitter(private val out: OutputStream) {
+    class Emitter(private val out: OutputStream, private val chunked: Boolean = false) {
+        private var finished = false
+
         @Synchronized fun send(event: String?, data: String) {
+            if (finished) return
             val sb = StringBuilder()
             event?.let { sb.append("event: ").append(it).append('\n') }
             data.split('\n').forEach { sb.append("data: ").append(it).append('\n') }
             sb.append('\n')
-            out.write(sb.toString().toByteArray()); out.flush()
+            val bytes = sb.toString().toByteArray(Charsets.UTF_8)
+            if (chunked) {
+                out.write("${bytes.size.toString(16)}\r\n".toByteArray(Charsets.US_ASCII))
+                out.write(bytes)
+                out.write("\r\n".toByteArray(Charsets.US_ASCII))
+            } else {
+                out.write(bytes)
+            }
+            out.flush()
+        }
+
+        @Synchronized fun finish() {
+            if (finished) return
+            finished = true
+            if (chunked) {
+                runCatching {
+                    out.write("0\r\n\r\n".toByteArray(Charsets.US_ASCII))
+                    out.flush()
+                }
+            }
         }
     }
 
@@ -834,7 +856,10 @@ class ApiServer(private val ctx: Context) {
             val other = synchronized(flights) {
                 val now = System.currentTimeMillis()
                 flights.entries.removeAll { it.value.res != null && now - it.value.at > IDEM_MS }
-                while (flights.size > IDEM_MAX) flights.remove(flights.keys.first())
+                while (flights.size >= IDEM_MAX) {
+                    val finishedKey = flights.entries.firstOrNull { it.value.res != null }?.key ?: break
+                    flights.remove(finishedKey)
+                }
                 flights[key] ?: run { mine = Flight(call).also { flights[key] = it }; null }
             }
             if (other != null) {

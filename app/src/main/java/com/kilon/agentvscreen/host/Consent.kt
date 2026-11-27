@@ -43,7 +43,7 @@ object Consent {
      * "confirm every time" always asks. [pkg]: the app the step is in; an allow for "this run" or "today" covers the same
      * [kind] in the same app for the same agent.
      */
-    fun require(ctx: Context, key: String, title: String, detail: String, kind: String = MONEY, pkg: String = "*") {
+    fun require(ctx: Context, key: String, title: String, detail: String, kind: String = MONEY, pkg: String = "*", screenLabel: String? = null) {
         val call = Call.current()
         val name = call?.tokenName ?: "main"; val session = call?.session ?: "default"
         val act = actFor(kind, call)
@@ -70,7 +70,7 @@ object Consent {
         if (act == com.kilon.agentvscreen.api.Policy.Act.ALLOW) {
             Audit.consent(name, session, "$title — $detail", "automatic"); return
         }
-        StrongConfirm.requireForConsent(ctx, call, key, title, detail, kind, pkg, WAIT_MS, VALID_MS)
+        StrongConfirm.requireForConsent(ctx, call, key, title, detail, kind, pkg, WAIT_MS, VALID_MS, screenLabel = screenLabel)
     }
 
     /** How [kind] is handled for the agent behind [call] (an app rule always asks). */

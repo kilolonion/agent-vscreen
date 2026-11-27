@@ -74,6 +74,7 @@ object PublicOAuth {
         val requestedScope: String?,
         var tokenId: String?,
         val createdAt: Long,
+        val verifiedDomain: String? = null,
     ) {
         fun json(): JSONObject = JSONObject()
             .put("client_id", clientId)
@@ -82,6 +83,7 @@ object PublicOAuth {
             .put("requested_scope", requestedScope ?: JSONObject.NULL)
             .put("token_id", tokenId ?: JSONObject.NULL)
             .put("created_at", createdAt)
+            .apply { if (verifiedDomain != null) put("verified_domain", verifiedDomain) }
 
         companion object {
             fun fromJson(o: JSONObject): RegisteredClient? {
@@ -92,7 +94,8 @@ object PublicOAuth {
                 if (uris.isEmpty()) return null
                 val reqScope = o.optString("requested_scope").takeIf { it.isNotBlank() && !o.isNull("requested_scope") }
                 val tid = o.optString("token_id").takeIf { it.isNotBlank() && !o.isNull("token_id") }
-                return RegisteredClient(id, name, uris, reqScope, tid, o.optLong("created_at", 0L))
+                val vd = o.optString("verified_domain").takeIf { it.isNotBlank() && !o.isNull("verified_domain") }
+                return RegisteredClient(id, name, uris, reqScope, tid, o.optLong("created_at", 0L), vd)
             }
         }
     }
@@ -192,6 +195,7 @@ object PublicOAuth {
         val sourceBucket: String = "unknown",
         val sourceDisplay: String? = null,
         val issuer: String = "",
+        val verifiedDomain: String? = null,
     ) {
         /**
          * Pairing lifecycle:
@@ -534,6 +538,7 @@ object PublicOAuth {
                 .put("code_challenge_methods_supported", JSONArray().put("S256"))
                 .put("token_endpoint_auth_methods_supported", JSONArray().put("none"))
                 .put("authorization_response_iss_parameter_supported", true)
+                .put("client_id_metadata_document_supported", true)
                 .put("scopes_supported", JSONArray(ALLOWED_SCOPES)),
         )
     }
@@ -765,6 +770,41 @@ object PublicOAuth {
 
     // ── Authorization + Pairing page (7.2, 7.3, 7.7, 7.8 #5–#6) ────────────
 
+    private fun resolveClient(clientId: String, src: String, unknownMsg: String): Pair<RegisteredClient?, ApiServer.Resp?> {
+        if (CimdResolver.isCimdClientId(clientId)) {
+            if (!pairingAllowedCheck()) {
+                Audit.security("public_cimd_window_closed", "src=$src client=$clientId")
+                return null to oauthError(403, "access_denied", "Pairing window is closed on the phone")
+            }
+            return when (val r = CimdResolver.resolve(clientId, src)) {
+                is CimdResolver.Result.Error -> null to oauthError(r.httpStatus, r.oauthError, r.description)
+                is CimdResolver.Result.Ok -> {
+                    val doc = r.doc
+                    val now = nowMs()
+                    val upserted = synchronized(lock) {
+                        val existing = clients[clientId]
+                        val updated = RegisteredClient(
+                            clientId = clientId,
+                            clientName = doc.clientName,
+                            redirectUris = doc.redirectUris,
+                            requestedScope = doc.requestedScope,
+                            tokenId = existing?.tokenId,
+                            createdAt = existing?.createdAt ?: now,
+                            verifiedDomain = doc.verifiedDomain,
+                        )
+                        clients[clientId] = updated
+                        saveLocked()
+                        updated
+                    }
+                    upserted to null
+                }
+            }
+        }
+        val existing = synchronized(lock) { clients[clientId] }
+            ?: return null to oauthError(400, "invalid_client", unknownMsg)
+        return existing to null
+    }
+
     fun handleAuthorize(ctx: Context, r: ApiServer.Req, base: String): ApiServer.Resp {
         val now = nowMs()
         val responseType = r.q("response_type")
@@ -773,8 +813,10 @@ object PublicOAuth {
         }
         val clientId = r.q("client_id")?.takeIf { it.isNotBlank() }
             ?: return oauthError(400, "invalid_request", "client_id is required")
-        val client = synchronized(lock) { clients[clientId] }
-            ?: return oauthError(400, "invalid_client", "Unknown client_id")
+        val rawSrc = r.headers["x-avs-public-src"]
+        val src = sourceBucket(rawSrc)
+        val (client, clientErr) = resolveClient(clientId, src, "Unknown client_id")
+        if (clientErr != null || client == null) return clientErr ?: oauthError(400, "invalid_client", "Unknown client_id")
 
         val redirectUri = r.q("redirect_uri")?.takeIf { it.isNotBlank() }
             ?: return oauthError(400, "invalid_request", "redirect_uri is required")
@@ -810,8 +852,6 @@ object PublicOAuth {
         val state = r.q("state")
         val selectableScopes = resolveSelectableScopes(client.requestedScope, r.q("scope"))
         val redirectHost = runCatching { URI(redirectUri).host }.getOrNull().orEmpty()
-        val rawSrc = r.headers["x-avs-public-src"]
-        val src = sourceBucket(rawSrc)
         val srcDisplay = sourceDisplay(rawSrc)
 
         val pairing = when (val started = startPairing(client, redirectUri, redirectHost, challenge, boundResource, state, selectableScopes, src, srcDisplay, null, base.trimEnd('/'))) {
@@ -895,6 +935,7 @@ object PublicOAuth {
                 sourceBucket = src,
                 sourceDisplay = srcDisplay,
                 issuer = issuer,
+                verifiedDomain = client.verifiedDomain,
             )
             p.deviceCodeHash = deviceCodeHash
             pairings[pid] = p
@@ -1004,6 +1045,7 @@ object PublicOAuth {
                 validMs = validMs,
                 sourceAddress = pairing.sourceDisplay,
                 postNotify = false,
+                clientVerifiedDomain = pairing.verifiedDomain,
                 onApproveWithScope = { grantedScope ->
                     onPairingApproved(pairing, grantedScope, StrongConfirm.BY_BIOMETRIC)
                 },
@@ -1029,8 +1071,10 @@ object PublicOAuth {
         val form = HttpCore.parseForm(r.bodyText)
         fun f(k: String): String? = form[k]?.firstOrNull()?.takeIf { it.isNotBlank() }
         val clientId = f("client_id") ?: return oauthError(400, "invalid_request", "client_id is required")
-        val client = synchronized(lock) { clients[clientId] }
-            ?: return oauthError(400, "invalid_client", "Unknown client_id (register at /oauth/register first)")
+        val rawSrc = r.headers["x-avs-public-src"]
+        val src = sourceBucket(rawSrc)
+        val (client, clientErr) = resolveClient(clientId, src, "Unknown client_id (register at /oauth/register first)")
+        if (clientErr != null || client == null) return clientErr ?: oauthError(400, "invalid_client", "Unknown client_id")
         val expectedResource = mcpResource(base)
         val reqResource = f("resource")
         if (reqResource != null && !matchesResource(reqResource, expectedResource)) {
@@ -1041,8 +1085,6 @@ object PublicOAuth {
             return oauthError(403, "access_denied", "Public MCP requires a screen lock PIN or biometric on the phone")
         }
         val rawDevice = randomToken()
-        val rawSrc = r.headers["x-avs-public-src"]
-        val src = sourceBucket(rawSrc)
         val srcDisplay = sourceDisplay(rawSrc)
         val scopes = resolveSelectableScopes(client.requestedScope, f("scope"))
         val pairing = when (val started = startPairing(client, "", tr("无回调地址（设备码配对）", "no redirect (device code)"), "", expectedResource, null, scopes, src, srcDisplay, Tokens.sha256(rawDevice))) {
