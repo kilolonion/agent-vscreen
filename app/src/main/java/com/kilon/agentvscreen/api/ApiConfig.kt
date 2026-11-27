@@ -130,6 +130,11 @@ object ApiConfig {
         if (base == baseUrl) "curl -fsS $base/cli | sh -s -- install $token"
         else "curl -fsS $base/cli | VSCREEN_URL=$base sh -s -- install $token"
 
+    /** One-line CLI install using a 10-minute single-use onboarding code (keeps permanent tokens out of chats/argv). */
+    fun installLineForCode(base: String = baseUrl, code: String): String =
+        if (base == baseUrl) "curl -fsS $base/cli | VSCREEN_CODE=$code sh -s -- install"
+        else "curl -fsS $base/cli | VSCREEN_URL=$base VSCREEN_CODE=$code sh -s -- install"
+
     /** MCP client config (streamable HTTP). */
     fun mcpJson(base: String = baseUrl, token: String = this.token): String = """{
   "mcpServers": {

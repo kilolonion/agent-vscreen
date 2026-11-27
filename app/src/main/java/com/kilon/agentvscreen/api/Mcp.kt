@@ -58,10 +58,41 @@ internal object Mcp {
             null
         }
 
+    private fun isModernRevision(ver: String?): Boolean {
+        val v = ver?.trim() ?: return false
+        if (v.length < 10 || v[4] != '-' || v[7] != '-') return false
+        val year = v.substring(0, 4).toIntOrNull() ?: return false
+        return year >= 2026
+    }
+
+    /**
+     * Detect stateless MCP 2026-07-28 (or newer) requests so dual-stack clients receive a plain HTTP 400
+     * (without JSON-RPC -32022) and automatically fall back to legacy `initialize` negotiation.
+     */
+    internal fun isModern2026Request(r: ApiServer.Req, msg: JSONObject?): Boolean {
+        if (isModernRevision(r.headers["mcp-protocol-version"])) return true
+        if (r.headers.containsKey("mcp-method")) return true
+        if (msg?.optString("method") == "server/discover") return true
+        val metaVer = msg?.optJSONObject("params")?.optJSONObject("_meta")
+            ?.optString("io.modelcontextprotocol/protocolVersion")
+        if (isModernRevision(metaVer)) return true
+        return false
+    }
+
+    private fun modernFallbackResp(): ApiServer.Resp = ApiServer.Resp.err(
+        400,
+        "UNSUPPORTED_MCP_PROTOCOL",
+        "This MCP server currently supports initialization-based revisions (2025-06-18, 2025-03-26, 2024-11-05); retry with initialize.",
+    )
+
     fun handle(server: ApiServer, r: ApiServer.Req): ApiServer.Resp {
         val body = r.bodyText.trim()
         if (body.startsWith("[")) {
             val arr = runCatching { JSONArray(body) }.getOrElse { return ApiServer.Resp.json(error(null, -32700, "parse error"), 400) }
+            if (isModern2026Request(r, null)) return modernFallbackResp()
+            for (i in 0 until arr.length()) {
+                if (isModern2026Request(r, arr.optJSONObject(i))) return modernFallbackResp()
+            }
             val out = JSONArray()
             val afterSends = ArrayList<() -> Unit>()
             for (i in 0 until arr.length()) one(server, r, arr.optJSONObject(i), null) { fn -> fn?.let { afterSends += it } }?.let { out.put(it) }
@@ -69,6 +100,7 @@ internal object Mcp {
             return (if (out.length() == 0) ApiServer.Resp(202, "text/plain", ByteArray(0)) else ApiServer.Resp.json(out)).withAfterSend(after)
         }
         val msg = runCatching { JSONObject(body) }.getOrElse { return ApiServer.Resp.json(error(null, -32700, "parse error"), 400) }
+        if (isModern2026Request(r, msg)) return modernFallbackResp()
         // A tool call that asked for progress, from a caller that reads an event stream: stream it.
         val token = msg.optJSONObject("params")?.optJSONObject("_meta")?.opt("progressToken")
         if (msg.optString("method") == "tools/call" && token != null && token != JSONObject.NULL && r.accepts("text/event-stream")) return ApiServer.Resp.sse { em ->
@@ -119,7 +151,8 @@ internal object Mcp {
                     else -> return error(id, -32602, "unknown tool $name")
                 }
                 val session = server.sessionOf(r, a)
-                val (res, replayed) = server.runFor(r, argv, session, p.optJSONObject("_meta")?.optString("requestId")?.takeIf { it.isNotBlank() }, onStep)
+                val reqId = p.optJSONObject("_meta")?.optString("requestId")?.trim()?.takeIf { it.isNotEmpty() }?.take(64)
+                val (res, replayed) = server.runFor(r, argv, session, reqId, onStep)
                 onAfterSend?.invoke(res.afterSend)
                 result(id, toolResult(server, res, replayed, session))
             }

@@ -42,6 +42,7 @@ class PublicServer(
      * at most it could pick its own rate-limit bucket.
      */
     private val cloudflareOrigin: Boolean = false,
+    private val onAuthenticatedActivity: () -> Unit = { PublicAccess.noteActivity() },
 ) {
     private val TAG = "PublicServer"
     private val pool = ThreadPoolExecutor(
@@ -126,7 +127,7 @@ class PublicServer(
                 val out = sock.getOutputStream()
                 synchronized(reading) { reading[sock] = System.currentTimeMillis() }
                 val req0 = try {
-                    HttpCore.readRequest(inp)
+                    HttpCore.readRequest(inp, sock)
                 } catch (e: HttpError) {
                     HttpCore.writeResponse(out, ApiServer.Resp.err(e.status, e.code, e.message ?: e.code), apiServer.cliVersion())
                     return
@@ -150,7 +151,7 @@ class PublicServer(
                     route(req)
                 } catch (t: Throwable) {
                     AppLogger.error(TAG, "route ${req.path}", t)
-                    ApiServer.Resp.err(500, "INTERNAL_ERROR", "${t.javaClass.simpleName}: ${t.message}")
+                    ApiServer.Resp.err(500, "INTERNAL_ERROR", tr("服务器内部错误，请稍后重试", "Internal server error; please retry shortly"))
                 }
                 afterSend = resp.afterSend
                 HttpCore.writeResponse(out, resp, apiServer.cliVersion())
@@ -163,8 +164,8 @@ class PublicServer(
     internal fun fromCloudflare(r: ApiServer.Req): ApiServer.Req {
         val h = r.headers.filterKeys { k -> !k.startsWith("x-avs-") && k != "x-vscreen-tailnet" }.toMutableMap()
         h["x-avs-public"] = secretProvider()
-        // Only an IP literal (never resolved as a name).
-        r.headers["cf-connecting-ip"]?.trim()?.takeIf { ip -> ip.length in 2..45 && ip.all { c -> c.isDigit() || c in 'a'..'f' || c in 'A'..'F' || c == '.' || c == ':' } }
+        // Only a syntactically valid IPv4/IPv6 literal (never resolved as a name).
+        r.headers["cf-connecting-ip"]?.trim()?.takeIf { PublicOAuth.isValidIpLiteral(it) }
             ?.let { h["x-avs-public-src"] = it }
         return ApiServer.Req(r.method, r.target, r.query, h, r.body)
     }
@@ -179,7 +180,6 @@ class PublicServer(
 
         // 7.7: mark public BEFORE any downstream logic so X-VScreen-Tailnet can NEVER elevate this request.
         r.viaPublic = true
-        PublicAccess.noteActivity()
         val base = baseOverride ?: PublicOAuth.publicBase(r, baseProvider())
 
         return when (r.path) {
@@ -213,7 +213,9 @@ class PublicServer(
                 else methodNotAllowed("GET")
 
             "/oauth/token" ->
-                if (r.method == "POST") PublicOAuth.handleToken(r, base)
+                if (r.method == "POST") PublicOAuth.handleToken(r, base).also { resp ->
+                    if (resp.status == 200) onAuthenticatedActivity()
+                }
                 else methodNotAllowed("POST")
 
             "/mcp" -> handleMcp(r, base)
@@ -233,7 +235,7 @@ class PublicServer(
         val srcFailKey = "public-src:$srcBucket"
         // 2.0.0-beta11 (test P7: ten bad Bearers from one address locked the paired client there out for 5 minutes):
         // the source lock stops guessing, so it applies to requests without a valid credential only. A valid token
-        // (random, 256 bits) is not a guess; its own client still has its own lock.
+        // (random, 256 bits) is not a guess and cannot be locked out by an attacker replaying a stale/revoked token.
 
         val prmUrl = "${base.trimEnd('/')}/.well-known/oauth-protected-resource"
         val wwwAuth = mapOf("WWW-Authenticate" to """Bearer resource_metadata="$prmUrl"""")
@@ -249,19 +251,13 @@ class PublicServer(
             null
         }
         val access = when (val chk = PublicOAuth.inspectAccessToken(bearer, PublicOAuth.mcpResource(base))) {
-            is PublicOAuth.AccessCheck.Valid -> {
-                val clientFailKey = "public-client:${chk.auth.clientId}"
-                apiServer.failLimiter.checkLocked(clientFailKey, remote = true)?.let { return it }
-                chk.auth
-            }
+            is PublicOAuth.AccessCheck.Valid -> chk.auth
             is PublicOAuth.AccessCheck.Invalid -> {
                 apiServer.failLimiter.checkLocked(srcFailKey, remote = true)?.let { return it }
-                // Section I: unknown Bearer counts ONLY against source bucket (never global lockout);
-                // known client's invalid/expired/wrong-resource token counts by client_id.
-                val failKey = chk.knownClientId?.let { "public-client:$it" } ?: srcFailKey
-                apiServer.failLimiter.checkLocked(failKey, remote = true)?.let { return it }
+                // Charge invalid/expired/revoked Bearer failures strictly to the caller's source bucket so
+                // replaying an expired or revoked token can never DoS-lock a legitimate client's active token.
                 return apiServer.failLimiter.recordFailure(
-                    who = failKey,
+                    who = srcFailKey,
                     remote = true,
                     path = r.path,
                     code = "BAD_TOKEN",
@@ -273,6 +269,7 @@ class PublicServer(
             }
         }
 
+        onAuthenticatedActivity()
         r.publicClientId = access.clientId
         r.publicScope = access.scope
         r.auth = ApiServer.Auth(access.token, signed = false, nonce = null)

@@ -105,12 +105,31 @@ class ShizukuBackend(private val appContext: Context) {
     fun isSui(): Boolean = runCatching { Sui.isSui() }.getOrDefault(false)
 
     /**
-     * The first installed Shizuku-protocol manager package (in preference
-     * order: official Shizuku, then AXManager), or null if none installed.
-     * Used to drive "open the manager app" actions.
+     * All discovered Shizuku-protocol manager packages on this device using 3-tier discovery:
+     *   1. Authoritative owner of `moe.shizuku.manager.permission.API_V23` (works for renamed forks)
+     *   2. Activities handling `moe.shizuku.manager.intent.action.REQUEST_PERMISSION`
+     *   3. Known manager package list fallback
      */
-    fun installedManagerPackage(): String? = SHIZUKU_COMPATIBLE_PACKAGES.firstOrNull { pkg ->
-        runCatching { appContext.packageManager.getPackageInfo(pkg, 0); true }.getOrDefault(false)
+    fun discoveredManagerPackages(): List<String> = Companion.discoverManagerPackages(appContext.packageManager)
+
+    /**
+     * The first discovered Shizuku-protocol manager package (permission owner first, then intent handlers,
+     * then known list), or null if none installed.
+     */
+    fun installedManagerPackage(): String? = discoveredManagerPackages().firstOrNull()
+
+    /** Human-readable provider label for display in Settings/status (never gates state). */
+    fun providerLabel(): String? {
+        if (isSui()) return "Sui"
+        val pkg = installedManagerPackage() ?: return null
+        return when (pkg) {
+            SHIZUKU_PACKAGE -> "Shizuku"
+            AXMANAGER_PACKAGE -> "AXManager"
+            else -> runCatching {
+                val ai = appContext.packageManager.getApplicationInfo(pkg, 0)
+                appContext.packageManager.getApplicationLabel(ai).toString().trim().takeIf { it.isNotEmpty() }
+            }.getOrNull() ?: pkg
+        }
     }
 
     fun isBinderAlive(): Boolean =
@@ -236,10 +255,21 @@ class ShizukuBackend(private val appContext: Context) {
             )
             m.isAccessible = true
             m.invoke(null, argv, env, cwd)
-        }.getOrElse {
-            AppLogger.warning(TAG, "newProcess reflection failed: ${it.message}")
-            return ShizukuManager.ProcessResult(1, "", "shizuku.newProcess unavailable: ${it.message}")
-        } ?: return ShizukuManager.ProcessResult(1, "", "shizuku.newProcess returned null")
+        }.getOrElse { err ->
+            AppLogger.warning(TAG, "newProcess reflection failed: ${err.message}")
+            if (com.kilon.agentvscreen.core.VScreenRemoteDisplay.isConnected()) {
+                if (execFallbackLogged.compareAndSet(false, true)) {
+                    AppLogger.info(TAG, "Falling back from Shizuku.newProcess to VScreenDisplayService EXEC")
+                }
+                return com.kilon.agentvscreen.core.VScreenRemoteDisplay.exec(argv, env, cwd, timeoutMs)
+            }
+            return ShizukuManager.ProcessResult(1, "", "shizuku.newProcess unavailable: ${err.message}")
+        } ?: run {
+            if (com.kilon.agentvscreen.core.VScreenRemoteDisplay.isConnected()) {
+                return com.kilon.agentvscreen.core.VScreenRemoteDisplay.exec(argv, env, cwd, timeoutMs)
+            }
+            return ShizukuManager.ProcessResult(1, "", "shizuku.newProcess returned null")
+        }
 
         val proc = procAny as? Process ?: return ShizukuManager.ProcessResult(
             1, "",
@@ -316,13 +346,21 @@ class ShizukuBackend(private val appContext: Context) {
     companion object {
         private const val TAG = "ShizukuBackend"
 
-        // Known Shizuku-protocol manager packages. Order = UI install-preference.
-        // Sui is deliberately ABSENT: it is a root module, not an APK, and
-        // adding a package name for it would re-create the very whitelist trap
-        // that hid it (GH#110). Sui is detected purely by its live binder.
+        const val PERMISSION_API_V23 = "moe.shizuku.manager.permission.API_V23"
+        const val ACTION_REQUEST_PERMISSION = "moe.shizuku.manager.intent.action.REQUEST_PERMISSION"
+
+        // Known Shizuku-protocol manager packages (tier-3 fallback after dynamic permission owner + intent discovery).
+        // Sui is deliberately ABSENT: it is a root module, not an APK, detected purely by its live binder.
         const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
         const val AXMANAGER_PACKAGE = "frb.axeron.manager"
-        val SHIZUKU_COMPATIBLE_PACKAGES = listOf(SHIZUKU_PACKAGE, AXMANAGER_PACKAGE)
+        val KNOWN_MANAGER_PACKAGES = listOf(
+            SHIZUKU_PACKAGE,
+            AXMANAGER_PACKAGE,
+            "moe.shizuku.privileged.api.nightzuku",
+            "io.github.the0x01.shevery",
+            "com.nightzuku.manager",
+        )
+        val SHIZUKU_COMPATIBLE_PACKAGES = KNOWN_MANAGER_PACKAGES
 
         const val SHIZUKU_GITHUB_URL = "https://github.com/RikkaApps/Shizuku/releases"
         const val AXMANAGER_GITHUB_URL = "https://github.com/fahrez182/AxManager/releases"
@@ -331,6 +369,33 @@ class ShizukuBackend(private val appContext: Context) {
         const val PERMISSION_REQUEST_CODE = 0xC1A4D
 
         private val polledFallbackLogged = AtomicBoolean(false)
+        private val execFallbackLogged = AtomicBoolean(false)
+
+        /** Pure 3-tier manager package merger (unit-tested). */
+        internal fun discoverManagerPackages(
+            permissionOwner: String?,
+            intentActivityPackages: List<String>,
+            installedKnownPackages: List<String>,
+        ): List<String> {
+            val out = LinkedHashSet<String>()
+            permissionOwner?.trim()?.takeIf { it.isNotEmpty() }?.let { out += it }
+            for (p in intentActivityPackages) p.trim().takeIf { it.isNotEmpty() }?.let { out += it }
+            for (p in installedKnownPackages) p.trim().takeIf { it.isNotEmpty() }?.let { out += it }
+            return out.toList()
+        }
+
+        /** Query PackageManager using the 3-tier Shizuku/fork discovery pipeline. */
+        fun discoverManagerPackages(pm: PackageManager): List<String> {
+            val owner = runCatching { pm.getPermissionInfo(PERMISSION_API_V23, 0)?.packageName }.getOrNull()
+            val intentPkgs = runCatching {
+                pm.queryIntentActivities(Intent(ACTION_REQUEST_PERMISSION), PackageManager.MATCH_ALL)
+                    .mapNotNull { it.activityInfo?.packageName }
+            }.getOrDefault(emptyList())
+            val knownInstalled = KNOWN_MANAGER_PACKAGES.filter { pkg ->
+                runCatching { pm.getPackageInfo(pkg, 0); true }.getOrDefault(false)
+            }
+            return discoverManagerPackages(owner, intentPkgs, knownInstalled)
+        }
 
 
         /**

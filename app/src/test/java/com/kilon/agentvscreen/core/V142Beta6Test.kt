@@ -68,7 +68,7 @@ class V142Beta6Test {
         assertFalse(VScreenDisplayService.injectableDisplay(7, created = false, owner = "com.other.cast", appPkg = app))
         assertFalse(VScreenDisplayService.injectableDisplay(8, created = false, owner = null, appPkg = app))
         // Through the binder: a key sent to display 0 is refused, whatever the caller asks.
-        val svc = VScreenDisplayService()
+        val svc = VScreenDisplayService().apply { ownAppUidFn = { android.os.Binder.getCallingUid() } }
         val data = android.os.Parcel.obtain(); val reply = android.os.Parcel.obtain()
         try {
             data.writeInterfaceToken(VScreenDisplayService.DESCRIPTOR)
@@ -82,7 +82,7 @@ class V142Beta6Test {
 
     @Test fun theServiceAnswersTheFenceCall() {
         // The emulator run found the service refusing FENCE: onTransact served codes only up to CREATE_PARKING.
-        val svc = VScreenDisplayService()
+        val svc = VScreenDisplayService().apply { ownAppUidFn = { android.os.Binder.getCallingUid() } }
         val data = android.os.Parcel.obtain(); val reply = android.os.Parcel.obtain()
         try {
             data.writeInterfaceToken(VScreenDisplayService.DESCRIPTOR)

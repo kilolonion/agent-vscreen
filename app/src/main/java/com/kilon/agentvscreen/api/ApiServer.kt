@@ -494,7 +494,7 @@ class ApiServer(private val ctx: Context) {
                 val inp = BufferedInputStream(sock.getInputStream())
                 val out = sock.getOutputStream()
                 synchronized(reading) { reading[sock] = System.currentTimeMillis() }
-                val req = try { HttpCore.readRequest(inp) } catch (e: HttpError) { write(out, Resp.err(e.status, e.code, e.message ?: e.code)); return }
+                val req = try { HttpCore.readRequest(inp, sock) } catch (e: HttpError) { write(out, Resp.err(e.status, e.code, e.message ?: e.code)); return }
                     catch (e: java.net.SocketTimeoutException) { quiet("http-408") { write(out, Resp.err(408, "REQUEST_TIMEOUT", "the request did not arrive in time")) }; return }
                     finally { synchronized(reading) { reading.remove(sock) } } ?: return
                 req.peer = sock.inetAddress
@@ -554,12 +554,13 @@ class ApiServer(private val ctx: Context) {
                 // 1.3: ready + the codes of what blocks (no details before the token is checked).
                 .also { o -> quiet("ping-ready") { val items = com.kilon.agentvscreen.host.Readiness.now(ctx)
                     o.put("ready", com.kilon.agentvscreen.host.Readiness.ready(items)).put("blocking", JSONArray(items.filter { it.blocking }.map { it.code })) } }
-                .put("endpoints", JSONArray(listOf("/v2/run", "/v2/shot/<name>", "/v2/events", "/v2/help", "/v2/codes", "/mcp", "/cli"))))
+                .put("endpoints", JSONArray(listOf("/v2/run", "/v2/pair/exchange", "/v2/shot/<name>", "/v2/events", "/v2/help", "/v2/codes", "/mcp", "/cli"))))
             "/v1/help", "/v2/help" -> return langOf(r) { Resp.text(VScreenOffloadHandler.HELP + "\n") }
             "/v2/codes" -> return langOf(r) { Resp.json(JSONObject().put("codes", JSONArray(com.kilon.agentvscreen.cmd.Codes.all.map { JSONObject().put("code", it.name).put("next", it.next.key).put("text", it.text) }))) }
             "/cli" -> { if (r.q("via") == "install") AgentLedger.installed(r.q("id")?.takeIf { id -> Tokens.list.value.any { it.id == id } } ?: Tokens.MAIN); return Resp.text(cliScript()) }
             "/skill" -> return langOf(r) { Resp.text(AgentGuide.skill()) }
             "/memory" -> return langOf(r) { Resp.text(AgentGuide.memoryFor(when (r.q("via")) { "mcp" -> Abilities.Via.MCP; "http" -> Abilities.Via.HTTP; else -> Abilities.Via.CLI }, if (r.remote) null else ApiConfig.baseUrl) + "\n") }
+            "/v2/pair/exchange" -> return langOf(r) { exchangeOnboardingCode(r) }
         }
         // 2.0.0-beta7 (7.8 #3): /mcp method check (GET/DELETE -> 405 + Allow: POST) runs BEFORE auth, shared with PublicServer.
         Mcp.preAuthCheck(r)?.let { return it }
@@ -593,6 +594,55 @@ class ApiServer(private val ctx: Context) {
         requests++
         lastClient = r.headers["user-agent"]?.take(60)
         lastCaller = r.caller
+    }
+
+    /**
+     * Redeem a 10-minute single-use onboarding code (`avc_...`) for the agent's permanent token (`avs_...`).
+     * Mounted ONLY on [ApiServer] (local loopback & Tailscale) after Host/browser/peer checks — NEVER on [PublicServer].
+     */
+    private fun exchangeOnboardingCode(r: Req): Resp {
+        if (r.method != "POST") return Resp.err(405, "METHOD", "POST")
+        if (r.q("code") != null) {
+            return Resp.err(
+                400,
+                "BAD_REQUEST",
+                tr("接入码必须放在 JSON 请求体中，不能放在网址参数里", "Send the onboarding code in the JSON request body, not in the URL query"),
+            )
+        }
+        val who = r.peerName ?: "local"
+        failLimiter.checkLocked(who, r.remote)?.let { return it }
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) {
+            return Resp.err(503, "THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
+        }
+        val json = runCatching { JSONObject(r.bodyText) }.getOrNull()
+            ?: return Resp.err(400, "BAD_JSON", tr("请求体必须是合法 JSON", "Request body must be valid JSON"))
+        val rawCode = json.optString("code", "").trim()
+        if (rawCode.isEmpty()) {
+            return Resp.err(400, "BAD_REQUEST", tr("缺少 code 字段", "Missing code field"))
+        }
+        val tokenId = OnboardingCodes.consume(rawCode)
+            ?: return failed(
+                r,
+                "CODE_INVALID_OR_EXPIRED",
+                tr("一次性接入码无效、已过期或已使用过", "Onboarding code is invalid, expired, or already used"),
+            )
+        val activated = Tokens.activateWithSecret(tokenId)
+            ?: return failed(
+                r,
+                "CODE_INVALID_OR_EXPIRED",
+                tr("接入码对应的接入项不可用或已兑换", "The onboarding target is unavailable or already redeemed"),
+            )
+        val (tok, rawToken) = activated
+        Audit.security("onboard_code_exchanged", "${tok.name} ${tok.id} ${if (r.remote) r.peerName ?: "remote" else "local"}")
+        AgentLedger.installed(tok.id)
+        return Resp.json(
+            JSONObject()
+                .put("ok", true)
+                .put("token", rawToken)
+                .put("token_id", tok.id)
+                .put("name", tok.name)
+                .put("level", tok.level),
+        )
     }
 
     // ── who is calling ───────────────────────────────────────────────────
@@ -727,7 +777,7 @@ class ApiServer(private val ctx: Context) {
      */
     fun runFor(r: Req, argv: List<String>, session: String, requestId: String?, onStep: ((String) -> Unit)? = null): Pair<NativeOffloadResult, Boolean> {
         val auth = r.auth ?: return NativeOffloadResult(1, "", "BAD_TOKEN") to false
-        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return NativeOffloadResult(1, "", "THERMAL_STOP: " + com.kilon.agentvscreen.host.ThermalGuard.reason()) to false
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return NativeOffloadResult(1, tr("设备过热已暂停：", "Thermal stop: ") + com.kilon.agentvscreen.host.ThermalGuard.reason(), "THERMAL_STOP") to false
         val t = Tokens.byId(auth.token.id) ?: auth.token
         val via = when {
             r.path.startsWith("/mcp") -> Abilities.Via.MCP

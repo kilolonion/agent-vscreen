@@ -46,8 +46,44 @@ object PlayAudio {
     /** Read output that says the shell may not change app-ops (Xiaomi without "USB debugging (security settings)", others). */
     fun denied(out: String): Boolean = Regex("SecurityException|Permission denial|not allowed", RegexOption.IGNORE_CASE).containsMatchIn(out)
 
+    /** Pure argv commands that give [pkg] (user [user], numeric [uid] when known) its sound back on both records. */
+    fun giveBackArgvs(user: Int, pkg: String, uid: Int?): List<List<String>> {
+        require(user >= 0) { "Invalid user: $user" }
+        PackageNames.requireValid(pkg)
+        require(uid == null || uid >= 0) { "Invalid uid: $uid" }
+        val u = user.toString()
+        val uidArg = uid?.toString() ?: pkg
+        return listOf(
+            listOf("cmd", "appops", "set", "--user", u, pkg, OP, "allow"),
+            listOf("cmd", "appops", "set", "--user", u, "--uid", uidArg, OP, "allow"),
+        )
+    }
+
+    /** Pure argv commands that silence [pkg] on its package record and, given [uid] (the app's own), on its UID record. */
+    fun silenceArgvs(user: Int, pkg: String, uid: Int?): List<List<String>> {
+        require(user >= 0) { "Invalid user: $user" }
+        PackageNames.requireValid(pkg)
+        require(uid == null || uid >= 0) { "Invalid uid: $uid" }
+        val u = user.toString()
+        return buildList {
+            add(listOf("cmd", "appops", "set", "--user", u, pkg, OP, "ignore"))
+            if (uid != null) add(listOf("cmd", "appops", "set", "--user", u, "--uid", uid.toString(), OP, "ignore"))
+        }
+    }
+
+    /** Pure argv command to read back both PLAY_AUDIO records for [pkg] in [user]. */
+    fun readArgv(user: Int, pkg: String): List<String> {
+        require(user >= 0) { "Invalid user: $user" }
+        PackageNames.requireValid(pkg)
+        return listOf("cmd", "appops", "get", "--user", user.toString(), pkg, OP)
+    }
+
     /** Shell lines that give [pkg] (user [user], numeric [uid] when known) its sound back on both records, then read them. */
+    @Deprecated("Use giveBackArgvs + readArgv without sh -c")
     fun giveBack(user: Int, pkg: String, uid: Int?): String {
+        require(user >= 0) { "Invalid user: $user" }
+        PackageNames.requireValid(pkg)
+        require(uid == null || uid >= 0) { "Invalid uid: $uid" }
         val u = "--user $user"
         return "cmd appops set $u $pkg $OP allow 2>&1; " +
             "cmd appops set $u --uid ${uid ?: pkg} $OP allow 2>&1; " +
@@ -55,7 +91,11 @@ object PlayAudio {
     }
 
     /** Shell lines that silence [pkg] on its package record and, given [uid] (the app's own), on its UID record; then read them. */
+    @Deprecated("Use silenceArgvs + readArgv without sh -c")
     fun silence(user: Int, pkg: String, uid: Int?): String {
+        require(user >= 0) { "Invalid user: $user" }
+        PackageNames.requireValid(pkg)
+        require(uid == null || uid >= 0) { "Invalid uid: $uid" }
         val u = "--user $user"
         return "cmd appops set $u $pkg $OP ignore 2>&1; " +
             (if (uid != null) "cmd appops set $u --uid $uid $OP ignore 2>&1; " else "") +
@@ -104,4 +144,24 @@ object PlayAudio {
         flush()
         return hits
     }
+
+    private val USER_INFO_RE = Regex("UserInfo\\{(\\d+):")
+    private val PKG_UID_RE = Regex("uid:(\\d+)")
+
+    /** Parse numeric Android user IDs from `pm list users`; defaults to `[0]` when none are parsed. */
+    fun parseUsers(out: String): List<Int> {
+        val ids = USER_INFO_RE.findAll(out).mapNotNull { it.groupValues[1].toIntOrNull() }.filter { it >= 0 }.distinct().toList()
+        return ids.ifEmpty { listOf(0) }
+    }
+
+    /** Parse `(packageName, uid?)` entries from `pm list packages [-U]` output, filtering to valid package names. */
+    fun parsePackages(out: String): List<Pair<String, Int?>> = out.lineSequence().mapNotNull { raw ->
+        val t = raw.trim()
+        if (!t.startsWith("package:")) return@mapNotNull null
+        val rest = t.removePrefix("package:")
+        val pkg = rest.substringBefore(' ').trim()
+        if (!PackageNames.isValid(pkg)) return@mapNotNull null
+        val uid = PKG_UID_RE.find(rest)?.groupValues?.get(1)?.toIntOrNull()?.takeIf { it >= 0 }
+        pkg to uid
+    }.distinctBy { it.first }.toList()
 }

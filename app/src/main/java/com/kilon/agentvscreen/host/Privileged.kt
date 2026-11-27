@@ -85,8 +85,8 @@ object Privileged {
             Via.ROOT -> com.kilon.agentvscreen.core.VScreenRemoteDisplay.exec(argv, env, cwd, timeoutMs)
         }
 
-    /** The way in's name, for messages ("Shizuku 不可用" / "Root 不可用"). */
-    fun name(): String = when (via) { Via.SHIZUKU -> "Shizuku"; Via.ROOT -> "Root" }
+    /** The way in's name, for messages ("Shizuku 不可用" / "AXManager 不可用" / "Root 不可用"). */
+    fun name(): String = when (via) { Via.SHIZUKU -> ShizukuManager.providerLabel() ?: "Shizuku"; Via.ROOT -> "Root" }
 
     /** Why it is not ready and what the user does, in one sentence. */
     fun notReadyHint(): String = when (via) {
@@ -95,9 +95,9 @@ object Privileged {
             else -> RootBackend.lastError ?: tr("还没用 root 启动：在 Agent-VScreen 首页的配置里点“用 Root 启动”", "Not started with root yet: tap \"Start with root\" in Agent-VScreen's setup")
         }
         Via.SHIZUKU -> when (ShizukuManager.snapshot.value.state) {
-            ShizukuManager.State.NOT_INSTALLED -> tr("没装 Shizuku（或 Sui）：请用户安装并启动 Shizuku，或在 App 里改用 Root", "Shizuku (or Sui) is not installed: ask the user to install and start Shizuku, or switch to root in the app")
+            ShizukuManager.State.NOT_INSTALLED -> tr("没装 Shizuku（或其兼容分支 / Sui）：请用户安装并启动 Shizuku，或在 App 里改用 Root", "Shizuku (or a compatible fork / Sui) is not installed: ask the user to install and start Shizuku, or switch to root in the app")
             ShizukuManager.State.NOT_RUNNING -> ShizukuManager.missingBinderHint()
-            ShizukuManager.State.NEED_PERMISSION -> tr("Agent-VScreen 尚未获得 Shizuku 授权", "Agent-VScreen has no Shizuku permission yet")
+            ShizukuManager.State.NEED_PERMISSION -> tr("Agent-VScreen 尚未获得 ${name()} 授权", "Agent-VScreen has no ${name()} permission yet")
             ShizukuManager.State.READY -> ""
         }
     }
@@ -112,7 +112,14 @@ object Privileged {
         val next = when (via) {
             Via.SHIZUKU -> {
                 val s = ShizukuManager.snapshot.value
-                Snapshot(via, s.state, if (s.state == ShizukuManager.State.READY) (if (s.isSui) "Sui" else "Shizuku v${s.version}") else "")
+                val provider = ShizukuManager.providerLabel() ?: "Shizuku"
+                val label = when {
+                    s.state != ShizukuManager.State.READY -> ""
+                    s.isSui -> "Sui"
+                    s.version > 0 -> "$provider v${s.version}"
+                    else -> provider
+                }
+                Snapshot(via, s.state, label)
             }
             Via.ROOT -> Snapshot(via, rootState(RootBackend.phase, RootBackend.binder?.isBinderAlive == true),
                 if (RootBackend.binder != null) "Root" + if (RootBackend.uid == 2000) tr("（shell 身份）", " (as shell)") else "" else "")

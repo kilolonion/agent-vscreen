@@ -1303,7 +1303,7 @@ object BackgroundOperation {
         if (before.first != 0 || before.second < 0) return
         val now = focusedNow() ?: return
         if (now.first != displayId) return
-        val ok = VScreenRemoteDisplay.focusTask(before.second).getOrNull() == true && focusedNow()?.first == 0
+        val ok = VScreenRemoteDisplay.restoreMainFocus(displayId, before.second).getOrNull() == true && focusedNow()?.first == 0
         if (ok) focusRestores++ else focusRestoreFailures++
         AppLogger.info(TAG, "ime guard: focus moved to display $displayId, restored=$ok")
     }

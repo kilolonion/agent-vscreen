@@ -646,9 +646,10 @@ func main() {
 					preparePublicProxyRequest(r, pbase, pubSecret)
 				}
 				prp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+					fmt.Fprintln(os.Stderr, "funnel proxy error:", err)
 					w.Header().Set("Content-Type", "application/json; charset=utf-8")
 					w.WriteHeader(http.StatusBadGateway)
-					fmt.Fprintf(w, `{"ok":false,"code":"APP_NOT_ANSWERING","error":"Agent-VScreen public server did not answer (%s)"}`, strings.ReplaceAll(err.Error(), `"`, `'`))
+					_, _ = w.Write([]byte(`{"ok":false,"code":"APP_NOT_ANSWERING","error":"Agent-VScreen public server did not answer"}`))
 				}
 				psrv := &http.Server{
 					Handler:           bounded(prp),

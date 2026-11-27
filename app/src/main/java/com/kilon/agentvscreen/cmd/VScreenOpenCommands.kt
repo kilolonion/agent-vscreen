@@ -173,7 +173,9 @@ internal fun VScreenOffloadHandler.requireNotOwnPackage(pkg: String?) {
 }
 
 internal fun VScreenOffloadHandler.handoffSkip(): Set<String> =
-    setOf(context.packageName, "com.android.systemui", "moe.shizuku.privileged.api") + runCatching { VScreenHandoff.homePackages() }.getOrDefault(emptySet())
+    setOf(context.packageName, "com.android.systemui") +
+        com.kilon.agentvscreen.host.ShizukuManager.discoveredManagerPackages() +
+        runCatching { VScreenHandoff.homePackages() }.getOrDefault(emptySet())
 
 /**
  * `handoff park <应用>`: the app moves to the hidden parking display, its page untouched, and is out of the agent's
@@ -350,6 +352,9 @@ internal fun VScreenOffloadHandler.stopCmd(sid: String?, args: OffloadArgs): Nat
     val main0 = mainWatch(s)
     // 1.4.0-beta13 (test: `stop 计算器` -> CLOSE_FAILED): an app name is resolved like launch does, not taken for a package.
     val pkgArg = args.positional.getOrNull(0)?.let { VScreenKnowledge.resolveApp(it) ?: it }
+    if (pkgArg != null && !com.kilon.agentvscreen.core.PackageNames.isValid(pkgArg)) {
+        throw ActionError("INVALID_ARGS", tr("无效的应用包名：$pkgArg", "Invalid package name: $pkgArg"))
+    }
     if (pkgArg != null && force && VScreenShell.isProtected(pkgArg)) throw ActionError("PROTECTED_APP", tr("$pkgArg 是 Agent-VScreen 自己、桌面或系统界面，不能 force-stop", "$pkgArg is Agent-VScreen itself, the launcher or system UI, and cannot be force-stopped"))
     if (force) {
         val target = pkgArg ?: runCatching { BackgroundOperation.previewDisplayFor(s)?.let { VScreenShell.topPackage(it.displayId) } }.getOrNull() ?: "?"

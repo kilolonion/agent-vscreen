@@ -487,8 +487,12 @@ class StrongConfirmActivity : ComponentActivity() {
                                 )
                             }
                             InfoLine(
-                                label = tr("客户端", "Client"),
+                                label = tr("客户端（对方填写）", "Client (self-reported)"),
                                 value = req.publicClientName ?: req.tokenName,
+                            )
+                            InfoLine(
+                                label = tr("来源地址", "Source address"),
+                                value = req.sourceAddress?.takeIf { it.isNotBlank() } ?: tr("未知", "Unknown"),
                             )
                             InfoLine(
                                 label = tr("回调域名", "Redirect host"),

@@ -34,10 +34,12 @@ Any agent can use it, whether it runs on the phone itself or on a computer, a se
 <p align="center"><sub>A tour of the app while an agent is at work. <a href="docs/promo/tour.mp4?raw=true">Download MP4</a></sub></p>
 <p align="center"><sub>The three MP4s have music, and there is a 34-second <a href="docs/promo/mix.mp4?raw=true">combined cut</a>. Music: "Wallpaper" by Kevin MacLeod (incompetech.com), <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>.</sub></p>
 
-- Version on `main`: 1.4.2-beta3 (versionCode 54) · [Beta APK](https://github.com/kilolonion/agent-vscreen/releases/tag/v1.4.2-beta3) · [Latest stable APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
+<!-- version:start -->
+- Version on `main`: 2.0.1-beta1 (versionCode 75) · [Release APK](https://github.com/kilolonion/agent-vscreen/releases/tag/v2.0.1-beta1) · [Latest stable APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
+<!-- version:end -->
 - Package: `com.kilon.agentvscreen`
 - Android 11+ (Android 14+ recommended), arm64
-- Privileges: [Shizuku](https://shizuku.rikka.app/) by default (no root needed), or direct root on an already-rooted phone
+- Privileges: [Shizuku](https://shizuku.rikka.app/) or compatible `API_V23` forks (Sui, AXManager, Nightzuku, Shevery — discovered dynamically, no root needed), or direct Root on an already-rooted phone
 
 ## What it does
 
@@ -89,9 +91,9 @@ Use `vscreen handoff park <app>` to put an app task on a hidden display and `vsc
 
 1. Install the APK and open Agent-VScreen.
 2. In **Setup**, choose one permission source:
-   - **Shizuku (default)**: start Shizuku, then tap **Grant Shizuku**. Start Shizuku again after each phone restart.
-   - **Root**: if the phone is already rooted, tap **Rooted? Use root instead** and approve the root manager's prompt. No Shizuku installation is needed. You can switch later under **Settings › Permission source**; switching closes the current background screen.
-3. Tap **One-tap setup** for the overlay, notifications, read-only accessibility, battery optimization and background running. On Honor, Huawei, Xiaomi, OPPO, vivo and similar phones, also open background management and allow auto-start and background activity, or the system may freeze the app in the background.
+   - **Shizuku / compatible forks (default)**: start Shizuku (or a compatible `API_V23` fork such as Sui, AXManager, Nightzuku or Shevery), then tap **Grant**. Restart the provider after each phone reboot.
+   - **Root**: if the phone is already rooted (or if official Shizuku is restricted on Android 17+), tap **Use Root instead (no Shizuku needed)** and approve the root manager's prompt. No Shizuku installation is needed. You can switch later under **Settings › Permission source**; switching closes the current background screen.
+3. Tap **Turn it on** for the overlay, notifications, read-only accessibility, battery optimization and background running. On Honor, Huawei, Xiaomi, OPPO, vivo and similar phones, also open background management and allow auto-start and background activity, or the system may freeze the app in the background.
 
 The app speaks Chinese and English (System / 中文 / English in Settings), and so does everything it tells the agent.
 
@@ -113,10 +115,13 @@ Verification must succeed, and the signer's certificate SHA-256 digest must matc
 
 On the app's **Connect** tab, tap **Connect a new agent**: give it a name, choose where it runs and how it connects, then tap **Copy message for your agent** and send it as is. The agent installs or configures the tool and saves a short note into its own long-term memory, so new conversations know the tool is there. Each connected agent gets its own token, which you can revoke on the Connect tab at any time.
 
+- **10-minute one-time onboarding codes (`avc_...`)**: for **Shell** (`VSCREEN_CODE=avc_...`), **HTTP** and **Operit**, the wizard issues a memory-only 10-minute single-use code instead of putting a permanent secret into your chat history or shell command line. The client exchanges it once via `POST /v2/pair/exchange` (local / Tailnet only, never exposed on public MCP) to receive its permanent token.
+- **Sensitive clipboard**: copying tokens, onboarding codes or login links marks the clipboard item with Android's `IS_SENSITIVE` flag so system clipboard overlays hide the secret preview.
+
 There are three ways to connect, the same for local and cloud agents:
 
 - **Shell**: agents with a terminal install the `vscreen` command: `vscreen launch Settings`, `vscreen act "tap Search; type About phone"`.
-- **MCP**: agents that speak MCP add the address and token (transport `httpStream`).
+- **MCP**: agents that speak MCP add the address and token (transport `httpStream`; supports revisions `2025-06-18`, `2025-03-26`, `2024-11-05` with automatic HTTP `400` fallback for `2026-07-28` dual-stack clients).
 - **HTTP**: your own code calls the `/v2` API directly; see [API.md](API.md).
 
 ### Local: the agent runs on this phone
@@ -125,7 +130,7 @@ Choose **On this phone**. The service listens only on `127.0.0.1:18765`; nothing
 
 If another app (or a cloned copy of this one) holds 18765, the service moves to the next free port and the app says who holds it; local agents find the new port by themselves, no reconnecting needed.
 
-### Cloud: the agent runs on a computer, a server or another phone
+### Remote: another device over a private network (Tailscale / SSH)
 
 Choose **Another device** and connect Tailscale under **Remote access** first; the message, install command and MCP config you copy then use the Tailscale address.
 
@@ -133,21 +138,37 @@ Choose **Another device** and connect Tailscale under **Remote access** first; t
 - **Tailscale app**: if the Tailscale app is already on the phone, or the phone needs an exit node to get online. The built-in node only lets other devices in; it does not carry the phone's own traffic.
 - SSH port forwarding also works.
 
-The token equals control of the phone. Built-in Tailscale accepts the token over its encrypted connection; other remote connections require signed requests by default. The app never offers a public link. Don't paste a token into public configs or screenshots.
+The token equals control of the phone. Built-in Tailscale accepts the token over its encrypted connection; other remote connections require signed requests by default. Don't paste a token into public configs or screenshots.
+
+### Cloud: Public MCP (Experimental, off by default)
+
+To connect cloud MCP clients (such as claude.ai or ChatGPT) that cannot join a private tailnet, you can explicitly turn on **Connect › Cloud (Public MCP · Experimental)**. It is off by default and serves only `/mcp` and OAuth 2.1 (PKCE S256 + RFC 9207 `iss` / RFC 8628 device flow) on an isolated loopback listener (`127.0.0.1:18785`):
+
+- **Three channels**: **Tailscale Funnel** (`*.ts.net`, official Tailscale account), **Cloudflare Tunnel** (your own domain, works with Headscale), or **ngrok** (one free static domain).
+- **User-initiated pairing code entry**: incoming requests **never pop up automatically or post unsolicited notifications** on the phone. You open Agent-VScreen on the phone, type the 8-character pairing code shown by the client/browser, inspect the source address and self-reported client name, and confirm with screen-lock biometric/PIN. An optional **strict pairing window** rejects all new client registrations and pairings unless you manually open a 3-minute window (which auto-closes after approval).
+- **Permissions, resilience & automatic safeguards**: `system` scope is **never exposed** over public MCP; the pairing card defaults to "Easy" (payments, irreversible actions, and other high-risk steps still require confirmation) and can be changed to "Look only" or "Steady" before approving; refresh token rotation includes a 30-second single-retry grace window for dropped mobile connections (any second reuse or post-use replay revokes all tokens for the client); public 500/502 errors are redacted; public access auto-closes after **24 hours with no authenticated requests** (unauthenticated scans never extend the timer) and resets to off after app updates.
+- **Known exposure**: Tailscale Funnel hostnames appear in public Certificate Transparency logs and may be scanned; with Cloudflare Tunnel or ngrok, HTTPS is decrypted on the provider's servers before forwarding to the phone. All risks are disclosed before enabling.
 
 ## Docs
 
-- [API.md](API.md) (Chinese): the full CLI, MCP and HTTP reference, sessions, watches, permissions and security, remote access and known limits.
+- [API.md](API.md) (Chinese): the full CLI, MCP and HTTP reference, sessions, watches, permissions and security, remote/public access and known limits.
 - [docs/REFERENCE.md](docs/REFERENCE.md): every command option and result code (generated from the source).
 - [docs/TASKS.md](docs/TASKS.md): the fixed task set to run on a real phone before a release.
-- [docs/CHANGELOG.md](docs/CHANGELOG.md): earlier releases.
+- [docs/RELEASE-PROCESS.md](docs/RELEASE-PROCESS.md): soak periods, pre-release checklist, and isolated CI release signing.
+- [docs/CHANGELOG.md](docs/CHANGELOG.md): full release history.
 
-## What's new in 1.4.2-beta3
+## What's new
 
-- **Optional direct root**: already-rooted phones can run without Shizuku. Shizuku remains the default and does not require root.
-- **Open apps yourself**: launch an app on the background screen from Home. Agents get `BUSY` while you hold it; Home shows the picture you left.
-- **Update channel**: choose **Releases** or **Betas (and releases)** in Settings. Release notes render as Markdown.
-- **Fewer hangs**: background failures no longer take down the whole process; screen calls and OCR have timeouts, and the app list is cached.
+<!-- whatsnew:start -->
+### What's new in 2.0.1-beta1
+
+- **Long lists fold**: Connected agents, tokens, temporary allowances, bookings and watches show their first few rows when long; tap "N more" to see the rest. Connected agents are listed most recently used first.
+- **About and quick feedback**: Settings has a new About row that opens the GitHub repository. The diagnostics page can open a GitHub issue in one tap: IPs, host names, emails and token-like strings are removed first, and the full report is copied to the clipboard.
+- **10-minute one-time onboarding codes and sensitive clipboard**: The onboarding wizard now issues 10-minute single-use codes (avc_) for CLI, HTTP and Operit, redeemed for a permanent token via local/Tailnet POST /v2/pair/exchange so long-lived secrets stay out of chat logs and shell history; copied tokens, codes and login URLs are marked IS_SENSITIVE to hide clipboard previews.
+- **Public MCP pairing, idle-timeout and OAuth hardening**: Incoming public pairings queue silently without popping up on the phone until you enter the 8-character code and verify the source address; added an optional 3-minute strict pairing window, 24h idle close counting authenticated traffic only, RFC 9207 iss, DCR client checks, /oauth/token rate limits, a 30s single-retry refresh rotation grace window, and redacted public 500/502 errors.
+- **Privileged service, HTTP and MCP protocol hardening**: The privileged display service (protocol 19) enforces caller UID checks on every transaction and validates EXEC through a pure-JVM allowlist with zero runtime sh -c; HttpCore enforces monotonic deadlines, anti-smuggling checks and bounded 500-key rate limiting; MCP adds an HTTP 400 fallback shim (UNSUPPORTED_MCP_PROTOCOL) for 2026-07-28 clients and fixes THERMAL_STOP result reporting.
+- **Android 16/17 compatibility and dynamic Shizuku fork discovery**: Three-tier dynamic discovery recognizes official Shizuku, Sui, AXManager, Nightzuku, Shevery and API_V23 forks, protects them from freeze/handoff, and falls back to service EXEC if newProcess fails; hardens API 36/37 Root AttributionSource handling and promotes an explicit Root fallback button in Setup.
+<!-- whatsnew:end -->
 
 ## Build from source
 
@@ -158,9 +179,16 @@ echo "sdk.dir=/path/to/android-sdk" > local.properties
 ./gradlew :app:assembleRelease
 ```
 
-Built-in Tailscale is a small Go program (`tsbridge/`). Run `tsbridge/build.sh` once before building to produce `app/src/main/jniLibs/arm64-v8a/libtsbridge.so`; without it the APK still builds, just without built-in Tailscale.
+The built-in Tailscale / ngrok helper (`tsbridge/`) and Cloudflare Tunnel client (`cloudflared/`) are Go binaries. Run both before building to bundle them:
 
-Release signing is optional: copy `keystore.properties.example` to `keystore.properties` and fill it in. Otherwise release builds are signed with the debug key.
+```bash
+./tsbridge/build.sh
+./cloudflared/build.sh   # verifies upstream commit against cloudflared/COMMIT
+```
+
+This produces `app/src/main/jniLibs/arm64-v8a/libtsbridge.so` and `libcloudflared.so`. Without them the APK still builds, just without those built-in channels.
+
+Release signing is optional: copy `keystore.properties.example` to `keystore.properties` and fill it in. Otherwise release builds are signed with the debug key (CI tag builds pass `-PavsUnsignedRelease=true` and sign only inside the isolated `release` environment; see [docs/RELEASE-PROCESS.md](docs/RELEASE-PROCESS.md)).
 
 ## License
 

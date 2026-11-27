@@ -59,7 +59,10 @@ fun SetupFlowPage() {
     val scope = rememberCoroutineScope()
     val sh by ShizukuManager.snapshot.collectAsState()
     val pv by com.kilon.agentvscreen.host.Privileged.snapshot.collectAsState()
+    val rootPhase by com.kilon.agentvscreen.host.RootBackend.phaseFlow.collectAsState()
     val root = pv.via == com.kilon.agentvscreen.host.Privileged.Via.ROOT
+    val suVisible = remember { com.kilon.agentvscreen.host.RootBackend.suVisible() }
+    val api37Plus = android.os.Build.VERSION.SDK_INT >= 37
     val skipped = remember { mutableStateListOf<String>() }
     var busy by remember { mutableStateOf(false) }
     var log by remember { mutableStateOf(emptyList<String>()) }
@@ -67,14 +70,14 @@ fun SetupFlowPage() {
     val todo = items.filter { !it.ok && it.key !in skipped }
     val step = todo.firstOrNull()
     fun refresh() = scope.launch { app.items = withContext(Dispatchers.IO) { runCatching { Setup.check(ctx) }.getOrDefault(app.items) } }
-    LaunchedEffect(sh) { refresh() }
+    LaunchedEffect(sh, pv, rootPhase) { refresh() }
     fun choose(v: com.kilon.agentvscreen.host.Privileged.Via) = scope.launch {
         withContext(Dispatchers.IO) { com.kilon.agentvscreen.host.Privileged.choose(ctx, v) }
         kotlinx.coroutines.delay(600); refresh()
     }
     fun open(i: Intent) { runCatching { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { host.say(tr("这台手机打不开这个设置页", "This phone cannot open that settings page")) } }
 
-    MiuixPage(tr("首次配置", "Setup"), subtitle = if (root) tr("用 Root，不需要 Shizuku", "Root, no Shizuku needed") else tr("只用 Shizuku，不占 adb", "Shizuku only, adb untouched")) {
+    MiuixPage(tr("首次配置", "Setup"), subtitle = if (root) tr("用 Root，不需要 Shizuku", "Root, no Shizuku needed") else tr("支持 Shizuku / 兼容分支，不占 adb", "Shizuku / compatible forks, adb untouched")) {
         if (items.isEmpty()) { Footnote(tr("正在检查…", "Checking…")); return@MiuixPage }
         // Progress: one dot per item, filled when done.
         Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -100,7 +103,8 @@ fun SetupFlowPage() {
                     Text(step.label, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
                     Text(step.detail, fontSize = 14.sp, lineHeight = 20.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, textAlign = TextAlign.Center)
                     val ready = pv.state == ShizukuManager.State.READY
-                    val starting = root && com.kilon.agentvscreen.host.RootBackend.phase == com.kilon.agentvscreen.host.RootBackend.Phase.STARTING
+                    val starting = root && rootPhase == com.kilon.agentvscreen.host.RootBackend.Phase.STARTING
+                    val providerName = ShizukuManager.providerLabel() ?: "Shizuku"
                     val (label, act) = when {
                         step.key == "detector" -> tr("已了解，开启", "I understand, turn on") to {
                             com.kilon.agentvscreen.core.VScreenDetector.acceptLicense(ctx); refresh(); Unit
@@ -110,8 +114,8 @@ fun SetupFlowPage() {
                         }
                         step.key == "privilege" -> when (sh.state) {
                             ShizukuManager.State.NOT_INSTALLED -> tr("安装 Shizuku", "Install Shizuku") to { ShizukuManager.openInstallPage(ctx) }
-                            ShizukuManager.State.NOT_RUNNING -> tr("打开 Shizuku", "Open Shizuku") to { ShizukuManager.openShizukuApp(ctx) }
-                            else -> tr("授权 Shizuku", "Grant Shizuku") to { host.grantShizuku(); refresh(); Unit }
+                            ShizukuManager.State.NOT_RUNNING -> tr("打开 $providerName", "Open $providerName") to { ShizukuManager.openShizukuApp(ctx) }
+                            else -> tr("授权 $providerName", "Grant $providerName") to { host.grantShizuku(); refresh(); Unit }
                         }
                         step.key == "vendor_bg" -> tr("去系统后台管理", "Open background management") to {
                             val opened = Liveness.openBackgroundSettings(ctx)
@@ -134,12 +138,34 @@ fun SetupFlowPage() {
                     PrimaryButton(onClick = act, enabled = !busy && !starting, modifier = Modifier.fillMaxWidth().padding(top = 6.dp), color = MiuixTheme.colorScheme.primary) {
                         Text(label, color = MiuixTheme.colorScheme.onPrimary)
                     }
-                    // 1.4.2-beta3: the other way in, one tap away; what each means is behind the "?".
-                    if (step.key == "privilege") Row(verticalAlignment = Alignment.CenterVertically) {
-                        LinkButton(onClick = { choose(if (root) com.kilon.agentvscreen.host.Privileged.Via.SHIZUKU else com.kilon.agentvscreen.host.Privileged.Via.ROOT) }) {
-                            Text(if (root) tr("改用 Shizuku", "Use Shizuku instead") else tr("手机已 root？改用 Root", "Rooted? Use root instead"))
+                    // Promote explicit Root fallback when su is visible, Shizuku failed/missing, or on Android 17+.
+                    if (step.key == "privilege" && !root && (suVisible || api37Plus || sh.state != ShizukuManager.State.READY)) {
+                        SoftButton(
+                            onClick = { choose(com.kilon.agentvscreen.host.Privileged.Via.ROOT) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(
+                                if (suVisible) tr("检测到 Root：改用 Root（无需 Shizuku）", "Root detected: use Root (no Shizuku needed)")
+                                else tr("改用 Root（无需 Shizuku）", "Use Root instead (no Shizuku needed)"),
+                            )
                         }
-                        Help(tr("Shizuku 和 Root", "Shizuku and root"), H.privilege)
+                    }
+                    if (step.key == "privilege" && !root && api37Plus) {
+                        Text(
+                            tr("Android 17+ 上官方 Shizuku 可能受限，可使用兼容分支（如 AXManager / Sui）或直接改用 Root。",
+                                "On Android 17+, official Shizuku may be limited; compatible forks (such as AXManager / Sui) or Root are supported."),
+                            fontSize = 12.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                    if (step.key == "privilege") Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (root) {
+                            LinkButton(onClick = { choose(com.kilon.agentvscreen.host.Privileged.Via.SHIZUKU) }) {
+                                Text(tr("改用 Shizuku / 兼容分支", "Use Shizuku / compatible fork"))
+                            }
+                        }
+                        Help(tr("Shizuku、兼容分支与 Root", "Shizuku, forks and Root"), H.privilege)
                     }
                     if (step.key in OPTIONAL) LinkButton(onClick = {
                         skipped += step.key

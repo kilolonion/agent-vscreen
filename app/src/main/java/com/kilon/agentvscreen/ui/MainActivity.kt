@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.os.Build
 import android.os.Bundle
+import android.os.PersistableBundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -87,11 +88,21 @@ class MainActivity : ComponentActivity(), AppHost {
 
     override fun say(text: String) { lifecycleScope.launch { snack.showSnackbar(text) } }
 
-    override fun copy(label: String, text: String) {
-        getSystemService(ClipboardManager::class.java)?.setPrimaryClip(ClipData.newPlainText(label, text))
-        val flat = text.replace(Regex("\\s+"), " ").trim()
-        val preview = if (flat.length > 40) flat.take(40) + "…" else flat
-        say(tr("已复制：$label（$preview）", "Copied: $label ($preview)"))
+    override fun copy(label: String, text: String, sensitive: Boolean) {
+        val clip = ClipData.newPlainText(label, text)
+        if (sensitive) {
+            clip.description.extras = PersistableBundle().apply {
+                putBoolean("android.content.extra.IS_SENSITIVE", true)
+            }
+        }
+        getSystemService(ClipboardManager::class.java)?.setPrimaryClip(clip)
+        if (sensitive) {
+            say(tr("已复制：$label（已标记为敏感内容）", "Copied: $label (marked sensitive)"))
+        } else {
+            val flat = text.replace(Regex("\\s+"), " ").trim()
+            val preview = if (flat.length > 40) flat.take(40) + "…" else flat
+            say(tr("已复制：$label（$preview）", "Copied: $label ($preview)"))
+        }
     }
 
     override fun recreateForLanguage() = recreate()

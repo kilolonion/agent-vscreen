@@ -154,7 +154,14 @@ def setup_root():
     check("app starts on Shizuku without Shizuku installed", wait_priv(("shizuku", "NOT_INSTALLED"), 45), str(priv_state()))
     # A slow emulator can swallow a tap (a "not responding" dialog came and went): tap again until the choice shows.
     for _ in range(3):
-        press_text(APP, ["Rooted? Use root instead", "手机已 root？改用 Root"])
+        press_text(APP, [
+            "Use Root instead (no Shizuku needed)",
+            "Root detected: use Root (no Shizuku needed)",
+            "改用 Root（无需 Shizuku）",
+            "检测到 Root：改用 Root（无需 Shizuku）",
+            "Rooted? Use root instead",
+            "手机已 root？改用 Root",
+        ])
         if wait_priv(("root", "READY"), 20) or (priv_state() or ("",))[0] == "root":
             break
     check("root granted and service connected", wait_priv(("root", "READY"), 60), str(priv_state()))

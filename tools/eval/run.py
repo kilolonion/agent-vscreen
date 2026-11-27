@@ -129,19 +129,32 @@ def call_api(token, argv, session, timeout=90):
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _semver_key(raw):
+    text = (raw or "").strip()
+    m = re.match(r"^(\d+)\.(\d+)\.(\d+)(?:-([A-Za-z]+)(\d*))?$", text)
+    if not m:
+        return None
+    major, minor, patch = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    pre_tag, pre_num = m.group(4), m.group(5)
+    if not pre_tag:
+        # Stable release sorts above any prerelease of the same major.minor.patch.
+        return (major, minor, patch, 1, "", 0)
+    return (major, minor, patch, 0, pre_tag.lower(), int(pre_num) if pre_num else 0)
+
+
 def version_allows(app_version, since):
     if not since:
         return True
-    m_need = re.search(r"beta(\d+)", since)
-    if not m_need:
+    s = since.strip()
+    if re.fullmatch(r"beta\d+", s):
+        s = f"2.0.0-{s}"
+    need_key = _semver_key(s)
+    if need_key is None:
         return True
-    need_beta = int(m_need.group(1))
-    if app_version.startswith("2.") and "-beta" not in app_version:
-        return True
-    m_cur = re.search(r"^2\.0\.0-beta(\d+)", app_version)
-    if not m_cur:
+    cur_key = _semver_key(app_version)
+    if cur_key is None:
         return False
-    return int(m_cur.group(1)) >= need_beta
+    return cur_key >= need_key
 
 
 def find_scene_display_id():

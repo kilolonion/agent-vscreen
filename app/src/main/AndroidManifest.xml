@@ -27,8 +27,14 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
+        <intent>
+            <action android:name="moe.shizuku.manager.intent.action.REQUEST_PERMISSION" />
+        </intent>
         <package android:name="moe.shizuku.privileged.api" />
         <package android:name="frb.axeron.manager" />
+        <package android:name="moe.shizuku.privileged.api.nightzuku" />
+        <package android:name="io.github.the0x01.shevery" />
+        <package android:name="com.nightzuku.manager" />
     </queries>
 
     <uses-sdk tools:overrideLibrary="rikka.shizuku.api,rikka.shizuku.provider,rikka.shizuku.shared,rikka.shizuku.aidl,top.yukonga.miuix.kmp.blur,top.yukonga.miuix.kmp.shader" />

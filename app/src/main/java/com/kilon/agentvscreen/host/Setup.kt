@@ -84,7 +84,7 @@ object Setup {
             val r = runCatching { VScreenShell.run(argv, 6_000L) }.getOrNull()
             out += if (r != null && r.exitCode == 0) "✓ $label" else "✗ $label${tr("：", ": ")}${r?.combined?.take(80) ?: tr("失败", "failed")}"
         }
-        if (!Settings.canDrawOverlays(ctx)) step(tr("悬浮窗", "Floating window"), arrayOf("appops", "set", pkg, "SYSTEM_ALERT_WINDOW", "allow"))
+        if (!Settings.canDrawOverlays(ctx)) step(tr("悬浮窗", "Floating window"), arrayOf("cmd", "appops", "set", pkg, "SYSTEM_ALERT_WINDOW", "allow"))
         if (Build.VERSION.SDK_INT >= 33 && ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             step(tr("通知", "Notifications"), arrayOf("pm", "grant", pkg, Manifest.permission.POST_NOTIFICATIONS))
         if (VScreenAccessibilityService.getInstance() == null) out += Heal.accessibility(ctx).let { (ok, m) -> (if (ok) "✓ " else "✗ ") + m }

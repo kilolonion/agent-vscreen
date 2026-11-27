@@ -39,6 +39,8 @@ object PublicOAuth {
     const val REGISTER_WINDOW_MS = 60 * 60_000L
     const val MAX_PENDING_PAIRINGS = 1
     const val MAX_PENDING_PAIRINGS_GLOBAL = 3
+    const val MAX_QUEUED_PAIRINGS_GLOBAL = 32
+    const val CLAIM_MIN_CONFIRM_MS = 60_000L
     const val AUTHORIZE_DENY_LIMIT = 3
     const val AUTHORIZE_DENY_COOLDOWN_MS = 30 * 60_000L
     const val PAIRING_TTL_MS = 5 * 60_000L
@@ -47,6 +49,10 @@ object PublicOAuth {
     const val AUTH_CODE_TTL_MS = 10 * 60_000L
     const val ACCESS_TOKEN_TTL_MS = 60 * 60_000L
     const val REFRESH_TOKEN_TTL_MS = 30L * 24 * 60 * 60_000L
+    /** 30s in-memory idempotent retry window for a rotated refresh token whose response was lost in transit. */
+    const val REFRESH_GRACE_MS = 30_000L
+    const val TOKEN_MAX_PER_MIN = 60
+    const val TOKEN_WINDOW_MS = 60_000L
     const val TOKEN_BYTES = 32
 
     /** 8-char pairing code alphabet without 0 / O / 1 / I (7.2). */
@@ -55,6 +61,7 @@ object PublicOAuth {
 
     const val DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code"
     private val SUPPORTED_GRANTS = setOf("authorization_code", "refresh_token", DEVICE_GRANT)
+    private val SUPPORTED_APP_TYPES = setOf("native", "web")
     /** RFC 8628 polling interval (s); polling faster answers slow_down. */
     const val DEVICE_INTERVAL_S = 3L
     private val PKCE_VERIFIER_RE = Regex("^[A-Za-z0-9._~-]{43,128}$")
@@ -122,6 +129,7 @@ object PublicOAuth {
         val resource: String,
         val scope: String,
         var retired: Boolean = false,
+        var retiredAt: Long = 0L,
     ) {
         fun json(): JSONObject = JSONObject()
             .put("token_id", tokenId)
@@ -130,6 +138,7 @@ object PublicOAuth {
             .put("resource", resource)
             .put("scope", scope)
             .put("retired", retired)
+            .apply { if (retiredAt > 0L) put("retired_at", retiredAt) }
 
         companion object {
             fun fromJson(o: JSONObject): RefreshTokenRecord? {
@@ -137,10 +146,26 @@ object PublicOAuth {
                 val cid = o.optString("client_id").takeIf { it.isNotBlank() } ?: return null
                 val res = o.optString("resource").takeIf { it.isNotBlank() } ?: return null
                 val sc = o.optString("scope").takeIf { it in ALLOWED_SCOPES } ?: "look"
-                return RefreshTokenRecord(tid, cid, o.optLong("expires_at", 0L), res, sc, o.optBoolean("retired", false))
+                return RefreshTokenRecord(
+                    tid, cid, o.optLong("expires_at", 0L), res, sc,
+                    o.optBoolean("retired", false),
+                    o.optLong("retired_at", 0L),
+                )
             }
         }
     }
+
+    /** In-memory-only idempotent grace record for a single rotated refresh response (never persisted to disk). */
+    private class RefreshGraceEntry(
+        val clientId: String,
+        val tokenId: String,
+        val resource: String,
+        val newAccessHash: String,
+        val newRefreshHash: String,
+        val responseJson: String,
+        val expiresAt: Long,
+        var retried: Boolean = false,
+    )
 
     private data class AuthCodeRecord(
         val clientId: String,
@@ -165,8 +190,17 @@ object PublicOAuth {
         val selectableScopes: List<String>,
         val createdAt: Long,
         val sourceBucket: String = "unknown",
+        val sourceDisplay: String? = null,
+        val issuer: String = "",
     ) {
-        @Volatile var status: String = "pending" // pending | approved | denied | expired | completed
+        /**
+         * Pairing lifecycle:
+         * - `queued`: silently waiting until the user enters [code] on the phone (no popup/notification).
+         * - `claimed`: user entered [code] on the phone; StrongConfirm card is active.
+         * - `approved` / `denied` / `expired` / `completed`: settled states.
+         */
+        @Volatile var status: String = "queued"
+        @Volatile var claimedAt: Long = 0L
         @Volatile var redirectLocation: String? = null
         @Volatile var confirmId: String? = null
         /** 2.0.0-beta11: RFC 8628 device pairing (no browser, no redirect): sha256 of the device_code. */
@@ -175,6 +209,15 @@ object PublicOAuth {
         @Volatile var deviceAuthCode: String? = null
         @Volatile var lastPollAt: Long = 0L
         val isDevice: Boolean get() = deviceCodeHash != null
+    }
+
+    sealed class ClaimResult {
+        data class Opened(val confirmId: String, val pairingId: String) : ClaimResult()
+        data object InvalidFormat : ClaimResult()
+        data object NotFound : ClaimResult()
+        data object Expired : ClaimResult()
+        data object TooManyActive : ClaimResult()
+        data object NoLockscreen : ClaimResult()
     }
 
     data class AccessAuth(val token: Tokens.Token, val clientId: String, val scope: String)
@@ -197,6 +240,7 @@ object PublicOAuth {
     private val clients = LinkedHashMap<String, RegisteredClient>()
     private val accessTokens = HashMap<String, AccessTokenRecord>()
     private val refreshTokens = HashMap<String, RefreshTokenRecord>()
+    private val refreshGrace = HashMap<String, RefreshGraceEntry>()
     private val authCodes = HashMap<String, AuthCodeRecord>()
     private val pairings = LinkedHashMap<String, Pairing>()
     /** Bounded history of access-token hash -> clientId so expired/revoked tokens from known clients still bucket by client_id. */
@@ -205,6 +249,7 @@ object PublicOAuth {
     }
     private val registerTimesGlobal = ArrayDeque<Long>()
     private val registerTimesBySource = HashMap<String, ArrayDeque<Long>>()
+    private val tokenTimesBySource = HashMap<String, ArrayDeque<Long>>()
     private val deniesBySource = HashMap<String, Int>()
     private val denyCooldownBySource = HashMap<String, Long>()
 
@@ -213,6 +258,14 @@ object PublicOAuth {
     @Volatile internal var clockOffsetMs: Long = 0L
     @Volatile internal var deviceSecureCheck: (Context) -> Boolean = { ctx ->
         runCatching { ctx.getSystemService(KeyguardManager::class.java)?.isDeviceSecure == true }.getOrDefault(false)
+    }
+    @Volatile internal var pairingAllowedCheck: () -> Boolean = {
+        com.kilon.agentvscreen.host.PublicAccess.isPairingAllowed(nowMs())
+    }
+    @Volatile internal var onPairingApprovedHook: () -> Unit = {
+        if (com.kilon.agentvscreen.host.PublicAccess.strictPairingWindow) {
+            com.kilon.agentvscreen.host.PublicAccess.closePairingWindow()
+        }
     }
     /** Debug/test-only seam (ignored whenever `!BuildConfig.DEBUG`). */
     @Volatile internal var pairingPresenterOverride: ((Context, Pairing, (String) -> Unit, () -> Unit) -> String?)? = null
@@ -229,6 +282,7 @@ object PublicOAuth {
             clients.clear()
             accessTokens.clear()
             refreshTokens.clear()
+            refreshGrace.clear()
             if (file.isFile) {
                 runCatching {
                     val root = JSONObject(file.readText(Charsets.UTF_8))
@@ -291,11 +345,16 @@ object PublicOAuth {
     private fun pruneExpiredLocked(now: Long) {
         accessTokens.entries.removeAll { it.value.expiresAt <= now }
         refreshTokens.entries.removeAll { it.value.expiresAt <= now }
+        refreshGrace.entries.removeAll { it.value.expiresAt <= now }
         authCodes.entries.removeAll { it.value.expiresAt <= now }
         val it = pairings.entries.iterator()
         while (it.hasNext()) {
             val p = it.next().value
-            if (p.status == "pending" && now - p.createdAt >= PAIRING_TTL_MS) {
+            val queuedExpired = p.status == "queued" && now - p.createdAt >= PAIRING_TTL_MS
+            val claimedExpired = p.status == "claimed" &&
+                now - p.createdAt >= PAIRING_TTL_MS &&
+                (p.claimedAt == 0L || now - p.claimedAt >= CLAIM_MIN_CONFIRM_MS)
+            if (queuedExpired || claimedExpired) {
                 p.status = "expired"
                 p.redirectLocation = null
             }
@@ -417,6 +476,27 @@ object PublicOAuth {
         return "${String(chars, 0, 4)}-${String(chars, 4, 4)}"
     }
 
+    /**
+     * Normalize a user-entered pairing code (accepts lowercase, spaces, hyphens, and underscores) into
+     * canonical `XXXX-XXXX` using [PAIRING_ALPHABET], or null if invalid.
+     */
+    fun normalizePairingCode(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        val cleaned = buildString(8) {
+            for (ch in raw.trim().uppercase(java.util.Locale.ROOT)) {
+                when (ch) {
+                    '-', '_', ' ', '\t', '\r', '\n', '－', '—', '–' -> continue
+                    else -> {
+                        if (ch !in PAIRING_ALPHABET) return null
+                        append(ch)
+                    }
+                }
+            }
+        }
+        if (cleaned.length != 8) return null
+        return "${cleaned.substring(0, 4)}-${cleaned.substring(4, 8)}"
+    }
+
     private fun oauthError(status: Int, error: String, desc: String): ApiServer.Resp =
         ApiServer.Resp.json(
             JSONObject().put("error", error).put("error_description", desc),
@@ -453,11 +533,19 @@ object PublicOAuth {
                 .put("device_authorization_endpoint", "$cleanBase/oauth/device_authorization")
                 .put("code_challenge_methods_supported", JSONArray().put("S256"))
                 .put("token_endpoint_auth_methods_supported", JSONArray().put("none"))
+                .put("authorization_response_iss_parameter_supported", true)
                 .put("scopes_supported", JSONArray(ALLOWED_SCOPES)),
         )
     }
 
     // ── Source bucketing (beta8 Section I: IPv4 /32, IPv6 /64, tailnet:<bucket>) ──
+
+    /** Strict syntactic IPv4 / IPv6 literal validation without DNS resolution. */
+    fun isValidIpLiteral(raw: String?): Boolean {
+        val s = raw?.trim() ?: return false
+        if (s.length !in 2..45) return false
+        return parseIpv4(s) != null || parseIpv6(s) != null
+    }
 
     /**
      * Normalize the `X-AVS-Public-Src` header injected by `tsbridge` into a stable rate-limit bucket key:
@@ -474,6 +562,13 @@ object PublicOAuth {
             return "tailnet:" + normalizeIpBucket(rest)
         }
         return normalizeIpBucket(raw)
+    }
+
+    /** Human-readable source address extracted from `X-AVS-Public-Src` for the confirmation card, or null if unknown. */
+    fun sourceDisplay(rawHeader: String?): String? {
+        val raw = rawHeader?.trim()?.replace(Regex("[\\r\\n\\t]+"), "")?.take(64)
+        if (raw.isNullOrEmpty() || raw.equals("unknown", ignoreCase = true)) return null
+        return raw
     }
 
     private fun normalizeIpBucket(input: String): String {
@@ -569,6 +664,10 @@ object PublicOAuth {
     fun handleRegister(r: ApiServer.Req): ApiServer.Resp {
         val now = nowMs()
         val src = sourceBucket(r.headers["x-avs-public-src"])
+        if (!pairingAllowedCheck()) {
+            Audit.security("public_register_window_closed", "src=$src")
+            return oauthError(403, "access_denied", "Pairing window is closed on the phone")
+        }
         val limitReason: String? = synchronized(lock) {
             while (registerTimesGlobal.isNotEmpty() && now - registerTimesGlobal.first() >= REGISTER_WINDOW_MS) {
                 registerTimesGlobal.removeFirst()
@@ -635,6 +734,11 @@ object PublicOAuth {
             }
         }
 
+        val appType = body.optString("application_type").takeIf { it.isNotBlank() && !body.isNull("application_type") }
+        if (appType != null && appType !in SUPPORTED_APP_TYPES) {
+            return oauthError(400, "invalid_client_metadata", "Supported application_type: native, web")
+        }
+
         val rawName = body.optString("client_name").trim().replace(Regex("[\\r\\n\\t]+"), " ").take(64)
         val clientName = rawName.ifEmpty { "MCP Client" }
         val reqScope = body.optString("scope").takeIf { it.isNotBlank() && !body.isNull("scope") }?.take(128)
@@ -655,6 +759,7 @@ object PublicOAuth {
             .put("response_types", JSONArray().put("code"))
             .put("token_endpoint_auth_method", "none")
             .put("client_id_issued_at", now / 1000L)
+        if (appType != null) resp.put("application_type", appType)
         return ApiServer.Resp.json(resp, 201)
     }
 
@@ -705,9 +810,11 @@ object PublicOAuth {
         val state = r.q("state")
         val selectableScopes = resolveSelectableScopes(client.requestedScope, r.q("scope"))
         val redirectHost = runCatching { URI(redirectUri).host }.getOrNull().orEmpty()
-        val src = sourceBucket(r.headers["x-avs-public-src"])
+        val rawSrc = r.headers["x-avs-public-src"]
+        val src = sourceBucket(rawSrc)
+        val srcDisplay = sourceDisplay(rawSrc)
 
-        val pairing = when (val started = startPairing(ctx, client, redirectUri, redirectHost, challenge, boundResource, state, selectableScopes, src, null)) {
+        val pairing = when (val started = startPairing(client, redirectUri, redirectHost, challenge, boundResource, state, selectableScopes, src, srcDisplay, null, base.trimEnd('/'))) {
             is Started.Ok -> started.pairing
             is Started.Refused -> return started.resp
         }
@@ -721,9 +828,12 @@ object PublicOAuth {
         class Refused(val resp: ApiServer.Resp) : Started()
     }
 
-    /** The one way a pairing starts (browser authorize and RFC 8628 device authorization): limits, record, phone card. */
+    /**
+     * The one way a pairing starts (browser authorize and RFC 8628 device authorization): checks the optional
+     * strict pairing window, rate limits, and enqueues a silent `"queued"` entry. Never opens a popup or posts a
+     * notification on the phone until the user enters the pairing code in [claimPairingByCode].
+     */
     private fun startPairing(
-        ctx: Context,
         client: RegisteredClient,
         redirectUri: String,
         redirectHost: String,
@@ -732,10 +842,16 @@ object PublicOAuth {
         state: String?,
         selectableScopes: List<String>,
         src: String,
+        srcDisplay: String?,
         deviceCodeHash: String?,
+        issuer: String = "",
     ): Started {
         val now = nowMs()
         val clientId = client.clientId
+        if (!pairingAllowedCheck()) {
+            Audit.security("public_pairing_window_closed", "src=$src client=$clientId")
+            return Started.Refused(oauthError(403, "access_denied", "Pairing window is closed on the phone"))
+        }
         val pairing: Pairing = synchronized(lock) {
             pruneExpiredLocked(now)
             val cooldownUntil = denyCooldownBySource[src] ?: 0L
@@ -743,17 +859,30 @@ object PublicOAuth {
                 val leftMin = ((cooldownUntil - now) / 60_000L).coerceAtLeast(1L)
                 return Started.Refused(oauthError(429, "access_denied", "Authorization temporarily locked after repeated denials; retry in $leftMin min"))
             }
-            val livePending = pairings.values.filter { it.status == "pending" && now - it.createdAt < PAIRING_TTL_MS }
-            if (livePending.count { it.sourceBucket == src } >= MAX_PENDING_PAIRINGS) {
-                return Started.Refused(oauthError(429, "temporarily_unavailable", "A pairing confirmation from this source is already pending on the phone"))
+            val liveActive = pairings.values.filter { (it.status == "queued" || it.status == "claimed") && now - it.createdAt < PAIRING_TTL_MS }
+            if (liveActive.count { it.sourceBucket == src } >= MAX_PENDING_PAIRINGS) {
+                return Started.Refused(oauthError(429, "temporarily_unavailable", "A pairing request from this source is already waiting; enter its code in Agent-VScreen or wait for it to expire"))
             }
-            if (livePending.size >= MAX_PENDING_PAIRINGS_GLOBAL) {
-                return Started.Refused(oauthError(429, "temporarily_unavailable", "Too many pairing confirmations are already pending on the phone"))
+            // Bound the silent queue with FIFO eviction of the oldest unclaimed entry so remote floods from
+            // distinct IPs cannot DoS legitimate pairings or evict an already-claimed confirmation card.
+            val liveQueued = pairings.values.filter { it.status == "queued" && now - it.createdAt < PAIRING_TTL_MS }
+            if (liveQueued.size >= MAX_QUEUED_PAIRINGS_GLOBAL) {
+                liveQueued.minByOrNull { it.createdAt }?.let { oldest ->
+                    oldest.status = "expired"
+                    oldest.redirectLocation = null
+                    pairings.remove(oldest.id)
+                }
             }
             val pid = "pair_" + randomHex(12)
+            var code = generatePairingCode()
+            var attempts = 0
+            while (attempts < 8 && pairings.values.any { it.code == code }) {
+                code = generatePairingCode()
+                attempts++
+            }
             val p = Pairing(
                 id = pid,
-                code = generatePairingCode(),
+                code = code,
                 clientId = clientId,
                 clientName = client.clientName,
                 redirectUri = redirectUri,
@@ -764,20 +893,105 @@ object PublicOAuth {
                 selectableScopes = selectableScopes,
                 createdAt = now,
                 sourceBucket = src,
+                sourceDisplay = srcDisplay,
+                issuer = issuer,
             )
             p.deviceCodeHash = deviceCodeHash
             pairings[pid] = p
             p
         }
+        Audit.security("public_pairing_queued", "client=$clientId src=$src")
+        return Started.Ok(pairing)
+    }
 
+    /**
+     * User-initiated pairing claim: after seeing the 8-char code on the client/browser, the user enters it
+     * in Agent-VScreen on the phone. Only then does the app create a [StrongConfirm] pairing card (with
+     * source address and self-reported client name) and open [com.kilon.agentvscreen.ui.StrongConfirmActivity].
+     */
+    fun claimPairingByCode(ctx: Context, rawCode: String, openActivity: Boolean = true): ClaimResult {
+        if (!deviceSecureCheck(ctx)) return ClaimResult.NoLockscreen
+        val norm = normalizePairingCode(rawCode) ?: return ClaimResult.InvalidFormat
+        val now = nowMs()
         val presenter = if (BuildConfig.DEBUG) pairingPresenterOverride else null
-        pairing.confirmId = if (presenter != null) {
+
+        var reuseConfirmId: String? = null
+        var claimedPairing: Pairing? = null
+        var failure: ClaimResult? = null
+
+        synchronized(lock) {
+            pruneExpiredLocked(now)
+            var matched: Pairing? = null
+            for (p in pairings.values) {
+                if (ApiServer.constTimeEq(p.code, norm)) {
+                    matched = p
+                }
+            }
+            if (matched == null) {
+                failure = ClaimResult.NotFound
+                return@synchronized
+            }
+            when (matched.status) {
+                "claimed" -> {
+                    val existingCid = matched.confirmId
+                    val stillOpen = existingCid != null && (
+                        StrongConfirm.byId(existingCid)?.answer == null ||
+                            (presenter != null && existingCid.startsWith("debug_"))
+                        )
+                    if (stillOpen) {
+                        reuseConfirmId = existingCid
+                        claimedPairing = matched
+                    } else if (now - matched.createdAt >= PAIRING_TTL_MS) {
+                        matched.status = "expired"
+                        matched.redirectLocation = null
+                        failure = ClaimResult.Expired
+                    } else {
+                        matched.claimedAt = now
+                        claimedPairing = matched
+                    }
+                }
+                "queued" -> {
+                    if (now - matched.createdAt >= PAIRING_TTL_MS) {
+                        matched.status = "expired"
+                        matched.redirectLocation = null
+                        failure = ClaimResult.Expired
+                    } else {
+                        val liveClaimed = pairings.values.count { it.status == "claimed" }
+                        if (liveClaimed >= MAX_PENDING_PAIRINGS_GLOBAL) {
+                            failure = ClaimResult.TooManyActive
+                        } else {
+                            matched.status = "claimed"
+                            matched.claimedAt = now
+                            claimedPairing = matched
+                        }
+                    }
+                }
+                "expired", "denied", "approved", "completed" -> {
+                    failure = ClaimResult.Expired
+                }
+                else -> {
+                    failure = ClaimResult.NotFound
+                }
+            }
+        }
+
+        failure?.let { return it }
+        val pairing = claimedPairing ?: return ClaimResult.NotFound
+        reuseConfirmId?.let { existingCid ->
+            if (openActivity && presenter == null) {
+                com.kilon.agentvscreen.ui.StrongConfirmActivity.open(ctx, existingCid)
+            }
+            return ClaimResult.Opened(existingCid, pairing.id)
+        }
+
+        val validMs = maxOf(CLAIM_MIN_CONFIRM_MS, PAIRING_TTL_MS - (now - pairing.createdAt))
+        val confirmId = if (presenter != null) {
             presenter(
                 ctx,
                 pairing,
                 { grantedScope -> onPairingApproved(pairing, grantedScope, StrongConfirm.BY_BIOMETRIC) },
                 { onPairingDenied(pairing) },
-            )
+            ) ?: "debug_${pairing.id}"
         } else {
             StrongConfirm.createPublicPairingRequest(
                 ctx = ctx,
@@ -787,7 +1001,9 @@ object PublicOAuth {
                 redirectHost = pairing.redirectHost,
                 pairingCode = pairing.code,
                 selectableScopes = pairing.selectableScopes,
-                validMs = PAIRING_TTL_MS,
+                validMs = validMs,
+                sourceAddress = pairing.sourceDisplay,
+                postNotify = false,
                 onApproveWithScope = { grantedScope ->
                     onPairingApproved(pairing, grantedScope, StrongConfirm.BY_BIOMETRIC)
                 },
@@ -796,12 +1012,18 @@ object PublicOAuth {
                 },
             ).id
         }
-        return Started.Ok(pairing)
+        pairing.confirmId = confirmId
+        Audit.security("public_pairing_claimed", "client=${pairing.clientId} src=${pairing.sourceBucket}")
+        if (openActivity && presenter == null) {
+            com.kilon.agentvscreen.ui.StrongConfirmActivity.open(ctx, confirmId)
+        }
+        return ClaimResult.Opened(confirmId, pairing.id)
     }
 
     /**
-     * 2.0.0-beta11: RFC 8628 device authorization. The phone shows its pairing card at once (same card, same
-     * limits as the browser flow); the client shows user_code to the user and polls the token endpoint.
+     * 2.0.0-beta11: RFC 8628 device authorization. Enqueues a silent pairing request (no unsolicited popup on the
+     * phone); the client tells the user `user_code`, the user enters it in Agent-VScreen on the phone to open the
+     * confirmation card, and the client polls the token endpoint.
      */
     fun handleDeviceAuthorization(ctx: Context, r: ApiServer.Req, base: String): ApiServer.Resp {
         val form = HttpCore.parseForm(r.bodyText)
@@ -819,9 +1041,11 @@ object PublicOAuth {
             return oauthError(403, "access_denied", "Public MCP requires a screen lock PIN or biometric on the phone")
         }
         val rawDevice = randomToken()
-        val src = sourceBucket(r.headers["x-avs-public-src"])
+        val rawSrc = r.headers["x-avs-public-src"]
+        val src = sourceBucket(rawSrc)
+        val srcDisplay = sourceDisplay(rawSrc)
         val scopes = resolveSelectableScopes(client.requestedScope, f("scope"))
-        val pairing = when (val started = startPairing(ctx, client, "", tr("无回调地址（设备码配对）", "no redirect (device code)"), "", expectedResource, null, scopes, src, Tokens.sha256(rawDevice))) {
+        val pairing = when (val started = startPairing(client, "", tr("无回调地址（设备码配对）", "no redirect (device code)"), "", expectedResource, null, scopes, src, srcDisplay, Tokens.sha256(rawDevice))) {
             is Started.Ok -> started.pairing
             is Started.Refused -> return started.resp
         }
@@ -834,17 +1058,17 @@ object PublicOAuth {
                 .put("verification_uri_complete", "$verify?user_code=" + URLEncoder.encode(pairing.code, "UTF-8"))
                 .put("expires_in", PAIRING_TTL_MS / 1000L)
                 .put("interval", DEVICE_INTERVAL_S)
-                .put("message", "Approve on the phone: Agent-VScreen shows a pairing card now. Tell the user to check that its code is ${pairing.code}. No browser is needed."),
+                .put("message", "Open Agent-VScreen on the phone (Public MCP), enter pairing code ${pairing.code}, verify the client and source address, and approve. No popup is sent automatically and no browser is needed."),
         )
     }
 
-    /** verification_uri page: there is nothing to type, the approval happens on the phone. */
+    /** verification_uri page: instructs the user to enter the pairing code in Agent-VScreen on the phone. */
     fun devicePageHtml(): ApiServer.Resp = ApiServer.Resp.html(
         errorPageHtml(
-            tr("请在手机上批准", "Approve on your phone"),
+            tr("请在手机上输入配对码批准", "Enter the pairing code on your phone"),
             tr(
-                "Agent-VScreen 已在手机上弹出配对确认。核对卡片上的配对码和 agent 告诉你的一致后批准即可，这个页面不用操作。",
-                "Agent-VScreen shows a pairing card on the phone. Check that its code matches the one the agent gave you and approve it there; nothing to do on this page.",
+                "手机不会自动弹窗。请打开手机上的 Agent-VScreen → 公网 MCP，输入 agent 给你的配对码，核对客户端名称与来源地址后批准即可，这个页面不用操作。",
+                "No popup is sent automatically. Open Agent-VScreen > Public MCP on your phone, enter the pairing code from the agent, check the client name and source address, and approve there; nothing to do on this page.",
             ),
         ),
         200,
@@ -863,8 +1087,8 @@ object PublicOAuth {
             val tooFast = p.lastPollAt != 0L && now - p.lastPollAt < DEVICE_INTERVAL_S * 1000L
             p.lastPollAt = now
             when (p.status) {
-                "pending" -> return if (tooFast) oauthError(400, "slow_down", "Poll every $DEVICE_INTERVAL_S s or slower")
-                else oauthError(400, "authorization_pending", "Waiting for the user to approve on the phone")
+                "queued", "claimed" -> return if (tooFast) oauthError(400, "slow_down", "Poll every $DEVICE_INTERVAL_S s or slower")
+                else oauthError(400, "authorization_pending", "Waiting for the user to enter the pairing code and approve on the phone")
                 "denied" -> return oauthError(400, "access_denied", "The user denied the pairing on the phone")
                 "approved" -> {
                     val c = p.deviceAuthCode ?: return oauthError(400, "expired_token", "device_code already used")
@@ -887,8 +1111,13 @@ object PublicOAuth {
             pruneExpiredLocked(now)
             val p = pairings[pid] ?: return oauthError(404, "not_found", "unknown pairing id")
             when (p.status) {
-                "pending" -> {
-                    val left = ((p.createdAt + PAIRING_TTL_MS - now) / 1000L).coerceAtLeast(1L)
+                "queued", "claimed" -> {
+                    val deadline = if (p.status == "claimed" && p.claimedAt > 0L) {
+                        maxOf(p.createdAt + PAIRING_TTL_MS, p.claimedAt + CLAIM_MIN_CONFIRM_MS)
+                    } else {
+                        p.createdAt + PAIRING_TTL_MS
+                    }
+                    val left = ((deadline - now) / 1000L).coerceAtLeast(1L)
                     JSONObject().put("status", "pending").put("expires_in", left)
                 }
                 "approved" -> {
@@ -914,8 +1143,10 @@ object PublicOAuth {
         var tokenId: String? = null
         val ok = synchronized(lock) {
             pruneExpiredLocked(now)
-            if (pairing.status != "pending" || now - pairing.createdAt >= PAIRING_TTL_MS) {
-                pairing.status = "expired"
+            val expired = now - pairing.createdAt >= PAIRING_TTL_MS &&
+                (pairing.claimedAt == 0L || now - pairing.claimedAt >= CLAIM_MIN_CONFIRM_MS)
+            if (pairing.status != "claimed" || expired) {
+                if (expired) pairing.status = "expired"
                 return@synchronized false
             }
             val client = clients[pairing.clientId] ?: return@synchronized false
@@ -944,7 +1175,7 @@ object PublicOAuth {
                 expiresAt = now + AUTH_CODE_TTL_MS,
             )
             if (pairing.isDevice) pairing.deviceAuthCode = rawCode
-            else pairing.redirectLocation = buildRedirectUrl(pairing.redirectUri, rawCode, pairing.state)
+            else pairing.redirectLocation = buildRedirectUrl(pairing.redirectUri, rawCode, pairing.state, pairing.issuer)
             pairing.status = "approved"
             saveLocked()
             true
@@ -953,6 +1184,7 @@ object PublicOAuth {
         if (ok && tid != null) {
             StrongConfirm.recordPublicPairingApproval(tid, "public:${pairing.clientId}", safeScope, by)
             Audit.security("public_pairing_approved", "client=${pairing.clientId} token=$tid scope=$safeScope")
+            onPairingApprovedHook()
         }
     }
 
@@ -960,7 +1192,7 @@ object PublicOAuth {
         val now = nowMs()
         var enteredCooldown = false
         synchronized(lock) {
-            if (pairing.status != "pending") return
+            if (pairing.status != "claimed") return
             pairing.status = "denied"
             pairing.redirectLocation = null
             val n = (deniesBySource[pairing.sourceBucket] ?: 0) + 1
@@ -979,10 +1211,10 @@ object PublicOAuth {
 
     internal fun latestPendingPairingForTests(): Pairing? = synchronized(lock) {
         pruneExpiredLocked(nowMs())
-        pairings.values.lastOrNull { it.status == "pending" }
+        pairings.values.lastOrNull { it.status == "queued" || it.status == "claimed" }
     }
 
-    private fun buildRedirectUrl(redirectUri: String, code: String, state: String?): String {
+    private fun buildRedirectUrl(redirectUri: String, code: String, state: String?, issuer: String? = null): String {
         val sep = if ('?' in redirectUri) '&' else '?'
         val sb = StringBuilder(redirectUri)
             .append(sep)
@@ -990,12 +1222,36 @@ object PublicOAuth {
         if (!state.isNullOrEmpty()) {
             sb.append("&state=").append(URLEncoder.encode(state, "UTF-8"))
         }
+        if (!issuer.isNullOrBlank()) {
+            sb.append("&iss=").append(URLEncoder.encode(issuer, "UTF-8"))
+        }
         return sb.toString()
     }
 
     // ── Token endpoint (authorization_code & rotating refresh_token) ───────
 
     fun handleToken(r: ApiServer.Req, base: String): ApiServer.Resp {
+        val now = nowMs()
+        val src = sourceBucket(r.headers["x-avs-public-src"])
+        val tokenLimited = synchronized(lock) {
+            val sq = tokenTimesBySource.getOrPut(src) { ArrayDeque() }
+            while (sq.isNotEmpty() && now - sq.first() >= TOKEN_WINDOW_MS) sq.removeFirst()
+            if (tokenTimesBySource.size > 500) {
+                tokenTimesBySource.entries.removeAll { (k, q) ->
+                    k != src && (q.isEmpty() || now - q.last() >= TOKEN_WINDOW_MS)
+                }
+            }
+            if (sq.size >= TOKEN_MAX_PER_MIN) {
+                true
+            } else {
+                sq.addLast(now)
+                false
+            }
+        }
+        if (tokenLimited) {
+            Audit.security("public_token_rate_limited", "src=$src limit=$TOKEN_MAX_PER_MIN/min")
+            return oauthError(429, "too_many_requests", "Token endpoint rate limit exceeded (max $TOKEN_MAX_PER_MIN per minute)")
+        }
         val form = HttpCore.parseForm(r.bodyText)
         fun f(k: String): String? = form[k]?.firstOrNull()?.takeIf { it.isNotBlank() }
         return when (f("grant_type")) {
@@ -1118,6 +1374,7 @@ object PublicOAuth {
 
         var reuseClientId: String? = null
         var reuseTokenId: String? = null
+        var graceRetryLog: String? = null
         var errorResp: ApiServer.Resp? = null
         var issued: JSONObject? = null
         var issuedLog: String? = null
@@ -1129,6 +1386,23 @@ object PublicOAuth {
                 return@synchronized
             }
             if (rec.retired) {
+                val grace = refreshGrace[hash]
+                if (grace != null &&
+                    !grace.retried &&
+                    now < grace.expiresAt &&
+                    grace.clientId == clientId &&
+                    (resource == null || matchesResource(resource, grace.resource)) &&
+                    accessTokens.containsKey(grace.newAccessHash) &&
+                    refreshTokens[grace.newRefreshHash]?.retired == false &&
+                    Tokens.byId(grace.tokenId)?.publicOnly == true
+                ) {
+                    // Single idempotent retry within 30s when the rotated response may have been lost in transit
+                    // before the client ever used the new access/refresh token.
+                    grace.retried = true
+                    graceRetryLog = "client=${rec.clientId} token=${rec.tokenId}"
+                    issued = JSONObject(grace.responseJson)
+                    return@synchronized
+                }
                 // 7.2: reuse of a rotated/retired refresh token revokes ALL tokens of this client.
                 revokeAllForClientLocked(rec.clientId)
                 saveLocked()
@@ -1161,13 +1435,18 @@ object PublicOAuth {
                 return@synchronized
             }
 
+            // Client proved possession of this refresh token: evict any prior grace entry that minted it.
+            refreshGrace.entries.removeAll { it.value.newRefreshHash == hash }
+
             // Rotate: mark old refresh token retired (keep hash until original expiry to detect reuse),
             // mint new access + refresh tokens WITHOUT modifying the Tokens entry (7.7).
             rec.retired = true
+            rec.retiredAt = now
             val currentScope = if (rec.scope == "operate") "operate" else "look" // the bound stays the pairing's
             val rawAccess = randomToken()
             val rawRefresh = randomToken()
             val newAccessHash = Tokens.sha256(rawAccess)
+            val newRefreshHash = Tokens.sha256(rawRefresh)
             accessTokens[newAccessHash] = AccessTokenRecord(
                 tokenId = tok.id,
                 clientId = rec.clientId,
@@ -1176,7 +1455,7 @@ object PublicOAuth {
                 scope = currentScope,
             )
             knownTokenClients[newAccessHash] = rec.clientId
-            refreshTokens[Tokens.sha256(rawRefresh)] = RefreshTokenRecord(
+            refreshTokens[newRefreshHash] = RefreshTokenRecord(
                 tokenId = tok.id,
                 clientId = rec.clientId,
                 expiresAt = now + REFRESH_TOKEN_TTL_MS,
@@ -1184,20 +1463,31 @@ object PublicOAuth {
                 scope = currentScope,
                 retired = false,
             )
-            pruneExpiredLocked(now)
-            saveLocked()
-            issuedLog = "client=${rec.clientId} token=${tok.id} scope=$currentScope"
-            issued = JSONObject()
+            val respObj = JSONObject()
                 .put("access_token", rawAccess)
                 .put("token_type", "Bearer")
                 .put("expires_in", ACCESS_TOKEN_TTL_MS / 1000L)
                 .put("refresh_token", rawRefresh)
                 .put("scope", effectiveScope(currentScope, tok))
+            refreshGrace[hash] = RefreshGraceEntry(
+                clientId = rec.clientId,
+                tokenId = tok.id,
+                resource = rec.resource,
+                newAccessHash = newAccessHash,
+                newRefreshHash = newRefreshHash,
+                responseJson = respObj.toString(),
+                expiresAt = now + REFRESH_GRACE_MS,
+            )
+            pruneExpiredLocked(now)
+            saveLocked()
+            issuedLog = "client=${rec.clientId} token=${tok.id} scope=$currentScope"
+            issued = respObj
         }
 
         if (reuseClientId != null) {
             Audit.security("public_refresh_reuse", "client=$reuseClientId token=$reuseTokenId")
         }
+        graceRetryLog?.let { Audit.security("public_refresh_grace_retry", it) }
         errorResp?.let { return it }
         issuedLog?.let { Audit.security("public_token_refreshed", it) }
         return ApiServer.Resp.json(issued!!)
@@ -1207,10 +1497,7 @@ object PublicOAuth {
 
     /**
      * Verify a Bearer access token presented to `POST /mcp` on [PublicServer], returning
-     * either [AccessCheck.Valid] or [AccessCheck.Invalid] with `knownClientId` populated
-     * when the token belonged to a known client (expired, wrong resource, or revoked) so
-     * [PublicServer] can bucket known-client failures by `client_id` while isolating unknown
-     * Bearer tokens strictly to the source IP bucket (beta8 Section I).
+     * either [AccessCheck.Valid] or [AccessCheck.Invalid].
      */
     fun inspectAccessToken(rawToken: String?, expectedResource: String): AccessCheck {
         if (rawToken.isNullOrBlank()) return AccessCheck.Invalid(null)
@@ -1224,6 +1511,10 @@ object PublicOAuth {
         if (now >= rec.expiresAt) return AccessCheck.Invalid(rec.clientId)
         if (!matchesResource(rec.resource, expectedResource)) return AccessCheck.Invalid(rec.clientId)
         val tok = Tokens.byId(rec.tokenId)?.takeIf { it.publicOnly } ?: return AccessCheck.Invalid(rec.clientId)
+        // Once the client successfully presents the newly rotated access token, close the grace window immediately.
+        synchronized(lock) {
+            refreshGrace.entries.removeAll { it.value.newAccessHash == hash }
+        }
         return AccessCheck.Valid(AccessAuth(tok, rec.clientId, effectiveScope(rec.scope, tok)))
     }
 
@@ -1236,6 +1527,7 @@ object PublicOAuth {
             val cids = clients.values.filter { it.tokenId == tokenId }.map { it.clientId }
             var changed = accessTokens.entries.removeAll { it.value.tokenId == tokenId }
             if (refreshTokens.entries.removeAll { it.value.tokenId == tokenId }) changed = true
+            refreshGrace.entries.removeAll { it.value.tokenId == tokenId }
             if (authCodes.entries.removeAll { it.value.tokenId == tokenId }) changed = true
             cids.forEach { cid ->
                 clients.remove(cid)
@@ -1248,6 +1540,7 @@ object PublicOAuth {
     private fun revokeAllForClientLocked(clientId: String) {
         accessTokens.entries.removeAll { it.value.clientId == clientId }
         refreshTokens.entries.removeAll { it.value.clientId == clientId }
+        refreshGrace.entries.removeAll { it.value.clientId == clientId }
         authCodes.entries.removeAll { it.value.clientId == clientId }
     }
 
@@ -1256,6 +1549,7 @@ object PublicOAuth {
             clients.clear()
             accessTokens.clear()
             refreshTokens.clear()
+            refreshGrace.clear()
             authCodes.clear()
             pairings.clear()
             saveLocked()
@@ -1304,14 +1598,14 @@ h1{font-size:20px;margin:0 0 8px}
 </head>
 <body>
 <div class="card">
-  <h1>请在手机的 Agent-VScreen 里确认</h1>
-  <p class="sub">Please confirm in Agent-VScreen on your phone and verify this pairing code matches.</p>
+  <h1>请在手机的 Agent-VScreen 里输入配对码</h1>
+  <p class="sub">Open Agent-VScreen &rarr; Public MCP on your phone and enter this pairing code. No popup is sent automatically.</p>
   <div class="code">$safeCode</div>
   <div class="meta">
-    <div><strong>Client:</strong> $safeName</div>
+    <div><strong>Client (self-reported):</strong> $safeName</div>
     <div><strong>Redirect host:</strong> $safeHost</div>
   </div>
-  <div id="st" class="status">等待手机确认… / Waiting for phone confirmation…</div>
+  <div id="st" class="status">等待手机输入配对码并确认… / Waiting for phone code entry &amp; approval…</div>
   <div id="cb">
     <div class="sub">若跳转后打不开（比如在手机浏览器里打开了电脑上的回调地址），复制下面的完整地址发给 agent。<br>If the redirect does not open (e.g. a computer's callback opened on a phone), copy this full address to the agent.</div>
     <textarea id="cbu" readonly></textarea>
@@ -1378,17 +1672,25 @@ h1{font-size:20px;margin:0 0 8px}
             clients.clear()
             accessTokens.clear()
             refreshTokens.clear()
+            refreshGrace.clear()
             authCodes.clear()
             pairings.clear()
             knownTokenClients.clear()
             registerTimesGlobal.clear()
             registerTimesBySource.clear()
+            tokenTimesBySource.clear()
             deniesBySource.clear()
             denyCooldownBySource.clear()
             storageFile = file
             clock = { System.currentTimeMillis() }
             clockOffsetMs = 0L
             deviceSecureCheck = { true }
+            pairingAllowedCheck = { com.kilon.agentvscreen.host.PublicAccess.isPairingAllowed(nowMs()) }
+            onPairingApprovedHook = {
+                if (com.kilon.agentvscreen.host.PublicAccess.strictPairingWindow) {
+                    com.kilon.agentvscreen.host.PublicAccess.closePairingWindow()
+                }
+            }
             pairingPresenterOverride = null
         }
     }

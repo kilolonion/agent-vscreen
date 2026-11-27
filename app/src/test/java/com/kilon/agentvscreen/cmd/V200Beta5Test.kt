@@ -511,9 +511,9 @@ class V200Beta5Test {
         val parsedWchan = Gate.parseWchanOutput("WCHAN                            NAME\ndo_freezer_trap                  com.example.a\nep_poll                          com.example.b\n")
         assertEquals(listOf("do_freezer_trap" to "com.example.a", "ep_poll" to "com.example.b"), parsedWchan)
 
-        // VScreenDisplayService GATE binder op 4 (HOLD) and op 5 (UNHOLD) + PROTOCOL == 18.
-        assertEquals(18, VScreenDisplayService.PROTOCOL)
-        val svc = VScreenDisplayService()
+        // VScreenDisplayService GATE binder op 4 (HOLD) and op 5 (UNHOLD) + PROTOCOL == 19.
+        assertEquals(19, VScreenDisplayService.PROTOCOL)
+        val svc = VScreenDisplayService().apply { ownAppUidFn = { android.os.Binder.getCallingUid() } }
         fun transactGate(write: (Parcel) -> Unit, read: (Parcel) -> Unit) {
             val data = Parcel.obtain()
             val reply = Parcel.obtain()

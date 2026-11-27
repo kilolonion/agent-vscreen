@@ -3,6 +3,7 @@ package com.kilon.agentvscreen.core
 import com.kilon.agentvscreen.tr
 
 import android.content.Context
+import com.kilon.agentvscreen.host.Privileged
 import com.kilon.agentvscreen.host.ShizukuManager
 
 /**
@@ -54,6 +55,7 @@ internal object VScreenShell {
         Control.admitInput()
         val clean = pkg.trim()
         if (clean.isEmpty()) return fail("INVALID_ARGS", tr("缺少包名", "Missing package name"))
+        if (!PackageNames.isValid(clean)) return fail("INVALID_ARGS", tr("无效的应用包名：$clean", "Invalid package name: $clean"))
         // v22 传送门: with an explicit intent (deep link / shortcut / learned page) the app is
         // always opened in a fresh task on the background screen (never "keep").
         val mode = if (intent != null && mode0 == LaunchMode.KEEP) LaunchMode.ROOT else mode0
@@ -200,6 +202,7 @@ internal object VScreenShell {
      * effect at the app's next start. Best effort; returns what each step said.
      */
     fun disableDownscale(pkg: String): String {
+        if (!PackageNames.isValid(pkg)) return tr("无效的应用包名：$pkg", "Invalid package name: $pkg")
         fun step(label: String, argv: Array<String>): String {
             val r = run(argv, 8_000L)
             val msg = r.combined.trim().lines().firstOrNull { it.isNotBlank() }?.take(120)
@@ -213,6 +216,7 @@ internal object VScreenShell {
 
     /** Undo [disableDownscale]. */
     fun resetDownscale(pkg: String) {
+        if (!PackageNames.isValid(pkg)) return
         com.kilon.agentvscreen.host.quiet("VScreenShell:189") { run(arrayOf("am", "compat", "reset", "DOWNSCALED", pkg), 8_000L) }
         com.kilon.agentvscreen.host.quiet("VScreenShell:190") { run(arrayOf("cmd", "game", "reset", pkg), 8_000L) }
     }
@@ -268,6 +272,7 @@ internal object VScreenShell {
     fun stop(displayId: Int, pkg: String?): Outcome {
         val target = pkg?.trim()?.takeIf { it.isNotEmpty() } ?: topPackage(displayId)
             ?: return ok(tr("副屏 $displayId 上没有应用", "No app on screen $displayId"))
+        if (!PackageNames.isValid(target)) return fail("INVALID_ARGS", tr("无效的应用包名：$target", "Invalid package name: $target"))
         if (isProtected(target)) return fail("PROTECTED_APP", tr("$target 是 Agent-VScreen 自己、桌面或系统界面，不能 force-stop（会中断任务或打断用户）", "$target is Agent-VScreen itself, the launcher or system UI and cannot be force-stopped (it would break the task or disturb the user)"))
         val r = run(arrayOf("am", "force-stop", target), 8_000L)
         return if (r.exitCode == 0) ok(tr("已结束 $target（force-stop 会结束该应用的所有页面，包括主屏上的）", "Stopped $target (force-stop ends all of the app's pages, including those on the main screen)"))
@@ -357,7 +362,15 @@ internal object VScreenShell {
         // with a cancel) says so (USER_STOPPED / USER_TAKEOVER / CONTROL_CHANGED), not "the system refused".
         r.getOrNull() == false && !Control.isUser() -> { Control.admitInput(); fail("INPUT_FAILED", tr("系统拒绝了副屏 $displayId 上的 $what 注入", "The system refused injecting $what on screen $displayId")) }
         r.getOrNull() == true -> ok(tr("副屏 $displayId：$what 已注入", "screen $displayId: $what injected"))
-        r.isFailure -> fail("NOT_CONNECTED", tr("副屏服务（Shizuku）不可用，$what 没有做：${r.exceptionOrNull()?.message}。多半是 Shizuku 停了：请用户打开 Shizuku 启动它", "The screen service (Shizuku) is unavailable, $what was not done: ${r.exceptionOrNull()?.message}. Most likely Shizuku stopped: ask the user to start it in Shizuku"))
+        r.isFailure -> {
+            val srcName = Privileged.name()
+            val fixHint = if (Privileged.via == Privileged.Via.ROOT) {
+                tr("请用户在 Agent-VScreen 里重新启动 Root 服务", "ask the user to restart the Root service in Agent-VScreen")
+            } else {
+                tr("多半是 $srcName 停了：请用户打开 $srcName 启动它", "Most likely $srcName stopped: ask the user to start it in $srcName")
+            }
+            fail("NOT_CONNECTED", tr("副屏服务（$srcName）不可用，$what 没有做：${r.exceptionOrNull()?.message}。$fixHint", "The screen service ($srcName) is unavailable, $what was not done: ${r.exceptionOrNull()?.message}. $fixHint"))
+        }
         else -> fail("INPUT_FAILED", tr("系统拒绝了副屏 $displayId 上的 $what 注入", "The system refused injecting $what on screen $displayId"))
     }
 
@@ -395,7 +408,8 @@ internal object VScreenShell {
         if (code != 3) Control.admitInput()
         val (ix, iy) = if (x < 0 || y < 0) (-1 to -1) else mx(displayId, x, y)
         val r = injector.pointer(displayId, code, pointerId, ix.toFloat(), iy.toFloat())
-        val v = r.getOrNull() ?: return fail("NOT_CONNECTED", tr("副屏服务（Shizuku）不可用：${r.exceptionOrNull()?.message}", "The screen service (Shizuku) is unavailable: ${r.exceptionOrNull()?.message}")) to 0
+        val srcName = Privileged.name()
+        val v = r.getOrNull() ?: return fail("NOT_CONNECTED", tr("副屏服务（$srcName）不可用：${r.exceptionOrNull()?.message}", "The screen service ($srcName) is unavailable: ${r.exceptionOrNull()?.message}")) to 0
         return (if (v.first) ok(tr("手指 $pointerId $op ($x,$y)", "finger $pointerId $op ($x,$y)")) else fail("INPUT_FAILED", tr("手指 $pointerId $op 注入失败（这根手指可能没按下）", "finger $pointerId $op injection failed (this finger may not be down)"))) to v.second
     }
 
@@ -476,11 +490,20 @@ internal object VScreenShell {
      * IWindowManager call is not reachable from the app process.
      */
     fun hideImeOn(context: Context, displayId: Int): Outcome {
+        if (displayId <= android.view.Display.DEFAULT_DISPLAY) {
+            return fail("IME_POLICY_FAILED", tr("拒绝修改主屏键盘策略", "Refused to modify main display IME policy"))
+        }
+        val direct = runCatching { VScreenRemoteDisplay.hideIme(displayId) }.getOrNull()
+        if (direct?.getOrNull() == true) {
+            return ok(tr("键盘策略：副屏不弹出键盘", "Keyboard policy: no keyboard on the screen"))
+        }
         val apk = context.applicationInfo.sourceDir
-        val r = run(arrayOf(
-            "sh", "-c",
-            "CLASSPATH='$apk' app_process /system/bin ${VScreenShellMain::class.java.name} ime-hide $displayId",
-        ), 10_000L)
+        val r = com.kilon.agentvscreen.host.Privileged.runProcess(
+            argv = arrayOf("/system/bin/app_process", "/system/bin", VScreenShellMain::class.java.name, "ime-hide", displayId.toString()),
+            env = arrayOf("CLASSPATH=$apk"),
+            cwd = null,
+            timeoutMs = 10_000L,
+        )
         return if (r.exitCode == 0 && r.stdout.contains("OK")) ok(tr("键盘策略：副屏不弹出键盘", "Keyboard policy: no keyboard on the screen"))
         else fail("IME_POLICY_FAILED", tr("设置副屏键盘策略失败：${r.combined.take(300)}", "Setting the screen's keyboard policy failed: ${r.combined.take(300)}"))
     }

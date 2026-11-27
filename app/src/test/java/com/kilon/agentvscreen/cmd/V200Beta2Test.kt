@@ -433,9 +433,9 @@ class V200Beta2Test {
 
     @Test
     fun serviceGateBinderTransactionLifecycleAndProtocolVersion() {
-        assertEquals(18, VScreenDisplayService.PROTOCOL)
-        assertEquals(VScreenDisplayService.GATE, VScreenDisplayService.LAST_CALL)
-        val svc = VScreenDisplayService()
+        assertEquals(19, VScreenDisplayService.PROTOCOL)
+        assertEquals(VScreenDisplayService.RESTORE_MAIN_FOCUS, VScreenDisplayService.LAST_CALL)
+        val svc = VScreenDisplayService().apply { ownAppUidFn = { android.os.Binder.getCallingUid() } }
         val wantPort = freePort()
 
         fun transactGate(write: (Parcel) -> Unit, read: (Parcel) -> Unit) {
@@ -538,6 +538,9 @@ class V200Beta2Test {
 
     @Test
     fun hostServiceIgnoresSpoofedActionsWhileNoteActionsHandlesThem() {
+        if (com.kilon.agentvscreen.core.BackgroundOperation.appContextOrNull() == null) {
+            com.kilon.agentvscreen.core.BackgroundOperation.init(ctx)
+        }
         com.kilon.agentvscreen.host.Prefs.setBlocked(ctx, false)
         com.kilon.agentvscreen.host.Prefs.setServiceOn(ctx, true)
         com.kilon.agentvscreen.host.UserAsk.reset()

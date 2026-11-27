@@ -35,8 +35,12 @@ object VScreenMute {
         legacy()?.takeIf { it.isNotEmpty() }?.let { old ->
             Thread {
                 val left = old.filterNot { (p, _) ->
-                    runCatching { VScreenShell.run(arrayOf("sh", "-c", PlayAudio.giveBack(0, p, null)), 6_000L).let { r ->
-                        PlayAudio.parseScan(r.combined).firstOrNull()?.let { !PlayAudio.silent(it.modes) } == true } }.getOrDefault(false)
+                    if (!PackageNames.isValid(p)) true
+                    else runCatching {
+                        PlayAudio.giveBackArgvs(0, p, null).forEach { argv -> VScreenShell.run(argv.toTypedArray(), 4_000L) }
+                        val read = VScreenShell.run(PlayAudio.readArgv(0, p).toTypedArray(), 4_000L).combined
+                        !PlayAudio.silent(PlayAudio.parse(read))
+                    }.getOrDefault(false)
                 }
                 if (left.isEmpty()) legacyFile()?.delete()
                 else AppLogger.warning(TAG, "could not give back ${left.keys}")
@@ -114,9 +118,31 @@ object VScreenMute {
     /** 1.4.2: the last full reading, shown at once while the sound page reads again. */
     @Volatile var lastSilenced: List<PlayAudio.Hit>? = null; private set
 
+    private fun scanDirect(): String? {
+        val usersOut = runCatching { VScreenShell.run(arrayOf("pm", "list", "users"), 4_000L).combined }.getOrNull() ?: return null
+        val users = PlayAudio.parseUsers(usersOut)
+        val sb = StringBuilder()
+        for (u in users) {
+            val uStr = u.toString()
+            val pkgsOut = runCatching { VScreenShell.run(arrayOf("pm", "list", "packages", "-U", "--user", uStr), 6_000L).combined }
+                .getOrNull()?.takeIf { it.contains("package:") }
+                ?: runCatching { VScreenShell.run(arrayOf("pm", "list", "packages", "--user", uStr), 6_000L).combined }.getOrDefault("")
+            for ((pkg, uid) in PlayAudio.parsePackages(pkgsOut)) {
+                sb.append("@@ ").append(u).append(' ').append(pkg)
+                if (uid != null) sb.append(' ').append(uid)
+                sb.append('\n')
+                val read = runCatching { VScreenShell.run(PlayAudio.readArgv(u, pkg).toTypedArray(), 4_000L).combined }.getOrDefault("")
+                sb.append(read).append('\n')
+            }
+        }
+        return sb.toString()
+    }
+
     fun silenced(): List<PlayAudio.Hit>? = runCatching {
-        val r = VScreenShell.run(arrayOf("sh", "-c", PlayAudio.SCAN), 90_000L)
-        PlayAudio.parseScan(r.combined).filter { PlayAudio.silent(it.modes) }.takeIf { r.combined.contains("@@") }
+        val raw = VScreenRemoteDisplay.soundScan().getOrNull()?.takeIf { it.contains("@@") }
+            ?: scanDirect()?.takeIf { it.contains("@@") }
+            ?: return@runCatching null
+        PlayAudio.parseScan(raw).filter { PlayAudio.silent(it.modes) }
     }.getOrNull()?.also { lastSilenced = it }
 
     /**
@@ -133,13 +159,31 @@ object VScreenMute {
         if (!keepIntended) { runCatching { VScreenRemoteDisplay.soundGiveAll() }; known = emptySet() }
         val bad = silenced()?.filterNot { it.user == 0 && it.pkg in keep } ?: return null
         if (bad.isEmpty()) return Repair(emptyList(), emptyList(), false)
-        val out = runCatching { VScreenShell.run(arrayOf("sh", "-c", bad.joinToString("; ") { PlayAudio.giveBack(it.user, it.pkg, it.uid) }), 60_000L).combined }.getOrDefault("")
-        val after = PlayAudio.parseScan(out).associateBy { it.user to it.pkg }
-        val (ok, no) = bad.partition { h -> after[h.user to h.pkg]?.let { !PlayAudio.silent(it.modes) } == true }
+        val ok = ArrayList<PlayAudio.Hit>()
+        val no = ArrayList<PlayAudio.Hit>()
+        val logOut = StringBuilder()
+        var anyDenied = false
+        for (h in bad) {
+            if (!PackageNames.isValid(h.pkg)) { no += h; continue }
+            val stepOut = StringBuilder()
+            runCatching {
+                for (argv in PlayAudio.giveBackArgvs(h.user, h.pkg, h.uid)) {
+                    val r = VScreenShell.run(argv.toTypedArray(), 4_000L)
+                    stepOut.append(r.combined).append('\n')
+                }
+            }
+            val readOut = runCatching { VScreenShell.run(PlayAudio.readArgv(h.user, h.pkg).toTypedArray(), 4_000L).combined }.getOrDefault("")
+            stepOut.append(readOut)
+            val combined = stepOut.toString()
+            if (PlayAudio.denied(combined)) anyDenied = true
+            if (logOut.length < 300) logOut.append(combined)
+            val after = PlayAudio.parse(readOut)
+            if (!PlayAudio.silent(after)) ok += h else no += h
+        }
         put(K_MANUAL, manual() - ok.filter { it.user == 0 }.map { it.pkg }.toSet())
         if (ok.isNotEmpty()) AppLogger.info(TAG, "repair gave back ${ok.map { "${it.user}/${it.pkg}" }}")
-        if (no.isNotEmpty()) AppLogger.warning(TAG, "repair could not give back ${no.map { "${it.user}/${it.pkg}" }}: ${out.take(300)}")
-        return Repair(ok, no, PlayAudio.denied(out))
+        if (no.isNotEmpty()) AppLogger.warning(TAG, "repair could not give back ${no.map { "${it.user}/${it.pkg}" }}: ${logOut.toString().take(300)}")
+        return Repair(ok, no, anyDenied)
     }
 
     fun mutedNow(): Set<String> = known
@@ -157,6 +201,7 @@ object VScreenMute {
     fun plays(): Set<String> = set(K_PLAYS)
 
     private fun uidOf(pkg: String): Int? = runCatching {
+        if (!PackageNames.isValid(pkg)) return null
         VScreenShell.run(arrayOf("cmd", "package", "list", "packages", "-U", pkg), 4_000L).combined.lines()
             .firstOrNull { it.trim().startsWith("package:$pkg ") }?.let { Regex("uid:(\\d+)").find(it)?.groupValues?.get(1)?.toIntOrNull() }
     }.getOrNull()
@@ -164,32 +209,46 @@ object VScreenMute {
     /** What changing one app's sound did: ok, the modes read after, and why not when refused. */
     data class Change(val ok: Boolean, val modes: PlayAudio.Modes?, val why: String? = null)
 
-    private fun apply(script: String, want: (PlayAudio.Modes) -> Boolean): Change {
-        val r = runCatching { VScreenShell.run(arrayOf("sh", "-c", script), 8_000L) }.getOrNull() ?: return Change(false, null, "no-shizuku")
-        val m = PlayAudio.parseScan(r.combined).firstOrNull()?.modes
-        return Change(m != null && want(m), m, if (PlayAudio.denied(r.combined)) "denied" else null)
+    private fun applyArgvs(setArgvs: List<List<String>>, readArgv: List<String>, want: (PlayAudio.Modes) -> Boolean): Change {
+        val sb = StringBuilder()
+        for (argv in setArgvs) {
+            val r = runCatching { VScreenShell.run(argv.toTypedArray(), 4_000L) }.getOrNull() ?: return Change(false, null, "no-shizuku")
+            sb.append(r.combined).append('\n')
+        }
+        val read = runCatching { VScreenShell.run(readArgv.toTypedArray(), 4_000L) }.getOrNull() ?: return Change(false, null, "no-shizuku")
+        sb.append(read.combined)
+        val m = PlayAudio.parse(read.combined)
+        val combined = sb.toString()
+        return Change(want(m), m, if (PlayAudio.denied(combined)) "denied" else null)
     }
 
     /** Mute [pkg] everywhere (package and its own UID record), kept until [unmute]. */
     fun mute(pkg: String): Change {
+        if (!PackageNames.isValid(pkg)) return Change(false, null, "invalid-package")
         val uid = uidOf(pkg)?.takeIf { it >= 10_000 }
-        return apply(PlayAudio.silence(0, pkg, uid)) { PlayAudio.silent(it) }.also { if (it.ok) { put(K_MANUAL, manual() + pkg); put(K_PLAYS, plays() - pkg) } }
+        return applyArgvs(PlayAudio.silenceArgvs(0, pkg, uid), PlayAudio.readArgv(0, pkg)) { PlayAudio.silent(it) }
+            .also { if (it.ok) { put(K_MANUAL, manual() + pkg); put(K_PLAYS, plays() - pkg) } }
     }
 
     /** Give [pkg] its sound back on both records (whoever muted it). */
     fun unmute(pkg: String): Change {
+        if (!PackageNames.isValid(pkg)) return Change(false, null, "invalid-package")
         runCatching { if (VScreenRemoteDisplay.isConnected()) VScreenRemoteDisplay.soundGive(pkg) }
-        return apply(PlayAudio.giveBack(0, pkg, uidOf(pkg))) { !PlayAudio.silent(it) }.also { if (it.ok) put(K_MANUAL, manual() - pkg) }
+        return applyArgvs(PlayAudio.giveBackArgvs(0, pkg, uidOf(pkg)), PlayAudio.readArgv(0, pkg)) { !PlayAudio.silent(it) }
+            .also { if (it.ok) put(K_MANUAL, manual() - pkg) }
     }
 
     /** [pkg] keeps (true) or loses (false) its sound while on the background screen. */
     fun setPlays(pkg: String, on: Boolean) {
+        if (!PackageNames.isValid(pkg)) return
         put(K_PLAYS, if (on) plays() + pkg else plays() - pkg)
         resync()
     }
 
     /** One app's state now: its two records, and whether it can be heard. */
-    fun state(pkg: String): PlayAudio.Modes? = runCatching { PlayAudio.parse(VScreenShell.run(arrayOf("cmd", "appops", "get", pkg, "PLAY_AUDIO"), 4_000L).combined) }.getOrNull()
+    fun state(pkg: String): PlayAudio.Modes? =
+        if (!PackageNames.isValid(pkg)) null
+        else runCatching { PlayAudio.parse(VScreenShell.run(arrayOf("cmd", "appops", "get", pkg, "PLAY_AUDIO"), 4_000L).combined) }.getOrNull()
 
     /** Apps muted by the last [sync] whose sound already playing was still heard. */
     @Volatile var heard: List<String> = emptyList()

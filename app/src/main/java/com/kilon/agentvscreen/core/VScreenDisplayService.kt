@@ -114,8 +114,92 @@ class VScreenDisplayService : Binder {
     constructor() : super() { base = null; guardThreads() }
     constructor(context: Context) : super() { base = context; guardThreads() }
 
+    /** Target Android user id this service belongs to (set by RootMain when started for a specific user). */
+    @Volatile internal var targetUserId: Int = 0
+    /** APK sourceDir hint (set by RootMain) used to verify app_process CLASSPATH in EXEC. */
+    @Volatile internal var ownSourceDirHint: String? = null
+    /** Test seams for caller UID and own app UID resolution. */
+    @Volatile internal var callingUidFn: () -> Int = { Binder.getCallingUid() }
+    @Volatile internal var ownAppUidFn: (() -> Int?)? = null
+    @Volatile private var cachedAppUid: Int = -1
+    @Volatile private var cachedSourceDir: String? = null
+
     /** 1.4.2: in the Shizuku process too, a helper thread's exception must not take the screens down with it. */
     private fun guardThreads() = ThreadGuard.install({ System.err.println("vscreen-service: $it") })
+
+    private fun resolveOwnAppUid(): Int? {
+        ownAppUidFn?.let { return it() }
+        val pkg = com.kilon.agentvscreen.BuildConfig.APPLICATION_ID
+        val user = targetUserId.coerceAtLeast(0)
+        if (user == 0) {
+            runCatching { base?.packageManager?.getPackageUid(pkg, 0) }.getOrNull()?.takeIf { it >= 0 }?.let { return it }
+        }
+        runCatching {
+            val sm = Class.forName("android.os.ServiceManager").getMethod("getService", String::class.java)
+                .invoke(null, "package") as? android.os.IBinder ?: return@runCatching null
+            val ipm = Class.forName("android.content.pm.IPackageManager\$Stub")
+                .getMethod("asInterface", android.os.IBinder::class.java).invoke(null, sm) ?: return@runCatching null
+            val mLong = runCatching {
+                ipm.javaClass.getMethod("getPackageUid", String::class.java, Long::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            }.getOrNull()
+            val uid = if (mLong != null) {
+                (mLong.invoke(ipm, pkg, 0L, user) as? Number)?.toInt()
+            } else {
+                val mInt = ipm.javaClass.getMethod("getPackageUid", String::class.java, Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                (mInt.invoke(ipm, pkg, 0, user) as? Number)?.toInt()
+            }
+            uid?.takeIf { it >= 0 }
+        }.getOrNull()?.let { return it }
+        val cmdQueries = buildList {
+            add(arrayOf("cmd", "package", "list", "packages", "--user", user.toString(), "-U", pkg))
+            if (user == 0) add(arrayOf("cmd", "package", "list", "packages", "-U", pkg))
+        }
+        for (argv in cmdQueries) {
+            val out = runCatching { runDirectProcess(argv, 3_000L) }.getOrNull() ?: continue
+            val uid = PlayAudio.parsePackages(out).firstOrNull { it.first == pkg }?.second
+            if (uid != null && uid >= 0) return uid
+        }
+        return null
+    }
+
+    private fun resolveOwnSourceDir(): String? {
+        ownSourceDirHint?.takeIf { it.isNotBlank() }?.let { return it }
+        cachedSourceDir?.let { return it }
+        val pkg = com.kilon.agentvscreen.BuildConfig.APPLICATION_ID
+        val fromPm = runCatching { base?.packageManager?.getApplicationInfo(pkg, 0)?.sourceDir }.getOrNull()?.takeIf { it.isNotBlank() }
+        if (fromPm != null) { cachedSourceDir = fromPm; return fromPm }
+        val fromCmd = runCatching {
+            runDirectProcess(arrayOf("cmd", "package", "path", pkg), 3_000L).lineSequence()
+                .map { it.trim() }.firstOrNull { it.startsWith("package:") }?.removePrefix("package:")?.trim()
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+        if (fromCmd != null) cachedSourceDir = fromCmd
+        return fromCmd
+    }
+
+    private fun checkOwnAppUid(caller: Int): Boolean {
+        val cached = cachedAppUid
+        if (cached >= 0 && caller == cached) return true
+        val fresh = resolveOwnAppUid()
+        if (fresh != null && fresh >= 0) cachedAppUid = fresh
+        return fresh != null && fresh >= 0 && caller == fresh
+    }
+
+    private fun isDestroyAuthorized(caller: Int): Boolean {
+        if (caller == android.os.Process.myUid() || caller == 2000 || caller == 0) return true
+        return checkOwnAppUid(caller)
+    }
+
+    private fun runDirectProcess(cmd: Array<String>, timeoutMs: Long = 4_000L): String {
+        val p = ProcessBuilder(*cmd).redirectErrorStream(true).start()
+        val out = StringBuilder()
+        val reader = Thread { runCatching { p.inputStream.bufferedReader().use { out.append(it.readText()) } } }.apply { isDaemon = true; start() }
+        if (!p.waitFor(timeoutMs.coerceAtLeast(1L), java.util.concurrent.TimeUnit.MILLISECONDS)) {
+            p.destroyForcibly()
+            error("timeout: ${cmd.joinToString(" ")}")
+        }
+        reader.join(1_000)
+        return synchronized(out) { out.toString() }
+    }
 
     /**
      * 1.4.0-beta11: the sound of apps on the background screen is owned HERE, not by the app (rainbow 2026-11-17: after
@@ -139,8 +223,18 @@ class VScreenDisplayService : Binder {
 
         init {
             // Whatever a killed service left silent: no screen exists in a fresh process, so all of it goes back.
-            runCatching { java.io.File(FILE).takeIf { it.isFile }?.readText() }.getOrNull()?.let { t ->
-                runCatching { org.json.JSONObject(t).let { o -> o.keys().forEach { k -> muted[k] = o.optString(k, "default") } } }
+            // Reject symlinks and filter keys strictly by PackageNames so /data/local/tmp cannot inject arguments.
+            runCatching {
+                val f = java.io.File(FILE)
+                if (f.isFile && !isSymlink(f)) f.readText() else null
+            }.getOrNull()?.let { t ->
+                runCatching {
+                    org.json.JSONObject(t).let { o ->
+                        o.keys().forEach { k ->
+                            if (PackageNames.isValid(k)) muted[k] = o.optString(k, "default")
+                        }
+                    }
+                }
             }
             if (muted.isNotEmpty()) Thread { giveAll(); if (list().isNotEmpty()) watch() }.apply { isDaemon = true; name = "vscreen-sound-leftover" }.start()
         }
@@ -148,6 +242,7 @@ class VScreenDisplayService : Binder {
         private fun save() {
             runCatching {
                 val f = java.io.File(FILE)
+                if (isSymlink(f)) { f.delete(); return }
                 if (muted.isEmpty()) f.delete()
                 else {
                     f.writeText(org.json.JSONObject().apply { muted.forEach { (k, v) -> put(k, v) } }.toString())
@@ -167,16 +262,16 @@ class VScreenDisplayService : Binder {
          * only when the uid is the app's alone, never a shared one), read back, and given back together as allow.
          */
         fun mute(pkg: String): Int = synchronized(muted) {
-            if (pkg.isBlank()) return 0
+            if (!PackageNames.isValid(pkg)) return 0
             if (pkg in muted) return 2
             val now = runCatching { PlayAudio.parse(sh("cmd", "appops", "get", pkg, "PLAY_AUDIO")) }.getOrNull() ?: return 0
             if (PlayAudio.silent(now)) return 0
             val uid = uidOf(pkg)?.takeIf { u -> u >= 10_000 && runCatching { sh("cmd", "package", "list", "packages", "--uid", "$u").lines().count { it.startsWith("package:") } == 1 }.getOrDefault(false) }
-            val out = runCatching { sh("sh", "-c", PlayAudio.silence(0, pkg, uid)) }.getOrDefault("")
-            val after = PlayAudio.parseScan(out).firstOrNull()?.modes
+            runCatching { PlayAudio.silenceArgvs(0, pkg, uid).forEach { argv -> sh(*argv.toTypedArray()) } }
+            val after = runCatching { PlayAudio.parse(sh(*PlayAudio.readArgv(0, pkg).toTypedArray())) }.getOrNull()
             if (after == null || after.pkg != "ignore" || (uid != null && after.uid != null && after.uid != "ignore")) {
                 // Refused or not taken: put back what we may have set, keep nothing.
-                runCatching { sh("sh", "-c", PlayAudio.giveBack(0, pkg, uid)) }
+                runCatching { PlayAudio.giveBackArgvs(0, pkg, uid).forEach { argv -> sh(*argv.toTypedArray()) } }
                 return 0
             }
             muted[pkg] = now.pkg ?: "default"; save(); watch()
@@ -185,6 +280,7 @@ class VScreenDisplayService : Binder {
         }
 
         private fun uidOf(pkg: String): Int? = runCatching {
+            if (!PackageNames.isValid(pkg)) return null
             sh("cmd", "package", "list", "packages", "-U", pkg).lines().firstOrNull { it.trim().startsWith("package:$pkg ") || it.trim() == "package:$pkg" }
                 ?.let { Regex("uid:(\\d+)").find(it)?.groupValues?.get(1)?.toIntOrNull() }
         }.getOrNull()
@@ -194,12 +290,13 @@ class VScreenDisplayService : Binder {
          * treat an explicit `default` as muted, so `default` is never written; nothing but an app that played before
          * is muted, so `allow` is what it had in effect.
          */
-        fun give(pkg: String) = synchronized(muted) {
-            if (pkg !in muted) return
+        fun give(pkg: String): Unit = synchronized(muted) {
+            if (!PackageNames.isValid(pkg) || pkg !in muted) return
             val ok = runCatching {
                 val uid = uidOf(pkg)
-                val out = sh("sh", "-c", PlayAudio.giveBack(0, pkg, uid))
-                PlayAudio.parseScan(out).firstOrNull()?.let { !PlayAudio.silent(it.modes) } ?: false
+                PlayAudio.giveBackArgvs(0, pkg, uid).forEach { argv -> sh(*argv.toTypedArray()) }
+                val after = PlayAudio.parse(sh(*PlayAudio.readArgv(0, pkg).toTypedArray()))
+                !PlayAudio.silent(after)
             }.getOrDefault(false)
             if (ok || !installed(pkg)) muted.remove(pkg)
             save()
@@ -209,8 +306,28 @@ class VScreenDisplayService : Binder {
 
         fun list(): List<String> = synchronized(muted) { muted.keys.toList() }
 
+        /** Shell-free full PLAY_AUDIO scan across all visible users/packages, outputting [PlayAudio.parseScan] format. */
+        fun scanAll(): String {
+            val users = PlayAudio.parseUsers(runCatching { sh("pm", "list", "users") }.getOrDefault(""))
+            val sb = StringBuilder()
+            for (u in users) {
+                val uStr = u.toString()
+                val rawPkgs = runCatching { sh("pm", "list", "packages", "-U", "--user", uStr) }
+                    .getOrNull()?.takeIf { it.contains("package:") }
+                    ?: runCatching { sh("pm", "list", "packages", "--user", uStr) }.getOrDefault("")
+                for ((pkg, uid) in PlayAudio.parsePackages(rawPkgs)) {
+                    sb.append("@@ ").append(u).append(' ').append(pkg)
+                    if (uid != null) sb.append(' ').append(uid)
+                    sb.append('\n')
+                    val out = runCatching { sh(*PlayAudio.readArgv(u, pkg).toTypedArray()) }.getOrDefault("")
+                    sb.append(out).append('\n')
+                }
+            }
+            return sb.toString()
+        }
+
         /** Give back every app that is no longer on one of our screens, or is in front on the main screen. */
-        fun check() = synchronized(muted) {
+        fun check(): Unit = synchronized(muted) {
             if (muted.isEmpty()) return
             if (++checks % 4 == 0 && !installed(com.kilon.agentvscreen.BuildConfig.APPLICATION_ID)) { giveAll(); return }
             val ours = synchronized(displays) { displays.keys.toSet() }
@@ -233,20 +350,18 @@ class VScreenDisplayService : Binder {
         }
 
         private fun installed(pkg: String): Boolean =
-            runCatching { sh("cmd", "package", "path", pkg).contains("package:") }.getOrDefault(true)
+            PackageNames.isValid(pkg) && runCatching { sh("cmd", "package", "path", pkg).contains("package:") }.getOrDefault(true)
 
-        private fun sh(vararg cmd: String): String {
-            val p = ProcessBuilder(*cmd).redirectErrorStream(true).start()
-            val out = StringBuilder()
-            val reader = Thread { runCatching { p.inputStream.bufferedReader().use { out.append(it.readText()) } } }.apply { isDaemon = true; start() }
-            if (!p.waitFor(4, java.util.concurrent.TimeUnit.SECONDS)) { p.destroyForcibly(); error("timeout: ${cmd.joinToString(" ")}") }
-            reader.join(1_000)
-            return synchronized(out) { out.toString() }
-        }
+        private fun sh(vararg cmd: String): String = runDirectProcess(arrayOf(*cmd), 4_000L)
     }
 
     override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
         if (code == DESTROY_CODE) {
+            val caller = callingUidFn()
+            if (!isDestroyAuthorized(caller)) {
+                System.err.println("vscreen-service: DESTROY refused for unauthorized uid=$caller")
+                throw SecurityException("unauthorized uid=$caller")
+            }
             runCatching { gate.stop() }
             synchronized(displays) { displays.values.forEach { runCatching { it.release() } }; displays.clear() }
             sound.giveAll() // uninstall, update, Shizuku stopping the service: no app is left silent
@@ -256,6 +371,11 @@ class VScreenDisplayService : Binder {
         // Every call code up to LAST_CALL: a range that stopped short of a newer code made the service refuse it (FENCE did).
         if (code !in CREATE..LAST_CALL) return super.onTransact(code, data, reply, flags)
         data.enforceInterface(DESCRIPTOR)
+        val caller = callingUidFn()
+        if (!checkOwnAppUid(caller)) {
+            System.err.println("vscreen-service: tx=$code refused for unauthorized uid=$caller")
+            throw SecurityException("unauthorized uid=$caller")
+        }
         val out = reply ?: return true
         try {
             when (code) {
@@ -300,9 +420,10 @@ class VScreenDisplayService : Binder {
                 }
                 SOUND -> {
                     when (data.readInt()) {
-                        0 -> { val p = data.readString().orEmpty(); out.writeInt(0); out.writeInt(sound.mute(p)) }
+                        0 -> { val p = data.readString().orEmpty(); val rc = sound.mute(p); out.writeInt(0); out.writeInt(rc) }
                         1 -> { sound.give(data.readString().orEmpty()); out.writeInt(0) }
                         3 -> { sound.giveAll(); out.writeInt(0) }
+                        4 -> { val scan = sound.scanAll(); out.writeInt(0); out.writeString(scan) }
                         else -> { val l = sound.list(); out.writeInt(0); out.writeInt(l.size); l.forEach { out.writeString(it) } }
                     }
                 }
@@ -316,7 +437,8 @@ class VScreenDisplayService : Binder {
                     val timeoutMs = data.readLong()
                     val o = android.os.ParcelFileDescriptor.CREATOR.createFromParcel(data)
                     val e = android.os.ParcelFileDescriptor.CREATOR.createFromParcel(data)
-                    out.writeInt(0); out.writeInt(exec(argv, env, cwd, timeoutMs, o, e))
+                    val rc = exec(argv, env, cwd, timeoutMs, o, e)
+                    out.writeInt(0); out.writeInt(rc)
                 }
                 INJECT_KEY -> {
                     val id = data.readInt(); val key = data.readInt(); val longPress = data.readInt() != 0
@@ -527,8 +649,14 @@ class VScreenDisplayService : Binder {
                             val pkg = data.readString().orEmpty()
                             val processName = data.readString().orEmpty()
                             val sdk = data.readInt()
+                            val ownPkg = com.kilon.agentvscreen.BuildConfig.APPLICATION_ID
+                            if (pkg != ownPkg || processName != ownPkg) {
+                                System.err.println("vscreen-service: GATE start refused for pkg=$pkg proc=$processName")
+                                throw SecurityException("GATE start restricted to own package")
+                            }
+                            val bound = gate.start(wantPort, internalPort, pkg, processName, sdk)
                             out.writeInt(0)
-                            out.writeInt(gate.start(wantPort, internalPort, pkg, processName, sdk))
+                            out.writeInt(bound)
                         }
                         1 -> {
                             gate.beat()
@@ -539,22 +667,36 @@ class VScreenDisplayService : Binder {
                             out.writeInt(0)
                         }
                         3 -> {
+                            val json = gate.statusJson().toString()
                             out.writeInt(0)
-                            out.writeString(gate.statusJson().toString())
+                            out.writeString(json)
                         }
                         4 -> {
                             val n = data.readInt().coerceIn(0, Gate.HOLD_MAX_PROCS)
                             val procs = List(n) { data.readString().orEmpty() }
                             val maxMs = data.readLong()
+                            val frozen = gate.hold(procs, maxMs)
                             out.writeInt(0)
-                            out.writeInt(gate.hold(procs, maxMs))
+                            out.writeInt(frozen)
                         }
                         5 -> {
+                            val thawed = gate.unhold()
                             out.writeInt(0)
-                            out.writeInt(gate.unhold())
+                            out.writeInt(thawed)
                         }
                         else -> throw IllegalArgumentException("unknown gate op $op")
                     }
+                }
+                HIDE_IME -> {
+                    val id = data.readInt()
+                    val ok = if (mayInject(id)) hideIme(id) else false
+                    out.writeInt(0); out.writeInt(if (ok) 1 else 0)
+                }
+                RESTORE_MAIN_FOCUS -> {
+                    val fromDisplay = data.readInt()
+                    val mainTaskId = data.readInt()
+                    val ok = restoreMainFocus(fromDisplay, mainTaskId)
+                    out.writeInt(0); out.writeInt(if (ok) 1 else 0)
                 }
             }
         } catch (t: Throwable) {
@@ -567,6 +709,39 @@ class VScreenDisplayService : Binder {
     @Volatile private var lastFlags = 0
     /** 2.0.0: the flag sets [create] tried before [lastFlags] and why each was refused (one per line). */
     @Volatile private var lastRejected = ""
+
+    private fun hideIme(displayId: Int): Boolean {
+        if (Build.VERSION.SDK_INT < 31) throw IllegalStateException("needs Android 12+")
+        val sm = Class.forName("android.os.ServiceManager")
+        val binder = sm.getMethod("getService", String::class.java).invoke(null, "window")
+            ?: throw IllegalStateException("window service not found")
+        val wm = Class.forName("android.view.IWindowManager\$Stub")
+            .getMethod("asInterface", android.os.IBinder::class.java).invoke(null, binder)
+            ?: throw IllegalStateException("window interface unavailable")
+        wm.javaClass.getMethod("setDisplayImePolicy", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            .invoke(wm, displayId, DISPLAY_IME_POLICY_HIDE)
+        return true
+    }
+
+    /**
+     * Restore focus back to [mainTaskId] on display 0 ONLY when one of OUR virtual displays ([fromDisplay]) currently
+     * holds focus AND [mainTaskId] is already the visible top app root task on display 0.
+     */
+    private fun restoreMainFocus(fromDisplay: Int, mainTaskId: Int): Boolean {
+        if (fromDisplay <= android.view.Display.DEFAULT_DISPLAY || mainTaskId < 0) return false
+        val ours = synchronized(displays) { displays.containsKey(fromDisplay) }
+        if (!ours) return false
+        return runCatching {
+            val cur = focusedRoot() ?: return@runCatching false
+            if (cur.first != fromDisplay) return@runCatching false
+            val topMain = rootTasks().firstOrNull { it.displayId == android.view.Display.DEFAULT_DISPLAY && it.visible && it.type == 1 }
+                ?: return@runCatching false
+            if (topMain.children.none { it.first == mainTaskId }) return@runCatching false
+            val a = atmService()
+            a.javaClass.getMethod("setFocusedTask", Int::class.javaPrimitiveType).invoke(a, mainTaskId)
+            true
+        }.getOrDefault(false)
+    }
 
     // ── Honor/Huawei APS (per-app render resolution) ─────────────────────
 
@@ -608,10 +783,28 @@ class VScreenDisplayService : Binder {
 
     // ── commands (root way in) ────────────────────────────────────────────
 
-    private fun exec(
+    internal fun exec(
         argv: Array<String>, env: Array<String>?, cwd: String?, timeoutMs: Long,
         stdout: android.os.ParcelFileDescriptor, stderr: android.os.ParcelFileDescriptor,
     ): Int {
+        val denied = ExecAllowlist.check(
+            argv = argv,
+            env = env,
+            cwd = cwd,
+            ownPkg = com.kilon.agentvscreen.BuildConfig.APPLICATION_ID,
+            ownSourceDir = resolveOwnSourceDir(),
+        )
+        if (denied != null) {
+            System.err.println("vscreen-service: EXEC denied (${argv.firstOrNull()}): $denied")
+            runCatching {
+                android.os.ParcelFileDescriptor.AutoCloseOutputStream(stderr).use {
+                    it.write("EXEC_DENIED: $denied\n".toByteArray())
+                }
+            }
+            runCatching { stdout.close() }
+            runCatching { stderr.close() }
+            return 126
+        }
         val o = android.os.ParcelFileDescriptor.AutoCloseOutputStream(stdout)
         val e = android.os.ParcelFileDescriptor.AutoCloseOutputStream(stderr)
         val p = try {
@@ -1078,11 +1271,16 @@ class VScreenDisplayService : Binder {
         override fun getOpPackageName(): String = SHELL_PKG
         override fun getApplicationContext(): Context = this
         override fun getAttributionSource(): AttributionSource =
-            if (Build.VERSION.SDK_INT >= 31) AttributionSource.Builder(android.os.Process.myUid()).setPackageName(SHELL_PKG).build()
-            else super.getAttributionSource()
+            if (Build.VERSION.SDK_INT >= 31) {
+                val uid = android.os.Process.myUid()
+                val builder = AttributionSource.Builder(uid)
+                attributionPackageForUid(uid)?.let { builder.setPackageName(it) }
+                builder.build()
+            } else super.getAttributionSource()
     }
 
     companion object {
+        internal fun attributionPackageForUid(uid: Int): String? = if (uid == 0) null else SHELL_PKG
         const val DESCRIPTOR = "com.kilon.agentvscreen.core.VScreenDisplayService"
         const val CREATE = FIRST_CALL_TRANSACTION
         const val RELEASE = FIRST_CALL_TRANSACTION + 1
@@ -1131,6 +1329,10 @@ class VScreenDisplayService : Binder {
          * op 5 UNHOLD -> unheld count
          */
         const val GATE = FIRST_CALL_TRANSACTION + 23
+        /** Protocol 19: set DISPLAY_IME_POLICY_HIDE directly inside the privileged service (no sh -c / app_process). */
+        const val HIDE_IME = FIRST_CALL_TRANSACTION + 24
+        /** Protocol 19: restore focus from our virtual display back to the already-visible top app task on display 0. */
+        const val RESTORE_MAIN_FOCUS = FIRST_CALL_TRANSACTION + 25
         /** The rule of [mayInject]: never the main screen; a display this service created, or one the app owns. */
         /**
          * 2.0.0-beta12 (test on HONOR: `key back`, `esc` did nothing on the screen while enter/del worked): BACK went in
@@ -1152,8 +1354,16 @@ class VScreenDisplayService : Binder {
             targetDisplayId != android.view.Display.DEFAULT_DISPLAY &&
                 ownPkg.isNotBlank() &&
                 taskPackages.any { it == ownPkg }
+        /** True if [file] is a symbolic link (uses NIO lstat on API 26+/JVM and Os.lstat as fallback). */
+        internal fun isSymlink(file: java.io.File): Boolean {
+            if (runCatching { java.nio.file.Files.isSymbolicLink(file.toPath()) }.getOrDefault(false)) return true
+            return runCatching {
+                val st = android.system.Os.lstat(file.path)
+                st.st_mode != 0 && android.system.OsConstants.S_ISLNK(st.st_mode)
+            }.getOrDefault(false)
+        }
         /** The newest call code; onTransact serves CREATE..LAST_CALL. A new code moves this. */
-        const val LAST_CALL = GATE
+        const val LAST_CALL = RESTORE_MAIN_FOCUS
         /** Apps the service silenced, so a service that was killed gives them back on its next start. Shell-owned. */
         const val FILE = "/data/local/tmp/agent-vscreen-muted.json"
         /** "allow" / "ignore" / "default" … as `appops get` says it, or null when it cannot be read. */
@@ -1162,12 +1372,14 @@ class VScreenDisplayService : Binder {
             PlayAudio.parse(out).pkg ?: if (out.contains("No operations", true) || out.contains("PLAY_AUDIO")) "default" else null
         /** MotionEvent.FLAG_CANCELED (public from API 33; older input stacks ignore the bit, the CANCEL action carries it). */
         private const val MOTION_FLAG_CANCELED = 0x20
+        /** android.view.WindowManager.DISPLAY_IME_POLICY_HIDE (API 31). */
+        private const val DISPLAY_IME_POLICY_HIDE = 2
         /** A held finger with no update for this long is cancelled by the service. */
         const val FINGER_MAX_IDLE_MS = 30_000L
         /** A display nobody touched for this long (app gone) is released. */
         const val ORPHAN_MS = 20 * 60_000L
         /** Bump when the protocol changes, so Shizuku restarts an old service process. */
-        const val PROTOCOL = 18
+        const val PROTOCOL = 19
         /** Shizuku's reserved "destroy user service" transaction. */
         const val DESTROY_CODE = 16777115
         private const val SHELL_PKG = "com.android.shell"

@@ -316,7 +316,7 @@ class V200Beta6Test {
         assertFalse(VScreenDisplayService.shouldRefuseMoveTask(1, listOf("com.other.app"), BuildConfig.APPLICATION_ID))
 
         // Service-side Binder transactions: FOCUS_TASK (d0 & omitted), REMOVE_TASK (d0), INJECT_DRAG (d0) all refused.
-        val svc = VScreenDisplayService()
+        val svc = VScreenDisplayService().apply { ownAppUidFn = { android.os.Binder.getCallingUid() } }
         fun callIntBool(tx: Int, write: (Parcel) -> Unit): Boolean {
             val data = Parcel.obtain(); val reply = Parcel.obtain()
             try {

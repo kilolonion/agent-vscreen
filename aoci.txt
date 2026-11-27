@@ -1,7 +1,7 @@
 #AOCI-ROOT-MANIFEST: 1
 #Format-Version: cognition-volumes/v1
 #Locale: zh-CN
-#Project: agent-vscreen
-#Global-Invariants: -
+#Project: Agent-VScreen：Android 后台虚拟副屏代理操作宿主 App，经 Shizuku/Root 在隔离副屏上通过本地 CLI/HTTP/MCP、内置 Tailscale 与实验性公网 MCP(OAuth 2.1) 安全驱动任意应用，辅以 OCR/无障碍/图标检测、闭环手势与真机评测场。
+#Global-Invariants: 1) 严禁向主屏(display 0)或他方屏注入输入、读取无障碍或移入自身包，所有改屏输入必经 Control.admitInput 与服务端 InputFence 纪元门禁；2) 所有特权 shell 经 Privileged、JPEG 编码经 Pictures、帧变化判定经 Change，命令/结果码/能力以 CommandSpec/Codes/Abilities 为单一事实源；3) 强确认(StrongConfirm)绝不经 API/浮窗/通知按钮批准，公网 MCP 永不开放 system 且配对静默入队由手机输 8 位码认领；4) 过热硬锁(ThermalGuard)同步落盘且仅首页电源菜单满足降温条件可解锁；5) release 禁含 debug 钩子与硬编码密钥，严禁针对特定应用写特判。
 #Volume: id=meta kind=meta path=aoci.meta.txt format=meta-v1 depends=- state=enabled
 #Volume: id=code kind=code path=aoci.code.txt format=object-fras-v2 depends=meta state=enabled

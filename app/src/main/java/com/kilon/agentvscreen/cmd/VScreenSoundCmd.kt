@@ -22,14 +22,14 @@ internal fun VScreenOffloadHandler.soundCmd(args: OffloadArgs): NativeOffloadRes
     fun done(c: VScreenMute.Change, what: String): NativeOffloadResult {
         if (c.ok) return ok(args, JSONObject().put("message", what).put("package_mode", c.modes?.pkg ?: JSONObject.NULL).put("uid_mode", c.modes?.uid ?: JSONObject.NULL))
         when (c.why) {
-            "no-shizuku" -> throw ActionError("NOT_CONNECTED", tr("需要 Shizuku 已连接", "Shizuku must be connected"))
+            "no-shizuku" -> throw ActionError("NOT_CONNECTED", tr("需要 ${com.kilon.agentvscreen.host.Privileged.name()} 已连接", "${com.kilon.agentvscreen.host.Privileged.name()} must be connected"))
             "denied" -> throw ActionError("NOT_SUPPORTED", tr("系统不允许 shell 修改应用权限（小米 / 红米要在开发者选项打开“USB 调试（安全设置）”）：告诉用户", "The system does not let the shell change app permissions (Xiaomi / Redmi: \"USB debugging (Security settings)\" in developer options): tell the user"))
             else -> throw ActionError("NOT_SUPPORTED", tr("没有改成：系统读回来是 包=${c.modes?.pkg}、UID=${c.modes?.uid}", "It did not change: the system reads package=${c.modes?.pkg}, UID=${c.modes?.uid}"))
         }
     }
     return when (val op = p.getOrNull(0)?.lowercase() ?: "list") {
         "list" -> {
-            val silent = VScreenMute.silenced() ?: throw ActionError("NOT_CONNECTED", tr("需要 Shizuku 已连接", "Shizuku must be connected"))
+            val silent = VScreenMute.silenced() ?: throw ActionError("NOT_CONNECTED", tr("需要 ${com.kilon.agentvscreen.host.Privileged.name()} 已连接", "${com.kilon.agentvscreen.host.Privileged.name()} must be connected"))
             val arr = JSONArray()
             silent.forEach { h ->
                 arr.put(JSONObject().put("package", h.pkg).put("name", name(h.pkg)).put("user", h.user).put("package_mode", h.modes.pkg ?: JSONObject.NULL).put("uid_mode", h.modes.uid ?: JSONObject.NULL)
