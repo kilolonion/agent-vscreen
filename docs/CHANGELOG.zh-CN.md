@@ -1,6 +1,6 @@
 # 版本更新记录
 
-当前 `main` 分支最新版本的更新摘要见 [README.zh-CN.md](../README.zh-CN.md#更新内容)。以下按时间倒序列出完整版本历史。
+以下按时间倒序列出完整版本历史；另见 [GitHub Releases](https://github.com/kilolonion/agent-vscreen/releases) 与 [English Changelog](CHANGELOG.md)。
 
 ## 2.0.1-beta1（versionCode 75）
 

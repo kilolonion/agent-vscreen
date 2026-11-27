@@ -17,7 +17,7 @@ import java.io.File
  * 1.4: what agents are told they can do comes from one table ([Abilities]). These tests keep every text and file that
  * discloses it in step with the table, and fail when a command ships without being disclosed.
  *
- * Generated files (README ability blocks, the Operit advice) are rewritten by [generatedFilesMatch] when they differ;
+ * Generated files (API.md ability block, the Operit advice) are rewritten by [generatedFilesMatch] when they differ;
  * the test then fails once so the change shows up in the diff. Run the tests again and they pass.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -84,8 +84,8 @@ class AbilitiesTest {
 
     @Test fun generatedFilesMatch() {
         val root = File("..")
-        if (!File(root, "README.md").isFile) return
-        val (zh, en) = block().split("\n\u0000")
+        if (!File(root, "API.md").isFile) return
+        val (zh, _) = block().split("\n\u0000")
         // 1.4.0-beta2: a test only checks; the files are rewritten only when asked (AVS_REGEN=1 ./build.sh regen).
         val regen = System.getenv("AVS_REGEN") == "1"
         val changed = ArrayList<String>()
@@ -94,8 +94,7 @@ class AbilitiesTest {
             val want = replaceBetween(now, start, end, body)
             if (want != now) { if (regen) f.writeText(want); changed += f.path }
         }
-        sync(File(root, "README.zh-CN.md"), "<!-- abilities:start -->", "<!-- abilities:end -->", zh)
-        sync(File(root, "README.md"), "<!-- abilities:start -->", "<!-- abilities:end -->", en)
+        sync(File(root, "API.md"), "<!-- abilities:start -->", "<!-- abilities:end -->", zh)
         // Operit: the usage_advice tool's description (JSON inside the METADATA comment; newlines as literal \n).
         val js = File(root, "integrations/operit/dist/packages/agent_vscreen.js")
         if (js.isFile) {
