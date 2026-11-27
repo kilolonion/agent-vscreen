@@ -1836,6 +1836,69 @@ def run_beta8_checks(token, out_dir, app_version):
     return out
 
 
+def collect_required_task_ids(task_defs, cli_required=None, only_ids=None):
+    """Collect ordered unique task IDs that MUST run and pass in this eval gate.
+
+    Includes:
+    - Any task definition marked `"required": true` (unless explicitly excluded by `--tasks`), and
+    - Any task ID explicitly named via `--required-tasks`.
+    """
+    req = []
+    seen = set()
+    for task in task_defs:
+        tid = task.get("id")
+        if not tid or not task.get("required"):
+            continue
+        if only_ids is not None and tid not in only_ids:
+            continue
+        if tid not in seen:
+            seen.add(tid)
+            req.append(tid)
+    if cli_required:
+        for raw in str(cli_required).split(","):
+            tid = raw.strip()
+            if tid and tid not in seen:
+                seen.add(tid)
+                req.append(tid)
+    return req
+
+
+def check_required_tasks(rows, skipped, required_ids):
+    """Return a list of failure dicts for required tasks that failed, were skipped, or were missing."""
+    by_id = {r["id"]: r for r in rows if isinstance(r, dict) and "id" in r}
+    skipped_by_id = {s["id"]: s for s in skipped if isinstance(s, dict) and "id" in s}
+    failures = []
+    for tid in required_ids:
+        if tid in skipped_by_id:
+            failures.append({"id": tid, "reason": "skipped", "since": skipped_by_id[tid].get("since")})
+        elif tid not in by_id:
+            failures.append({"id": tid, "reason": "missing"})
+        elif not by_id[tid].get("ok"):
+            failures.append({"id": tid, "reason": "failed", "error": by_id[tid].get("error")})
+    return failures
+
+
+def evaluate_gate(rows, skipped, totals, baseline, required_ids, repeat_rows=None, beta8_res=None, only_ids=None):
+    """Evaluate all CI exit-gate checks and return `(ok, messages, required_failures)`."""
+    messages = []
+    if totals.get("false_quiet", 0) > 0:
+        messages.append(f"FAIL: false_quiet (误静默) = {totals['false_quiet']} (must be 0)")
+    regressed = check_baseline_regressions(rows, baseline)
+    if regressed and only_ids is None:
+        messages.append(f"FAIL: baseline-passing task(s) failed or missing: {', '.join(regressed)}")
+    required_failures = check_required_tasks(rows, skipped, required_ids)
+    if required_failures:
+        summary = ", ".join(f"{f['id']} ({f['reason']})" for f in required_failures)
+        messages.append(f"FAIL: required task(s) did not pass: {summary}")
+    if repeat_rows is not None:
+        mismatched = [item["id"] for item in repeat_rows if not item["matched"]]
+        if mismatched:
+            messages.append(f"FAIL: repeat-check AVST sequence mismatch in: {', '.join(mismatched)}")
+    if beta8_res is not None and not beta8_res.get("all_ok"):
+        messages.append(f"FAIL: beta8-checks failed: {json.dumps(beta8_res, ensure_ascii=False)}")
+    return len(messages) == 0, messages, required_failures
+
+
 def main():
     repo_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description="Run Agent-VScreen evaluation suite.")
@@ -1847,6 +1910,11 @@ def main():
     parser.add_argument("--baseline", default=str(repo_root / "tools" / "eval" / "baseline.json"))
     parser.add_argument("--write-baseline", action="store_true", help="Copy result.json to baseline path")
     parser.add_argument("--tasks", default=None, help="Comma-separated task IDs to run (e.g. T04b,T10b,T11b,T05b)")
+    parser.add_argument(
+        "--required-tasks",
+        default=None,
+        help="Comma-separated task IDs that must run and pass in addition to tasks marked required=true",
+    )
     parser.add_argument("--times", type=int, default=1, help="Repeat each selected task N times with seed +1 per run")
     parser.add_argument("--gesture-stats", action="store_true", help="Run Stage 4 gesture acceptance suite (40x S04, 20x S10, 20x S11, 20x S05)")
     parser.add_argument("--s04-runs", type=int, default=40, help="S04 drag runs for --gesture-stats")
@@ -1925,12 +1993,13 @@ def main():
     task_files = sorted(Path(args.tasks_dir).glob("*.json"))
     if not task_files:
         raise SystemExit(f"No task files in {args.tasks_dir}")
+    task_defs = [json.loads(tf.read_text(encoding="utf-8")) for tf in task_files]
     only_ids = {x.strip() for x in args.tasks.split(",") if x.strip()} if args.tasks else None
+    required_ids = collect_required_task_ids(task_defs, args.required_tasks, only_ids)
 
     if args.times > 1:
         grouped = {}
-        for tf in task_files:
-            task = json.loads(tf.read_text(encoding="utf-8"))
+        for task in task_defs:
             if only_ids is not None and task["id"] not in only_ids:
                 continue
             if not version_allows(app_version, task.get("since")):
@@ -1963,8 +2032,7 @@ def main():
     skipped = []
     repeat_rows = [] if args.repeat_check else None
 
-    for tf in task_files:
-        task = json.loads(tf.read_text(encoding="utf-8"))
+    for task in task_defs:
         if only_ids is not None and task["id"] not in only_ids:
             continue
         since = task.get("since")
@@ -2034,12 +2102,24 @@ def main():
     beta3_cmp = compute_beta3_comparison(rows, baseline)
 
     beta8_res = run_beta8_checks(token, out_dir, app_version) if args.beta8_checks else None
+    gate_ok, gate_messages, required_failures = evaluate_gate(
+        rows=rows,
+        skipped=skipped,
+        totals=totals,
+        baseline=baseline,
+        required_ids=required_ids,
+        repeat_rows=repeat_rows,
+        beta8_res=beta8_res,
+        only_ids=only_ids,
+    )
 
     result_obj = {
         "app_version": app_version,
         "generated_at": int(time.time()),
         "tasks": rows,
         "skipped_tasks": skipped,
+        "required_tasks": required_ids,
+        "required_task_failures": required_failures,
         "totals": totals,
         "diff_vs_baseline": diff,
         "regressed_tasks": regressed,
@@ -2074,22 +2154,9 @@ def main():
         base_copy.pop("beta8_checks", None)
         baseline_path.write_text(json.dumps(base_copy, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    failed_gate = False
-    if totals["false_quiet"] > 0:
-        print(f"FAIL: false_quiet (误静默) = {totals['false_quiet']} (must be 0)", file=sys.stderr)
-        failed_gate = True
-    if regressed and only_ids is None:
-        print(f"FAIL: baseline-passing task(s) failed or missing: {', '.join(regressed)}", file=sys.stderr)
-        failed_gate = True
-    if repeat_rows is not None:
-        mismatched = [item["id"] for item in repeat_rows if not item["matched"]]
-        if mismatched:
-            print(f"FAIL: repeat-check AVST sequence mismatch in: {', '.join(mismatched)}", file=sys.stderr)
-            failed_gate = True
-    if beta8_res is not None and not beta8_res.get("all_ok"):
-        print(f"FAIL: beta8-checks failed: {json.dumps(beta8_res, ensure_ascii=False)}", file=sys.stderr)
-        failed_gate = True
-    if failed_gate:
+    if not gate_ok:
+        for msg in gate_messages:
+            print(msg, file=sys.stderr)
         sys.exit(1)
 
 

@@ -79,8 +79,14 @@ internal object McpModern {
             "server/discover" -> McpProtocol.jsonRpcResult(
                 id,
                 JSONObject()
-                    .put("protocolVersions", JSONArray(McpProtocol.SUPPORTED_VERSIONS))
-                    .put("serverInfo", JSONObject().put("name", "agent-vscreen").put("version", BuildConfig.VERSION_NAME))
+                    .put("supportedVersions", JSONArray(McpProtocol.SUPPORTED_VERSIONS))
+                    .put(
+                        "_meta",
+                        JSONObject().put(
+                            McpProtocol.META_SERVER_INFO,
+                            JSONObject().put("name", "agent-vscreen").put("version", BuildConfig.VERSION_NAME),
+                        ),
+                    )
                     .put("instructions", McpProtocol.serverInstructions())
                     .put(
                         "capabilities",
@@ -117,7 +123,7 @@ internal object McpModern {
                 val tr = Mcp.toolResult(server, res, replayed, session).put("resultType", "complete")
                 McpProtocol.jsonRpcResult(id, tr)
             }
-            "tasks/get" -> McpTasks.handleGet(server, r, id, p)
+            "tasks/get" -> McpTasks.handleGet(server, r, id, p) { srv, res, rep, sess -> Mcp.toolResult(srv, res, rep, sess) }
             "tasks/result" -> McpTasks.handleResult(server, r, id, p) { srv, res, rep, sess -> Mcp.toolResult(srv, res, rep, sess) }
             "tasks/cancel" -> McpTasks.handleCancel(server, r, id, p)
             "tasks/list" -> McpTasks.handleList(server, r, id)

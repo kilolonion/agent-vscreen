@@ -497,7 +497,10 @@ class StrongConfirmActivity : ComponentActivity() {
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Text(
-                                        tr("已验证来源域名：${req.clientVerifiedDomain}", "Verified domain: ${req.clientVerifiedDomain}"),
+                                        tr(
+                                            "已验证元数据文档来源域名：${req.clientVerifiedDomain}",
+                                            "Verified metadata document domain: ${req.clientVerifiedDomain}",
+                                        ),
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = Color(0xFF15803D),

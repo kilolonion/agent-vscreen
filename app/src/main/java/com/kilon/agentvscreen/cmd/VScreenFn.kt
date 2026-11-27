@@ -34,6 +34,13 @@ internal fun VScreenOffloadHandler.fnCmd(@Suppress("UNUSED_PARAMETER") sid: Stri
                 "NOT_CONNECTED",
                 tr("需要 ${Privileged.name()} 已连接", "${Privileged.name()} must be connected"),
             )
+            is AppFunctions.QueryResult.Error -> throw ActionError(
+                "OPERATION_FAILED",
+                tr(
+                    "查询 AppFunctions 失败（退出码 ${res.exitCode}）${if (res.message.isNotEmpty()) "：${res.message}" else ""}",
+                    "Failed to query AppFunctions (exit ${res.exitCode})${if (res.message.isNotEmpty()) ": ${res.message}" else ""}",
+                ),
+            )
             is AppFunctions.QueryResult.Ok -> {
                 val visible = res.items.filter { fn ->
                     fn.pkg != ownPkg && Guard.check(Guard.Act.READ, fn.pkg) !is Guard.Verdict.Deny
@@ -77,6 +84,13 @@ internal fun VScreenOffloadHandler.fnCmd(@Suppress("UNUSED_PARAMETER") sid: Stri
         is AppFunctions.QueryResult.NotConnected -> throw ActionError(
             "NOT_CONNECTED",
             tr("需要 ${Privileged.name()} 已连接", "${Privileged.name()} must be connected"),
+        )
+        is AppFunctions.QueryResult.Error -> throw ActionError(
+            "OPERATION_FAILED",
+            tr(
+                "查询 $pkg 的 AppFunctions 失败（退出码 ${res.exitCode}）${if (res.message.isNotEmpty()) "：${res.message}" else ""}",
+                "Failed to query AppFunctions for $pkg (exit ${res.exitCode})${if (res.message.isNotEmpty()) ": ${res.message}" else ""}",
+            ),
         )
         is AppFunctions.QueryResult.Ok -> {
             if (res.items.isEmpty()) {

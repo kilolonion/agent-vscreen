@@ -65,6 +65,13 @@ internal object InputReach {
         return null
     }
 
+    @Volatile internal var interactiveProbe: (Int) -> Boolean? = { id ->
+        VScreenRemoteDisplay.isDisplayInteractive(id)
+    }
+    @Volatile internal var dumpsysRunner: () -> com.kilon.agentvscreen.host.ShizukuManager.ProcessResult? = {
+        VScreenShell.run(arrayOf("dumpsys", "input"), 4_000L)
+    }
+
     /** Probe input reachability for [displayId] (returns [Reach.OK] immediately when the main screen is on). */
     fun probe(displayId: Int, force: Boolean = false): Reach = probeResult(displayId, force).reach
 
@@ -77,7 +84,17 @@ internal object InputReach {
         if (!force) {
             synchronized(cache) { cache[key] }?.let { return it }
         }
+        return probeDirect(displayId)
+    }
+
+    /**
+     * Directly probe whether [displayId] is interactive right now, bypassing the main-screen-on shortcut.
+     * Used after waking the main screen so input is only sent once the target virtual display itself
+     * reports interactive (issue #60).
+     */
+    fun probeDirect(displayId: Int): ProbeResult {
         val computed = probeScreenOff(displayId)
+        val key = CacheKey(displayId, VScreenAwake.screenOff)
         synchronized(cache) {
             cache[key] = computed
             last = computed
@@ -87,11 +104,11 @@ internal object InputReach {
     }
 
     private fun probeScreenOff(displayId: Int): ProbeResult {
-        val interactive = runCatching { VScreenRemoteDisplay.isDisplayInteractive(displayId) }.getOrNull()
+        val interactive = runCatching { interactiveProbe(displayId) }.getOrNull()
         if (interactive != null) {
             return ProbeResult(if (interactive) Reach.OK else Reach.BLOCKED, "isInteractive")
         }
-        val dump = runCatching { VScreenShell.run(arrayOf("dumpsys", "input"), 4_000L) }.getOrNull()
+        val dump = runCatching { dumpsysRunner() }.getOrNull()
         if (dump != null && dump.exitCode == 0) {
             val nonInteractive = parseNonInteractive(dump.stdout)
             if (nonInteractive != null) {
@@ -123,5 +140,12 @@ internal object InputReach {
     internal fun seedForTest(displayId: Int, screenOff: Boolean, result: ProbeResult) = synchronized(cache) {
         cache[CacheKey(displayId, screenOff)] = result
         last = result
+    }
+
+    internal fun resetForTest() {
+        invalidate()
+        last = ProbeResult(Reach.OK, "n/a")
+        interactiveProbe = { id -> VScreenRemoteDisplay.isDisplayInteractive(id) }
+        dumpsysRunner = { VScreenShell.run(arrayOf("dumpsys", "input"), 4_000L) }
     }
 }

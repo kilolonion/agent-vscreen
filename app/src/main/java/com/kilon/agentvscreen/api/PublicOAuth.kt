@@ -75,6 +75,7 @@ object PublicOAuth {
         var tokenId: String?,
         val createdAt: Long,
         val verifiedDomain: String? = null,
+        val deviceOnly: Boolean = false,
     ) {
         fun json(): JSONObject = JSONObject()
             .put("client_id", clientId)
@@ -83,19 +84,56 @@ object PublicOAuth {
             .put("requested_scope", requestedScope ?: JSONObject.NULL)
             .put("token_id", tokenId ?: JSONObject.NULL)
             .put("created_at", createdAt)
+            .put("device_only", deviceOnly)
             .apply { if (verifiedDomain != null) put("verified_domain", verifiedDomain) }
 
         companion object {
             fun fromJson(o: JSONObject): RegisteredClient? {
                 val id = o.optString("client_id").takeIf { it.isNotBlank() } ?: return null
                 val name = o.optString("client_name").ifBlank { "MCP Client" }
-                val urisArr = o.optJSONArray("redirect_uris") ?: return null
+                val deviceOnly = o.optBoolean("device_only", false)
+                val urisArr = o.optJSONArray("redirect_uris") ?: if (deviceOnly) JSONArray() else return null
                 val uris = (0 until urisArr.length()).mapNotNull { urisArr.optString(it).takeIf { u -> u.isNotBlank() } }
-                if (uris.isEmpty()) return null
+                if (uris.isEmpty() && !deviceOnly) return null
                 val reqScope = o.optString("requested_scope").takeIf { it.isNotBlank() && !o.isNull("requested_scope") }
                 val tid = o.optString("token_id").takeIf { it.isNotBlank() && !o.isNull("token_id") }
                 val vd = o.optString("verified_domain").takeIf { it.isNotBlank() && !o.isNull("verified_domain") }
-                return RegisteredClient(id, name, uris, reqScope, tid, o.optLong("created_at", 0L), vd)
+                return RegisteredClient(id, name, uris, reqScope, tid, o.optLong("created_at", 0L), vd, deviceOnly)
+            }
+        }
+    }
+
+    /**
+     * Independent per-pairing authorization grant.
+     *
+     * Separates software metadata ([RegisteredClient], which for CIMD is shared across installations)
+     * from each approved pairing's authorization instance, internal [tokenId], permission level,
+     * task ownership, and revocation boundary.
+     */
+    data class GrantRecord(
+        val grantId: String,
+        val clientId: String,
+        val tokenId: String,
+        val issuedScope: String,
+        val createdAt: Long,
+        val sourceDisplay: String? = null,
+    ) {
+        fun json(): JSONObject = JSONObject()
+            .put("grant_id", grantId)
+            .put("client_id", clientId)
+            .put("token_id", tokenId)
+            .put("issued_scope", issuedScope)
+            .put("created_at", createdAt)
+            .apply { if (sourceDisplay != null) put("source_display", sourceDisplay) }
+
+        companion object {
+            fun fromJson(o: JSONObject): GrantRecord? {
+                val gid = o.optString("grant_id").takeIf { it.isNotBlank() } ?: return null
+                val cid = o.optString("client_id").takeIf { it.isNotBlank() } ?: return null
+                val tid = o.optString("token_id").takeIf { it.isNotBlank() } ?: return null
+                val sc = o.optString("issued_scope").takeIf { it in ALLOWED_SCOPES } ?: "look"
+                val src = o.optString("source_display").takeIf { it.isNotBlank() && !o.isNull("source_display") }
+                return GrantRecord(gid, cid, tid, sc, o.optLong("created_at", 0L), src)
             }
         }
     }
@@ -106,10 +144,12 @@ object PublicOAuth {
         val expiresAt: Long,
         val resource: String,
         val scope: String,
+        val grantId: String = "grant_$tokenId",
     ) {
         fun json(): JSONObject = JSONObject()
             .put("token_id", tokenId)
             .put("client_id", clientId)
+            .put("grant_id", grantId)
             .put("expires_at", expiresAt)
             .put("resource", resource)
             .put("scope", scope)
@@ -120,7 +160,8 @@ object PublicOAuth {
                 val cid = o.optString("client_id").takeIf { it.isNotBlank() } ?: return null
                 val res = o.optString("resource").takeIf { it.isNotBlank() } ?: return null
                 val sc = o.optString("scope").takeIf { it in ALLOWED_SCOPES } ?: "look"
-                return AccessTokenRecord(tid, cid, o.optLong("expires_at", 0L), res, sc)
+                val gid = o.optString("grant_id").takeIf { it.isNotBlank() && !o.isNull("grant_id") } ?: "grant_$tid"
+                return AccessTokenRecord(tid, cid, o.optLong("expires_at", 0L), res, sc, gid)
             }
         }
     }
@@ -133,10 +174,12 @@ object PublicOAuth {
         val scope: String,
         var retired: Boolean = false,
         var retiredAt: Long = 0L,
+        val grantId: String = "grant_$tokenId",
     ) {
         fun json(): JSONObject = JSONObject()
             .put("token_id", tokenId)
             .put("client_id", clientId)
+            .put("grant_id", grantId)
             .put("expires_at", expiresAt)
             .put("resource", resource)
             .put("scope", scope)
@@ -149,10 +192,12 @@ object PublicOAuth {
                 val cid = o.optString("client_id").takeIf { it.isNotBlank() } ?: return null
                 val res = o.optString("resource").takeIf { it.isNotBlank() } ?: return null
                 val sc = o.optString("scope").takeIf { it in ALLOWED_SCOPES } ?: "look"
+                val gid = o.optString("grant_id").takeIf { it.isNotBlank() && !o.isNull("grant_id") } ?: "grant_$tid"
                 return RefreshTokenRecord(
                     tid, cid, o.optLong("expires_at", 0L), res, sc,
                     o.optBoolean("retired", false),
                     o.optLong("retired_at", 0L),
+                    gid,
                 )
             }
         }
@@ -162,6 +207,7 @@ object PublicOAuth {
     private class RefreshGraceEntry(
         val clientId: String,
         val tokenId: String,
+        val grantId: String,
         val resource: String,
         val newAccessHash: String,
         val newRefreshHash: String,
@@ -173,6 +219,7 @@ object PublicOAuth {
     private data class AuthCodeRecord(
         val clientId: String,
         val tokenId: String,
+        val grantId: String,
         val redirectUri: String,
         val codeChallenge: String,
         val resource: String,
@@ -224,7 +271,12 @@ object PublicOAuth {
         data object NoLockscreen : ClaimResult()
     }
 
-    data class AccessAuth(val token: Tokens.Token, val clientId: String, val scope: String)
+    data class AccessAuth(
+        val token: Tokens.Token,
+        val clientId: String,
+        val scope: String,
+        val grantId: String = "grant_${token.id}",
+    )
 
     /**
      * 2.0.0-beta11 (review): the one rule for what a public credential may do: the scope it was issued with (the level
@@ -242,6 +294,7 @@ object PublicOAuth {
     private val lock = Any()
     private val rng = SecureRandom()
     private val clients = LinkedHashMap<String, RegisteredClient>()
+    private val grants = LinkedHashMap<String, GrantRecord>()
     private val accessTokens = HashMap<String, AccessTokenRecord>()
     private val refreshTokens = HashMap<String, RefreshTokenRecord>()
     private val refreshGrace = HashMap<String, RefreshGraceEntry>()
@@ -284,6 +337,7 @@ object PublicOAuth {
         synchronized(lock) {
             storageFile = file
             clients.clear()
+            grants.clear()
             accessTokens.clear()
             refreshTokens.clear()
             refreshGrace.clear()
@@ -294,6 +348,13 @@ object PublicOAuth {
                         for (i in 0 until arr.length()) {
                             arr.optJSONObject(i)?.let { RegisteredClient.fromJson(it) }?.let { c ->
                                 clients[c.clientId] = c
+                            }
+                        }
+                    }
+                    root.optJSONArray("grants")?.let { arr ->
+                        for (i in 0 until arr.length()) {
+                            arr.optJSONObject(i)?.let { GrantRecord.fromJson(it) }?.let { g ->
+                                grants[g.grantId] = g
                             }
                         }
                     }
@@ -311,10 +372,24 @@ object PublicOAuth {
                             }
                         }
                     }
+                    // Backward compatibility: synthesize GrantRecord for legacy entries persisted before grants existed.
+                    val knownGrantTokens = grants.values.mapTo(HashSet()) { it.tokenId }
+                    clients.values.forEach { c ->
+                        val tid = c.tokenId
+                        if (tid != null && tid !in knownGrantTokens) {
+                            val gid = "grant_$tid"
+                            val sc = c.requestedScope?.let { if ("operate" in it) "operate" else "look" } ?: "look"
+                            grants[gid] = GrantRecord(gid, c.clientId, tid, sc, c.createdAt)
+                            knownGrantTokens += tid
+                        }
+                    }
                     pruneExpiredLocked(nowMs())
                 }.onFailure { AppLogger.warning(TAG, "load store failed: ${it.message}") }
                 // 2.0.0-beta14: names cut at 16 characters by earlier versions get their full client_name back.
                 clients.values.forEach { c -> c.tokenId?.let { runCatching { Tokens.restorePublicName(it, c.clientName) } } }
+                grants.values.forEach { g ->
+                    clients[g.clientId]?.clientName?.let { name -> runCatching { Tokens.restorePublicName(g.tokenId, name) } }
+                }
             }
         }
     }
@@ -327,6 +402,9 @@ object PublicOAuth {
             val cArr = JSONArray()
             clients.values.forEach { cArr.put(it.json()) }
             root.put("clients", cArr)
+            val gArr = JSONArray()
+            grants.values.forEach { gArr.put(it.json()) }
+            root.put("grants", gArr)
             val aObj = JSONObject()
             accessTokens.forEach { (h, r) -> aObj.put(h, r.json()) }
             root.put("access_tokens", aObj)
@@ -748,7 +826,7 @@ object PublicOAuth {
         val clientName = rawName.ifEmpty { "MCP Client" }
         val reqScope = body.optString("scope").takeIf { it.isNotBlank() && !body.isNull("scope") }?.take(128)
         val clientId = "pub_" + randomHex(12)
-        val client = RegisteredClient(clientId, clientName, uris, reqScope, null, now)
+        val client = RegisteredClient(clientId, clientName, uris, reqScope, null, now, deviceOnly = deviceOnly)
 
         synchronized(lock) {
             clients[clientId] = client
@@ -783,14 +861,17 @@ object PublicOAuth {
                     val now = nowMs()
                     val upserted = synchronized(lock) {
                         val existing = clients[clientId]
+                        // CIMD identifies client software, NOT an installation; keep tokenId = null here and
+                        // bind each approved pairing to its own independent GrantRecord + Tokens.Token.
                         val updated = RegisteredClient(
                             clientId = clientId,
                             clientName = doc.clientName,
                             redirectUris = doc.redirectUris,
                             requestedScope = doc.requestedScope,
-                            tokenId = existing?.tokenId,
+                            tokenId = null,
                             createdAt = existing?.createdAt ?: now,
                             verifiedDomain = doc.verifiedDomain,
+                            deviceOnly = doc.deviceOnly,
                         )
                         clients[clientId] = updated
                         saveLocked()
@@ -1183,6 +1264,7 @@ object PublicOAuth {
         val level = Tokens.levelOf(rawLevel)?.takeIf { "operate" in pairing.selectableScopes && it in Tokens.PUBLIC_LEVELS } ?: Tokens.LOOK
         val safeScope = Tokens.scopeOfLevel(level).let { if (it == "look") "look" else "operate" }
         var tokenId: String? = null
+        var grantId: String? = null
         val ok = synchronized(lock) {
             pruneExpiredLocked(now)
             val expired = now - pairing.createdAt >= PAIRING_TTL_MS &&
@@ -1192,17 +1274,23 @@ object PublicOAuth {
                 return@synchronized false
             }
             val client = clients[pairing.clientId] ?: return@synchronized false
-            val existingTok = client.tokenId?.let { Tokens.byId(it) }?.takeIf { it.publicOnly }
-            val tok = if (existingTok != null) {
-                Tokens.setLevel(existingTok.id, level)
-                Tokens.byId(existingTok.id) ?: existingTok
-            } else {
-                Tokens.createPublic(client.clientName, safeScope).also { created ->
-                    client.tokenId = created.id
-                    Tokens.setLevel(created.id, level)
-                }
-            }
+            // Always mint a dedicated public token & GrantRecord per approved pairing so two installations
+            // sharing a CIMD client_id URL (or re-pairings) never share task ownership, permission level,
+            // or revocation blast radius.
+            val created = Tokens.createPublic(client.clientName, safeScope)
+            Tokens.setLevel(created.id, level)
+            val tok = Tokens.byId(created.id) ?: created
+            val gid = "grant_" + randomHex(12)
+            grants[gid] = GrantRecord(
+                grantId = gid,
+                clientId = pairing.clientId,
+                tokenId = tok.id,
+                issuedScope = safeScope,
+                createdAt = now,
+                sourceDisplay = pairing.sourceDisplay,
+            )
             tokenId = tok.id
+            grantId = gid
             deniesBySource.remove(pairing.sourceBucket)
 
             val rawCode = randomToken()
@@ -1210,6 +1298,7 @@ object PublicOAuth {
             authCodes[codeHash] = AuthCodeRecord(
                 clientId = pairing.clientId,
                 tokenId = tok.id,
+                grantId = gid,
                 redirectUri = pairing.redirectUri,
                 codeChallenge = pairing.codeChallenge,
                 resource = pairing.resource,
@@ -1223,9 +1312,10 @@ object PublicOAuth {
             true
         }
         val tid = tokenId
-        if (ok && tid != null) {
+        val gid = grantId
+        if (ok && tid != null && gid != null) {
             StrongConfirm.recordPublicPairingApproval(tid, "public:${pairing.clientId}", safeScope, by)
-            Audit.security("public_pairing_approved", "client=${pairing.clientId} token=$tid scope=$safeScope")
+            Audit.security("public_pairing_approved", "client=${pairing.clientId} grant=$gid token=$tid scope=$safeScope")
             onPairingApprovedHook()
         }
     }
@@ -1379,6 +1469,7 @@ object PublicOAuth {
                 expiresAt = now + ACCESS_TOKEN_TTL_MS,
                 resource = expectedRes,
                 scope = issuedScope,
+                grantId = rec.grantId,
             )
             knownTokenClients[accessHash] = rec.clientId
             refreshTokens[refreshHash] = RefreshTokenRecord(
@@ -1388,10 +1479,11 @@ object PublicOAuth {
                 resource = expectedRes,
                 scope = issuedScope,
                 retired = false,
+                grantId = rec.grantId,
             )
             saveLocked()
         }
-        Audit.security("public_token_issued", "client=${rec.clientId} token=${tok.id} scope=$grantedScope")
+        Audit.security("public_token_issued", "client=${rec.clientId} grant=${rec.grantId} token=${tok.id} scope=$grantedScope")
 
         return ApiServer.Resp.json(
             JSONObject()
@@ -1416,6 +1508,7 @@ object PublicOAuth {
 
         var reuseClientId: String? = null
         var reuseTokenId: String? = null
+        var reuseGrantId: String? = null
         var graceRetryLog: String? = null
         var errorResp: ApiServer.Resp? = null
         var issued: JSONObject? = null
@@ -1441,16 +1534,18 @@ object PublicOAuth {
                     // Single idempotent retry within 30s when the rotated response may have been lost in transit
                     // before the client ever used the new access/refresh token.
                     grace.retried = true
-                    graceRetryLog = "client=${rec.clientId} token=${rec.tokenId}"
+                    graceRetryLog = "client=${rec.clientId} grant=${rec.grantId} token=${rec.tokenId}"
                     issued = JSONObject(grace.responseJson)
                     return@synchronized
                 }
-                // 7.2: reuse of a rotated/retired refresh token revokes ALL tokens of this client.
-                revokeAllForClientLocked(rec.clientId)
+                // 7.2: reuse of a rotated/retired refresh token revokes ALL tokens of THIS pairing grant
+                // without affecting independent pairings sharing the same CIMD client_id URL.
+                revokeAllForGrantLocked(rec.grantId, rec.tokenId)
                 saveLocked()
                 reuseClientId = rec.clientId
                 reuseTokenId = rec.tokenId
-                errorResp = oauthError(400, "invalid_grant", "Refresh token reuse detected; all client tokens revoked")
+                reuseGrantId = rec.grantId
+                errorResp = oauthError(400, "invalid_grant", "Refresh token reuse detected; all tokens for this grant revoked")
                 return@synchronized
             }
             // 7.8 #7: form client_id MUST match refresh token owner.
@@ -1471,7 +1566,7 @@ object PublicOAuth {
             }
             val tok = Tokens.byId(rec.tokenId)?.takeIf { it.publicOnly }
             if (tok == null) {
-                revokeAllForClientLocked(rec.clientId)
+                revokeAllForGrantLocked(rec.grantId, rec.tokenId)
                 saveLocked()
                 errorResp = oauthError(400, "invalid_grant", "Client token was revoked")
                 return@synchronized
@@ -1495,6 +1590,7 @@ object PublicOAuth {
                 expiresAt = now + ACCESS_TOKEN_TTL_MS,
                 resource = rec.resource,
                 scope = currentScope,
+                grantId = rec.grantId,
             )
             knownTokenClients[newAccessHash] = rec.clientId
             refreshTokens[newRefreshHash] = RefreshTokenRecord(
@@ -1504,6 +1600,7 @@ object PublicOAuth {
                 resource = rec.resource,
                 scope = currentScope,
                 retired = false,
+                grantId = rec.grantId,
             )
             val respObj = JSONObject()
                 .put("access_token", rawAccess)
@@ -1514,6 +1611,7 @@ object PublicOAuth {
             refreshGrace[hash] = RefreshGraceEntry(
                 clientId = rec.clientId,
                 tokenId = tok.id,
+                grantId = rec.grantId,
                 resource = rec.resource,
                 newAccessHash = newAccessHash,
                 newRefreshHash = newRefreshHash,
@@ -1522,12 +1620,12 @@ object PublicOAuth {
             )
             pruneExpiredLocked(now)
             saveLocked()
-            issuedLog = "client=${rec.clientId} token=${tok.id} scope=$currentScope"
+            issuedLog = "client=${rec.clientId} grant=${rec.grantId} token=${tok.id} scope=$currentScope"
             issued = respObj
         }
 
         if (reuseClientId != null) {
-            Audit.security("public_refresh_reuse", "client=$reuseClientId token=$reuseTokenId")
+            Audit.security("public_refresh_reuse", "client=$reuseClientId grant=$reuseGrantId token=$reuseTokenId")
         }
         graceRetryLog?.let { Audit.security("public_refresh_grace_retry", it) }
         errorResp?.let { return it }
@@ -1557,7 +1655,7 @@ object PublicOAuth {
         synchronized(lock) {
             refreshGrace.entries.removeAll { it.value.newAccessHash == hash }
         }
-        return AccessCheck.Valid(AccessAuth(tok, rec.clientId, effectiveScope(rec.scope, tok)))
+        return AccessCheck.Valid(AccessAuth(tok, rec.clientId, effectiveScope(rec.scope, tok), rec.grantId))
     }
 
     /** Verify a Bearer access token presented to `POST /mcp` on [PublicServer]. */
@@ -1566,29 +1664,52 @@ object PublicOAuth {
 
     fun revokeAllForToken(tokenId: String) {
         synchronized(lock) {
-            val cids = clients.values.filter { it.tokenId == tokenId }.map { it.clientId }
-            var changed = accessTokens.entries.removeAll { it.value.tokenId == tokenId }
+            val affectedClientIds = HashSet<String>()
+            var changed = false
+            val gIt = grants.entries.iterator()
+            while (gIt.hasNext()) {
+                val g = gIt.next().value
+                if (g.tokenId == tokenId) {
+                    affectedClientIds += g.clientId
+                    gIt.remove()
+                    changed = true
+                }
+            }
+            if (accessTokens.entries.removeAll { it.value.tokenId == tokenId }) changed = true
             if (refreshTokens.entries.removeAll { it.value.tokenId == tokenId }) changed = true
             refreshGrace.entries.removeAll { it.value.tokenId == tokenId }
             if (authCodes.entries.removeAll { it.value.tokenId == tokenId }) changed = true
-            cids.forEach { cid ->
-                clients.remove(cid)
-                changed = true
+            // Remove legacy non-CIMD DCR client registration ONLY if no sibling grants remain;
+            // keep shared CIMD metadata intact so other installations sharing that client_id are unaffected.
+            clients.values.filter { it.tokenId == tokenId }.forEach { affectedClientIds += it.clientId }
+            affectedClientIds.forEach { cid ->
+                if (!CimdResolver.isCimdClientId(cid)) {
+                    val hasOtherGrants = grants.values.any { it.clientId == cid }
+                    if (!hasOtherGrants) {
+                        clients.remove(cid)
+                        changed = true
+                    } else if (clients[cid]?.tokenId == tokenId) {
+                        clients[cid]?.tokenId = null
+                        changed = true
+                    }
+                }
             }
             if (changed) saveLocked()
         }
     }
 
-    private fun revokeAllForClientLocked(clientId: String) {
-        accessTokens.entries.removeAll { it.value.clientId == clientId }
-        refreshTokens.entries.removeAll { it.value.clientId == clientId }
-        refreshGrace.entries.removeAll { it.value.clientId == clientId }
-        authCodes.entries.removeAll { it.value.clientId == clientId }
+    private fun revokeAllForGrantLocked(grantId: String, tokenId: String) {
+        grants.entries.removeAll { it.key == grantId || it.value.tokenId == tokenId }
+        accessTokens.entries.removeAll { it.value.grantId == grantId || it.value.tokenId == tokenId }
+        refreshTokens.entries.removeAll { it.value.grantId == grantId || it.value.tokenId == tokenId }
+        refreshGrace.entries.removeAll { it.value.grantId == grantId || it.value.tokenId == tokenId }
+        authCodes.entries.removeAll { it.value.grantId == grantId || it.value.tokenId == tokenId }
     }
 
     fun revokeAll() {
         synchronized(lock) {
             clients.clear()
+            grants.clear()
             accessTokens.clear()
             refreshTokens.clear()
             refreshGrace.clear()
@@ -1598,7 +1719,22 @@ object PublicOAuth {
         }
     }
 
-    fun activeClientCount(): Int = synchronized(lock) { clients.values.count { it.tokenId != null } }
+    fun activeClientCount(): Int = synchronized(lock) {
+        val ids = HashSet<String>()
+        grants.values.forEach { ids += it.tokenId }
+        clients.values.forEach { c -> c.tokenId?.let { ids += it } }
+        ids.size
+    }
+
+    internal fun registeredClient(clientId: String): RegisteredClient? = synchronized(lock) { clients[clientId] }
+
+    internal fun listClients(): List<RegisteredClient> = synchronized(lock) { clients.values.toList() }
+
+    internal fun grantsForClient(clientId: String): List<GrantRecord> = synchronized(lock) {
+        grants.values.filter { it.clientId == clientId }
+    }
+
+    internal fun grantById(grantId: String): GrantRecord? = synchronized(lock) { grants[grantId] }
 
     // ── Pairing HTML page ──────────────────────────────────────────────────
 
@@ -1712,6 +1848,7 @@ h1{font-size:20px;margin:0 0 8px}
     internal fun resetForTests(file: File? = null) {
         synchronized(lock) {
             clients.clear()
+            grants.clear()
             accessTokens.clear()
             refreshTokens.clear()
             refreshGrace.clear()

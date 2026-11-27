@@ -41,6 +41,7 @@ internal object AppFunctions {
         data class Ok(val items: List<FnInfo>) : QueryResult()
         data object Unsupported : QueryResult()
         data object NotConnected : QueryResult()
+        data class Error(val exitCode: Int, val message: String) : QueryResult()
     }
 
     private data class Cached(val versionCode: Long, val items: List<FnInfo>)
@@ -90,7 +91,15 @@ internal object AppFunctions {
 
         val out = shellRunner(arrayOf("cmd", "app_function", "list-app-functions", "--package", pkg))
             ?: return QueryResult.NotConnected
-        if (looksUnsupported(out)) {
+        if (out.exitCode != 0) {
+            if (looksUnsupported(out)) {
+                shellSupported = false
+                return QueryResult.Unsupported
+            }
+            // Transient shell/service failure: do NOT cache empty result or permanently disable support.
+            return QueryResult.Error(out.exitCode, ScreenText.clean(out.stderr.ifBlank { out.stdout }, maxLen = 120))
+        }
+        if (looksUnsupportedZeroExit(out)) {
             shellSupported = false
             return QueryResult.Unsupported
         }
@@ -104,7 +113,14 @@ internal object AppFunctions {
         if (!isSupported()) return QueryResult.Unsupported
         val out = shellRunner(arrayOf("cmd", "app_function", "list-app-functions"))
             ?: return QueryResult.NotConnected
-        if (looksUnsupported(out)) {
+        if (out.exitCode != 0) {
+            if (looksUnsupported(out)) {
+                shellSupported = false
+                return QueryResult.Unsupported
+            }
+            return QueryResult.Error(out.exitCode, ScreenText.clean(out.stderr.ifBlank { out.stdout }, maxLen = 120))
+        }
+        if (looksUnsupportedZeroExit(out)) {
             shellSupported = false
             return QueryResult.Unsupported
         }
@@ -122,7 +138,8 @@ internal object AppFunctions {
     }
 
     internal fun looksUnsupported(out: ShellOut): Boolean {
-        val combined = (out.stdout + "\n" + out.stderr).lowercase()
+        if (out.exitCode == 0) return false
+        val combined = (out.stderr + "\n" + out.stdout).lowercase()
         if ("no shell command" in combined || "unknown command" in combined || "can't find service" in combined) {
             return true
         }
@@ -130,6 +147,18 @@ internal object AppFunctions {
             return true
         }
         return false
+    }
+
+    /** Guard for rare ROMs where `cmd` prints "Can't find service: app_function" with exit 0; never scans JSON bodies. */
+    private fun looksUnsupportedZeroExit(out: ShellOut): Boolean {
+        val err = out.stderr.trim().lowercase()
+        if ("can't find service" in err || "no shell command" in err || "unknown command" in err) return true
+        val trimmed = out.stdout.trim()
+        if (trimmed.startsWith("{") || trimmed.startsWith("[")) return false
+        val firstLine = trimmed.lineSequence().firstOrNull()?.trim()?.lowercase().orEmpty()
+        return firstLine.startsWith("can't find service") ||
+            firstLine.startsWith("no shell command") ||
+            firstLine.startsWith("unknown command")
     }
 
     /**

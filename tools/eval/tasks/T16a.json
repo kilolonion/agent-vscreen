@@ -3,6 +3,7 @@
   "scene": "S16",
   "seed": 801,
   "since": "beta8",
+  "required": true,
   "extras": {
     "init_value": 0,
     "target_value": 170

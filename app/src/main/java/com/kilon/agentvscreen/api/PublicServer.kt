@@ -280,6 +280,7 @@ class PublicServer(
 
         onAuthenticatedActivity()
         r.publicClientId = access.clientId
+        r.publicGrantId = access.grantId
         r.publicScope = access.scope
         r.auth = ApiServer.Auth(access.token, signed = false, nonce = null)
         Tokens.used(access.token.id)

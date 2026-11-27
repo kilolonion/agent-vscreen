@@ -3,6 +3,7 @@
   "scene": "S15",
   "seed": 915,
   "since": "beta8",
+  "required": true,
   "commands": [
     [
       "launch",

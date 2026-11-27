@@ -4,15 +4,23 @@ import com.kilon.agentvscreen.cmd.ScreenText
 import com.kilon.agentvscreen.host.Audit
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
-import java.net.HttpURLConnection
+import java.io.IOException
+import java.io.InputStream
 import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.net.URI
-import java.net.URL
 import java.util.Locale
 import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SNIHostName
+import javax.net.ssl.SSLException
+import javax.net.ssl.SSLPeerUnverifiedException
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 
 /**
  * OAuth Client ID Metadata Document (CIMD) resolver with strict SSRF defense and bounded caching.
@@ -21,8 +29,9 @@ import javax.net.ssl.HttpsURLConnection
  * 1. Validates strict HTTPS URL syntax (non-empty path, no userinfo/query/fragment/IP literal/non-443 port).
  * 2. Resolves all DNS records and blocks loopback, RFC1918 private, link-local, CGNAT/Tailscale (`100.64.0.0/10`),
  *    IPv6 ULA (`fc00::/7`), multicast, and unspecified addresses.
- * 3. Fetches the document with redirects disabled, 5 s timeouts, 64 KB cap, JSON Content-Type check, and
- *    per-source fetch rate limiting (10/hour).
+ * 3. Connects directly to the validated [InetAddress] list over TLS with SNI and HTTPS hostname verification
+ *    for the original hostname (eliminating DNS rebinding TOCTOU), redirects disabled, 5 s timeouts, 64 KB cap,
+ *    JSON Content-Type check, and per-source fetch rate limiting (10/hour).
  * 4. Verifies `client_id` matches the URL verbatim, `redirect_uris` are valid, and `token_endpoint_auth_method`
  *    is `"none"` (or absent), caching up to 64 entries capped at 24 h.
  */
@@ -30,6 +39,7 @@ internal object CimdResolver {
     const val CONNECT_TIMEOUT_MS = 5_000
     const val READ_TIMEOUT_MS = 5_000
     const val MAX_BODY_BYTES = 64 * 1024
+    const val MAX_HEADER_BYTES = 16 * 1024
     const val MAX_CACHE_ENTRIES = 64
     const val DEFAULT_CACHE_TTL_MS = 60 * 60_000L
     const val MAX_CACHE_TTL_MS = 24 * 60 * 60_000L
@@ -79,14 +89,20 @@ internal object CimdResolver {
 
     @Volatile internal var clock: () -> Long = { System.currentTimeMillis() }
     @Volatile internal var dnsResolver: (String) -> Array<InetAddress> = { host -> InetAddress.getAllByName(host) }
-    @Volatile internal var httpFetcher: (URI) -> FetchResponse = { uri -> defaultFetch(uri) }
+    @Volatile internal var tlsSocketOpener: (InetAddress, String, Int, Int) -> Socket = { addr, host, port, timeoutMs ->
+        openPinnedTlsSocket(addr, host, port, timeoutMs)
+    }
+    @Volatile internal var httpFetcher: (URI, List<InetAddress>) -> FetchResponse = { uri, addrs ->
+        defaultFetch(uri, addrs)
+    }
 
     internal fun resetForTest() = synchronized(lock) {
         cache.clear()
         fetchTimesBySource.clear()
         clock = { System.currentTimeMillis() }
         dnsResolver = { host -> InetAddress.getAllByName(host) }
-        httpFetcher = { uri -> defaultFetch(uri) }
+        tlsSocketOpener = { addr, host, port, timeoutMs -> openPinnedTlsSocket(addr, host, port, timeoutMs) }
+        httpFetcher = { uri, addrs -> defaultFetch(uri, addrs) }
     }
 
     /** True when [clientId] looks like a CIMD URL (`https://...`). */
@@ -240,10 +256,13 @@ internal object CimdResolver {
         }
 
         val resp = try {
-            httpFetcher(uri)
+            httpFetcher(uri, addrs.toList())
         } catch (e: BodyTooLargeException) {
             Audit.security("public_cimd_too_large", "src=$sourceBucket host=$host")
             return Result.Error(400, "invalid_client_metadata", "CIMD metadata document exceeds ${MAX_BODY_BYTES / 1024} KB limit")
+        } catch (e: SSLException) {
+            Audit.security("public_cimd_tls_failed", "src=$sourceBucket host=$host")
+            return Result.Error(400, "invalid_client", "TLS verification failed for CIMD metadata host")
         } catch (e: Exception) {
             Audit.security("public_cimd_fetch_failed", "src=$sourceBucket host=$host")
             return Result.Error(400, "invalid_client", "Failed to fetch CIMD metadata document")
@@ -350,35 +369,224 @@ internal object CimdResolver {
 
     private class BodyTooLargeException : Exception()
 
-    private fun defaultFetch(uri: URI): FetchResponse {
-        val conn = (URL(uri.toString()).openConnection() as? HttpsURLConnection)
-            ?: throw IllegalStateException("Expected HTTPS connection")
-        conn.instanceFollowRedirects = false
-        conn.connectTimeout = CONNECT_TIMEOUT_MS
-        conn.readTimeout = READ_TIMEOUT_MS
-        conn.useCaches = false
-        conn.requestMethod = "GET"
-        conn.setRequestProperty("Accept", "application/json")
+    private fun openPinnedTlsSocket(addr: InetAddress, host: String, port: Int, timeoutMs: Int): Socket {
+        val raw = Socket()
+        var ssl: SSLSocket? = null
         try {
-            val status = conn.responseCode
-            val ct = conn.contentType
-            val cc = conn.getHeaderField("Cache-Control")
-            val stream = if (status in 200..299) conn.inputStream else conn.errorStream
-            val out = ByteArrayOutputStream()
-            if (stream != null) {
-                stream.use { ins ->
-                    val buf = ByteArray(4096)
-                    while (true) {
-                        val n = ins.read(buf)
-                        if (n <= 0) break
-                        if (out.size() + n > MAX_BODY_BYTES) throw BodyTooLargeException()
-                        out.write(buf, 0, n)
+            raw.connect(InetSocketAddress(addr, port), timeoutMs)
+            raw.soTimeout = timeoutMs
+            val sslFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
+            ssl = sslFactory.createSocket(raw, host, port, true) as SSLSocket
+            val params = ssl.sslParameters
+            params.serverNames = listOf(SNIHostName(host))
+            params.endpointIdentificationAlgorithm = "HTTPS"
+            ssl.sslParameters = params
+            ssl.soTimeout = timeoutMs
+            ssl.startHandshake()
+            if (!HttpsURLConnection.getDefaultHostnameVerifier().verify(host, ssl.session)) {
+                throw SSLPeerUnverifiedException("TLS hostname verification failed for $host")
+            }
+            return ssl
+        } catch (t: Throwable) {
+            runCatching { ssl?.close() }
+            runCatching { raw.close() }
+            throw t
+        }
+    }
+
+    internal fun defaultFetch(uri: URI, validatedAddrs: List<InetAddress>): FetchResponse {
+        if (validatedAddrs.isEmpty()) throw IOException("No validated addresses for CIMD fetch")
+        if (validatedAddrs.any { isForbiddenAddress(it) }) throw IOException("Forbidden address in CIMD fetch")
+
+        val host = uri.host.lowercase(Locale.ROOT)
+        val port = if (uri.port == -1) 443 else uri.port
+        val rawPath = uri.rawPath?.takeIf { it.isNotEmpty() } ?: "/"
+
+        var sock: Socket? = null
+        var lastErr: IOException? = null
+        for (addr in validatedAddrs) {
+            try {
+                sock = tlsSocketOpener(addr, host, port, CONNECT_TIMEOUT_MS)
+                break
+            } catch (e: SSLException) {
+                throw e
+            } catch (e: IOException) {
+                lastErr = e
+            }
+        }
+        val activeSock = sock ?: throw (lastErr ?: IOException("Failed to connect to validated CIMD addresses"))
+
+        return activeSock.use { s ->
+            val deadlineNs = System.nanoTime() + READ_TIMEOUT_MS * 1_000_000L
+            fun applyRemainingTimeout() {
+                val remMs = ((deadlineNs - System.nanoTime()) / 1_000_000L).toInt()
+                if (remMs <= 0) throw IOException("CIMD read timed out")
+                s.soTimeout = remMs
+            }
+
+            applyRemainingTimeout()
+            val req = buildString {
+                append("GET ").append(rawPath).append(" HTTP/1.1\r\n")
+                append("Host: ").append(host).append("\r\n")
+                append("Accept: application/json\r\n")
+                append("Accept-Encoding: identity\r\n")
+                append("Connection: close\r\n")
+                append("\r\n")
+            }
+            val outStream = s.getOutputStream()
+            outStream.write(req.toByteArray(Charsets.US_ASCII))
+            outStream.flush()
+
+            val ins = BufferedInputStream(s.getInputStream(), 4096)
+            val headerBytes = readHeaderBlock(ins, ::applyRemainingTimeout)
+            val headerText = String(headerBytes, Charsets.ISO_8859_1)
+            val lines = headerText.split("\r\n")
+            val statusLine = lines.firstOrNull()?.takeIf { it.startsWith("HTTP/1.") }
+                ?: throw IOException("Invalid HTTP status line from CIMD host")
+            val statusParts = statusLine.split(' ', limit = 3)
+            val status = statusParts.getOrNull(1)?.takeIf { it.length == 3 }?.toIntOrNull()
+                ?: throw IOException("Invalid HTTP status code from CIMD host")
+
+            var contentType: String? = null
+            var cacheControl: String? = null
+            var contentLength: Long? = null
+            var chunked = false
+            for (i in 1 until lines.size) {
+                val line = lines[i]
+                if (line.isEmpty()) continue
+                val colon = line.indexOf(':')
+                if (colon <= 0) continue
+                val name = line.substring(0, colon).trim().lowercase(Locale.ROOT)
+                val value = line.substring(colon + 1).trim()
+                when (name) {
+                    "content-type" -> if (contentType == null) contentType = value
+                    "cache-control" -> cacheControl = if (cacheControl == null) value else "$cacheControl, $value"
+                    "content-length" -> {
+                        val parsed = value.toLongOrNull()
+                        if (parsed == null || parsed < 0L) throw IOException("Invalid Content-Length")
+                        if (contentLength != null && contentLength != parsed) throw IOException("Conflicting Content-Length")
+                        contentLength = parsed
+                    }
+                    "transfer-encoding" -> {
+                        if (value.lowercase(Locale.ROOT).split(',').any { it.trim() == "chunked" }) {
+                            chunked = true
+                        }
                     }
                 }
             }
-            return FetchResponse(status, ct, cc, out.toByteArray())
-        } finally {
-            conn.disconnect()
+
+            if (status in 300..399) {
+                // Never follow redirects.
+                return@use FetchResponse(status, contentType, cacheControl, ByteArray(0))
+            }
+            if (chunked && contentLength != null) throw IOException("Both Transfer-Encoding and Content-Length present")
+
+            val body = when {
+                chunked -> readChunkedBody(ins, ::applyRemainingTimeout)
+                contentLength != null -> readFixedBody(ins, contentLength, ::applyRemainingTimeout)
+                else -> readBoundedUntilEof(ins, ::applyRemainingTimeout)
+            }
+            FetchResponse(status, contentType, cacheControl, body)
         }
+    }
+
+    private fun readHeaderBlock(ins: InputStream, updateTimeout: () -> Unit): ByteArray {
+        val out = ByteArrayOutputStream(1024)
+        var state = 0
+        while (true) {
+            updateTimeout()
+            val b = ins.read()
+            if (b < 0) throw IOException("Unexpected EOF while reading CIMD response headers")
+            if (out.size() >= MAX_HEADER_BYTES) throw IOException("CIMD response headers too large")
+            out.write(b)
+            state = when (state) {
+                0 -> if (b == '\r'.code) 1 else 0
+                1 -> if (b == '\n'.code) 2 else if (b == '\r'.code) 1 else 0
+                2 -> if (b == '\r'.code) 3 else 0
+                3 -> if (b == '\n'.code) return out.toByteArray() else if (b == '\r'.code) 1 else 0
+                else -> 0
+            }
+        }
+    }
+
+    private fun readLineCrLf(ins: InputStream, maxLen: Int, updateTimeout: () -> Unit): String {
+        val out = ByteArrayOutputStream(64)
+        while (true) {
+            updateTimeout()
+            val b = ins.read()
+            if (b < 0) throw IOException("Unexpected EOF in chunked CIMD body")
+            if (b == '\n'.code) {
+                val arr = out.toByteArray()
+                val end = if (arr.isNotEmpty() && arr[arr.size - 1] == '\r'.code.toByte()) arr.size - 1 else arr.size
+                return String(arr, 0, end, Charsets.ISO_8859_1)
+            }
+            if (out.size() >= maxLen) throw IOException("Chunk line too long")
+            out.write(b)
+        }
+    }
+
+    private fun readFixedBody(ins: InputStream, length: Long, updateTimeout: () -> Unit): ByteArray {
+        if (length > MAX_BODY_BYTES.toLong()) throw BodyTooLargeException()
+        val target = length.toInt()
+        val out = ByteArray(target)
+        var offset = 0
+        while (offset < target) {
+            updateTimeout()
+            val n = ins.read(out, offset, target - offset)
+            if (n <= 0) throw IOException("Truncated CIMD response body")
+            offset += n
+        }
+        return out
+    }
+
+    private fun readChunkedBody(ins: InputStream, updateTimeout: () -> Unit): ByteArray {
+        val out = ByteArrayOutputStream()
+        while (true) {
+            val line = readLineCrLf(ins, 256, updateTimeout)
+            val hex = line.substringBefore(';').trim()
+            if (hex.isEmpty() || hex.length > 8 || hex.any { it !in '0'..'9' && it !in 'a'..'f' && it !in 'A'..'F' }) {
+                throw IOException("Invalid chunk size in CIMD response")
+            }
+            val size = hex.toLongOrNull(16) ?: throw IOException("Invalid chunk size in CIMD response")
+            if (size == 0L) {
+                // Consume optional trailers up to empty line (bounded).
+                var trailerBytes = 0
+                while (true) {
+                    val tl = readLineCrLf(ins, 1024, updateTimeout)
+                    if (tl.isEmpty()) break
+                    trailerBytes += tl.length + 2
+                    if (trailerBytes > 4096) throw IOException("CIMD chunk trailers too large")
+                }
+                return out.toByteArray()
+            }
+            if (size > MAX_BODY_BYTES.toLong() || out.size().toLong() + size > MAX_BODY_BYTES.toLong()) {
+                throw BodyTooLargeException()
+            }
+            var rem = size.toInt()
+            val buf = ByteArray(minOf(rem, 4096))
+            while (rem > 0) {
+                updateTimeout()
+                val n = ins.read(buf, 0, minOf(rem, buf.size))
+                if (n <= 0) throw IOException("Truncated chunk in CIMD response")
+                out.write(buf, 0, n)
+                rem -= n
+            }
+            val cr = ins.read()
+            val lf = ins.read()
+            if (cr != '\r'.code || lf != '\n'.code) throw IOException("Missing CRLF after chunk in CIMD response")
+        }
+    }
+
+    private fun readBoundedUntilEof(ins: InputStream, updateTimeout: () -> Unit): ByteArray {
+        val out = ByteArrayOutputStream()
+        val buf = ByteArray(4096)
+        while (true) {
+            updateTimeout()
+            val n = ins.read(buf)
+            if (n <= 0) break
+            if (out.size() + n > MAX_BODY_BYTES) throw BodyTooLargeException()
+            out.write(buf, 0, n)
+        }
+        return out.toByteArray()
     }
 }

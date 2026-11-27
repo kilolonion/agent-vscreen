@@ -55,6 +55,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -664,9 +665,15 @@ internal fun TaskTitleBar(
             layout(child.width, (child.height + state.heightOffset.toInt()).coerceAtLeast(0)) { child.placeRelative(0, 0) }
         }.padding(horizontal = TopAppBarDefaults.TitlePadding).padding(bottom =
             if (subtitle.isEmpty()) TopAppBarDefaults.LargeTitleBottomPadding else TopAppBarDefaults.SubtitleBottomPadding)) {
-            // Keep the same line height when hidden; an empty title still occupies one line.
-            Text(if (collapsed) "" else title, modifier = if (collapsed) Modifier else Modifier.scrollIfLong(),
-                color = colors.onSurface, fontSize = styles.title1.fontSize, maxLines = 1, softWrap = false)
+            // Keep the same line height when hidden; empty "" drops CJK fallback font metrics and shrinks heightOffsetLimit.
+            Text(
+                title,
+                modifier = if (collapsed) Modifier.clearAndSetSemantics {} else Modifier.scrollIfLong(),
+                color = if (collapsed) Color.Transparent else colors.onSurface,
+                fontSize = styles.title1.fontSize,
+                maxLines = 1,
+                softWrap = false,
+            )
             if (subtitle.isNotEmpty()) Text(subtitle, color = colors.onSurfaceVariantSummary, style = styles.body2)
         }
     }

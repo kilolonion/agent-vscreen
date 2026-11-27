@@ -245,4 +245,5 @@ internal class WakeBudget {
         if (keys.size >= 2 || keys.lastOrNull()?.let { now - it < 15_000L } == true) return false
         keys.addLast(now); return true
     }
+    @Synchronized fun reset() { keys.clear() }
 }

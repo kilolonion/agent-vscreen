@@ -17,11 +17,16 @@ internal object McpProtocol {
     const val TASKS_EXTENSION = "io.modelcontextprotocol/tasks"
     const val META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion"
     const val META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities"
+    const val META_SERVER_INFO = "io.modelcontextprotocol/serverInfo"
 
     /** SEP-2243: HTTP routing header (`Mcp-Method` / `Mcp-Name`) does not match JSON-RPC body. */
     const val ERR_HEADER_MISMATCH = -32020
+    /** MCP 2026-07-28: client did not declare a required extension capability (`data.requiredCapabilities`). */
+    const val ERR_MISSING_CAPABILITY = -32021
     /** Stateless modern protocol version error with `data: {supported, requested}`. */
     const val ERR_UNSUPPORTED_PROTOCOL = -32022
+
+    private val TASK_ID_METHODS = setOf("tasks/get", "tasks/update", "tasks/cancel", "tasks/result")
 
     const val CACHE_TTL_MS = 3_600_000L
     const val CACHE_SCOPE_PUBLIC = "public"
@@ -88,17 +93,37 @@ internal object McpProtocol {
         }
         if (r.headers.containsKey("mcp-name")) {
             val headerName = r.headers["mcp-name"]
-            val bodyName = msg.optJSONObject("params")?.optString("name")?.takeIf { it.isNotEmpty() }
-            if (headerName != bodyName) {
+            val params = msg.optJSONObject("params")
+            val expectedName = when {
+                bodyMethod in TASK_ID_METHODS -> params?.optString("taskId")?.trim()?.takeIf { it.isNotEmpty() }
+                bodyMethod == "tasks/list" -> null
+                else -> params?.optString("name")?.takeIf { it.isNotEmpty() }
+            }
+            if (headerName != expectedName) {
+                val targetField = if (bodyMethod in TASK_ID_METHODS) "params.taskId" else "params.name"
                 return 400 to jsonRpcError(
                     id,
                     ERR_HEADER_MISMATCH,
-                    "HeaderMismatch: Mcp-Name does not match params.name",
+                    "HeaderMismatch: Mcp-Name does not match $targetField",
                 )
             }
         }
+        if (bodyMethod.startsWith("tasks/") && !clientSupportsTasks(msg)) {
+            return missingTasksCapabilityError(id)
+        }
         return null
     }
+
+    fun missingTasksCapabilityError(id: Any?): Pair<Int, JSONObject> =
+        400 to jsonRpcError(
+            id,
+            ERR_MISSING_CAPABILITY,
+            "Missing required client capability: $TASKS_EXTENSION",
+            JSONObject().put(
+                "requiredCapabilities",
+                JSONObject().put("extensions", JSONObject().put(TASKS_EXTENSION, JSONObject())),
+            ),
+        )
 
     /**
      * Opt-in gate for `io.modelcontextprotocol/tasks`: only returns true when the request's

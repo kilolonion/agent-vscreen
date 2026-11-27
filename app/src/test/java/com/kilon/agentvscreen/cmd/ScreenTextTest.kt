@@ -83,4 +83,69 @@ class ScreenTextTest {
         assertFalse(sd.getJSONArray("toasts").getString(0).contains("\n"))
         assertFalse(sd.getJSONArray("readback").getString(0).contains("\n"))
     }
+
+    // ── Fix 07: Real Note builders strictly isolate screen text from system_text ──
+
+    @Test
+    fun realWaitTimeoutNotFoundAndAmbiguousNotesIsolateSentinelFromSystemText() {
+        val sentinel = "SENTINEL_9876"
+        val inputSentinel = "INPUT_5432"
+
+        fun excerptsOf(note: Note): List<String> {
+            val arr = note.json().optJSONArray("screen_excerpts") ?: return emptyList()
+            return (0 until arr.length()).map { arr.getString(it) }
+        }
+
+        // 1. Wait timeout path (`buildScreenNowParts` + `buildMissedNote`) in BOTH ZH and EN
+        for (lang in listOf(I18n.Lang.ZH, I18n.Lang.EN)) {
+            I18n.choice = lang
+            val nowParts = buildScreenNowParts(
+                activity = "com.example.shop/.CheckoutActivity",
+                els = listOf(El(1, sentinel, Rect(10, 20, 400, 90), fromA11y = true)),
+            )
+            val waitNote = buildMissedNote(
+                code = "WAIT_TIMEOUT",
+                displayDetail = "3.0s 后仍未等到目标；${nowParts.displaySuffix}",
+                systemDetail = "3.0s 后仍未等到目标；${nowParts.systemSuffix}",
+                excerpts = nowParts.excerpts,
+                skipped = 2,
+            )
+            val j = waitNote.json()
+            assertFalse("[$lang] Wait timeout system_text must NOT contain sentinel: ${j.getString("system_text")}", j.getString("system_text").contains(sentinel))
+            assertTrue("[$lang] Wait timeout screen_excerpts MUST contain sentinel", excerptsOf(waitNote).any { it.contains(sentinel) })
+            assertTrue("[$lang] Display text keeps readable summary", j.getString("text").contains(sentinel))
+        }
+        I18n.choice = I18n.Lang.ZH
+
+        // 2. Not-found target path (`buildNotFoundRefusal`) with near-miss text AND editable input box
+        val notFoundEls = listOf(
+            El(1, sentinel, Rect(10, 20, 400, 90), fromA11y = true, clickable = true),
+            El(2, inputSentinel, Rect(10, 120, 400, 200), fromA11y = true, editable = true),
+        )
+        val nfRef = buildNotFoundRefusal("SENTINEL_MISS", notFoundEls)
+        val nfNotes = Notes()
+        nfNotes.add(nfRef.code, nfRef.message!!, screenExcerpts = nfRef.screenExcerpts, systemText = nfRef.systemMessage)
+        val nfNote = nfNotes.list.single()
+        val nfJson = nfNote.json()
+        assertFalse("NOT_FOUND system_text must NOT contain near-miss sentinel", nfJson.getString("system_text").contains(sentinel))
+        assertFalse("NOT_FOUND system_text must NOT contain input box sentinel", nfJson.getString("system_text").contains(inputSentinel))
+        val nfEx = excerptsOf(nfNote)
+        assertTrue("NOT_FOUND screen_excerpts MUST contain near-miss sentinel", nfEx.any { it.contains(sentinel) })
+        assertTrue("NOT_FOUND screen_excerpts MUST contain input box sentinel", nfEx.any { it.contains(inputSentinel) })
+
+        // 3. Ambiguous candidates path (`buildAmbiguousRefusal`)
+        val ambHits = listOf(
+            El(1, "确认 $sentinel A", Rect(10, 20, 400, 90), fromA11y = true, clickable = true),
+            El(2, "确认 $sentinel B", Rect(10, 120, 400, 190), fromA11y = true, clickable = true),
+        )
+        val ambRef = buildAmbiguousRefusal("确认", ambHits)
+        val ambNotes = Notes()
+        ambNotes.add(ambRef.code, ambRef.message!!, screenExcerpts = ambRef.screenExcerpts, systemText = ambRef.systemMessage)
+        val ambNote = ambNotes.list.single()
+        val ambJson = ambNote.json()
+        assertFalse("AMBIGUOUS system_text must NOT contain candidate sentinel", ambJson.getString("system_text").contains(sentinel))
+        val ambEx = excerptsOf(ambNote)
+        assertEquals(2, ambEx.size)
+        assertTrue("AMBIGUOUS screen_excerpts MUST contain both candidates", ambEx.all { it.contains(sentinel) })
+    }
 }
