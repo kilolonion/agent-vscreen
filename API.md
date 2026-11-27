@@ -6,25 +6,25 @@ Agent-VScreen 是一个独立的 Android 应用。它在一块看不见的副屏
 - 包名 `com.kilon.agentvscreen`，`main` 分支版本 2.0.1-beta1（versionCode 75）。官方测试版与正式版同签名可覆盖安装；安装前可按 [README 的说明](README.zh-CN.md#验证下载的-apk)验证签名。
 <!-- version:end -->
 - 需要 Android 11 及以上、arm64。
-- **2.0.x**：守门人（`Gate`）托管公开本机端口并在 App 被冻结或强停后自动唤醒；每 agent 独立六行权限表（`Policy`）与防遮挡独立强确认页（`StrongConfirm`）；实验性公网 MCP 接入（Tailscale Funnel / Cloudflare Tunnel / ngrok + OAuth 2.1 + 手机输入配对码确认）；回复协议 v3 与闭环手势；任务中保持亮屏；完整版本记录见 [docs/CHANGELOG.zh-CN.md](docs/CHANGELOG.zh-CN.md)。
+- **2.0.x**：守门人（`Gate`）托管公开本机端口并在 App 被冻结或强停后自动唤醒；特权服务（协议 19）全事务码调用方 UID 强校验与 `ExecAllowlist` 零 `sh -c` 白名单；10 分钟一次性接入码（`avc_...` / `POST /v2/pair/exchange`）与敏感剪贴板（`IS_SENSITIVE`）；每 agent 独立六行权限表（`Policy`）与防遮挡独立强确认页（`StrongConfirm`）；实验性公网 MCP 接入（Tailscale Funnel / Cloudflare Tunnel / ngrok + OAuth 2.1 + 手机输入配对码确认 + 30 秒刷新容错 + `2026-07-28` HTTP 400 回退）；Shizuku 兼容分支动态发现与 Android 16/17 兼容；回复协议 v3 与闭环手势；任务中保持亮屏；完整版本记录见 [docs/CHANGELOG.zh-CN.md](docs/CHANGELOG.zh-CN.md)。
 - **1.4.x**：支持已 root 手机直接用 Root（默认仍用 Shizuku）、统一看图命令 `look`、应用静音 `sound`、端口自动顺延、按 agent 隔离定时预约与盯守。
 - **1.3.0 / 1.2.0**：`ask` / `teach` / `schedule`、结构化 `/v2` 接口与多令牌签名认证，旧接口 `/v1` 仍保留兼容（升级要点见第 9 节）。
 - 每条命令的参数和每个结果代码的完整列表在 [docs/REFERENCE.md](docs/REFERENCE.md)，它由代码里的命令表和代码表生成，和 `vscreen help all`、`vscreen help codes` 的内容一致。
 
 ## 1. 安装和首次配置
 
-特权来源二选一：默认用 **Shizuku**（不需要 root），已 root 的手机也可以直接用 **Root**。Agent-VScreen 不占用 adb，不改无线调试的开关和端口，也不重启 adbd。你的 agent 如果自己在用 adb 或 Shizuku，照常可以用。
+特权来源二选一：默认用 **Shizuku / 兼容分支**（不需要 root，通过三层动态发现自动识别官方 Shizuku、Sui、AXManager、Nightzuku、Shevery 及其他实现 `moe.shizuku.manager.permission.API_V23` 协议的分支），已 root 的手机也可以直接用 **Root**（优先 `su 2000` 以 shell 身份运行，失败时回退 uid 0；Android 16/17 上已加固 `AttributionSource` 兼容并在首次配置页提供显式 Root 回退入口）。Agent-VScreen 不占用 adb，不改无线调试的开关和端口，也不重启 adbd；特权进程内的屏幕服务（协议 19）对全部 Binder 事务强制核验调用方 UID，命令执行一律经纯 JVM 白名单（`ExecAllowlist`）校验且运行时不调用 `sh -c`；Shizuku 模式下若 `Shizuku.newProcess` 反射受限且屏幕服务已连接，自动透明降级为服务端 `EXEC`。你的 agent 如果自己在用 adb 或 Shizuku，照常可以用。
 
 1. 安装 APK，打开 Agent-VScreen。
 2. 在“首次配置”里选择权限来源：
-   - **Shizuku**：先启动 Shizuku，再点 **授权 Shizuku**，在弹窗里点允许。手机每次重启后要重新启动 Shizuku。
-   - **Root**：手机已用 Magisk、KernelSU、APatch 等 root 时，点 **手机已 root？改用 Root**，在 root 管理器弹窗里授权。不需要装 Shizuku；获得授权后，打开 App 时会自动启动 Root 服务。
-3. 点 **一键配置其余项**。它会通过所选的权限来源依次做下面几件事，每一项都只把 Agent-VScreen **加进去**，不会移除或替换别的应用的设置：
+   - **Shizuku / 兼容分支**：先启动 Shizuku（或已安装的兼容分支 / Sui），再点 **授权**，在弹窗里点允许。手机每次重启后要重新启动对应服务。动态发现的特权管理器包名会自动免于回合间冻结（`--hold`）与主副屏移交（`handoff`）。
+   - **Root**：手机已用 Magisk、KernelSU、APatch 等 root（或 Android 17+ 上官方 Shizuku 受限）时，点 **改用 Root（无需 Shizuku）**，在 root 管理器弹窗里授权。不需要装 Shizuku；获得授权后，打开 App 时会自动启动 Root 服务。
+3. 点 **自动开启**。它会通过所选的权限来源依次做下面几件事，每一项都只把 Agent-VScreen **加进去**，不会移除或替换别的应用的设置：
    - 允许悬浮窗；
    - 允许通知；
    - 把它的无障碍服务加进已开启的列表。这个服务是只读的：不做手势，也不开触摸浏览，你已经开着的其它无障碍服务保持不变；
    - 加入电池白名单、允许后台运行。
-4. 在底部“接入 › 新建接入”里按向导生成并 **复制给 agent 的话**，发给你的 agent，见第 2 节。
+4. 在底部“接入 › 新建接入”里按向导生成 10 分钟一次性接入码或配置并 **复制给 agent 的话**，发给你的 agent，见第 2 节。
 
 也可以在 **设置 › 权限来源** 切换。切换会关闭当前副屏；新来源就绪后，下一条命令会自动重连。
 
@@ -64,12 +64,16 @@ Agent-VScreen 是一个独立的 Android 应用。它在一块看不见的副屏
 
 ## 2. 三种接入方式
 
-三种方式背后是同一套命令，同一个结果。在 App 底部“接入 › 新建接入”里会自动为这个 agent 生成专属令牌并复制 **给 agent 的话** 发给它，它会自己装好、记住。也可以在“设置 › 令牌”里单独管理每个令牌的权限、免确认和撤销（见第 7 节）。
+三种方式背后是同一套命令，同一个结果。在 App 底部“接入 › 新建接入”里会自动为这个 agent 创建待兑换令牌（CLI / HTTP / Operit 默认签发 10 分钟单次有效的 `avc_...` 一次性接入码，不把长期密钥放进聊天记录或命令历史）并复制 **给 agent 的话** 发给它，它会自己装好、兑换并记住。也可以在“设置 › 令牌”里单独管理每个令牌的权限、免确认和撤销（见第 7 节）。
 
 ### 2.1 命令行 `vscreen`（推荐）
 
 ```sh
+# 推荐：使用向导签发的 10 分钟一次性接入码（avc_...），经环境变量传参不落命令历史
+VSCREEN_CODE=<一次性接入码> curl -fsS http://127.0.0.1:18765/cli | sh -s -- install
+# 兼容：直接使用长期令牌（手工在“设置 › 令牌”创建的令牌）
 curl -fsS http://127.0.0.1:18765/cli | sh -s -- install <令牌>
+
 vscreen guide                 # 一页用法：看 → 做 → 核对
 vscreen launch 设置
 vscreen act "tap 搜索; type 蓝牙; key enter until text:蓝牙"
@@ -77,20 +81,22 @@ vscreen act                   # 看一眼现在的画面
 vscreen done
 ```
 
+- 传入 `VSCREEN_CODE=avc_...`（或参数为 `avc_` 开头）时，安装脚本会先探测本机有效端口，再通过 `POST /v2/pair/exchange` 的 JSON 请求体一次性兑换长期令牌并写入私有配置文件（不把接入码或令牌放进 URL 查询串或进程参数）。
 - 需要 `curl`。有 `sha256sum`、`shasum` 或 `openssl` 之一时，命令行给每个请求签名，令牌本身不发送，回复也校验（见 7.2）。都没有时退回到发送令牌，这种方式只在本机可用。
 - 退出码：0 整段按预期做完；1 停在某一步或被拒绝；2 命令写错，什么都没执行；3 连不上或回复校验失败。
 - 截图下载到 `$VSCREEN_SHOT_DIR`（默认 `$TMPDIR/vscreen-shots`），文字里是本地路径。完整输出另存为同目录的 `last.txt`。
 - 每条命令带一个请求号。连接中途断了，命令行用同一个请求号重试一次，拿到的是第一次执行的结果，不会执行两遍。
 - App 更新后命令行会自己换成新版。新脚本通过签名请求取回并校验，校验不过不会安装。第一次安装的那一行 `curl … | sh` 没有校验可做，它信任的是你当时连的那个地址。
-- 环境变量：`VSCREEN_URL`、`VSCREEN_TOKEN`、`VSCREEN_SESSION`、`VSCREEN_SHOT_DIR`、`VSCREEN_SHOTS=none`、`VSCREEN_NO_UPDATE`。
+- 环境变量：`VSCREEN_URL`、`VSCREEN_TOKEN`、`VSCREEN_CODE`、`VSCREEN_SESSION`、`VSCREEN_SHOT_DIR`、`VSCREEN_SHOTS=none`、`VSCREEN_NO_UPDATE`。
 
 ### 2.2 MCP
 
-把 App 里复制的 MCP 配置加进 agent（streamable HTTP，地址 `/mcp`）。
+把 App 里复制的 MCP 配置加进 agent（Streamable HTTP，地址 `POST /mcp`；`GET`/`DELETE /mcp` 在鉴权前直接返回 `405 Allow: POST`）。
 
+- **协议版本与兼容回退**：支持 MCP `2025-06-18`、`2025-03-26` 与 `2024-11-05` 握手（`initialize`）。若双栈客户端先发送 MCP `2026-07-28` 无状态请求（含 `MCP-Protocol-Version >= 2026`、`Mcp-Method`、`server/discover` 或 `_meta` 版本字段，单条与 JSON-RPC batch 均覆盖），服务端立即返回**非 JSON-RPC 的 HTTP `400`**（`{"code":"UNSUPPORTED_MCP_PROTOCOL",...}`，绝不使用 `-32022`），以触发客户端自动回退到传统 `initialize` 流程。
 - **工具**：`vscreen`（参数 `command` 是一整条命令行）和按命令分开的 `vscreen_launch`、`vscreen_act`、`vscreen_status` 等。分开的工具参数是字段：`args` 是位置参数，每个选项一个字段，由命令表生成。
 - **结果**：`content` 是文字和截图；`structuredContent` 是结构化结果（`ok`、`code`、`next`、`steps`、`screen`、`notes`）；`isError` 跟随结果代码。
-- **进度**：调用带 `_meta.progressToken` 且请求头 `Accept` 含 `text/event-stream` 时，每做完一步发一条 `notifications/progress`。
+- **进度与请求号**：调用带 `_meta.progressToken` 且请求头 `Accept` 含 `text/event-stream` 时，每做完一步发一条 `notifications/progress`。传入的 `requestId` / `progressToken` 超过 64 字符时自动截断。
 - **取消**：断开这次请求的连接，这段操作会在当前这一步之后停下。
 - MCP 客户端不会签名。内置 Tailscale 接受令牌，无需关掉“只接受签名请求”；其它直接接入方式默认要求签名，见 7.2。
 
@@ -122,14 +128,17 @@ Authorization: Bearer <令牌>            （本机；其它设备见 7.2 的签
 }
 ```
 
-- `ok` 为真只表示整段按预期做完。停在某一步时 `ok` 为假，`code` 是那一步的代码，`next` 是建议的下一步：`look`（先看画面）、`fix_command`（改命令）、`ask_user`（停下问用户）、`retry_later`（稍后重试）、`none`。
+- `ok` 为真只表示整段按预期做完。停在某一步时 `ok` 为假，`code` 是那一步的代码，`next` 是建议的下一步：`look`（先看画面）、`fix_command`（改命令）、`ask_user`（停下问用户）、`user_on_phone`（去手机端处理）、`retry_later`（稍后重试）、`none`。
 - `request_id`：同一个令牌用同一个 id 重发，10 分钟内只执行一次，后来的请求拿到第一次的结果并带 `"replayed": true`。
 - 请求头 `Accept: text/event-stream`：回复变成事件流，每做完一步一条 `step` 事件，最后一条 `result` 事件是上面的 JSON。
 - 请求头 `X-VScreen-Lang: zh|en`：这一次请求用哪种语言回复，不影响别的调用方。
 - 断开连接：正在执行的命令在当前这一步之后停下（带 `request_id` 时先等 3 秒，看调用方是否用同一个 id 重连）。
 - 长操作可以加 `--async`：马上返回任务号，之后 `task <号> --wait 60s` 取结果，`task cancel <号>` 取消。
+- **一次性接入码兑换（仅本机与 Tailnet `ApiServer`，永不暴露于公网 `PublicServer`）**：
+  - `POST /v2/pair/exchange`，请求体 `{"code": "avc_..."}`，成功返回 `200` 及 `{"ok": true, "token": "avs_...", "token_id": "...", "name": "...", "level": "..."}` 并原子激活待兑换令牌。
+  - 仅接受 `POST`（非 POST 返回 `405`），拒绝 URL 查询参数 `?code=`（返回 `400 BAD_REQUEST`，不消耗接入码）与浏览器 `Origin`（返回 `403 BROWSER_REFUSED`）；无效、已过期（10 分钟）或重复使用的接入码返回 `401 CODE_INVALID_OR_EXPIRED`。
 - 其它地址：`GET /v2/ping`（不要令牌，含手机时间）、`GET /v2/help`、`GET /v2/codes`、`GET /v2/shot/<名字>`、`GET /v2/events?session=&wait=30s&again=1`。
-- 服务端限制：同时最多 24 个连接（超出返回 503 `SERVER_BUSY`），请求头 16 KB，请求体 1 MB，请求头 10 秒内、请求体 20 秒内要发完。支持 chunked 请求体。带 `Origin` 的请求（网页发起）一律拒绝。
+- 服务端与 HTTP 解析限制（`HttpCore`）：同时最多 24 个连接（超出返回 503 `SERVER_BUSY`），请求头 16 KB，请求体 1 MB；读头 10 秒、读体 20 秒均以单调时钟严格收紧 socket 截止，防慢速连接占池；拒绝 `Content-Length` 与 `Transfer-Encoding` 并存、冲突 `Content-Length`、带符号/溢出 chunk 长度与超限 trailer；带 `Origin` 的请求（网页发起）一律拒绝；远程鉴权失败按通道独立计数封禁（键表上限 500 条），绝不在工作线程 `sleep`。
 
 ### 2.4 让其它设备连进来（默认关闭）
 
@@ -186,10 +195,10 @@ ssh -p 8022 -L 18765:127.0.0.1:18765 <手机地址>
 
 面向无法加入私有 Tailscale 网络的云端 MCP 客户端（如 claude.ai、ChatGPT 自定义连接器或无浏览器的云端主机），可在 **接入 › 云端（公网 MCP · 实验性）** 手动开启：
 
-- **独立隔离入口**：仅监听本机 `127.0.0.1:18785`（`PublicServer`），由通道代理注入常量时间校验的 `X-AVS-Public` 隔离密钥与真实客户端来源头 `X-AVS-Public-Src`（按 IPv4 `/32` 或 IPv6 `/64` 分桶限流）。只暴露 OAuth 发现（`/.well-known/oauth-protected-resource`、`/.well-known/oauth-protected-resource/mcp`、`/.well-known/oauth-authorization-server`）、注册/授权/设备码/换票端点（`/oauth/register`、`/oauth/authorize`、`/oauth/authorize/status`、`/oauth/device_authorization`、`/oauth/device`、`/oauth/token`）和 `POST /mcp`（`GET`/`DELETE /mcp` 在认证前直接返回 `405 Allow: POST`），其余路径一律 `404`。本地令牌与 Tailnet 头在公网入口一律拒收。
+- **独立隔离入口**：仅监听本机 `127.0.0.1:18785`（`PublicServer`），由通道代理注入常量时间校验的 `X-AVS-Public` 隔离密钥与真实客户端来源头 `X-AVS-Public-Src`（按 IPv4 `/32` 或 IPv6 `/64` 分桶限流；Cloudflare 源站会剥离伪造头并严格校验 `Cf-Connecting-IP` 字面量）。只暴露 OAuth 发现（`/.well-known/oauth-protected-resource`、`/.well-known/oauth-protected-resource/mcp`、`/.well-known/oauth-authorization-server`）、注册/授权/设备码/换票端点（`/oauth/register`、`/oauth/authorize`、`/oauth/authorize/status`、`/oauth/device_authorization`、`/oauth/device`、`/oauth/token`）和 `POST /mcp`（`GET`/`DELETE /mcp` 在认证前直接返回 `405 Allow: POST`），其余路径一律 `404`（包括 `/v2/pair/exchange`）。本地令牌与 Tailnet 头在公网入口一律拒收；公网 500/502 错误仅返回脱敏通用提示，不暴露内部异常类名或堆栈细节。
 - **三种通道**：**Tailscale Funnel**（官方 Tailscale 账号，域名会出现在公开证书透明度日志中）、**Cloudflare Tunnel**（自有域名，支持 Headscale）或 **ngrok**（免费固定域名）。使用 Cloudflare Tunnel / ngrok 时，HTTPS 在其服务端终止后再转发至手机。
-- **OAuth 2.1 + 主动输入配对码**：支持授权码（强制 PKCE S256 + RFC 8707 `resource` 绑定）与 RFC 8628 设备码。外部发起配对时**静默入队，手机不会自动弹窗或发通知**；用户打开手机上的 Agent-VScreen 输入 8 位配对码后才弹出强确认卡（显示来源地址与客户端自报名称，仅接受锁屏生物识别/PIN，禁用长按）。可选开启**严格配对窗口**（默认拒绝一切新客户端注册与配对，仅在手动打开的 3 分钟窗口内放行并在批准后自动关闭）。
-- **令牌与生命周期**：访问令牌 1 小时过期，刷新令牌 30 天轮换（重用已退役的刷新令牌会立即撤销该客户端的全部令牌）；公网客户端**永不开放 `system` 权限**；连续 **24 小时无已认证请求**（仅计有效 Bearer 的 `/mcp` 与 HTTP 200 的 `/oauth/token`，扫描和未认证流量不续期）自动关闭，App 版本更新后自动恢复关闭。
+- **OAuth 2.1 + 主动输入配对码**：支持授权码（强制 PKCE S256、RFC 8707 `resource` 绑定与 RFC 9207 `iss` 参数校验）、DCR（校验 `application_type` 与重定向 URI）与 RFC 8628 设备码。外部发起配对时**静默入队（上限 32 条），手机不会自动弹窗或发通知**；用户打开手机上的 Agent-VScreen 输入 8 位配对码后才弹出强确认卡（显示来源地址与客户端自报名称，仅接受锁屏生物识别/PIN，禁用长按）。可选开启**严格配对窗口**（默认拒绝一切新客户端注册与配对，仅在手动打开的 3 分钟窗口内放行并在批准后自动关闭）。
+- **令牌、容错与生命周期**：访问令牌 1 小时过期，刷新令牌 30 天轮换并内置**内存级 30 秒单次重试宽限**（移动弱网丢失响应时允许同一旧刷新令牌重试一次并返回同组新令牌；客户端一旦使用新令牌、超过 30 秒或二次重放即撤销宽限并立即吊销该客户端全部令牌）；`/oauth/token` 按来源限流，无效/已撤销 Bearer 仅记入调用方来源桶不锁死合法客户端；公网客户端**永不开放 `system` 权限**；连续 **24 小时无已认证请求**（仅计有效 Bearer 的 `/mcp` 与 HTTP 200 的 `/oauth/token`，扫描和未认证流量不续期）自动关闭，App 版本更新后自动恢复关闭。
 
 **私有远程安全设置**（“接入 › 远程访问”下面）：
 
@@ -366,11 +375,11 @@ ssh -p 8022 -L 18765:127.0.0.1:18765 <手机地址>
 
 ### 7.1 每个 agent 一个令牌
 
-App 的“接入 › 新建接入”或“设置 › 令牌”里可以新建令牌，形如 `avs_<id>_<密钥>`；通过公网 MCP 配对的客户端也会生成独立的 `publicOnly` 令牌条目（本地与 Tailnet 入口拒收）。每个令牌有：
+App 的“接入 › 新建接入”或“设置 › 令牌”里可以新建令牌，形如 `avs_<id>_<密钥>`；向导为 CLI / HTTP / Operit 新建 agent 时先创建 `pending` 待兑换条目并签发 10 分钟单次有效的内存接入码（`avc_...`，上限 16 条 FIFO，仅存 SHA-256 摘要，重启自动作废），经本机/Tailnet `POST /v2/pair/exchange` 兑换后才原子激活长期令牌；通过公网 MCP 配对的客户端也会生成独立的 `publicOnly` 令牌条目（本地与 Tailnet 入口拒收）。每个令牌有：
 
 - **名字**：出现在操作日志、确认页面和“最近调用方”里。
 - **权限范围与分项权限表**：对应 `look`（只看：状态、应用列表、截图分析）、`operate`（打开和操作应用）、`system`（另外允许 `fix` 改系统设置等；公网客户端永不开放 `system`）。范围不够或类别设为“不允许”时返回 `SCOPE_DENIED`，什么都不执行。
-- **单独撤销**：不影响别的 agent。
+- **单独撤销**：不影响别的 agent，撤销时同步作废尚未兑换的一次性接入码与关联公网 OAuth 令牌。
 - **自己的会话**：不同令牌的 agent 即使用同一个会话名，也互不相干，抢不了对方的副屏。
 - App 只保存新令牌密钥与公网 OAuth 令牌的 SHA-256 摘要，原始凭证不落盘也不进日志。
 
@@ -428,22 +437,25 @@ X-VScreen-Sign:  sha256hex( K \n Time \n Nonce \n METHOD \n 路径和查询串 \
 
 每条命令记一行：时间、令牌名、来源设备（公网调用另记 `source="public"` 与真实来源地址 `src_addr`）、会话、命令、结果代码、耗时、请求号。`type` 输入的文字只记字数。确认的每次答复、令牌的创建和撤销、配对入队/认领/批准、验证失败和封禁也记在里面。在 App 底部“记录 › 操作日志”里看、复制、清空。文件最大 1 MB，满了保留上一份。
 
-### 7.5 其它
+### 7.5 其它与特权边界
 
+- **特权服务边界（协议 19）**：运行在 Shizuku/Root 进程中的 `VScreenDisplayService` 对全部 Binder 事务码强制校验调用方 UID（仅允许本应用 UID，`DESTROY_CODE` 另允许 `0`/`2000`）；`EXEC` 事务全部经纯 JVM 白名单（`ExecAllowlist`）与包名/进程名校验器（`PackageNames`）审查，拒绝所有 shell 解释器（`sh`/`su`/`bash`/`toybox`/`busybox`）、任意 `cwd` 与任意环境变量，运行时零 `sh -c`；`/data/local/tmp` 持久化状态文件均做符号链接防护。
+- **敏感剪贴板保护**：App 复制令牌、一次性接入码、登录链接及副屏粘贴输入（`VScreenTyping.pasteText`）时均对 `ClipData` 标记 `android.content.extra.IS_SENSITIVE = true`，在 Android 13+ 系统剪贴板浮层中隐藏明文预览，且 App 内 Snackbar 不回显明文。
 - 截图随副屏清理：副屏释放 2 分钟后，在那之前的截图都会删掉。
 - 密码框只报字符数，内容不会出现在任何回复里。
-- 中文等非 ASCII 文字在无障碍没开、输入框读不到时，仍然通过剪贴板粘贴输入。粘贴后剪贴板会恢复原内容，读不到原内容时清空。
-- `vscreen diag` 导出一份诊断：版本、设备、连接状态、最近的命令（代码和耗时）、被吞掉的异常计数、应用日志末尾。不含截图、输入的文字和令牌。
+- 中文等非 ASCII 文字在无障碍没开、输入框读不到时，仍然通过标记为敏感的剪贴板粘贴输入。粘贴后剪贴板会恢复原内容，读不到原内容时清空。
+- `vscreen diag` 导出一份诊断：版本、设备、特权提供方与连接状态、最近的命令（代码和耗时）、被吞掉的异常计数、应用日志末尾。不含截图、输入的文字和令牌；通过诊断页外发 GitHub Issue 前还会经 `Feedback.redact` 二次脱敏内网/Tailnet IP、域名、邮箱与类密钥字符串。
 
 ## 8. 已知限制
 
-- **真机验证范围**：发版前按 [docs/TASKS.md](docs/TASKS.md) 与 [docs/RELEASE-PROCESS.md](docs/RELEASE-PROCESS.md) 执行真机与模拟器矩阵验证；各厂商 ROM 的后台保活策略、熄屏供电与 `PLAY_AUDIO` 静音行为仍存在机型差异。
+- **真机与模拟器验证范围**：发版前按 [docs/TASKS.md](docs/TASKS.md) 与 [docs/RELEASE-PROCESS.md](docs/RELEASE-PROCESS.md) 执行真机与模拟器矩阵验证（含 API 34/35 强门禁及 API 36 前瞻观测）；各厂商 ROM 的后台保活策略、熄屏供电与 `PLAY_AUDIO` 静音行为仍存在机型差异。
+- **Android 17+ 与 Shizuku 兼容分支**：官方 Shizuku 与 Sui 已实测验证，其他 `API_V23` 兼容分支（如 AXManager、Nightzuku、Shevery）按协议动态发现；若未来 Android 17+ 上官方 Shizuku 受限，可改用兼容分支或在首次配置/设置中切换至 Root 模式。
 - **守门人（`Gate`）与应用进程职责边界**：2.0.0-beta2 起公开本机端口已移入特权服务进程（`core/Gate.kt`，见 [docs/SPIKE-FRONT-DOOR.md](docs/SPIKE-FRONT-DOOR.md)），App 被冻结或强停后 `Gate` 会在 3 秒内自动拉起并转发；但 OCR、无障碍树、悬浮窗和强确认界面仍运行在 App 进程中。
 - 内置 Tailscale/ngrok 代理（`libtsbridge.so`）与 Cloudflare Tunnel（`libcloudflared.so`）打包在 APK `jniLibs` 中。按需下载做不到：Android 10 起不允许执行下载到应用数据目录里的程序。
 - 第一次安装命令行的 `curl … | sh` 没有校验（见 2.1）。
 - 开启高精度 OCR（PP-OCRv6，fp16 权重合计约 11.5 MB）时，冷启动后第一次识别文字要加载模型，第一条命令会慢几秒。
 - 如果系统拦截了自动开启无障碍服务，请到 **系统设置 › 无障碍** 手动打开一次。
-- 使用 Shizuku 时，手机重启后要重新启动 Shizuku。所选权限来源不可用时，需要副屏的命令可能返回 `NOT_CONNECTED`，回执会说明原因。
+- 使用 Shizuku 或兼容分支时，手机重启后要重新启动对应服务。所选权限来源不可用时，需要副屏的命令可能返回 `NOT_CONNECTED`，回执会按当前提供方说明原因。
 
 ## 9. 从 1.1 升级
 

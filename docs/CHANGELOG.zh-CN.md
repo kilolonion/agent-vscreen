@@ -6,6 +6,11 @@
 
 - **过长的列表自动折叠**：接入页的 agent、设置里的令牌、agent 页的临时许可和预约、盯守超过前几项时自动折叠，接入页按最近使用排序。
 - **关于项目和快捷反馈**：设置新增“关于项目”直达仓库；诊断页支持一键去 GitHub 提 issue，自动脱敏 IP、域名、邮箱和令牌样式字符串，完整版复制到剪贴板。
+- **10 分钟一次性接入码与敏感剪贴板**：接入向导为命令行（`VSCREEN_CODE`）、HTTP 与 Operit（`vscreen_configure`）改为先创建 `pending` 待兑换条目并签发仅驻留内存的 10 分钟单次有效接入码（`avc_...`），仅经本机与 Tailnet 的 `POST /v2/pair/exchange` 一次性兑换为长期令牌（公网 `PublicServer` 永不暴露，拒收 `GET`、`?code=` 与网页 `Origin`）；复制凭证与 `VScreenTyping.pasteText` 统一标记 `android.content.extra.IS_SENSITIVE = true` 并隐藏剪贴板预览。
+- **公网 MCP 配对、空闲关闭与 OAuth 2.1 加固**：外部配对静默入队（上限 32 条）绝不自动弹窗或发通知，须在手机端输入 8 位配对码并核对来源地址后才弹强确认；新增可选 3 分钟严格配对窗口（批准后自动关闭）；修正 24 小时空闲关闭仅计已认证请求（HTTP 200 `/oauth/token` 与有效 Bearer `/mcp`）；补齐 RFC 9207 `iss`、DCR `application_type` 校验、`/oauth/token` 来源限流、30 秒内存刷新轮换单次重试宽限、无效 Bearer 来源桶隔离及公网 500/502 错误脱敏。
+- **特权服务、HTTP 与 MCP 协议安全加固**：`VScreenDisplayService`（协议 19）对全部 Binder 事务强制校验调用方 UID（`DESTROY_CODE` 另允许 `0`/`2000`），所有 `EXEC` 经纯 JVM `ExecAllowlist` + `PackageNames` 白名单校验且运行时零 `sh -c`，并加固 `/data/local/tmp` 状态文件防符号链接攻击；`HttpCore` 强制单调时钟 socket 截止、防走私/chunked/trailer 校验与 500 键有界 `AuthFailLimiter`（远程失败绝不 `sleep`）；`Mcp` 新增 `2026-07-28` HTTP `400` 回退垫片（`UNSUPPORTED_MCP_PROTOCOL`，绝不含 `-32022`，覆盖单条与 batch）、`requestId` 64 字符截断并修复过热锁定结果码 `THERMAL_STOP`。
+- **Android 16/17 兼容与 Shizuku 兼容分支动态发现**：三层动态发现自动识别官方 Shizuku、Sui、AXManager、Nightzuku、Shevery 及 `API_V23` 分支，全链路保护免于 `--hold` 冻结与 `handoff` 移交，并在 `Shizuku.newProcess` 失效时透明降级至服务端 `EXEC`；加固 API 36/37 `AttributionSource` 与 `RootMain` 兼容，新增响应式 `RootBackend.phaseFlow` 并在首次配置页突出显式 Root 回退；修正 `tools/eval/run.py` SemVer 版本门控并新增 `device.yml` API 36 观测矩阵。
+- **CI、供应链与文档守门**：发布签名隔离至限 `v*` 标签人工审批的 GitHub `release` 环境（前置绑定 `release-device` 矩阵与 `-PavsUnsignedRelease=true` 无密钥构建）；所有 GitHub Actions 锁定 40 位 SHA，校验 gitleaks/Shizuku SHA-256、固定 `cloudflared/COMMIT` 与哈希锁定 `tools/ocr-bench/requirements-ci.txt`；新增 `DocsSyncTest`、`docs/RELEASE-PROCESS.md`、`tools/ci/check_aoci_coverage.py` 与 `AGENTS.md` 项目工程红线约定。
 
 ## 2.0.0（versionCode 74）
 
