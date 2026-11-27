@@ -93,14 +93,14 @@ class VScreenDisplayService : Binder {
         synchronized(injectable) { injectable.remove(id) }
         displays.remove(id)?.release()
     }
-    @Volatile private var reaperStarted = false
+    @Volatile private var reaperHandle: LoopWatchdog.Handle? = null
 
     private fun startReaper() {
-        if (reaperStarted) return
-        reaperStarted = true
-        Thread {
-            while (true) {
+        if (reaperHandle?.alive == true) return
+        reaperHandle = LoopWatchdog.process.startLoop("vscreen-reaper", critical = true) { ctx ->
+            while (ctx.active) {
                 Thread.sleep(60_000)
+                ctx.beat()
                 val now = SystemClock.elapsedRealtime()
                 val stale = synchronized(displays) { touched.filter { now - it.value > ORPHAN_MS }.keys.toList() }
                 for (id in stale) {
@@ -108,7 +108,7 @@ class VScreenDisplayService : Binder {
                 }
                 if (stale.isNotEmpty()) sound.check()
             }
-        }.apply { isDaemon = true; name = "vscreen-reaper" }.start()
+        }
     }
 
     constructor() : super() { base = null; guardThreads() }
@@ -125,7 +125,13 @@ class VScreenDisplayService : Binder {
     @Volatile private var cachedSourceDir: String? = null
 
     /** 1.4.2: in the Shizuku process too, a helper thread's exception must not take the screens down with it. */
-    private fun guardThreads() = ThreadGuard.install({ System.err.println("vscreen-service: $it") })
+    private fun guardThreads() {
+        ThreadGuard.install({ System.err.println("vscreen-service: $it") })
+        LoopWatchdog.process.attachLogger { name, msg, err ->
+            val tail = err?.let { " (${it.javaClass.simpleName}: ${it.message?.take(160)})" } ?: ""
+            System.err.println("vscreen-watchdog[$name]: $msg$tail")
+        }
+    }
 
     private fun resolveOwnAppUid(): Int? {
         ownAppUidFn?.let { return it() }
@@ -218,7 +224,7 @@ class VScreenDisplayService : Binder {
 
     private inner class Sound {
         private val muted = LinkedHashMap<String, String>()
-        @Volatile private var watching = false
+        @Volatile private var watchHandle: LoopWatchdog.Handle? = null
         private var checks = 0
 
         init {
@@ -339,14 +345,19 @@ class VScreenDisplayService : Binder {
         }
 
         private fun watch() {
-            if (watching) return
-            watching = true
-            Thread {
-                while (true) {
-                    runCatching { Thread.sleep(3_000) }
-                    runCatching { check() }
+            if (watchHandle?.alive == true) return
+            watchHandle = LoopWatchdog.process.startLoop("vscreen-sound", critical = true) { ctx ->
+                while (ctx.active) {
+                    Thread.sleep(3_000)
+                    ctx.beat()
+                    check()
                 }
-            }.apply { isDaemon = true; name = "vscreen-sound" }.start()
+            }
+        }
+
+        fun stopWatch() {
+            watchHandle?.stop()
+            watchHandle = null
         }
 
         private fun installed(pkg: String): Boolean =
@@ -362,6 +373,9 @@ class VScreenDisplayService : Binder {
                 System.err.println("vscreen-service: DESTROY refused for unauthorized uid=$caller")
                 throw SecurityException("unauthorized uid=$caller")
             }
+            reaperHandle?.stop(); reaperHandle = null
+            fingerHandle?.stop(); fingerHandle = null
+            sound.stopWatch()
             runCatching { gate.stop() }
             synchronized(displays) { displays.values.forEach { runCatching { it.release() } }; displays.clear() }
             sound.giveAll() // uninstall, update, Shizuku stopping the service: no app is left silent
@@ -1058,7 +1072,7 @@ class VScreenDisplayService : Binder {
     private class Gesture(val downTime: Long) { val list = ArrayList<Finger>(); var lastMs = SystemClock.uptimeMillis() }
     /** displayId -> fingers currently down, in down order. */
     private val fingers = HashMap<Int, Gesture>()
-    @Volatile private var fingerWatch = false
+    @Volatile private var fingerHandle: LoopWatchdog.Handle? = null
 
     private fun multi(g: Gesture, action: Int, flags: Int = 0): MotionEvent {
         val n = g.list.size
@@ -1166,17 +1180,17 @@ class VScreenDisplayService : Binder {
 
     /** A finger nobody moved for [FINGER_MAX_IDLE_MS] is cancelled, so a dead app never leaves a finger down. */
     private fun startFingerWatch() {
-        if (fingerWatch) return
-        fingerWatch = true
-        Thread {
-            while (true) {
-                com.kilon.agentvscreen.host.quiet("VScreenDisplayService:508") { Thread.sleep(1_000) }
+        if (fingerHandle?.alive == true) return
+        fingerHandle = LoopWatchdog.process.startLoop("vscreen-fingers", critical = true) { ctx ->
+            while (ctx.active) {
+                Thread.sleep(1_000)
+                ctx.beat()
                 synchronized(fingers) {
                     val now = SystemClock.uptimeMillis()
                     fingers.entries.filter { now - it.value.lastMs > FINGER_MAX_IDLE_MS }.map { it.key }.forEach { cancelAll(it) }
                 }
             }
-        }.apply { isDaemon = true; name = "vscreen-fingers" }.start()
+        }
     }
 
     private fun atmService(): Any = runCatching {

@@ -80,7 +80,9 @@ class ApiServer(private val ctx: Context) {
     /** 1.2: the extra socket on this phone's Tailscale address (null: off, or no tailnet address now). */
     @Volatile private var tailServer: ServerSocket? = null
     @Volatile var tailAddress: String? = null; private set
-    @Volatile private var tailWatch: Thread? = null
+    @Volatile private var acceptHandle: com.kilon.agentvscreen.core.LoopWatchdog.Handle? = null
+    @Volatile private var tailAcceptHandle: com.kilon.agentvscreen.core.LoopWatchdog.Handle? = null
+    @Volatile private var tailWatchHandle: com.kilon.agentvscreen.core.LoopWatchdog.Handle? = null
 
     /** Called when [lastError] / listening changes (the notification shows it). */
     @Volatile var onChange: (() -> Unit)? = null
@@ -203,11 +205,16 @@ class ApiServer(private val ctx: Context) {
         }
         if (ss == null || intPort <= 0) return false
         server = ss; internalPort = intPort
-        Thread({ acceptLoop(ss, sendAcceptAck = true) }, "vscreen-http-accept").apply { isDaemon = true }.start()
+        acceptHandle = com.kilon.agentvscreen.core.LoopWatchdog.process.startLoop(
+            name = "vscreen-http-accept",
+            critical = true,
+            shouldRun = { !ss.isClosed },
+        ) { ctx -> acceptLoop(ss, sendAcceptAck = true, ctx = ctx) }
         val gp = com.kilon.agentvscreen.core.VScreenRemoteDisplay.gateStart(
             port, intPort, ctx.packageName, processName(), android.os.Build.VERSION.SDK_INT
         ).onFailure { AppLogger.warning(TAG, "gateStart failed: ${it.message}") }.getOrDefault(-1)
         if (gp <= 0) {
+            acceptHandle?.stop(); acceptHandle = null
             com.kilon.agentvscreen.host.quiet("ApiServer:gate-fallback") { ss.close() }
             server = null; internalPort = 0; boundPort = 0; usingGate = false
             return false
@@ -224,8 +231,10 @@ class ApiServer(private val ctx: Context) {
     private fun closeLocalLocked() {
         retry?.interrupt(); retry = null
         usingGate = false
+        acceptHandle?.stop(); acceptHandle = null
         runCatching { server?.close() }; server = null; boundPort = 0; internalPort = 0; portNote = null
-        tailWatch?.interrupt(); tailWatch = null
+        tailWatchHandle?.stop(); tailWatchHandle = null
+        tailAcceptHandle?.stop(); tailAcceptHandle = null
         runCatching { tailServer?.close() }; tailServer = null; tailAddress = null
     }
 
@@ -273,7 +282,11 @@ class ApiServer(private val ctx: Context) {
             return false
         }
         server = ss; boundPort = port; internalPort = 0; usingGate = false; lastError = null; portBusy = false; bindFailures = 0
-        Thread({ acceptLoop(ss) }, "vscreen-http-accept").apply { isDaemon = true }.start()
+        acceptHandle = com.kilon.agentvscreen.core.LoopWatchdog.process.startLoop(
+            name = "vscreen-http-accept",
+            critical = true,
+            shouldRun = { !ss.isClosed },
+        ) { ctx -> acceptLoop(ss, ctx = ctx) }
         AppLogger.info(TAG, "listening on 127.0.0.1:$port")
         return true
     }
@@ -339,22 +352,31 @@ class ApiServer(private val ctx: Context) {
      * (Tailscale started later), so it is checked every 20 s.
      */
     private fun startTailnet(port: Int) {
-        tailWatch = Thread({
-            while (!Thread.currentThread().isInterrupted) {
+        tailWatchHandle = com.kilon.agentvscreen.core.LoopWatchdog.process.startLoop(
+            name = "vscreen-tailnet-watch",
+            critical = false,
+        ) { ctx ->
+            while (ctx.active) {
+                ctx.beat()
                 val want = tailnetAddress()
                 if (want?.hostAddress != tailAddress) {
+                    tailAcceptHandle?.stop(); tailAcceptHandle = null
                     runCatching { tailServer?.close() }; tailServer = null; tailAddress = null
                     // 1.4.0-beta15: the set port on the tailnet address, else the one the service took locally.
                     if (want != null) runCatching {
                         val ss = runCatching { ServerSocket(port, 50, want) }.getOrElse { ServerSocket(boundPort.takeIf { it > 0 } ?: throw it, 50, want) }.apply { reuseAddress = true }
                         tailServer = ss; tailAddress = want.hostAddress
                         AppLogger.info(TAG, "also listening on tailnet ${want.hostAddress}:$port")
-                        Thread({ acceptLoop(ss) }, "vscreen-http-tail").apply { isDaemon = true }.start()
+                        tailAcceptHandle = com.kilon.agentvscreen.core.LoopWatchdog.process.startLoop(
+                            name = "vscreen-http-tail",
+                            critical = false,
+                            shouldRun = { !ss.isClosed },
+                        ) { tailCtx -> acceptLoop(ss, ctx = tailCtx) }
                     }.onFailure { AppLogger.warning(TAG, "tailnet bind: ${it.message}") }
                 }
-                try { Thread.sleep(20_000) } catch (_: InterruptedException) { break }
+                Thread.sleep(20_000)
             }
-        }, "vscreen-tailnet-watch").apply { isDaemon = true }.also { it.start() }
+        }
     }
 
     /** 2.0.0-beta2 test helper: bind a loopback port directly in internal-Gate mode (writes 0x06 accept-ack). */
@@ -369,13 +391,23 @@ class ApiServer(private val ctx: Context) {
             return@synchronized false
         }
         server = ss; boundPort = port; internalPort = port; usingGate = true
-        Thread({ acceptLoop(ss, sendAcceptAck = true) }, "vscreen-http-accept").apply { isDaemon = true }.start()
+        acceptHandle = com.kilon.agentvscreen.core.LoopWatchdog.process.startLoop(
+            name = "vscreen-http-accept",
+            critical = true,
+            shouldRun = { !ss.isClosed },
+        ) { ctx -> acceptLoop(ss, sendAcceptAck = true, ctx = ctx) }
         true
     }
 
-    private fun acceptLoop(ss: ServerSocket, sendAcceptAck: Boolean = false) {
-        while (!ss.isClosed) {
+    private fun acceptLoop(
+        ss: ServerSocket,
+        sendAcceptAck: Boolean = false,
+        ctx: com.kilon.agentvscreen.core.LoopWatchdog.LoopContext? = null,
+    ) {
+        ctx?.beat()
+        while (!ss.isClosed && (ctx?.active != false)) {
             val s = try { ss.accept() } catch (e: SocketException) { break } catch (e: Exception) { continue }
+            ctx?.beat()
             if (sendAcceptAck) {
                 // 2.0.0-beta2: prove the app process itself ran accept() (not a dying/frozen kernel listen queue)
                 // before Gate forwards any client bytes. Only sent on the internal port behind Gate.

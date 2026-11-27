@@ -25,6 +25,24 @@ object ThreadGuard {
     internal fun fatal(isMainThread: Boolean, e: Throwable): Boolean = isMainThread || e is VirtualMachineError
 
     /**
+     * Normalize a thread name for per-site counting without collapsing distinct `vscreen-*` threads into `"vscreen"`.
+     * Strips trailing/embedded numeric pool/worker indices and any whitespace-delimited arguments/URLs.
+     */
+    internal fun normalizeThreadName(raw: String?): String {
+        val base = raw?.trim().orEmpty()
+        if (base.isEmpty()) return "unnamed"
+        val token = base.substringBefore(' ').substringBefore('\t')
+        val parts = token.split('-').filter { it.isNotEmpty() }
+        val kept = parts.filterNot { seg ->
+            seg.all { it.isDigit() } || (seg.startsWith("#") && seg.length > 1 && seg.drop(1).all { it.isDigit() })
+        }
+        val normalized = (if (kept.isNotEmpty()) kept.joinToString("-") else token)
+            .trimEnd('#', '-', '_')
+            .take(40)
+        return normalized.ifEmpty { "unnamed" }
+    }
+
+    /**
      * Install in this process (idempotent). [log] writes one line (app log, or stderr in the shell process);
      * [note] gets every survived exception (for per-kind counting).
      */
@@ -42,7 +60,7 @@ object ThreadGuard {
             deaths++
             last = "${t.name}: ${e.javaClass.simpleName}: ${e.message?.take(160)}"
             runCatching { log("background thread ${t.name} ended by ${e.stackTraceToString().take(2000)}") }
-            runCatching { note("thread/${t.name.substringBefore('-', t.name).take(24)}", e) }
+            runCatching { note("thread/${normalizeThreadName(t.name)}", e) }
         }
     }
 }

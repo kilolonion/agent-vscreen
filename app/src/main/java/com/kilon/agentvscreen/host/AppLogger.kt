@@ -43,6 +43,7 @@ object AppLogger {
  * an optional probe); before 1.2 these places were bare `runCatching { }` that swallowed everything silently.
  */
 inline fun <T> quiet(tag: String, block: () -> T): T? = try { block() } catch (t: Throwable) {
+    if (t is VirtualMachineError) throw t
     if (t is InterruptedException) Thread.currentThread().interrupt()
     Swallowed.note(tag, t); null
 }
@@ -61,6 +62,8 @@ object Swallowed {
         // The first of a kind goes to the log in full; repeats only count (a loop must not flood the file).
         if (first) AppLogger.warning("quiet/$tag", msg)
     }
+
+    fun totalCount(): Int = synchronized(map) { map.values.sumOf { it.count } }
 
     fun snapshot(): List<Pair<String, Entry>> = synchronized(map) { map.map { it.key to Entry(it.value.count, it.value.last, it.value.at) } }
 }

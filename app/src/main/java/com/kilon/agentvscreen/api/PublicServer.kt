@@ -56,6 +56,7 @@ class PublicServer(
     private val bindLock = Any()
 
     @Volatile private var server: ServerSocket? = null
+    @Volatile private var acceptHandle: com.kilon.agentvscreen.core.LoopWatchdog.Handle? = null
     @Volatile var boundPort: Int = 0; private set
     val running: Boolean get() = server?.isClosed == false
 
@@ -70,7 +71,11 @@ class PublicServer(
                 ss.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), p), 50)
                 server = ss
                 boundPort = p
-                Thread({ acceptLoop(ss) }, "vscreen-pub-accept").apply { isDaemon = true }.start()
+                acceptHandle = com.kilon.agentvscreen.core.LoopWatchdog.process.startLoop(
+                    name = "vscreen-pub-accept",
+                    critical = true,
+                    shouldRun = { !ss.isClosed },
+                ) { ctx -> acceptLoop(ss, ctx) }
                 AppLogger.info(TAG, "listening on 127.0.0.1:$p")
                 return@synchronized p
             } catch (e: Exception) {
@@ -84,14 +89,18 @@ class PublicServer(
     fun stop() = synchronized(bindLock) { stopLocked() }
 
     private fun stopLocked() {
+        acceptHandle?.stop()
+        acceptHandle = null
         quiet("PublicServer:close") { server?.close() }
         server = null
         boundPort = 0
     }
 
-    private fun acceptLoop(ss: ServerSocket) {
-        while (!ss.isClosed) {
+    private fun acceptLoop(ss: ServerSocket, ctx: com.kilon.agentvscreen.core.LoopWatchdog.LoopContext? = null) {
+        ctx?.beat()
+        while (!ss.isClosed && (ctx?.active != false)) {
             val s = try { ss.accept() } catch (_: SocketException) { break } catch (_: Exception) { continue }
+            ctx?.beat()
             var placed = try { pool.execute { serve(s) }; true } catch (_: RejectedExecutionException) { false }
             if (!placed) {
                 val victim = synchronized(reading) { reading.keys.firstOrNull()?.also { reading.remove(it) } }
