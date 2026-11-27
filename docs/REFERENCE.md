@@ -385,6 +385,7 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `SIGNATURE_REQUIRED` | `ask_user` | 经外部 Tailscale App 从其它设备来的请求必须签名（vscreen 命令行会签名；经内置 Tailscale 来的不需要）。MCP 等不能签名的客户端：请用户在 其它设备 里关掉“只接受签名请求”，或改用内置 Tailscale。 |
 | `TASK_STARTED` | `none` | 任务已开始，用 task <号> 取结果。 |
 | `TIME_SKEW` | `ask_user` | 调用方的时钟和手机差得太多，签名因此不被接受。校准调用方的时钟。 |
+| `UNSUPPORTED_MCP_PROTOCOL` | `fix_command` | 当前 MCP 服务端支持基于 initialize 握手的协议版本（2025-06-18 / 2025-03-26 / 2024-11-05）；请回退使用 initialize 重新连接。 |
 | `OPERATION_FAILED` | `look` | 执行出错，返回里有原因。 |
 | `INTERNAL_ERROR` | `none` | 工具内部错误。把这段报错发给开发者（vscreen diag 能导出诊断）。 |
 
@@ -772,6 +773,7 @@ scope: `look`
 | `SIGNATURE_REQUIRED` | `ask_user` | Requests from other devices through the external Tailscale app must be signed (the vscreen CLI signs; through the built-in Tailscale none is needed). For clients that cannot sign, such as MCP: ask the user to turn off "signed requests only" under Other devices, or use the built-in Tailscale. |
 | `TASK_STARTED` | `none` | The task started; fetch its result with task <id>. |
 | `TIME_SKEW` | `ask_user` | The caller's clock is too far from the phone's, so the signature is not accepted. Fix the caller's clock. |
+| `UNSUPPORTED_MCP_PROTOCOL` | `fix_command` | This MCP server currently supports initialization-based revisions (2025-06-18, 2025-03-26, 2024-11-05); retry with initialize. |
 | `OPERATION_FAILED` | `look` | It failed; the reply says why. |
 | `INTERNAL_ERROR` | `none` | Internal tool error. Send it to the developer (vscreen diag exports diagnostics). |
 

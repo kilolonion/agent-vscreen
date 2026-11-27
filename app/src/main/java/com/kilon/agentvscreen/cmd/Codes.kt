@@ -124,6 +124,7 @@ internal object Codes {
         Code("SIGNATURE_REQUIRED", Next.USER, "经外部 Tailscale App 从其它设备来的请求必须签名（vscreen 命令行会签名；经内置 Tailscale 来的不需要）。MCP 等不能签名的客户端：请用户在 其它设备 里关掉“只接受签名请求”，或改用内置 Tailscale。", "Requests from other devices through the external Tailscale app must be signed (the vscreen CLI signs; through the built-in Tailscale none is needed). For clients that cannot sign, such as MCP: ask the user to turn off \"signed requests only\" under Other devices, or use the built-in Tailscale."),
         Code("TASK_STARTED", Next.NONE, "任务已开始，用 task <号> 取结果。", "The task started; fetch its result with task <id>."),
         Code("TIME_SKEW", Next.USER, "调用方的时钟和手机差得太多，签名因此不被接受。校准调用方的时钟。", "The caller's clock is too far from the phone's, so the signature is not accepted. Fix the caller's clock."),
+        Code("UNSUPPORTED_MCP_PROTOCOL", Next.FIX, "当前 MCP 服务端支持基于 initialize 握手的协议版本（2025-06-18 / 2025-03-26 / 2024-11-05）；请回退使用 initialize 重新连接。", "This MCP server currently supports initialization-based revisions (2025-06-18, 2025-03-26, 2024-11-05); retry with initialize."),
         Code("OPERATION_FAILED", Next.LOOK, "执行出错，返回里有原因。", "It failed; the reply says why."),
         Code("INTERNAL_ERROR", Next.NONE, "工具内部错误。把这段报错发给开发者（vscreen diag 能导出诊断）。", "Internal tool error. Send it to the developer (vscreen diag exports diagnostics)."),
     )

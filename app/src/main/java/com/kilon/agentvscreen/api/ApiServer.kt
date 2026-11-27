@@ -727,7 +727,7 @@ class ApiServer(private val ctx: Context) {
      */
     fun runFor(r: Req, argv: List<String>, session: String, requestId: String?, onStep: ((String) -> Unit)? = null): Pair<NativeOffloadResult, Boolean> {
         val auth = r.auth ?: return NativeOffloadResult(1, "", "BAD_TOKEN") to false
-        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return NativeOffloadResult(1, "", "THERMAL_STOP: " + com.kilon.agentvscreen.host.ThermalGuard.reason()) to false
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return NativeOffloadResult(1, tr("设备过热已暂停：", "Thermal stop: ") + com.kilon.agentvscreen.host.ThermalGuard.reason(), "THERMAL_STOP") to false
         val t = Tokens.byId(auth.token.id) ?: auth.token
         val via = when {
             r.path.startsWith("/mcp") -> Abilities.Via.MCP
