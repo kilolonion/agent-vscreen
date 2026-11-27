@@ -353,6 +353,15 @@ internal object VScreenRemoteDisplay {
     fun soundGive(pkg: String): Result<Unit> = call(VScreenDisplayService.SOUND, { it.writeInt(1); it.writeString(pkg) }) { }
     fun soundGiveAll(): Result<Unit> = call(VScreenDisplayService.SOUND, { it.writeInt(3) }) { }
     fun soundList(): Result<List<String>> = call(VScreenDisplayService.SOUND, { it.writeInt(2) }) { r -> List(r.readInt()) { r.readString().orEmpty() } }
+    fun soundScan(): Result<String> = call(VScreenDisplayService.SOUND, { it.writeInt(4) }, extraMs = 80_000L) { it.readString().orEmpty() }
+
+    /** Protocol 19: set DISPLAY_IME_POLICY_HIDE directly in the privileged service (no sh -c / app_process). */
+    fun hideIme(displayId: Int): Result<Boolean> =
+        call(VScreenDisplayService.HIDE_IME, { it.writeInt(displayId) }) { it.readInt() != 0 }
+
+    /** Protocol 19: restore focus back to the visible top app task on display 0 when our virtual display took focus. */
+    fun restoreMainFocus(fromDisplayId: Int, mainTaskId: Int): Result<Boolean> =
+        call(VScreenDisplayService.RESTORE_MAIN_FOCUS, { it.writeInt(fromDisplayId); it.writeInt(mainTaskId) }) { it.readInt() != 0 }
 
     fun touch(displayId: Int) {
         if (binder?.isBinderAlive != true) return

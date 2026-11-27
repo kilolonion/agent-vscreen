@@ -722,42 +722,51 @@ internal object ActHold {
 
     private fun defaultVerifyPids(uid: Int, targets: List<TargetProcess>): List<ProcVerifyResult> {
         if (targets.isEmpty()) return emptyList()
-        val pidList = targets.joinToString(" ") { it.pid.toString() }
-        // Single batched shell invocation reading cgroup v2 events (works in Shizuku, root-su2000, root-uid0)
-        // plus fallback /proc/<pid>/wchan and existence probe.
-        val script = buildString {
-            // 2.0.0-beta11: vendors mount the app hierarchy elsewhere (HONOR MagicOS has no /sys/fs/cgroup/uid_<uid>),
-            // so each process's own cgroup v2 path is read from /proc/<pid>/cgroup ("0::<path>") first.
-            append("if [ -d /sys/fs/cgroup/uid_$uid ]; then echo CGDIR=1; else echo CGDIR=0; fi; ")
-            append("for p in $pidList; do ")
-            append("ev=''; exists=0; wc=''; ")
-            append("cg=\$(sed -n 's/^0:://p' /proc/\$p/cgroup 2>/dev/null | head -n 1); ")
-            append("f=/sys/fs/cgroup\$cg/cgroup.events; ")
-            append("if [ -n \"\$cg\" ] && [ -r \"\$f\" ]; then echo CGDIR=1; ")
-            append("exists=1; ev=\$(tr '\\n' ' ' < \"\$f\" 2>/dev/null); ")
-            append("elif [ -r /sys/fs/cgroup/uid_$uid/pid_\$p/cgroup.events ]; then ")
-            append("exists=1; ev=\$(tr '\\n' ' ' < /sys/fs/cgroup/uid_$uid/pid_\$p/cgroup.events 2>/dev/null); ")
-            append("elif [ -d /proc/\$p ]; then ")
-            append("exists=1; wc=\$(cat /proc/\$p/wchan 2>/dev/null); ")
-            append("elif kill -0 \$p 2>/dev/null; then exists=1; fi; ")
-            append("echo \"PID=\$p|EX=\$exists|EV=\$ev|WC=\$wc\"; ")
-            append("done")
-        }
-        val r = runCatching { VScreenShell.run(arrayOf("sh", "-c", script), 4_000L) }.getOrNull()
-        val stdout = r?.stdout.orEmpty()
-        var cgAvail = false
+        var cgAvail = uid >= 0 && runCatching {
+            VScreenShell.run(arrayOf("ls", "-1d", "/sys/fs/cgroup/uid_$uid"), 2_000L).exitCode == 0
+        }.getOrDefault(false)
         val byPid = HashMap<Int, Triple<Boolean, String?, String?>>()
-        for (line in stdout.lineSequence()) {
-            val t = line.trim()
-            if (t == "CGDIR=1") { cgAvail = true; continue }
-            if (t == "CGDIR=0") continue
-            if (!t.startsWith("PID=")) continue
-            val parts = t.split('|')
-            val pid = parts.getOrNull(0)?.removePrefix("PID=")?.toIntOrNull() ?: continue
-            val ex = parts.getOrNull(1)?.removePrefix("EX=") == "1"
-            val ev = parts.getOrNull(2)?.removePrefix("EV=")?.trim()?.takeIf { it.isNotEmpty() }
-            val wc = parts.getOrNull(3)?.removePrefix("WC=")?.trim()?.takeIf { it.isNotEmpty() }
-            byPid[pid] = Triple(ex, ev, wc)
+        val safeCgroupPath = Regex("^/[A-Za-z0-9_./:-]+$")
+        for (tgt in targets) {
+            val pid = tgt.pid
+            if (pid <= 0) continue
+            var exists = false
+            var ev: String? = null
+            var wc: String? = null
+            // 2.0.0-beta11: read each process's cgroup v2 path from /proc/<pid>/cgroup ("0::<path>") first.
+            val cgRes = runCatching { VScreenShell.run(arrayOf("cat", "/proc/$pid/cgroup"), 2_000L) }.getOrNull()
+            if (cgRes != null && cgRes.exitCode == 0) {
+                exists = true
+                val rel = cgRes.stdout.lineSequence()
+                    .firstOrNull { it.startsWith("0::") }
+                    ?.removePrefix("0::")
+                    ?.trim()
+                if (rel != null && safeCgroupPath.matches(rel) && !rel.contains("..")) {
+                    val evPath = "/sys/fs/cgroup${rel.trimEnd('/')}/cgroup.events"
+                    val evRes = runCatching { VScreenShell.run(arrayOf("cat", evPath), 2_000L) }.getOrNull()
+                    if (evRes != null && evRes.exitCode == 0 && evRes.stdout.isNotBlank()) {
+                        cgAvail = true
+                        ev = evRes.stdout.replace('\n', ' ').trim()
+                    }
+                }
+            }
+            if (ev == null && uid >= 0) {
+                val fallbackEv = "/sys/fs/cgroup/uid_$uid/pid_$pid/cgroup.events"
+                val evRes = runCatching { VScreenShell.run(arrayOf("cat", fallbackEv), 2_000L) }.getOrNull()
+                if (evRes != null && evRes.exitCode == 0 && evRes.stdout.isNotBlank()) {
+                    cgAvail = true
+                    exists = true
+                    ev = evRes.stdout.replace('\n', ' ').trim()
+                }
+            }
+            if (ev == null) {
+                val wcRes = runCatching { VScreenShell.run(arrayOf("cat", "/proc/$pid/wchan"), 2_000L) }.getOrNull()
+                if (wcRes != null && wcRes.exitCode == 0) {
+                    exists = true
+                    wc = wcRes.stdout.trim().takeIf { it.isNotEmpty() }
+                }
+            }
+            byPid[pid] = Triple(exists, ev, wc)
         }
         // Double-check any apparently-missing PID via dumpsys activity processes so we never misclassify hidepid=2 as DIED
         // when cgroup wasn't available.

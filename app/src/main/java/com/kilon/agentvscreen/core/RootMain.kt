@@ -50,7 +50,10 @@ class RootMain {
             // The system context is made here, on the main thread (ActivityThread needs a looper), as Shizuku's own
             // service starter does; the service builds its DisplayManager on it.
             val ctx = runCatching { systemContext() }.onFailure { log("system context: ${it.message}") }.getOrNull()
-            val service = if (ctx != null) VScreenDisplayService(ctx) else VScreenDisplayService()
+            val service = (if (ctx != null) VScreenDisplayService(ctx) else VScreenDisplayService()).apply {
+                targetUserId = user
+                ownSourceDirHint = apk.takeIf { it.isNotBlank() }
+            }
             runCatching {
                 File(PID).writeText("${android.os.Process.myPid()} $version ${android.os.Process.myUid()}\n")
                 File(PID).setReadable(true, false)

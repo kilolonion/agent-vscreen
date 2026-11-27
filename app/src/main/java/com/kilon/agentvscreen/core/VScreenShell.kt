@@ -54,6 +54,7 @@ internal object VScreenShell {
         Control.admitInput()
         val clean = pkg.trim()
         if (clean.isEmpty()) return fail("INVALID_ARGS", tr("缺少包名", "Missing package name"))
+        if (!PackageNames.isValid(clean)) return fail("INVALID_ARGS", tr("无效的应用包名：$clean", "Invalid package name: $clean"))
         // v22 传送门: with an explicit intent (deep link / shortcut / learned page) the app is
         // always opened in a fresh task on the background screen (never "keep").
         val mode = if (intent != null && mode0 == LaunchMode.KEEP) LaunchMode.ROOT else mode0
@@ -200,6 +201,7 @@ internal object VScreenShell {
      * effect at the app's next start. Best effort; returns what each step said.
      */
     fun disableDownscale(pkg: String): String {
+        if (!PackageNames.isValid(pkg)) return tr("无效的应用包名：$pkg", "Invalid package name: $pkg")
         fun step(label: String, argv: Array<String>): String {
             val r = run(argv, 8_000L)
             val msg = r.combined.trim().lines().firstOrNull { it.isNotBlank() }?.take(120)
@@ -213,6 +215,7 @@ internal object VScreenShell {
 
     /** Undo [disableDownscale]. */
     fun resetDownscale(pkg: String) {
+        if (!PackageNames.isValid(pkg)) return
         com.kilon.agentvscreen.host.quiet("VScreenShell:189") { run(arrayOf("am", "compat", "reset", "DOWNSCALED", pkg), 8_000L) }
         com.kilon.agentvscreen.host.quiet("VScreenShell:190") { run(arrayOf("cmd", "game", "reset", pkg), 8_000L) }
     }
@@ -268,6 +271,7 @@ internal object VScreenShell {
     fun stop(displayId: Int, pkg: String?): Outcome {
         val target = pkg?.trim()?.takeIf { it.isNotEmpty() } ?: topPackage(displayId)
             ?: return ok(tr("副屏 $displayId 上没有应用", "No app on screen $displayId"))
+        if (!PackageNames.isValid(target)) return fail("INVALID_ARGS", tr("无效的应用包名：$target", "Invalid package name: $target"))
         if (isProtected(target)) return fail("PROTECTED_APP", tr("$target 是 Agent-VScreen 自己、桌面或系统界面，不能 force-stop（会中断任务或打断用户）", "$target is Agent-VScreen itself, the launcher or system UI and cannot be force-stopped (it would break the task or disturb the user)"))
         val r = run(arrayOf("am", "force-stop", target), 8_000L)
         return if (r.exitCode == 0) ok(tr("已结束 $target（force-stop 会结束该应用的所有页面，包括主屏上的）", "Stopped $target (force-stop ends all of the app's pages, including those on the main screen)"))
@@ -476,11 +480,20 @@ internal object VScreenShell {
      * IWindowManager call is not reachable from the app process.
      */
     fun hideImeOn(context: Context, displayId: Int): Outcome {
+        if (displayId <= android.view.Display.DEFAULT_DISPLAY) {
+            return fail("IME_POLICY_FAILED", tr("拒绝修改主屏键盘策略", "Refused to modify main display IME policy"))
+        }
+        val direct = runCatching { VScreenRemoteDisplay.hideIme(displayId) }.getOrNull()
+        if (direct?.getOrNull() == true) {
+            return ok(tr("键盘策略：副屏不弹出键盘", "Keyboard policy: no keyboard on the screen"))
+        }
         val apk = context.applicationInfo.sourceDir
-        val r = run(arrayOf(
-            "sh", "-c",
-            "CLASSPATH='$apk' app_process /system/bin ${VScreenShellMain::class.java.name} ime-hide $displayId",
-        ), 10_000L)
+        val r = com.kilon.agentvscreen.host.Privileged.runProcess(
+            argv = arrayOf("/system/bin/app_process", "/system/bin", VScreenShellMain::class.java.name, "ime-hide", displayId.toString()),
+            env = arrayOf("CLASSPATH=$apk"),
+            cwd = null,
+            timeoutMs = 10_000L,
+        )
         return if (r.exitCode == 0 && r.stdout.contains("OK")) ok(tr("键盘策略：副屏不弹出键盘", "Keyboard policy: no keyboard on the screen"))
         else fail("IME_POLICY_FAILED", tr("设置副屏键盘策略失败：${r.combined.take(300)}", "Setting the screen's keyboard policy failed: ${r.combined.take(300)}"))
     }

@@ -349,18 +349,28 @@ internal class Gate(
 
     private fun writeHoldFile(procs: List<String>) {
         runCatching {
+            if (VScreenDisplayService.isSymlink(holdFile)) {
+                logWarn("hold: refusing to write symlink ${holdFile.path}")
+                return
+            }
             holdFile.parentFile?.mkdirs()
             holdFile.writeText(procs.joinToString("\n") + "\n")
         }.onFailure { logWarn("hold: failed writing ${holdFile.path}: ${it.message}") }
     }
 
     private fun readHoldFile(): List<String> = runCatching {
-        if (!holdFile.isFile) emptyList()
-        else holdFile.readLines().map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+        if (!holdFile.isFile || VScreenDisplayService.isSymlink(holdFile)) return@runCatching emptyList()
+        val own = pkg.ifBlank { com.kilon.agentvscreen.BuildConfig.APPLICATION_ID }
+        val launchers = runCatching { (resolveLaunchers ?: ::defaultResolveLaunchers)() }.getOrDefault(emptySet())
+        holdFile.readLines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && isHoldableProcess(it, own, launchers) }
+            .distinct()
+            .take(HOLD_MAX_PROCS)
     }.getOrDefault(emptyList())
 
     private fun deleteHoldFile() {
-        runCatching { if (holdFile.exists()) holdFile.delete() }
+        runCatching { if (holdFile.exists() || VScreenDisplayService.isSymlink(holdFile)) holdFile.delete() }
     }
 
     internal fun heldProcsSnapshot(): List<String> = synchronized(holdLock) { heldProcs.toList() }

@@ -26,23 +26,38 @@ object PortHolder {
         org.json.JSONObject(raw).optInt("port", 0)
     }.getOrDefault(0)
 
+    private fun readSocketTables(): String {
+        val tcp = runCatching { VScreenShell.run(arrayOf("cat", "/proc/net/tcp"), 3_000L).stdout }.getOrDefault("")
+        val tcp6 = runCatching { VScreenShell.run(arrayOf("cat", "/proc/net/tcp6"), 3_000L).stdout }.getOrDefault("")
+        return if (tcp.isEmpty()) tcp6 else if (tcp6.isEmpty()) tcp else "$tcp\n$tcp6"
+    }
+
+    private fun firstPackageForUid(uid: Int): String? {
+        if (uid < 0) return null
+        val u = uid.toString()
+        val first = runCatching { VScreenShell.run(arrayOf("cmd", "package", "list", "packages", "--uid", u), 3_000L).combined }.getOrDefault("")
+        val parsed = first.lineSequence().mapNotNull { it.substringAfter("package:", "").substringBefore(' ').takeIf { p -> p.isNotBlank() } }.firstOrNull()
+        if (parsed != null) return parsed
+        val fallback = runCatching { VScreenShell.run(arrayOf("pm", "list", "packages", "--uid", u), 3_000L).combined }.getOrDefault("")
+        return fallback.lineSequence().mapNotNull { it.substringAfter("package:", "").substringBefore(' ').takeIf { p -> p.isNotBlank() } }.firstOrNull()
+    }
+
     /** True when [port] is held by uid 2000 or 0 and matches our own Gate's bound port. */
     fun isOwnGate(port: Int): Boolean {
         val gatePort = currentGatePort()
         if (gatePort <= 0 || gatePort != port) return false
-        val table = VScreenShell.run(arrayOf("sh", "-c", "cat /proc/net/tcp /proc/net/tcp6 2>/dev/null"), 3_000L).combined
+        val table = readSocketTables()
         val uid = uidIn(table, port) ?: return false
         return isOwnGate(uid, port, gatePort)
     }
 
     fun name(ctx: Context, port: Int): String? {
-        val table = VScreenShell.run(arrayOf("sh", "-c", "cat /proc/net/tcp /proc/net/tcp6 2>/dev/null"), 3_000L).combined
+        val table = readSocketTables()
         val uid = uidIn(table, port) ?: return null
         if (isOwnGate(uid, port, currentGatePort())) return null
         val user = uid / 100_000
         if (uid % 100_000 < 10_000) return tr("系统服务（uid $uid）", "a system service (uid $uid)")
-        val pkg = VScreenShell.run(arrayOf("sh", "-c", "cmd package list packages --uid $uid 2>/dev/null || pm list packages --uid $uid"), 3_000L)
-            .combined.lineSequence().mapNotNull { it.substringAfter("package:", "").substringBefore(' ').takeIf { p -> p.isNotBlank() } }.firstOrNull()
+        val pkg = firstPackageForUid(uid)
         val me = android.os.Process.myUid() / 100_000
         if (pkg == ctx.packageName) return if (user != me) tr("分身或平行空间（用户 $user）里的 Agent-VScreen", "Agent-VScreen in a parallel space or clone (user $user)")
             else tr("本 App 还没退出的旧进程", "an old process of this app that has not exited yet")
