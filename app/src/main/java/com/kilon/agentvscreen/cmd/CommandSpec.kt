@@ -23,7 +23,9 @@ internal object CommandSpec {
 
     class Opt(val name: String, val kind: Kind, private val argZh: String?, private val argEn: String?, private val zh: String, private val en: String,
               /** Still accepted so old callers do not break, but not shown in help. */
-              val deprecated: Boolean = false) {
+              val deprecated: Boolean = false,
+              /** Option may be supplied multiple times (MCP JSON Schema allows string or string[]). */
+              val repeatable: Boolean = false) {
         val arg: String? get() = if (kind == Kind.SWITCH) null else tr(argZh ?: "值", argEn ?: "value")
         val text: String get() = tr(zh, en)
         fun usage(): String = "--$name" + (arg?.let { " <$it>" } ?: "")
@@ -155,7 +157,7 @@ internal object CommandSpec {
                 "     act \"tap Start until text:Running\" --hold",
                 "     act --stop \"text:In stock\" --keep notify --for 2h"),
             listOf(Opt("stop", Kind.VALUE, "条件", "condition", "整段一直盯着，满足就停下，后面的步骤不做", "watched for the whole stretch; when met it stops and skips the rest"),
-                Opt("on", Kind.VALUE, "条件 => 一步", "cond => step", "短程规则（仅本次 act 生效，可写 1–3 条，不跨轮）：条件成立时执行一步（只允许 tap / key back / scroll / wait 时长，可选 x1–x3，默认 x1；条件不能是 stable / still；text: / gone: 连续 2 次独立读屏才触发，间隔 500ms；规则不能触发付款或“每次确认”应用）", "short-range rule for this act only (1–3 rules, never persisted): when cond holds, run one step (tap / key back / scroll / wait duration only; optional x1–x3, default x1; cond cannot be stable / still; text: / gone: requires 2 consecutive independent readings with 500ms cooldown; rules never auto-confirm payments or ask-every-time apps)"),
+                Opt("on", Kind.VALUE, "条件 => 一步", "cond => step", "短程规则（仅本次 act 生效，可写 1–3 条，不跨轮）：条件成立时执行一步（只允许 tap / key back / scroll / wait 时长，可选 x1–x3，默认 x1；条件不能是 stable / still；text: / gone: 连续 2 次独立读屏才触发，间隔 500ms；规则不能触发付款或“每次确认”应用）", "short-range rule for this act only (1–3 rules, never persisted): when cond holds, run one step (tap / key back / scroll / wait duration only; optional x1–x3, default x1; cond cannot be stable / still; text: / gone: requires 2 consecutive independent readings with 500ms cooldown; rules never auto-confirm payments or ask-every-time apps)", repeatable = true),
                 Opt("hold", Kind.SWITCH, null, null, "回复发出前暂停副屏前台应用并核实，下一条命令前自动恢复（最长 120 秒，仅 Android 14+；一直要就 note hold on）。注意：Android 15 起，暂停正在频繁刷新的应用时，系统可能直接结束它；暂停只对按帧计时的应用有效，按真实时钟计时的应用恢复后会直接跳过这段时间；暂停期间网络连接可能超时", "pause and verify the virtual screen's foreground app before sending the reply, resuming before the next command (max 120s, Android 14+ only; set default with note hold on). Note: starting on Android 15, pausing an actively refreshing app may cause the system to kill it; pausing only stops frame-timed apps (wall-clock apps skip ahead on resume) and active network connections may time out"),
                 Opt("watch", Kind.DURATION, "时长", "duration", "步骤做完再看这么久（会动的画面）", "keep looking this long after the steps (moving pictures)"),
                 Opt("fast", Kind.SWITCH, null, null, "只跳过动作之间的画面稳定等待（游戏、连续点击）；最后一步以及 repeat 内每轮的 until / 稳定等待仍会执行", "skip settle waits only between actions (games, rapid taps); the last step and each repeat iteration's until / settle wait still run"),
@@ -307,6 +309,12 @@ internal object CommandSpec {
             listOf("修复 status 里列出的问题，并把被留下静音的应用恢复声音；每项修完再检查一遍，fixed 是检查的结果。会改系统设置或在主屏打开设置页的步骤：手机上会请用户确认。"),
             listOf("fix the problems listed in status and give sound back to apps left silent; each is checked again afterwards and fixed is that check. Steps that change system settings or open a settings page on the main screen: the phone asks the user to confirm."),
             listOf(Opt("open", Kind.SWITCH, null, null, "需要用户手动处理时，在主屏打开对应页面", "when the user must act by hand, open the page on the main screen")), scope = Scope.SYSTEM, screen = false),
+        Cmd("fn", "[应用名|包名]", "[app name|package]",
+            listOf("只读探测 Android 16+ 应用声明的 AppFunctions 结构化接口与参数 schema（不带参数列出设备上提供 AppFunctions 的应用）。旧系统或未开放服务返回 FN_UNSUPPORTED。"),
+            listOf("read-only discovery of Android 16+ AppFunctions declared by an app and their schemas (with no argument, lists installed apps exposing AppFunctions). Returns FN_UNSUPPORTED on older Android or when the service is unavailable."),
+            scope = Scope.LOOK, screen = false,
+            sumZh = "只读探测应用声明的 AppFunctions（Android 16+）",
+            sumEn = "read-only discovery of an app's Android 16+ AppFunctions"),
         Cmd("diag", "", "",
             listOf("导出一份诊断（版本、状态、最近的日志和被吞掉的异常；不含你输入的文字和截图），返回文本，出问题时交给开发者。"),
             listOf("export a diagnostic bundle (versions, status, recent logs and swallowed exceptions; none of your typed text or screenshots) as text, to hand to the developer when something is wrong."),
@@ -331,7 +339,7 @@ internal object CommandSpec {
         if (sub in TRANSPORT_WORDS || sub == "--help" || sub == "-h") return true
         if (argv.drop(1).any { it == "--help" || it == "-h" }) return true
         return when (sub) {
-            "status", "diag", "apps", "permissions", "events" -> true
+            "status", "diag", "apps", "permissions", "events", "fn" -> true
             "task" -> argv.drop(1).firstOrNull { !it.startsWith("-") }?.lowercase() != "cancel"
             "sound" -> {
                 val a1 = argv.drop(1).firstOrNull { !it.startsWith("-") }?.lowercase()
@@ -460,16 +468,45 @@ internal object CommandSpec {
         }
     }
 
-    /** JSON schema of one command's arguments as an MCP tool input: `args` (the positional part) plus one property per option. */
+    /** JSON schema (2020-12) of one command's arguments as an MCP tool input: `args` plus one property per option. */
     fun inputSchema(c: Cmd): JSONObject {
         val props = JSONObject()
-        if (c.positional.isNotEmpty()) props.put("args", JSONObject().put("type", "string").put("description",
-            tr("一个字符串（不是数组），写法：", "ONE string (not an array), written as: ") + c.positional.trim('[', ']').replace("\"", "") +
-                (if (c.positional.startsWith("[")) tr("。可以不给", ". Optional") else "")))
-        for (o in c.allOpts.filter { !it.deprecated }) props.put(o.name.replace('-', '_'), JSONObject()
-            .put("type", if (o.kind == Kind.SWITCH) "boolean" else "string").put("description", o.text))
+        val req = JSONArray()
+        if (c.positional.isNotEmpty()) {
+            val optional = c.positional.startsWith("[")
+            props.put(
+                "args",
+                JSONObject().put("type", "string").put(
+                    "description",
+                    tr("一个字符串（不是数组），写法：", "ONE string (not an array), written as: ") + c.positional.trim('[', ']').replace("\"", "") +
+                        (if (optional) tr("。可以不给", ". Optional") else ""),
+                ),
+            )
+            if (!optional) req.put("args")
+        }
+        for (o in c.allOpts.filter { !it.deprecated }) {
+            val prop = if (o.repeatable) {
+                JSONObject()
+                    .put(
+                        "oneOf",
+                        JSONArray()
+                            .put(JSONObject().put("type", "string"))
+                            .put(JSONObject().put("type", "array").put("items", JSONObject().put("type", "string"))),
+                    )
+                    .put("description", o.text)
+            } else {
+                JSONObject()
+                    .put("type", if (o.kind == Kind.SWITCH) "boolean" else "string")
+                    .put("description", o.text)
+            }
+            props.put(o.name.replace('-', '_'), prop)
+        }
         props.put("session", JSONObject().put("type", "string").put("description", tr("可选：会话名", "optional: session name")))
-        return JSONObject().put("type", "object").put("properties", props).put("required", JSONArray())
+        return JSONObject()
+            .put("\$schema", "https://json-schema.org/draft/2020-12/schema")
+            .put("type", "object")
+            .put("properties", props)
+            .also { if (req.length() > 0) it.put("required", req) }
     }
 
     /** The argv of a structured call (MCP typed tool / HTTP `{"command":"act","args":…,"options":{…}}`). */

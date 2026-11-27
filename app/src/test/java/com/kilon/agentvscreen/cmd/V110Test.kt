@@ -34,7 +34,7 @@ class V110Test {
         val els = listOf(el(1, "xbox360播放dvd", 400, 150, editable = true), el(2, "搜索", 900, 150), el(3, "新闻", 100, 600))
         val m = nearMiss(els, "搜索或输入网址")
         assertTrue(m, m.contains("“搜索”(900,150)"))
-        assertTrue(m, m.contains("输入框：xbox360播放dvd(400,150)"))
+        assertTrue(m, m.contains("输入框：“xbox360播放dvd”(400,150)"))
         assertTrue(m, !m.contains("新闻"))
     }
 

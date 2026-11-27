@@ -329,6 +329,7 @@ object ExecAllowlist {
         if (sub != "list-app-functions" && sub != "execute-app-function") {
             return "cmd app_function subcommand not allowed: $sub"
         }
+        if (sub == "list-app-functions" && argv.size == 3) return null
         val pkgIdx = argv.indexOf("--package")
         if (pkgIdx < 3 || pkgIdx + 1 >= argv.size || !PackageNames.isValid(argv[pkgIdx + 1])) {
             return "cmd app_function requires valid --package"

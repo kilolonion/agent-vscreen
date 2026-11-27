@@ -280,6 +280,12 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 
 权限范围: `system`
 
+### `fn [应用名|包名]`
+
+只读探测 Android 16+ 应用声明的 AppFunctions 结构化接口与参数 schema（不带参数列出设备上提供 AppFunctions 的应用）。旧系统或未开放服务返回 FN_UNSUPPORTED。
+
+权限范围: `look`
+
 ### `diag`
 
 导出一份诊断（版本、状态、最近的日志和被吞掉的异常；不含你输入的文字和截图），返回文本，出问题时交给开发者。
@@ -324,6 +330,7 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `OCR_DOWN` | `none` | 文字识别不可用（两种引擎都失败）：元素只来自无障碍，画面上的字可能没列出来，以截图为准。 |
 | `APP_PARKED` | `fix_command` | 这个应用被停到了停放屏（隐藏的停放显示，不在副屏上）：页面、登录都还在，但现在看不到也不能操作。用 vscreen handoff unpark <应用> 把它取回副屏，再继续；这期间副屏可以放别的应用。 |
 | `APP_READ_ONLY` | `ask_user` | 用户把这个应用设成只读：能看、滚动、返回，不能点击/输入/滑动。 |
+| `FINANCE_APP_RISK` | `none` | 该应用属于金融/支付类，已默认设为每次确认；自动化操作可能触发账号安全风控，必要时建议用 handoff out 交给用户在主屏完成。 |
 | `USER_TAKEOVER` | `ask_user` | 用户正在自己操作副屏。停下告诉用户，等用户交还（vscreen events --wait 收 handback）；副屏和页面会留着，不要 release 或重新 launch。 |
 | `THERMAL_STOP` | `ask_user` | 过热保护已停止后台任务，不要重试。请用户在手机冷却后从首页电源菜单手动恢复。 |
 | `USER_STOPPED` | `ask_user` | 用户按了“停止 AI”。所有操作都被拒绝，只有用户能解除；把返回里怎么解除的那句转告用户。 |
@@ -387,7 +394,9 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `SIGNATURE_REQUIRED` | `ask_user` | 经外部 Tailscale App 从其它设备来的请求必须签名（vscreen 命令行会签名；经内置 Tailscale 来的不需要）。MCP 等不能签名的客户端：请用户在 其它设备 里关掉“只接受签名请求”，或改用内置 Tailscale。 |
 | `TASK_STARTED` | `none` | 任务已开始，用 task <号> 取结果。 |
 | `TIME_SKEW` | `ask_user` | 调用方的时钟和手机差得太多，签名因此不被接受。校准调用方的时钟。 |
-| `UNSUPPORTED_MCP_PROTOCOL` | `fix_command` | 当前 MCP 服务端支持基于 initialize 握手的协议版本（2025-06-18 / 2025-03-26 / 2024-11-05）；请回退使用 initialize 重新连接。 |
+| `FN_UNSUPPORTED` | `none` | 当前系统不支持 Android 16+ AppFunctions 探测（或系统未开放 app_function 服务）；改用常规 launch / act 界面操作。 |
+| `FN_NOT_FOUND` | `none` | 该应用未声明可用的 AppFunctions；改用 launch / act 界面操作。 |
+| `UNSUPPORTED_MCP_PROTOCOL` | `fix_command` | 请求的 MCP 协议版本不受支持（当前支持 2026-07-28 及 2025-06-18 / 2025-03-26 / 2024-11-05）；请改用受支持的版本重连。 |
 | `OPERATION_FAILED` | `look` | 执行出错，返回里有原因。 |
 | `INTERNAL_ERROR` | `none` | 工具内部错误。把这段报错发给开发者（vscreen diag 能导出诊断）。 |
 
@@ -670,6 +679,12 @@ fix the problems listed in status and give sound back to apps left silent; each 
 
 scope: `system`
 
+### `fn [app name|package]`
+
+read-only discovery of Android 16+ AppFunctions declared by an app and their schemas (with no argument, lists installed apps exposing AppFunctions). Returns FN_UNSUPPORTED on older Android or when the service is unavailable.
+
+scope: `look`
+
 ### `diag`
 
 export a diagnostic bundle (versions, status, recent logs and swallowed exceptions; none of your typed text or screenshots) as text, to hand to the developer when something is wrong.
@@ -714,6 +729,7 @@ scope: `look`
 | `OCR_DOWN` | `none` | Text recognition is unavailable (both engines failed): elements come from accessibility only, words on the picture may be missing; trust the screenshot. |
 | `APP_PARKED` | `fix_command` | This app is parked on the parking display (a hidden display, not the screen): its page and logins are kept, but it is neither visible nor operable now. Bring it back with vscreen handoff unpark <app>, then carry on; the screen can hold another app meanwhile. |
 | `APP_READ_ONLY` | `ask_user` | The user set this app to read-only: you may look, scroll and go back, not tap / type / swipe. |
+| `FINANCE_APP_RISK` | `none` | This is a finance/payment app set to confirm every time by default; automated actions may trigger account risk controls. Consider using handoff out so the user finishes sensitive steps on the main screen. |
 | `USER_TAKEOVER` | `ask_user` | The user is operating the screen. Stop, tell the user, and wait for the hand-back (vscreen events --wait for handback); the screen and its page stay, don't release or launch again. |
 | `THERMAL_STOP` | `ask_user` | Overheating stopped background work. Do not retry; ask the user to resume in the Home power menu after cooling. |
 | `USER_STOPPED` | `ask_user` | The user pressed "Stop AI". Everything is refused and only the user can lift it; pass on the line that says how. |
@@ -777,7 +793,9 @@ scope: `look`
 | `SIGNATURE_REQUIRED` | `ask_user` | Requests from other devices through the external Tailscale app must be signed (the vscreen CLI signs; through the built-in Tailscale none is needed). For clients that cannot sign, such as MCP: ask the user to turn off "signed requests only" under Other devices, or use the built-in Tailscale. |
 | `TASK_STARTED` | `none` | The task started; fetch its result with task <id>. |
 | `TIME_SKEW` | `ask_user` | The caller's clock is too far from the phone's, so the signature is not accepted. Fix the caller's clock. |
-| `UNSUPPORTED_MCP_PROTOCOL` | `fix_command` | This MCP server currently supports initialization-based revisions (2025-06-18, 2025-03-26, 2024-11-05); retry with initialize. |
+| `FN_UNSUPPORTED` | `none` | This device does not support Android 16+ AppFunctions discovery (or the app_function shell service is unavailable); use normal launch / act UI operation instead. |
+| `FN_NOT_FOUND` | `none` | This app does not expose any AppFunctions; use launch / act UI operation instead. |
+| `UNSUPPORTED_MCP_PROTOCOL` | `fix_command` | The requested MCP protocol revision is unsupported (supported: 2026-07-28, 2025-06-18, 2025-03-26, 2024-11-05); retry with a supported revision. |
 | `OPERATION_FAILED` | `look` | It failed; the reply says why. |
 | `INTERNAL_ERROR` | `none` | Internal tool error. Send it to the developer (vscreen diag exports diagnostics). |
 

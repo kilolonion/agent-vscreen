@@ -204,7 +204,7 @@ internal object PageBook {
     fun pickTitle(els: List<El>, activity: String?): String {
         val candidates = els.asSequence()
             .filter { !it.placeholder && !it.iconButton }
-            .map { it to it.text.trim() }
+            .map { it to ScreenText.clean(it.text, maxLen = 0) }
             .filter { (_, t) -> t.length in TITLE_MIN_LEN..TITLE_MAX_LEN && !t.all { c -> c.isDigit() } }
             .toList()
         val prioritized = candidates.filter { it.first.toolbarTitle }
@@ -213,8 +213,10 @@ internal object PageBook {
         val chosen = prioritized
             .sortedWith(compareBy({ it.first.box.top }, { it.first.box.left }))
             .firstOrNull()?.second
-        if (chosen != null) return chosen
-        return activity?.substringAfterLast('.')?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+        if (chosen != null) return ScreenText.clean(chosen, maxLen = TITLE_MAX_LEN)
+        return activity?.substringAfterLast('.')?.substringAfterLast('/')
+            ?.let { ScreenText.clean(it, maxLen = 32) }
+            ?.takeIf { it.isNotBlank() }
             ?: tr("页面", "Page")
     }
 

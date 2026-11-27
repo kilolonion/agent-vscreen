@@ -106,6 +106,9 @@ jobs:
       - name: AOCI index covers all main Kotlin sources
         run: python3 tools/ci/check_aoci_coverage.py
 
+      - name: Eval runner & compare unit tests
+        run: python3 -m unittest discover -s tools/eval -p "test_*.py" -v
+
       # Release signing NEVER happens in the build job: CI always produces an unsigned release APK signed only
       # in the isolated `release` job (environment: release) that has no checkout, build tools, or untrusted deps.
       - name: Debug and unsigned release APKs

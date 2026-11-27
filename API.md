@@ -93,10 +93,13 @@ vscreen done
 
 把 App 里复制的 MCP 配置加进 agent（Streamable HTTP，地址 `POST /mcp`；`GET`/`DELETE /mcp` 在鉴权前直接返回 `405 Allow: POST`）。
 
-- **协议版本与兼容回退**：支持 MCP `2025-06-18`、`2025-03-26` 与 `2024-11-05` 握手（`initialize`）。若双栈客户端先发送 MCP `2026-07-28` 无状态请求（含 `MCP-Protocol-Version >= 2026`、`Mcp-Method`、`server/discover` 或 `_meta` 版本字段，单条与 JSON-RPC batch 均覆盖），服务端立即返回**非 JSON-RPC 的 HTTP `400`**（`{"code":"UNSUPPORTED_MCP_PROTOCOL",...}`，绝不使用 `-32022`），以触发客户端自动回退到传统 `initialize` 流程。
-- **工具**：`vscreen`（参数 `command` 是一整条命令行）和按命令分开的 `vscreen_launch`、`vscreen_act`、`vscreen_status` 等。分开的工具参数是字段：`args` 是位置参数，每个选项一个字段，由命令表生成。
-- **结果**：`content` 是文字和截图；`structuredContent` 是结构化结果（`ok`、`code`、`next`、`steps`、`screen`、`notes`）；`isError` 跟随结果代码。
-- **进度与请求号**：调用带 `_meta.progressToken` 且请求头 `Accept` 含 `text/event-stream` 时，每做完一步发一条 `notifications/progress`。传入的 `requestId` / `progressToken` 超过 64 字符时自动截断。
+- **双栈协议支持（`2026-07-28` 无状态 + 传统 `initialize`）**：
+  - **Modern 无状态路径（`2026-07-28`）**：支持 `server/discover`（返回 `supportedVersions` 与 `_meta["io.modelcontextprotocol/serverInfo"]`）、`tools/list`、`tools/call` 与 `tasks/get` / `tasks/result` / `tasks/cancel` / `tasks/list`；`server/discover` 与 `tools/list` 固定返回确定性工具顺序并携带 `resultType: "complete"`、`ttlMs: 3600000`、`cacheScope: "public"`；严格校验 SEP-2243 `Mcp-Method` / `Mcp-Name` 请求头与 JSON-RPC body 一致（`tools/call` 核对 `params.name`，`tasks/get|cancel|update|result` 核对 `params.taskId`，不匹配返回 HTTP `400` + JSON-RPC `-32020`）；调用 `tasks/*` 未声明 `io.modelcontextprotocol/tasks` 客户端扩展返回 HTTP `400` + `-32021`（附 `data.requiredCapabilities`）；不识别的现代版本号返回 `-32022`（附 `data: {supported, requested}`）；现代路径不输出 `Mcp-Session-Id`。
+  - **`io.modelcontextprotocol/tasks` 扩展**：仅当请求 `_meta["io.modelcontextprotocol/clientCapabilities"].extensions` 显式声明 `"io.modelcontextprotocol/tasks"` 时，异步任务（`bg_<id>`）、手机提问（`ask_<id>`）、手机强确认（`cfm_<id>`）与后台盯守（`keep_<name>`）返回扁平 `CreateTaskResult`（顶层 `resultType: "task"`、`taskId`、`ttlMs`、`pollIntervalMs`）；按配对授权实例 `(grantId ?: tokenId, taskId)` 严格隔离权限。`tasks/get` 在 `status == "completed"` 时直接内联 `"result"`（包含 `isError: true` 的工具拒绝/过期结果），仅内部执行异常才进入 `status == "failed"`；`ask_*` 与 `cfm_*` 等待期间始终报告 `working`（不用 `input_required`），并禁止 `tasks/update`（强确认永不经 MCP 批准）。多步 `act` 强确认批准后仅从经页态校验的安全续执行点继续（无法安全续跑或页面已变时停住不重放已生效前置步骤）；任务取消与续跑使用统一原子状态机，不覆写终态。
+  - **Legacy 路径（`2025-06-18` / `2025-03-26` / `2024-11-05`）**：完整保留传统 `initialize` 握手与 `Mcp-Session-Id` 兼容。
+- **工具与 Schema**：`vscreen`（参数 `command` 是一整条命令行）和按命令分开的 `vscreen_launch`、`vscreen_act`、`vscreen_status`、`vscreen_fn` 等。Schema 遵循 JSON Schema 2020-12（可重复选项如 `--on` 声明 `oneOf: [string, string[]]`）并附完整工具注解（`readOnlyHint` / `destructiveHint` / `idempotentHint` / `openWorldHint`）。
+- **结果与防注入隔离**：`content` 是文字和截图；`structuredContent` 是结构化结果（`ok`、`code`、`next`、`steps`、`screen`、`screen_data`、`notes`）；`isError` 跟随结果代码。所有来自第三方应用的不可信屏幕文本均集中在顶层 `screen_data`（带 `"untrusted": true`），并在文本回复中经 `<screen-data>` 围栏与引号清洗与系统段落隔离。
+- **进度与请求号**：调用带 `_meta.progressToken` 且请求头 `Accept` 含 `text/event-stream` 时，通过标准 `Transfer-Encoding: chunked` SSE 流每步发送 `notifications/progress`。传入的 `requestId` 超过 64 字符自动截断，并由服务端幂等去重表保活（锁内先命中既有 key、仅插入新 key 时淘汰最老已完成项且绝不驱逐执行中请求）。
 - **取消**：断开这次请求的连接，这段操作会在当前这一步之后停下。
 - MCP 客户端不会签名。内置 Tailscale 接受令牌，无需关掉“只接受签名请求”；其它直接接入方式默认要求签名，见 7.2。
 
@@ -197,8 +200,8 @@ ssh -p 8022 -L 18765:127.0.0.1:18765 <手机地址>
 
 - **独立隔离入口**：仅监听本机 `127.0.0.1:18785`（`PublicServer`），由通道代理注入常量时间校验的 `X-AVS-Public` 隔离密钥与真实客户端来源头 `X-AVS-Public-Src`（按 IPv4 `/32` 或 IPv6 `/64` 分桶限流；Cloudflare 源站会剥离伪造头并严格校验 `Cf-Connecting-IP` 字面量）。只暴露 OAuth 发现（`/.well-known/oauth-protected-resource`、`/.well-known/oauth-protected-resource/mcp`、`/.well-known/oauth-authorization-server`）、注册/授权/设备码/换票端点（`/oauth/register`、`/oauth/authorize`、`/oauth/authorize/status`、`/oauth/device_authorization`、`/oauth/device`、`/oauth/token`）和 `POST /mcp`（`GET`/`DELETE /mcp` 在认证前直接返回 `405 Allow: POST`），其余路径一律 `404`（包括 `/v2/pair/exchange`）。本地令牌与 Tailnet 头在公网入口一律拒收；公网 500/502 错误仅返回脱敏通用提示，不暴露内部异常类名或堆栈细节。
 - **三种通道**：**Tailscale Funnel**（官方 Tailscale 账号，域名会出现在公开证书透明度日志中）、**Cloudflare Tunnel**（自有域名，支持 Headscale）或 **ngrok**（免费固定域名）。使用 Cloudflare Tunnel / ngrok 时，HTTPS 在其服务端终止后再转发至手机。
-- **OAuth 2.1 + 主动输入配对码**：支持授权码（强制 PKCE S256、RFC 8707 `resource` 绑定与 RFC 9207 `iss` 参数校验）、DCR（校验 `application_type` 与重定向 URI）与 RFC 8628 设备码。外部发起配对时**静默入队（上限 32 条），手机不会自动弹窗或发通知**；用户打开手机上的 Agent-VScreen 输入 8 位配对码后才弹出强确认卡（显示来源地址与客户端自报名称，仅接受锁屏生物识别/PIN，禁用长按）。可选开启**严格配对窗口**（默认拒绝一切新客户端注册与配对，仅在手动打开的 3 分钟窗口内放行并在批准后自动关闭）。
-- **令牌、容错与生命周期**：访问令牌 1 小时过期，刷新令牌 30 天轮换并内置**内存级 30 秒单次重试宽限**（移动弱网丢失响应时允许同一旧刷新令牌重试一次并返回同组新令牌；客户端一旦使用新令牌、超过 30 秒或二次重放即撤销宽限并立即吊销该客户端全部令牌）；`/oauth/token` 按来源限流，无效/已撤销 Bearer 仅记入调用方来源桶不锁死合法客户端；公网客户端**永不开放 `system` 权限**；连续 **24 小时无已认证请求**（仅计有效 Bearer 的 `/mcp` 与 HTTP 200 的 `/oauth/token`，扫描和未认证流量不续期）自动关闭，App 版本更新后自动恢复关闭。
+- **OAuth 2.1 + CIMD + 主动输入配对码**：支持授权码（强制 PKCE S256、RFC 8707 `resource` 绑定与 RFC 9207 `iss` 参数校验）、DCR（校验 `application_type` 与重定向 URI）、**CIMD（Client ID Metadata Documents，`client_id_metadata_document_supported: true`）**与 RFC 8628 设备码（含仅设备码客户端重启持久化）。CIMD URL 仅接受默认 443 端口且带非空路径的 `https://` 公网域名，先解析全部 DNS 记录拦截回环/私网/链路本地/CGNAT（含 Tailscale `100.64.0.0/10`）/IPv6 ULA/组播等地址，随后**直连已校验的 IP 列表并以原始主机名完成 TLS SNI 与证书主机名校验**（杜绝 DNS 重绑定），禁用重定向、限时 5 秒、限 64 KB JSON、按来源限流 10 次/小时并按 `Cache-Control` 缓存（上限 64 条 / 24h）。同一 CIMD URL 的每次独立配对均生成独立授权实例（`GrantRecord`）与内部令牌，权限档位、MCP 任务可见性与撤销互不串联。外部发起配对时**静默入队（上限 32 条），手机不会自动弹窗或发通知**；用户打开手机上的 Agent-VScreen 输入 8 位配对码后才弹出强确认卡（CIMD 客户端显示绿色「已验证元数据文档来源域名」，DCR 客户端显示灰色「未验证（动态注册，名称由对方填写）」警示；仅接受锁屏生物识别/PIN，禁用长按）。可选开启**严格配对窗口**（默认拒绝一切新客户端注册与配对，仅在手动打开的 3 分钟窗口内放行并在批准后自动关闭）。
+- **令牌、容错与生命周期**：访问令牌 1 小时过期，刷新令牌 30 天轮换并内置**内存级 30 秒单次重试宽限**（移动弱网丢失响应时允许同一旧刷新令牌重试一次并返回同组新令牌；客户端一旦使用新令牌、超过 30 秒或二次重放即撤销宽限并立即吊销**该配对授权实例**的全部令牌，不影响共享同一 CIMD URL 的其他独立配对）；`/oauth/token` 按来源限流，无效/已撤销 Bearer 仅记入调用方来源桶不锁死合法客户端；公网客户端**永不开放 `system` 权限**；连续 **24 小时无已认证请求**（仅计有效 Bearer 的 `/mcp` 与 HTTP 200 的 `/oauth/token`，扫描和未认证流量不续期）自动关闭，App 版本更新后自动恢复关闭。
 
 **私有远程安全设置**（“接入 › 远程访问”下面）：
 
@@ -215,7 +218,7 @@ ssh -p 8022 -L 18765:127.0.0.1:18765 <手机地址>
 - **核心**：`launch`、`act`、`note`、`keep`、`events`、`task`、`title`、`done`、`stop`、`release`、`handoff`、`status`、`apps`。
 - **问用户**（1.3.0）：`ask`、`teach`。
 - **声音与看图**（1.4.0）：`look`（含原 `zoom`、`frames` 兼容别名）、`sound`。
-- **辅助**：`spots`、`collect`、`schedule`、`fix`、`diag`、`guide`、`help`。
+- **辅助**：`spots`、`collect`、`schedule`、`fn`（Android 16+ AppFunctions 只读探测）、`fix`、`diag`、`guide`、`help`。
 
 `launch` 和 `act` 返回固定的四段：【做了什么】、【这段时间】（从上次返回到现在，包括 agent 思考的时间）、【现在】（编号元素和截图）、【注意】（每条以代码开头）。手机只报事实，画面是什么意思由调用方的模型看图判断。
 
@@ -284,7 +287,7 @@ ssh -p 8022 -L 18765:127.0.0.1:18765 <手机地址>
 
 ### 3.5 排队
 
-同一块副屏上的命令一条一条执行，按到达的顺序排队。排队超过 60 秒返回 `QUEUE_TIMEOUT`，这条没有执行。不占用副屏的命令不排队（`status`、`apps`、`events`、`task`、`title`、`permissions`、`elevate`、`keep`、`sound`、`ask`、`teach`、`schedule`、`fix`、`diag`、`guide`、`help`）。
+同一块副屏上的命令一条一条执行，按到达的顺序排队。排队超过 60 秒返回 `QUEUE_TIMEOUT`，这条没有执行。不占用副屏的命令不排队（`status`、`apps`、`fn`、`events`、`task`、`title`、`permissions`、`elevate`、`keep`、`sound`、`ask`、`teach`、`schedule`、`fix`、`diag`、`guide`、`help`）。
 
 ### 3.6 按键
 
@@ -321,7 +324,7 @@ ssh -p 8022 -L 18765:127.0.0.1:18765 <手机地址>
   回合结束后，任何会话都能接手，页面保留。
 - **用户自己使用副屏**：用户可以在首页点 **打开应用**，无需 agent 发命令。这会开启用户自己的回合；用户使用期间 agent 会收到 `BUSY`，交还后 agent 才能接手。
 - **回合**：从某个会话发出第一条工作命令（如 `launch`、`act`、`look`、`collect`、`spots`）起算回合开始，之后安静满 N 分钟算回合结束（N 默认 3，可以在 App 里改成 1、3、5、10 或 30）。
-  - **只读查询不重开回合**：不触碰副屏的被动查询命令（`status`、`diag`、`apps`、`permissions`、`events`、`task` 查询、`sound` 查询、`keep` 查询、`schedule` 查询、`guide`、`remembered`、`help`）在会话无进行中回合时不开启新回合也不获取亮屏锁；回合进行中时照常顺延安静计时。
+  - **只读查询不重开回合**：不触碰副屏的被动查询命令（`status`、`diag`、`apps`、`fn`、`permissions`、`events`、`task` 查询、`sound` 查询、`keep` 查询、`schedule` 查询、`guide`、`remembered`、`help`）在会话无进行中回合时不开启新回合也不获取亮屏锁；回合进行中时照常顺延安静计时。
   - 回合进行中：副屏保持唤醒，后台录制不停，所以下一次的【这段时间】能覆盖 agent 思考的这段时间；若在设置中开启“任务中保持亮屏”或“需要时点亮”，冷启动建屏后会立即持有亮屏锁，回合结束、`done` 或停止后立刻释放。
   - 回合结束后：副屏省电暂停，10 分钟后释放；下一条工作命令会自动唤醒或重建副屏。
   - `vscreen done`：这一轮做完了，回合马上结束，不用等 N 分钟。
@@ -445,12 +448,12 @@ X-VScreen-Sign:  sha256hex( K \n Time \n Nonce \n METHOD \n 路径和查询串 \
 | **系统操作**（`system`） | 修复权限、系统级命令（**公网客户端永不开放**） | 不允许 | 不允许 | 不允许 | 允许 |
 | **高频操作**（`rate`） | 每分钟超过阈值次操作（设为“允许”时仅记录并通知） | 问我 | 问我 | 允许 | 允许 |
 
-应用级规则（禁止 / 只读 / 每次确认）独立于 agent 权限表生效。
+应用级规则（禁止 / 只读 / 每次确认）独立于 agent 权限表生效。**主流金融与支付类应用**（钱包、银行、证券与交易所等，不含高频通用社交应用）默认启用「每次确认」（`FinanceApps`），启动时附带 `FINANCE_APP_RISK` 风险提示，且用户仅可通过生物识别强确认将其放宽为显式允许；同时在支付金额 + 支付语境页面点击“确认/确定/继续”时自动升级为支付强确认。`act --human` / `note human on`（仿人节奏）明确定位为针对快速连续输入或动画防抖敏感应用的**操作稳定性手段**，不提供按风控策略自动开启能力。
 
 **独立强确认页（`StrongConfirm` / `StrongConfirmActivity`）**：
 
-- 2.0 移除了旧版通知栏直接点“允许”的快捷按钮，所有确认均在独立强确认页内完成。该页面启用 `FLAG_SECURE`、防遮挡触摸过滤（`filterTouchesWhenObscured`）与防无障碍代点保护。
-- **必须生物识别/PIN 强确认**：放宽权限、支付、开启公网接入、公网新客户端配对（须由用户在手机上输入 8 位配对码后才打开确认页）。
+- 2.0 移除了旧版通知栏直接点“允许”的快捷按钮，所有确认均在独立强确认页内完成。该页面启用 `FLAG_SECURE`、防遮挡触摸过滤（`filterTouchesWhenObscured`）与防无障碍代点保护；涉及第三方应用按钮文字时明确标注“应用画面显示文字”以区分系统文案。
+- **必须生物识别/PIN 强确认**：放宽权限、放宽金融应用默认规则、支付、开启公网接入、公网新客户端配对（须由用户在手机上输入 8 位配对码后才打开确认页）。
 - **页内轻确认**：除支付与放宽权限外的普通高风险/高频提示可在确认页内单点确认，并可选择仅本次、本轮任务内或今天内有效。
 - 命令遇到待确认动作时最多等待 60 秒：允许则继续执行；拒绝返回 `USER_DENIED`；超时返回 `CONFIRM_PENDING` 或 `NEEDS_CONFIRM`（附 `next=user_on_phone`），请求保留有效期内确认后原样重发即可通过。1.1 的 `--confirmed` 参数无效。
 - 用户在 agent 付款时全程盯着，可在 agent 详情页临时开启 **免确认支付 30 分钟**（需先指纹确认，放行照常记录操作日志）。
@@ -470,6 +473,7 @@ X-VScreen-Sign:  sha256hex( K \n Time \n Nonce \n METHOD \n 路径和查询串 \
 
 ### 7.5 其它与特权边界
 
+- **屏幕文字防提示词注入边界（`ScreenText`）**：所有来自第三方应用的屏幕元素、系统 Toast、输入框回读、应用名与 AppFunctions 描述均统一剥离换行（`\r`/`\n`）、控制字符与 Unicode Bidi 覆盖符，并中性化伪造段落标记（`【...】` / `</screen-data>`）；文本回复中的屏幕内容以成对引号与 `<screen-data>…</screen-data>` 数据围栏隔离，结构化 JSON 提供带 `"untrusted": true` 的顶层 `screen_data` 对象，且 `notes[]` 分离受信任 `system_text` 与 `screen_excerpts`。
 - **特权服务边界（协议 19）**：运行在 Shizuku/Root 进程中的 `VScreenDisplayService` 对全部 Binder 事务码强制校验调用方 UID（仅允许本应用 UID，`DESTROY_CODE` 另允许 `0`/`2000`）；`EXEC` 事务全部经纯 JVM 白名单（`ExecAllowlist`）与包名/进程名校验器（`PackageNames`）审查，拒绝所有 shell 解释器（`sh`/`su`/`bash`/`toybox`/`busybox`）、任意 `cwd` 与任意环境变量，运行时零 `sh -c`；`/data/local/tmp` 持久化状态文件均做符号链接防护。
 - **敏感剪贴板保护**：App 复制令牌、一次性接入码、登录链接及副屏粘贴输入（`VScreenTyping.pasteText`）时均对 `ClipData` 标记 `android.content.extra.IS_SENSITIVE = true`，在 Android 13+ 系统剪贴板浮层中隐藏明文预览，且 App 内 Snackbar 不回显明文。
 - 截图随副屏清理：副屏释放 2 分钟后，在那之前的截图都会删掉。

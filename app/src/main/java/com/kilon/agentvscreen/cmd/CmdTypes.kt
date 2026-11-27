@@ -70,23 +70,45 @@ class Call(val session: String, val tokenId: String = "main", val tokenName: Str
     }
 }
 
-/** A line of the notes block: [code] from [Codes] (null = plain information) and its text. */
-class Note(val code: String?, val text: String) {
+/**
+ * A line of the notes block: [code] from [Codes] (null = plain information), human-readable [text],
+ * strictly platform-authored [systemText] (never containing untrusted third-party screen excerpts),
+ * and cleaned [screenExcerpts] when screen content is referenced.
+ */
+class Note(
+    val code: String?,
+    val text: String,
+    val screenExcerpts: List<String> = emptyList(),
+    val systemText: String = text,
+) {
     fun line(): String = if (code == null) text else com.kilon.agentvscreen.tr("$code：$text", "$code: $text")
-    fun json(): org.json.JSONObject = org.json.JSONObject().put("code", code ?: org.json.JSONObject.NULL).put("text", text)
-        .also { if (code != null) it.put("next", Codes.next(code)) }
+    fun json(): org.json.JSONObject = org.json.JSONObject()
+        .put("code", code ?: org.json.JSONObject.NULL)
+        .put("text", text)
+        .put("system_text", systemText)
+        .also {
+            if (code != null) it.put("next", Codes.next(code))
+            if (screenExcerpts.isNotEmpty()) {
+                it.put("screen_excerpts", org.json.JSONArray(screenExcerpts.map { ex -> ScreenText.clean(ex, maxLen = 120) }))
+            }
+        }
 }
 
 /** The notes of one reply, in order, without repeats. */
 class Notes {
     val list = ArrayList<Note>()
     operator fun plusAssign(text: String) { if (list.none { it.code == null && it.text == text }) list += Note(null, text) }
-    fun add(code: String, text: String) { if (list.none { it.code == code && it.text == text }) list += Note(code, text) }
+    fun add(code: String, text: String, screenExcerpts: List<String> = emptyList(), systemText: String = text) {
+        if (list.none { it.code == code && it.text == text }) list += Note(code, text, screenExcerpts, systemText)
+    }
+    fun add(note: Note) {
+        if (list.none { it.code == note.code && it.text == note.text }) list += note
+    }
     fun addAll(o: Notes) { o.list.forEach { n -> if (list.none { it.code == n.code && it.text == n.text }) list += n } }
     val isEmpty: Boolean get() = list.isEmpty()
     /** The code that decides the reply's outcome: the first coded note that is not mere information. */
     fun firstBlocking(): String? = list.firstOrNull { it.code != null && Codes.of(it.code)?.next != Codes.Next.NONE && it.code !in INFO }?.code
-    companion object { val INFO = setOf("NO_CHANGE", "SNAP_BACK", "MAIN_SCREEN_CHANGED", "KEEP_LIMIT", "OCR_DOWN", "HOLD_UNSUPPORTED", "HOLD_REFUSED", "RULE_OFF") }
+    companion object { val INFO = setOf("NO_CHANGE", "SNAP_BACK", "MAIN_SCREEN_CHANGED", "KEEP_LIMIT", "OCR_DOWN", "HOLD_UNSUPPORTED", "HOLD_REFUSED", "RULE_OFF", "FINANCE_APP_RISK") }
 }
 
 /**
@@ -122,6 +144,8 @@ class StepOut(val n: String, val step: String, var status: String, var text: Str
     var recapLabel: String? = null
     /** Input delivery channel when non-default (e.g. `a11y` or `wake`). */
     var via: String? = null
+    /** Sanitized non-password input-box readback for `screen_data.readback` isolation. */
+    var readback: String? = null
     fun json(): org.json.JSONObject = org.json.JSONObject().put("n", n).put("step", step).put("status", status)
         .also { o ->
             fact?.let { o.put("fact", it) }; code?.let { o.put("code", it) }

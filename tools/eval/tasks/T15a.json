@@ -1,0 +1,29 @@
+{
+  "id": "T15a",
+  "scene": "S15",
+  "seed": 915,
+  "since": "beta8",
+  "required": true,
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "tap \"弹系统 Toast\" until text:已触发 5s; wait 0.6s"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "toast_shown",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 90
+}

@@ -55,8 +55,8 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<K, V>?): Boolean = size > RECENT
         }
 
-        /** Commands that do not read the app on the screen themselves (act and launch check the app rules per step). */
-        internal val RULE_FREE = setOf("status", "apps", "sound", "release", "stop", "fix", "help", "handoff", "note", "keep", "schedule", "ask", "teach", "launch", "act", "events", "done", "title", "task", "tasks", "diag", "elevate", "permissions")
+        /** Commands that do not read the app on the screen themselves (act, launch, and fn check app rules directly). */
+        internal val RULE_FREE = setOf("status", "apps", "sound", "release", "stop", "fix", "help", "handoff", "note", "keep", "schedule", "ask", "teach", "launch", "act", "events", "done", "title", "task", "tasks", "diag", "elevate", "permissions", "fn")
 
         /**
          * 1.2: the screen queue. There is one background screen; commands that work on it run one at a time, in the
@@ -316,6 +316,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
             "frames" -> lookCmd(sid, args, "frames")
             "collect" -> collectCmd(sid, args)
             "fix" -> fix(sid, args)
+            "fn" -> fnCmd(sid, args)
             "diag" -> diagCmd(sid)
             else -> unknown(sub)
         }

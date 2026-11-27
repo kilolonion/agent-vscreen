@@ -1,0 +1,33 @@
+{
+  "id": "T16a",
+  "scene": "S16",
+  "seed": 801,
+  "since": "beta8",
+  "required": true,
+  "extras": {
+    "init_value": 0,
+    "target_value": 170
+  },
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "drag 100 800 980 800 seek until text:170% in 360,560,740,740 20s"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "goal",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 120
+}

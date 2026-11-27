@@ -1004,7 +1004,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
     val path: List<Pair<Int, Int>>
     if (step.kind == StepKind.PRESS) {
         val t = target(sid, d, step.target!!, ctx)
-        payGuard(sid, d, t.atPoint, t.x, t.y)
+        payGuard(sid, d, t.atPoint, t.x, t.y, contextEls = t.contextEls, acted = ctx.acted)
         pressTarget = t
         val start = if (hu != null) hu.drift(t.x to t.y, Gesture.HUMAN_START_DRIFT_PX, d.width, d.height) else (t.x to t.y)
         path = listOf(start)

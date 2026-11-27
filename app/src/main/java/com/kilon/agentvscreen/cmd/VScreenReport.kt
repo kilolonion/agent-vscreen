@@ -368,7 +368,7 @@ internal fun mergeElements(screenHeight: Int, a11y: List<El>, ocr: List<VScreenO
         val a = if (a0 in tappable && !a0.clickable) a0.copy(clickable = true) else a0
         if (!a.placeholder && DIGIT.containsMatchIn(a.text) && a.text.length <= 24) {
             val drawn = items.filter { it !in usedOcr && Rect(a.box).apply { inset(-8, -8) }.contains(it.box.centerX(), it.box.centerY()) && DIGIT.containsMatchIn(it.text) }
-            val drawnText = drawn.joinToString(" ") { it.text.trim() }
+            val drawnText = ScreenText.clean(drawn.joinToString(" ") { it.text.trim() }, maxLen = 0)
             if (drawn.isNotEmpty() && VScreenOcr.norm(drawnText) != VScreenOcr.norm(a.text) && !VScreenOcr.norm(drawnText).contains(VScreenOcr.norm(a.text))) {
                 usedOcr += drawn
                 val w = tidy(drawnText)
@@ -383,7 +383,7 @@ internal fun mergeElements(screenHeight: Int, a11y: List<El>, ocr: List<VScreenO
             if (inner.isNotEmpty()) {
                 usedOcr += inner
                 val row = maxOf(16, screenHeight / 120)
-                val words = inner.sortedWith(compareBy({ it.box.centerY() / row }, { it.box.centerX() })).joinToString(" · ") { it.text.replace('\n', ' ').trim() }
+                val words = inner.sortedWith(compareBy({ it.box.centerY() / row }, { it.box.centerX() })).joinToString(" · ") { ScreenText.clean(it.text, maxLen = 0) }
                 val w = tidy(words)
                 out += a.copy(text = if (w.first == ElKind.TEXT) w.second else "", kind = w.first, hint = if (w.first == ElKind.LINK) w.second else null)
                 continue
@@ -393,7 +393,7 @@ internal fun mergeElements(screenHeight: Int, a11y: List<El>, ocr: List<VScreenO
     }
     for (it in items) {
         if (it in usedOcr) continue
-        val t = it.text.replace('\n', ' ').trim()
+        val t = ScreenText.clean(it.text, maxLen = 0)
         val nt = VScreenOcr.norm(t)
         // 1.3: one source per place. Where the app's own element has words (its text, its description, or a hidden
         // link), those are the element: the OCR reading of the same place is not listed again. Before, both were listed
@@ -539,15 +539,15 @@ private val URLISH = Regex("^(https?://|[a-z][a-z0-9+.-]*://)|[?&][\\w%]+=")
 
 /** Words of an element: URL-encoded tracking strings become LINK (with their length), long ones are cut. */
 internal fun tidy(raw: String): Pair<ElKind, String> {
-    val t = raw.trim()
+    val t = ScreenText.clean(raw, maxLen = 0)
     if (PCT.findAll(t).count() >= 3 || (t.length > Report.MAX_ELEMENT_TEXT && !t.contains(' ') && URLISH.containsMatchIn(t))) return ElKind.LINK to t.length.toString()
     return ElKind.TEXT to (if (t.length > Report.MAX_ELEMENT_TEXT) t.take(Report.MAX_ELEMENT_TEXT) + "…" else t)
 }
 
 internal fun El.line(): String {
     val c = "(${box.centerX()},${box.centerY()})"
-    val lbl = label.let { if (it.length > Report.MAX_ELEMENT_TEXT) it.take(Report.MAX_ELEMENT_TEXT) + "…" else it }
-    return "#$n “$lbl” $c" + flags.let { if (it.isNotEmpty()) " $it" else "" }
+    val lbl = ScreenText.quote(label, Report.MAX_ELEMENT_TEXT)
+    return "#$n $lbl $c" + flags.let { if (it.isNotEmpty()) " $it" else "" }
 }
 // ── 这段时间 ──────────────────────────────────────────────────────────
 
@@ -671,11 +671,12 @@ internal fun formatSystemToasts(
     for (ev in events) {
         if (ev.packageName != vdPkg) continue
         if (ev.epochMs < fromMs || ev.epochMs > toMs) continue
-        val text = ev.text.trim().take(80)
+        val text = ScreenText.clean(ev.text, maxLen = 80)
         if (text.isEmpty() || !seen.add(text)) continue
         val ago = Report.ago(ev.epochMs, toMs)
         val suffix = if (sameOnMain) tr("（可能来自主屏上的同一应用）", " (may be from the same app on the main screen)") else ""
-        out += tr("toast：$text（$ago）$suffix", "toast: $text ($ago)$suffix")
+        val quoted = ScreenText.quote(text, maxLen = 80)
+        out += tr("toast：$quoted（$ago）$suffix", "toast: $quoted ($ago)$suffix")
         if (out.size >= Report.MAX_TOASTS) break
     }
     return out
@@ -901,7 +902,7 @@ internal fun pictureEvents(
                     if (k in priorWords) continue
                     val wb = r.boxes[k] ?: continue
                     if (box.contains(wb.centerX(), wb.centerY())) {
-                        found += w.take(20)
+                        found += ScreenText.quote(w, maxLen = 20)
                         if (found.size >= 3) break
                     }
                 }
@@ -965,8 +966,8 @@ internal fun pictureFacts(d: VScreenDisplay, from: Long, to: Long): Pair<List<St
     pictureEvents(d, from, to).let { it.allLines to it.changed }
 
 private fun list(ws: List<String>, max: Int): String =
-    if (I18n.en) ws.take(max).joinToString(", ") { "\"${it.take(30)}\"" } + (if (ws.size > max) " and more, ${ws.size} in all" else "")
-    else ws.take(max).joinToString("、") { "“${it.take(30)}”" } + if (ws.size > max) " 等 ${ws.size} 处" else ""
+    if (I18n.en) ws.take(max).joinToString(", ") { ScreenText.quote(it, maxLen = 30) } + (if (ws.size > max) " and more, ${ws.size} in all" else "")
+    else ws.take(max).joinToString("、") { ScreenText.quote(it, maxLen = 30) } + if (ws.size > max) " 等 ${ws.size} 处" else ""
 
 // ── the picture ──────────────────────────────────────────────────────
 
@@ -1177,6 +1178,35 @@ internal fun putScreenElements(
 }
 
 /**
+ * P2-3, pure: isolated top-level `screen_data` block carrying all untrusted third-party text
+ * separately from trusted system instructions/notes (`untrusted = true`).
+ */
+internal fun buildScreenData(
+    appLabel: String?,
+    pageTitle: String,
+    allElements: List<El>,
+    shownElements: Collection<El>,
+    fullElements: Boolean,
+    meanwhileTexts: List<String>,
+    toasts: List<String>,
+    readbacks: List<String>,
+): org.json.JSONObject {
+    val els = (if (fullElements) allElements else shownElements.toList()).take(Report.MAX_JSON_ELEMENTS)
+    return org.json.JSONObject()
+        .put("untrusted", true)
+        .put("app_label", appLabel?.let { ScreenText.clean(it, maxLen = 64) } ?: org.json.JSONObject.NULL)
+        .put("page_title", ScreenText.clean(pageTitle, maxLen = 32))
+        .put("elements", org.json.JSONArray(els.map { e ->
+            e.json().put("text", ScreenText.clean(e.text, maxLen = 80)).also { o ->
+                e.hint?.let { o.put("hint", ScreenText.clean(it, maxLen = 64)) }
+            }
+        }))
+        .put("meanwhile_texts", org.json.JSONArray(meanwhileTexts.map { ScreenText.clean(it, maxLen = 120) }))
+        .put("toasts", org.json.JSONArray(toasts.map { ScreenText.clean(it, maxLen = 120) }))
+        .put("readback", org.json.JSONArray(readbacks.map { ScreenText.clean(it, maxLen = 120) }))
+}
+
+/**
  * 2.0.0-beta3 (3.3 & 3.11) + 2.0.0-beta16 (Item 3), pure: format the short reply for a quiet `act`
  * (when `loudReasons` is empty) and return both the rendered text and the exact current [El]s shown.
  */
@@ -1199,7 +1229,8 @@ internal fun formatShortReplyWithShown(
     }
     val stepCount = exec.size
     val totalSec = "${(maxOf(0L, totalMs) / 100) / 10.0}s"
-    val pageTag = "P${card.id} ${card.title}".trim()
+    val safeTitle = ScreenText.clean(card.title, maxLen = 24)
+    val pageTag = "P${card.id} $safeTitle".trim()
     val timeHint = timeHintPart(sinceLastMs)
     sb.append(
         tr(
@@ -1237,24 +1268,24 @@ internal fun formatShortReplyWithShown(
     } else {
         sb.append(
             tr(
-                "现在 P${card.id} ${card.title}（新页面，共 ${els.size} 个元素）",
-                "Now P${card.id} ${card.title} (new page, ${els.size} elements)",
+                "现在 P${card.id} $safeTitle（新页面，共 ${els.size} 个元素）",
+                "Now P${card.id} $safeTitle (new page, ${els.size} elements)",
             )
         ).append('\n')
     }
 
     val diffEntries = ArrayList<Pair<String, El?>>()
     for (e in diff.added) {
-        val lbl = e.label.let { if (it.length > Report.MAX_ELEMENT_TEXT) it.take(Report.MAX_ELEMENT_TEXT) + "…" else it }
+        val lbl = ScreenText.quote(e.label, Report.MAX_ELEMENT_TEXT)
         diffEntries += ("+ #${e.n} $lbl [${Report.box(e.box)}]") to e
     }
     for (e in diff.removed) {
-        val lbl = e.label.let { if (it.length > Report.MAX_ELEMENT_TEXT) it.take(Report.MAX_ELEMENT_TEXT) + "…" else it }
+        val lbl = ScreenText.quote(e.label, Report.MAX_ELEMENT_TEXT)
         diffEntries += ("- #${e.n} $lbl [${Report.box(e.box)}]") to null
     }
     for ((old, now) in diff.modified) {
-        val oLbl = old.label.take(20)
-        val nLbl = now.label.let { if (it.length > Report.MAX_ELEMENT_TEXT) it.take(Report.MAX_ELEMENT_TEXT) + "…" else it }
+        val oLbl = ScreenText.quote(old.label, maxLen = 20)
+        val nLbl = ScreenText.quote(now.label, Report.MAX_ELEMENT_TEXT)
         diffEntries += ("~ #${now.n} $oLbl → $nLbl [${Report.box(now.box)}]") to now
     }
     val keptEntries = diffEntries.take(Report.MAX_QUIET_DIFF)
@@ -1320,16 +1351,22 @@ internal fun applyReplyBudget(parts: FullReplyParts, budgetTokens: Int = Report.
         sb.append('\n').append(Blocks.meanwhile).append('\n')
         sb.append(parts.meanwhileHeader).append('\n')
         parts.maskLine?.let { sb.append(it).append('\n') }
-        val bodyCount = parts.wordStaticLines.size + bet.size + pics.size
-        parts.wordStaticLines.forEach { sb.append(it).append('\n') }
-        bet.forEach { sb.append(it).append('\n') }
-        pics.forEach { sb.append(it).append('\n') }
-        if (bodyCount == 0 && parts.maskLine == null) {
+        val screenMeanwhile = parts.wordStaticLines + bet + pics
+        if (screenMeanwhile.isNotEmpty()) {
+            sb.append(ScreenText.FENCE_OPEN).append('\n')
+            screenMeanwhile.forEach { sb.append(it).append('\n') }
+            sb.append(ScreenText.FENCE_CLOSE).append('\n')
+        }
+        if (screenMeanwhile.isEmpty() && parts.maskLine == null) {
             sb.append(tr("文字和画面都没有明显变化（光标、细小动画这类小变动不算）", "no clear change in text or picture (cursors and tiny animations don't count)")).append('\n')
         }
         parts.sheetNoteLine?.let { sb.append(it).append('\n') }
         sb.append('\n').append(parts.nowHeader).append('\n')
-        if (includeElements) parts.elementLines.forEach { sb.append(it).append('\n') }
+        if (includeElements && parts.elementLines.isNotEmpty()) {
+            sb.append(ScreenText.FENCE_OPEN).append('\n')
+            parts.elementLines.forEach { sb.append(it).append('\n') }
+            sb.append(ScreenText.FENCE_CLOSE).append('\n')
+        }
         sb.append('\n').append(Blocks.notes).append('\n')
         if (parts.notesLines.isEmpty()) sb.append(tr("无\n", "none\n"))
         else parts.notesLines.forEach { sb.append("- ").append(it).append('\n') }
@@ -1572,6 +1609,9 @@ internal fun VScreenOffloadHandler.fourBlocks(
     val timing = Timing(received, totalActionMs).also { it.lookMs = lookMs0 + extraLookMs }
     val ok = outcome == "done" || outcome == "stopped"
     val code = if (ok) "OK" else notes.firstBlocking() ?: "STEP_MISSED"
+    val appPkg = snap.activity?.substringBefore('/')
+    val appLabel = appPkg?.let { com.kilon.agentvscreen.core.VScreenKnowledge.label(it) }
+    val readbacks = steps.mapNotNull { it.readback?.takeIf { r -> r.isNotEmpty() } }
 
     // ── Quiet short reply path (act only, loudReasons empty) ──
     if (actLoud != null && reasons.isEmpty()) {
@@ -1583,10 +1623,10 @@ internal fun VScreenOffloadHandler.fourBlocks(
             nowMs = now,
         )
         val shortText = if (holdFooter != null) shortReply.text + holdFooter + "\n" else shortReply.text
-        val returnedAt = recordReturned(snap.frame, snap.version, snap.activity?.substringBefore('/'), quiet = true, windowFrom = from)
+        val returnedAt = recordReturned(snap.frame, snap.version, appPkg, quiet = true, windowFrom = from)
         val screen = putScreenElements(
             org.json.JSONObject()
-                .put("app", snap.activity?.substringBefore('/') ?: org.json.JSONObject.NULL)
+                .put("app", appPkg ?: org.json.JSONObject.NULL)
                 .put("activity", snap.activity ?: org.json.JSONObject.NULL)
                 .put("width", d.width).put("height", d.height)
                 .put("generation", d.generation)
@@ -1596,6 +1636,16 @@ internal fun VScreenOffloadHandler.fourBlocks(
             all = els,
             shown = shortReply.shown,
             fullElements = false,
+        )
+        val screenData = buildScreenData(
+            appLabel = appLabel,
+            pageTitle = card.title,
+            allElements = els,
+            shownElements = shortReply.shown,
+            fullElements = false,
+            meanwhileTexts = emptyList(),
+            toasts = emptyList(),
+            readbacks = readbacks,
         )
         val data = org.json.JSONObject()
             .put("timing", timing.json(total))
@@ -1610,6 +1660,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
             .put("meanwhile", org.json.JSONArray())
             .put("picture_changed", false)
             .put("screen", screen)
+            .put("screen_data", screenData)
         if (actLoud.hasRules || actLoud.rulesFired.isNotEmpty()) {
             data.put("rules_fired", org.json.JSONArray(actLoud.rulesFired.map { it.json() }))
         }
@@ -1754,7 +1805,8 @@ internal fun VScreenOffloadHandler.fourBlocks(
     val (nowHeader, elemLines, shown) = buildNowSection(d, snap, card, els, fullList, elemLimit, pic, sheet, usedRegionPic)
 
     val total = System.currentTimeMillis() - received
-    val pageTag = "P${card.id} ${card.title}".trim()
+    val safePageTitle = ScreenText.clean(card.title, maxLen = 24)
+    val pageTag = "P${card.id} $safePageTitle".trim()
     val baseFull = applyReplyBudget(
         FullReplyParts(
             header = tr("第 $turn 轮$timeHint · $pageTag", "Turn $turn$timeHint · $pageTag"),
@@ -1774,10 +1826,10 @@ internal fun VScreenOffloadHandler.fourBlocks(
     )
     val fullText = if (holdFooter != null) baseFull + holdFooter + "\n" else baseFull
 
-    val returnedAt = recordReturned(snap.frame, snap.version, snap.activity?.substringBefore('/'), quiet = if (actLoud != null) false else null, windowFrom = from)
+    val returnedAt = recordReturned(snap.frame, snap.version, appPkg, quiet = if (actLoud != null) false else null, windowFrom = from)
     val screen = putScreenElements(
         org.json.JSONObject()
-            .put("app", snap.activity?.substringBefore('/') ?: org.json.JSONObject.NULL)
+            .put("app", appPkg ?: org.json.JSONObject.NULL)
             .put("activity", snap.activity ?: org.json.JSONObject.NULL)
             .put("width", d.width).put("height", d.height)
             .put("generation", d.generation)
@@ -1787,6 +1839,16 @@ internal fun VScreenOffloadHandler.fourBlocks(
         all = els,
         shown = shown,
         fullElements = fullList || !card.canRef,
+    )
+    val screenData = buildScreenData(
+        appLabel = appLabel,
+        pageTitle = card.title,
+        allElements = els,
+        shownElements = shown,
+        fullElements = fullList || !card.canRef,
+        meanwhileTexts = wordEv.allLines + picEv.detailLines,
+        toasts = toastLines,
+        readbacks = readbacks,
     )
     val data = org.json.JSONObject()
         .put("timing", timing.json(total))
@@ -1800,6 +1862,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
         .put("meanwhile", org.json.JSONArray(allSinceLines))
         .put("picture_changed", pic != null && (picEv.changed || changedShare > 0.0 || changedRegions.isNotEmpty() || from != last || isLookOrFullCmd))
         .put("screen", screen)
+        .put("screen_data", screenData)
     if (actLoud != null) {
         data.put("loud", org.json.JSONArray(reasons))
         if (actLoud.hasRules || actLoud.rulesFired.isNotEmpty()) {
@@ -1876,6 +1939,8 @@ private fun buildNowSection(
     hasSheet: Boolean,
     usedRegionPic: Boolean,
 ): Triple<String, List<String>, Set<El>> {
+    val safeTitle = ScreenText.clean(card.title, maxLen = 24)
+    val safeAct = snap.activity?.let { ScreenText.clean(it, maxLen = 80) }
     val picSuffix = if (pic != null) {
         val desc = when {
             usedRegionPic && hasSheet -> tr("（左缩略图、右变化区域，下方是拼图）", " (left thumb, right changed regions, sheet below)")
@@ -1887,7 +1952,7 @@ private fun buildNowSection(
     } else ""
 
     if (els.isEmpty()) {
-        val header = "${Blocks.now} P${card.id} ${card.title}  ${snap.activity ?: tr("（副屏上没有应用）", "(no app on the screen)")}${tr("  副屏 ", "  screen ")}${d.width}x${d.height}$picSuffix"
+        val header = "${Blocks.now} P${card.id} $safeTitle  ${safeAct ?: tr("（副屏上没有应用）", "(no app on the screen)")}${tr("  副屏 ", "  screen ")}${d.width}x${d.height}$picSuffix"
         val emptyLine = if (snap.items == null) tr("（没读到文字：OCR 没有结果）", "(no text read: OCR returned nothing)")
         else tr("（画面上没有可读的文字或控件：看图）", "(no readable text or widgets on the screen: look at the picture)")
         return Triple(header, listOf(emptyLine), emptySet())
@@ -1896,8 +1961,8 @@ private fun buildNowSection(
     if (!fullList && card.canRef) {
         val diff = PageBook.diffElements(card.prevEls, els)
         val header = tr(
-            "${Blocks.now} P${card.id} ${card.title}（第 ${card.prevSeenTurn} 轮看过，没变的 ${diff.unchanged.size} 个省略）  副屏 ${d.width}x${d.height}",
-            "${Blocks.now} P${card.id} ${card.title} (seen turn ${card.prevSeenTurn}, ${diff.unchanged.size} unchanged omitted)  screen ${d.width}x${d.height}",
+            "${Blocks.now} P${card.id} $safeTitle（第 ${card.prevSeenTurn} 轮看过，没变的 ${diff.unchanged.size} 个省略）  副屏 ${d.width}x${d.height}",
+            "${Blocks.now} P${card.id} $safeTitle (seen turn ${card.prevSeenTurn}, ${diff.unchanged.size} unchanged omitted)  screen ${d.width}x${d.height}",
         ) + picSuffix
         val outLines = ArrayList<String>()
         val shown = LinkedHashSet<El>()
@@ -1911,13 +1976,13 @@ private fun buildNowSection(
             outLines += tr("（还有 ${changed.size - limit} 个变化未列出：act 不带步骤可看全部）", "(${changed.size - limit} more changed not listed: act with no steps lists all)")
         }
         if (diff.removed.isNotEmpty()) {
-            val remShown = diff.removed.take(10).joinToString(tr("、", ", ")) { tr("“${it.label.take(20)}”", "\"${it.label.take(20)}\"") }
+            val remShown = diff.removed.take(10).joinToString(tr("、", ", ")) { ScreenText.quote(it.label, maxLen = 20) }
             outLines += tr("− 不见了 ${diff.removed.size} 个：$remShown", "− ${diff.removed.size} gone: $remShown")
         }
         return Triple(header, outLines, shown)
     }
 
-    val header = "${Blocks.now} P${card.id} ${card.title}  ${snap.activity ?: tr("（副屏上没有应用）", "(no app on the screen)")}${tr("  副屏 ", "  screen ")}${d.width}x${d.height}$picSuffix"
+    val header = "${Blocks.now} P${card.id} $safeTitle  ${safeAct ?: tr("（副屏上没有应用）", "(no app on the screen)")}${tr("  副屏 ", "  screen ")}${d.width}x${d.height}$picSuffix"
     val ordered = els.sortedWith(compareBy({ it.box.centerY() }, { it.box.centerX() }))
     val taken = ordered.take(limit)
     val outLines = ArrayList<String>(taken.size + 1)

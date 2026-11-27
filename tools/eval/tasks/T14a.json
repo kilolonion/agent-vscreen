@@ -1,0 +1,34 @@
+{
+  "id": "T14a",
+  "scene": "S14",
+  "seed": 914,
+  "since": "beta8",
+  "required": true,
+  "commands": [
+    [
+      "launch",
+      "com.kilon.avstorture"
+    ],
+    [
+      "act",
+      "--hold",
+      "wait 0.4s"
+    ],
+    [
+      "act",
+      "wait 0.4s"
+    ]
+  ],
+  "expect": [
+    {
+      "ev": "tick",
+      "ok": true
+    }
+  ],
+  "forbid": [
+    {
+      "ev": "fail"
+    }
+  ],
+  "max_seconds": 90
+}

@@ -147,6 +147,8 @@ object StrongConfirm {
         val publicClientName: String? = null,
         val redirectHost: String? = null,
         val sourceAddress: String? = null,
+        /** CIMD verified domain when the OAuth client authenticated via a Client ID Metadata Document. */
+        val clientVerifiedDomain: String? = null,
         val selectableScopes: List<String> = emptyList(),
         val defaultScope: String = "look",
         val onApproveWithScope: ((String) -> Unit)? = null,
@@ -161,6 +163,8 @@ object StrongConfirm {
         val grantKey: String? = null,
         /** [Risk.LEVEL_UP]: the level the agent asks for. */
         val targetLevel: String? = null,
+        /** Sanitized button/element label read from a third-party app screen, shown explicitly attributed on the card. */
+        val screenLabel: String? = null,
     ) {
         @Volatile var answer: Boolean? = null
         @Volatile var answeredBy: String? = null
@@ -561,6 +565,7 @@ object StrongConfirm {
         onDeny: () -> Unit,
         sourceAddress: String? = null,
         postNotify: Boolean = true,
+        clientVerifiedDomain: String? = null,
     ): Request {
         // 2.0.0-beta8 (feedback 2): the pairing card offers levels; operate in the OAuth grant opens careful / free.
         val safeScopes = if ("operate" in selectableScopes) Tokens.PUBLIC_LEVELS else listOf(Tokens.LOOK)
@@ -587,6 +592,7 @@ object StrongConfirm {
                 publicClientName = clientName,
                 redirectHost = redirectHost,
                 sourceAddress = sourceAddress,
+                clientVerifiedDomain = clientVerifiedDomain,
                 selectableScopes = safeScopes,
                 // rainbow (P10): a default of "look" was approved without a glance and every later act failed;
                 // default to the most the client asked for that the user would usually give (Easy), shown plainly.
@@ -785,6 +791,7 @@ object StrongConfirm {
         pkg: String,
         waitMs: Long,
         validMs: Long,
+        screenLabel: String? = null,
     ) {
         val reusable = false
         val gKey = grantKey(kind, pkg)
@@ -825,6 +832,7 @@ object StrongConfirm {
             strength = if (kind == Consent.MONEY) Risk.Strength.BIOMETRIC else Risk.Strength.TAP,
             ranges = Consent.rangesFor(kind),
             grantKey = gKey,
+            screenLabel = screenLabel?.let { com.kilon.agentvscreen.cmd.ScreenText.clean(it, maxLen = 40) }?.takeIf { it.isNotEmpty() },
         )
         if (created) notify(ctx, req)
         awaitRequest(req, call, waitMsOverride ?: waitMs)
@@ -883,6 +891,7 @@ object StrongConfirm {
         ranges: List<Range> = listOf(Range.ONCE),
         grantKey: String? = null,
         targetLevel: String? = null,
+        screenLabel: String? = null,
     ): Pair<Request, Boolean> = synchronized(lock) {
         pruneRequestsLocked(nowMs)
         val existing = requests.lastOrNull { it.key == key && it.liveAt(nowMs) }
@@ -906,6 +915,7 @@ object StrongConfirm {
             ranges = ranges.ifEmpty { listOf(Range.ONCE) },
             grantKey = grantKey,
             targetLevel = targetLevel,
+            screenLabel = screenLabel,
         )
         requests += req
         publishPendingLocked(nowMs)

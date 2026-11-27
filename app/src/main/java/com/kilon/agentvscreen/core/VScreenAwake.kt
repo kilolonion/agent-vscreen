@@ -219,8 +219,20 @@ object VScreenAwake {
 
     // ── Phone screen policy during active turns (issue #48 & #60) ──────────────────────────────────────────────────
 
-    private var screenLock: PowerManager.WakeLock? = null
+    /** Plain keep-on lock (never carries ACQUIRE_CAUSES_WAKEUP). */
+    private var keepOnLock: PowerManager.WakeLock? = null
+    /** Dedicated active-wake lock used exclusively by [wakePhoneForInput] under `WAKE_WHEN_NEEDED`. */
+    private var wakeInputLock: PowerManager.WakeLock? = null
     @Volatile var screenLockHeld = false; private set
+    @Volatile internal var lastKeepOnLockFlags: Int = 0; private set
+    @Volatile internal var lastInputWakeLockFlags: Int = 0; private set
+
+    @Volatile internal var wakeLockFactory: ((Context, Int, String) -> PowerManager.WakeLock?)? = null
+    @Volatile internal var isInteractiveFn: ((Context) -> Boolean)? = null
+    @Volatile internal var monoClockMs: () -> Long = { SystemClock.elapsedRealtime() }
+    @Volatile internal var sleepFn: (Long) -> Unit = { Thread.sleep(it) }
+    @Volatile internal var wakeTimeoutMs: Long = 2_000L
+    @Volatile internal var wakePollStepMs: Long = 100L
 
     /** Whether the screen lock should be held now under the 3-mode setting: pure, for unit tests. */
     internal fun wantsScreenLock(
@@ -246,30 +258,43 @@ object VScreenAwake {
         if (want) holdScreenLock(ctx) else releaseScreenLock()
     }
 
+    private fun acquireWakeLock(ctx: Context, flags: Int, tag: String): PowerManager.WakeLock? {
+        val custom = wakeLockFactory
+        val lock = if (custom != null) custom(ctx, flags, tag) else runCatching {
+            ctx.getSystemService(PowerManager::class.java)?.newWakeLock(flags, tag)
+        }.getOrNull()
+        lock?.setReferenceCounted(false)
+        return lock
+    }
+
     @Suppress("DEPRECATION") // SCREEN_DIM_WAKE_LOCK: still works; a background service has no window for FLAG_KEEP_SCREEN_ON.
-    private fun holdScreenLock(ctx: Context) = synchronized(this) {
-        val lock = screenLock ?: runCatching {
-            ctx.getSystemService(PowerManager::class.java)?.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK, "agentvscreen:keep-screen-on")
-                ?.apply { setReferenceCounted(false) }
-        }.getOrNull()?.also { screenLock = it } ?: return@synchronized
+    internal fun holdScreenLock(ctx: Context) = synchronized(this) {
+        val flags = PowerManager.SCREEN_DIM_WAKE_LOCK
+        val lock = keepOnLock ?: acquireWakeLock(ctx, flags, "agentvscreen:keep-screen-on")
+            ?.also { keepOnLock = it } ?: return@synchronized
+        lastKeepOnLockFlags = flags
         // Renewed on every keeper tick (15 s); the limit only matters if the process dies holding it.
         runCatching { lock.acquire(SCREEN_LOCK_MS) }.onFailure { AppLogger.warning(TAG, "screen lock: ${it.message}") }
         if (!screenLockHeld) AppLogger.info(TAG, "keeping the phone screen on during the agent turn")
         screenLockHeld = lock.isHeld
     }
 
-    private fun releaseScreenLock() = synchronized(this) {
-        if (screenLock?.isHeld == true) { runCatching { screenLock?.release() }; AppLogger.info(TAG, "phone screen let go") }
+    internal fun releaseScreenLock() = synchronized(this) {
+        if (keepOnLock?.isHeld == true) { runCatching { keepOnLock?.release() }; AppLogger.info(TAG, "phone screen let go") }
+        if (wakeInputLock?.isHeld == true) runCatching { wakeInputLock?.release() }
         screenLockHeld = false
     }
 
     /**
      * Wake the phone's main screen (to the lock screen, never unlocking) when `WAKE_WHEN_NEEDED` is active and a
      * touch/gesture requires an interactive display. Rate-limited with an independent [WakeBudget] and suppressed
-     * whenever the device is heat-limited. Returns `null` on success, or an error reason when refused.
+     * whenever the device is heat-limited. Returns `null` only once the target virtual display [d.displayId]
+     * itself probes interactive via [InputReach.probeDirect], or an error reason when refused / timed out.
      */
+    internal fun wakePhoneForInput(d: VScreenDisplay): String? = wakePhoneForInputDisplay(d.displayId)
+
     @Suppress("DEPRECATION")
-    internal fun wakePhoneForInput(d: VScreenDisplay): String? {
+    internal fun wakePhoneForInputDisplay(displayId: Int): String? {
         if (VScreenStore.phoneScreenMode.value != VScreenStore.PhoneScreenMode.WAKE_WHEN_NEEDED) {
             return tr("当前未开启“需要时点亮”", "Wake-when-needed mode is not enabled")
         }
@@ -277,40 +302,56 @@ object VScreenAwake {
             return tr("手机当前处于过热降负载状态，暂停自动点亮屏幕", "Phone is thermally throttled; automatic screen wake is paused")
         }
         val ctx = appContext ?: return tr("服务未初始化，无法点亮屏幕", "Service not initialized; cannot wake the screen")
-        if (!phoneWakeBudget.allow(SystemClock.elapsedRealtime())) {
+        if (!phoneWakeBudget.allow(monoClockMs())) {
             return tr("短时间内点亮屏幕过于频繁，已暂停自动点亮，请稍后再试或手动点亮屏幕", "Screen was woken too frequently; automatic wake paused, retry later or turn the screen on manually")
         }
-        val pm = ctx.getSystemService(PowerManager::class.java)
-            ?: return tr("无法访问电源服务", "PowerManager unavailable")
-        synchronized(this) {
-            if (screenLock?.isHeld == true) runCatching { screenLock?.release() }
-            screenLock = runCatching {
-                pm.newWakeLock(PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "agentvscreen:wake-for-input")
-                    ?.apply { setReferenceCounted(false); acquire(SCREEN_LOCK_MS) }
-            }.getOrNull()
-            screenLockHeld = screenLock?.isHeld == true
+        val wakeFlags = PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP
+        val wakeHeld = synchronized(this) {
+            if (wakeInputLock?.isHeld == true) runCatching { wakeInputLock?.release() }
+            val lock = wakeInputLock ?: acquireWakeLock(ctx, wakeFlags, "agentvscreen:wake-for-input")
+                ?.also { wakeInputLock = it }
+            lastInputWakeLockFlags = wakeFlags
+            if (lock != null) {
+                runCatching { lock.acquire(SCREEN_LOCK_MS) }.onFailure { AppLogger.warning(TAG, "wake lock: ${it.message}") }
+            }
+            lock?.isHeld == true
         }
-        if (!screenLockHeld) {
+        if (!wakeHeld) {
             return tr("未能获取亮屏锁点亮主屏", "Failed to acquire wake lock to light the main screen")
         }
         screenWokeCount++
-        AppLogger.info(TAG, "woke phone screen for input on display ${d.displayId} (count=$screenWokeCount)")
-        val t0 = SystemClock.elapsedRealtime()
-        while (SystemClock.elapsedRealtime() - t0 < 2_000L) {
-            if (runCatching { pm.isInteractive }.getOrDefault(false)) {
-                screenOff = false
-                InputReach.invalidate(d.displayId)
-                if (InputReach.probe(d.displayId, force = true) == InputReach.Reach.OK) return null
+        AppLogger.info(TAG, "woke phone screen for input on display $displayId (count=$screenWokeCount)")
+        fun checkMainInteractive(): Boolean = isInteractiveFn?.invoke(ctx)
+            ?: runCatching { ctx.getSystemService(PowerManager::class.java)?.isInteractive == true }.getOrDefault(false)
+
+        var ready = false
+        try {
+            val t0 = monoClockMs()
+            while (true) {
+                if (checkMainInteractive()) screenOff = false
+                InputReach.invalidate(displayId)
+                // Always probe the target virtual display directly (never shortcut on !screenOff).
+                if (InputReach.probeDirect(displayId).reach == InputReach.Reach.OK) {
+                    ready = true
+                    break
+                }
+                if (monoClockMs() - t0 >= wakeTimeoutMs) break
+                sleepFn(wakePollStepMs)
             }
-            Thread.sleep(100)
+        } finally {
+            if (ready) {
+                // Hand off screen-on retention to the plain keep-on lock (never reusing ACQUIRE_CAUSES_WAKEUP).
+                if (wantsScreenLock(VScreenStore.phoneScreenMode.value, BackgroundOperation.agentTurnActive(), screenOff, com.kilon.agentvscreen.host.ThermalGuard.limited)) {
+                    holdScreenLock(ctx)
+                }
+            }
+            synchronized(this) {
+                if (wakeInputLock?.isHeld == true) runCatching { wakeInputLock?.release() }
+                screenLockHeld = keepOnLock?.isHeld == true
+            }
         }
-        val interactiveNow = runCatching { pm.isInteractive }.getOrDefault(false)
-        if (interactiveNow) {
-            screenOff = false
-            InputReach.invalidate(d.displayId)
-            if (InputReach.probe(d.displayId, force = true) == InputReach.Reach.OK) return null
-        }
-        return tr("已尝试点亮主屏，但 2 秒内输入仍未恢复可交互", "Attempted to wake the main screen, but input did not become interactive within 2 s")
+        if (ready) return null
+        return tr("已尝试点亮主屏，但 2 秒内副屏输入仍未恢复可交互", "Attempted to wake the main screen, but virtual display input did not become interactive within 2 s")
     }
 
     private const val SCREEN_LOCK_MS = 2 * 60_000L
@@ -323,6 +364,24 @@ object VScreenAwake {
     internal fun setScreenOffForTest(off: Boolean) {
         screenOff = off
         InputReach.invalidate()
+    }
+
+    internal fun resetWakeForTest(ctx: Context? = null) = synchronized(this) {
+        appContext = ctx?.applicationContext
+        if (keepOnLock?.isHeld == true) runCatching { keepOnLock?.release() }
+        if (wakeInputLock?.isHeld == true) runCatching { wakeInputLock?.release() }
+        keepOnLock = null
+        wakeInputLock = null
+        screenLockHeld = false
+        lastKeepOnLockFlags = 0
+        lastInputWakeLockFlags = 0
+        wakeLockFactory = null
+        isInteractiveFn = null
+        monoClockMs = { SystemClock.elapsedRealtime() }
+        sleepFn = { Thread.sleep(it) }
+        wakeTimeoutMs = 2_000L
+        wakePollStepMs = 100L
+        phoneWakeBudget.reset()
     }
 
     /** For status. */

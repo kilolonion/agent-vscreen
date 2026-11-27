@@ -175,9 +175,9 @@ class V200Beta16Test {
                 assertNotNull("CLI compatibility broken for '$old'", CommandSpec.of(old))
                 assertNotNull("help <cmd> compatibility broken for '$old'", CommandSpec.helpFor(old))
             }
-            // Budget baseline check for total serialized tools/list payload (beta16 baseline: ZH 16,191 / EN 27,164 chars).
+            // Budget baseline check for total serialized tools/list payload (includes JSON Schema 2020-12 $schema, full MCP annotations, and vscreen_fn).
             val totalChars = tools.toString().length
-            val budget = if (lang == I18n.Lang.ZH) 18_000 else 30_000
+            val budget = if (lang == I18n.Lang.ZH) 21_500 else 33_500
             println("MCP tools/list baseline ($lang): ${tools.length()} tools, $totalChars chars")
             assertTrue("($lang) tools/list grew past budget ($totalChars > $budget)", totalChars <= budget)
         }

@@ -230,6 +230,7 @@ internal object HttpCore {
         }
         val sb = StringBuilder("HTTP/1.1 ${r.status} $reason\r\nContent-Type: ${r.type}\r\n")
         if (r.stream == null) sb.append("Content-Length: ${r.body.size}\r\n")
+        else sb.append("Transfer-Encoding: chunked\r\n")
         sb.append("Connection: close\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nX-VScreen-Version: $versionHeader\r\n")
         r.headers.forEach { (k, v) ->
             sb.append(k).append(": ").append(v.replace("\r", "").replace("\n", " ")).append("\r\n")
@@ -241,7 +242,12 @@ internal object HttpCore {
             out.flush()
         } else {
             out.flush()
-            r.stream.invoke(ApiServer.Emitter(out))
+            val em = ApiServer.Emitter(out, chunked = true)
+            try {
+                r.stream.invoke(em)
+            } finally {
+                em.finish()
+            }
         }
     }
 

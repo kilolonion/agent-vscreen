@@ -462,6 +462,8 @@ class ApiServer(private val ctx: Context) {
         @Volatile var viaPublic: Boolean = false
         /** 2.0.0-beta7 (7.7): OAuth client_id when [viaPublic] is true. */
         @Volatile var publicClientId: String? = null
+        /** Independent per-pairing OAuth authorization grant ID when [viaPublic] is true. */
+        @Volatile var publicGrantId: String? = null
         /** 2.0.0-beta11: what this public credential may do now ([PublicOAuth.effectiveScope]); null off the public path. */
         @Volatile var publicScope: String? = null
         /** Forwarded by the built-in Tailscale node (loopback + its secret, never on public path). */
@@ -486,13 +488,35 @@ class ApiServer(private val ctx: Context) {
     }
 
     /** Writes server-sent events on a response that stays open while a command runs. */
-    class Emitter(private val out: OutputStream) {
+    class Emitter(private val out: OutputStream, private val chunked: Boolean = false) {
+        private var finished = false
+
         @Synchronized fun send(event: String?, data: String) {
+            if (finished) return
             val sb = StringBuilder()
             event?.let { sb.append("event: ").append(it).append('\n') }
             data.split('\n').forEach { sb.append("data: ").append(it).append('\n') }
             sb.append('\n')
-            out.write(sb.toString().toByteArray()); out.flush()
+            val bytes = sb.toString().toByteArray(Charsets.UTF_8)
+            if (chunked) {
+                out.write("${bytes.size.toString(16)}\r\n".toByteArray(Charsets.US_ASCII))
+                out.write(bytes)
+                out.write("\r\n".toByteArray(Charsets.US_ASCII))
+            } else {
+                out.write(bytes)
+            }
+            out.flush()
+        }
+
+        @Synchronized fun finish() {
+            if (finished) return
+            finished = true
+            if (chunked) {
+                runCatching {
+                    out.write("0\r\n\r\n".toByteArray(Charsets.US_ASCII))
+                    out.flush()
+                }
+            }
         }
     }
 
@@ -742,13 +766,15 @@ class ApiServer(private val ctx: Context) {
     // ── running a command ────────────────────────────────────────────────
 
     /** A command in flight or just finished, by request id: a retry of the same request gets the same result, not a second run. */
-    private class Flight(val call: Call) {
+    private class Flight(val call: Call, val at: Long) {
         val done = CountDownLatch(1)
         @Volatile var res: NativeOffloadResult? = null
-        val at = System.currentTimeMillis()
         val waiters = AtomicInteger(0)
     }
     private val flights = LinkedHashMap<String, Flight>()
+    @Volatile internal var idemClockMs: () -> Long = { System.currentTimeMillis() }
+    @Volatile internal var idemMax: Int = IDEM_MAX
+    @Volatile internal var execOverride: ((List<String>, String) -> NativeOffloadResult)? = null
 
     /** Run one command for [session] (no caller identity: the app's own use and tests). */
     fun exec(argv: List<String>, session: String): NativeOffloadResult {
@@ -809,7 +835,14 @@ class ApiServer(private val ctx: Context) {
      * Run a command for the caller of [r]: with its identity ([Call]: token, scope, peer), cancelled when the caller
      * goes away, and at most once per request id. Returns the result and whether it was a replay of an earlier run.
      */
-    fun runFor(r: Req, argv: List<String>, session: String, requestId: String?, onStep: ((String) -> Unit)? = null): Pair<NativeOffloadResult, Boolean> {
+    fun runFor(
+        r: Req,
+        argv: List<String>,
+        session: String,
+        requestId: String?,
+        onStep: ((String) -> Unit)? = null,
+        onCallCreated: ((Call) -> Unit)? = null,
+    ): Pair<NativeOffloadResult, Boolean> {
         val auth = r.auth ?: return NativeOffloadResult(1, "", "BAD_TOKEN") to false
         if (com.kilon.agentvscreen.host.ThermalGuard.locked) return NativeOffloadResult(1, tr("设备过热已暂停：", "Thermal stop: ") + com.kilon.agentvscreen.host.ThermalGuard.reason(), "THERMAL_STOP", data = com.kilon.agentvscreen.host.ThermalGuard.thermalErrorData()) to false
         val t = Tokens.byId(auth.token.id) ?: auth.token
@@ -828,14 +861,23 @@ class ApiServer(private val ctx: Context) {
         val call = Call(session, t.id, t.name, scopes, r.peerName, requestId, com.kilon.agentvscreen.I18n.code, t.trustUntil, via, source,
             srcAddr = if (r.viaPublic) r.headers["x-avs-public-src"]?.trim()?.take(64)?.takeIf { it.isNotEmpty() } else null)
         call.progress = onStep
+        onCallCreated?.invoke(call)
         val key = requestId?.let { "${t.id}:$it" }
         var mine: Flight? = null
         if (key != null) {
             val other = synchronized(flights) {
-                val now = System.currentTimeMillis()
+                val now = idemClockMs()
                 flights.entries.removeAll { it.value.res != null && now - it.value.at > IDEM_MS }
-                while (flights.size > IDEM_MAX) flights.remove(flights.keys.first())
-                flights[key] ?: run { mine = Flight(call).also { flights[key] = it }; null }
+                // Look up the caller's key FIRST so an in-TTL retry of the oldest entry is never evicted.
+                flights[key] ?: run {
+                    val limit = idemMax.coerceAtLeast(1)
+                    while (flights.size >= limit) {
+                        val finishedKey = flights.entries.firstOrNull { it.value.res != null }?.key ?: break
+                        flights.remove(finishedKey)
+                    }
+                    mine = Flight(call, now).also { flights[key] = it }
+                    null
+                }
             }
             if (other != null) {
                 // The same request again (the caller's connection broke and it retried): wait for the first run.
@@ -845,11 +887,11 @@ class ApiServer(private val ctx: Context) {
                 return (other.res ?: NativeOffloadResult(1, "", "CANCELLED")) to true
             }
         }
-        val flight = mine ?: Flight(call)
+        val flight = mine ?: Flight(call, idemClockMs())
         flight.waiters.incrementAndGet()
         val watch = watchDisconnect(r, flight)
         try {
-            val res = Call.with(call) { exec(argv, session) }
+            val res = Call.with(call) { execOverride?.invoke(argv, session) ?: exec(argv, session) }
             flight.res = res
             return res to false
         } finally { flight.done.countDown(); watch.interrupt() }
@@ -906,7 +948,7 @@ class ApiServer(private val ctx: Context) {
         val session = sessionOf(r, json)
         val requestId = (json?.optString("request_id")?.takeIf { it.isNotBlank() } ?: r.q("request_id") ?: r.headers["x-vscreen-request-id"])?.take(64)
         if (v2 && r.accepts("text/event-stream")) return Resp.sse { em ->
-            val (res, replayed) = runFor(r, argv, session, requestId) { line -> quiet("sse-step") { em.send("step", line) } }
+            val (res, replayed) = runFor(r, argv, session, requestId, onStep = { line -> quiet("sse-step") { em.send("step", line) } })
             quiet("sse-result") { em.send("result", envelope(res, session, requestId, replayed, r, true).toString()) }
             res.afterSend?.let { quiet("sse-after-send") { it() } }
         }

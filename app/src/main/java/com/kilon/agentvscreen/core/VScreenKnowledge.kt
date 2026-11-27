@@ -44,7 +44,7 @@ object VScreenKnowledge {
     fun label(pkg: String): String? = synchronized(labels) {
         if (labels.containsKey(pkg)) return labels[pkg]
         val l = ctx()?.packageManager?.let { pm ->
-            runCatching { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString().trim() }.getOrNull()
+            runCatching { com.kilon.agentvscreen.cmd.ScreenText.clean(pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString(), maxLen = 64) }.getOrNull()
         }?.takeIf { it.isNotEmpty() && it != pkg }
         labels[pkg] = l
         l

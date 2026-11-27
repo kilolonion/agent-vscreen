@@ -283,4 +283,133 @@ class V201IssuesTest {
         val enBlocked = I18n.with("en") { inputBlockedMessage() }
         assertFalse("EN INPUT_BLOCKED_SCREEN_OFF must not contain fullwidth punctuation: $enBlocked", fullwidth.containsMatchIn(enBlocked))
     }
+
+    // ── Fix 14 (#60): Direct target-display wake readiness probe ─────────────
+
+    @Test
+    fun wakePhoneForInputWaitsForDirectVirtualDisplayReadinessAcrossDelayedBlockedAndTimeoutCases() {
+        val ctx = RuntimeEnvironment.getApplication()
+        val pm = ctx.getSystemService(android.os.PowerManager::class.java)!!
+        try {
+            // Case 1: Main screen reports interactive on poll 1 (screenOff -> false), while virtual display 37
+            // stays non-interactive for 2 polls and recovers on poll 3. Must NOT return early on poll 1!
+            VScreenAwake.resetWakeForTest(ctx)
+            InputReach.resetForTest()
+            VScreenStore.setPhoneScreenMode(VScreenStore.PhoneScreenMode.WAKE_WHEN_NEEDED)
+            VScreenAwake.setScreenOffForTest(true)
+            var now = 100_000L
+            VScreenAwake.monoClockMs = { now }
+            VScreenAwake.sleepFn = { step -> now += step }
+            VScreenAwake.wakeTimeoutMs = 2_000L
+            VScreenAwake.wakePollStepMs = 100L
+            VScreenAwake.isInteractiveFn = { true } // main screen turns interactive immediately!
+            val createdLocks = ArrayList<Triple<Int, String, android.os.PowerManager.WakeLock>>()
+            VScreenAwake.wakeLockFactory = { _, flags, tag ->
+                pm.newWakeLock(flags, tag).also { createdLocks += Triple(flags, tag, it) }
+            }
+            var probes = 0
+            InputReach.interactiveProbe = { displayId ->
+                assertEquals(37, displayId)
+                probes++
+                probes >= 3
+            }
+
+            val errDelayed = VScreenAwake.wakePhoneForInputDisplay(37)
+            assertNull("Delayed display recovery must succeed once display 37 probes interactive: $errDelayed", errDelayed)
+            assertEquals("Must bypass !screenOff shortcut and probe display 37 until poll 3", 3, probes)
+            val wakeLockEntry = createdLocks.first { it.second == "agentvscreen:wake-for-input" }
+            @Suppress("DEPRECATION")
+            assertTrue((wakeLockEntry.first and android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP) != 0)
+            assertFalse("Active wakeInputLock must be released immediately after wake completes", wakeLockEntry.third.isHeld)
+
+            // Case 2: Main screen wakes, but virtual display 37 remains persistently BLOCKED -> must timeout with error!
+            VScreenAwake.resetWakeForTest(ctx)
+            InputReach.resetForTest()
+            VScreenStore.setPhoneScreenMode(VScreenStore.PhoneScreenMode.WAKE_WHEN_NEEDED)
+            VScreenAwake.setScreenOffForTest(true)
+            now = 200_000L
+            VScreenAwake.monoClockMs = { now }
+            VScreenAwake.sleepFn = { step -> now += step }
+            VScreenAwake.wakeTimeoutMs = 500L
+            VScreenAwake.wakePollStepMs = 100L
+            VScreenAwake.isInteractiveFn = { true }
+            var persistentProbes = 0
+            InputReach.interactiveProbe = {
+                persistentProbes++
+                false
+            }
+            val errBlocked = VScreenAwake.wakePhoneForInputDisplay(37)
+            assertNotNull("Persistently blocked virtual display MUST fail rather than letting input proceed", errBlocked)
+            assertTrue("Should probe multiple times before timing out", persistentProbes >= 4)
+
+            // Case 3: Main screen itself never becomes interactive -> times out cleanly with error.
+            VScreenAwake.resetWakeForTest(ctx)
+            InputReach.resetForTest()
+            VScreenStore.setPhoneScreenMode(VScreenStore.PhoneScreenMode.WAKE_WHEN_NEEDED)
+            VScreenAwake.setScreenOffForTest(true)
+            now = 300_000L
+            VScreenAwake.monoClockMs = { now }
+            VScreenAwake.sleepFn = { step -> now += step }
+            VScreenAwake.wakeTimeoutMs = 300L
+            VScreenAwake.wakePollStepMs = 100L
+            VScreenAwake.isInteractiveFn = { false }
+            InputReach.interactiveProbe = { false }
+            val errMainTimeout = VScreenAwake.wakePhoneForInputDisplay(37)
+            assertNotNull("Timeout when main screen never wakes must return error", errMainTimeout)
+        } finally {
+            VScreenAwake.resetWakeForTest()
+            InputReach.resetForTest()
+            VScreenStore.setPhoneScreenMode(VScreenStore.PhoneScreenMode.ALLOW_SLEEP)
+        }
+    }
+
+    // ── Fix 15 (#48/#60): Separate keepOnLock never reuses ACQUIRE_CAUSES_WAKEUP ──
+
+    @Test
+    @Suppress("DEPRECATION")
+    fun keepOnLockNeverReusesAcquireCausesWakeupAfterModeSwitchTurnEndOrThermalRelease() {
+        val ctx = RuntimeEnvironment.getApplication()
+        val pm = ctx.getSystemService(android.os.PowerManager::class.java)!!
+        try {
+            VScreenAwake.resetWakeForTest(ctx)
+            InputReach.resetForTest()
+            VScreenStore.setPhoneScreenMode(VScreenStore.PhoneScreenMode.WAKE_WHEN_NEEDED)
+            VScreenAwake.setScreenOffForTest(true)
+            var now = 400_000L
+            VScreenAwake.monoClockMs = { now }
+            VScreenAwake.sleepFn = { step -> now += step }
+            VScreenAwake.isInteractiveFn = { true }
+            InputReach.interactiveProbe = { true }
+
+            val created = ArrayList<Triple<Int, String, android.os.PowerManager.WakeLock>>()
+            VScreenAwake.wakeLockFactory = { _, flags, tag ->
+                pm.newWakeLock(flags, tag).also { created += Triple(flags, tag, it) }
+            }
+
+            // 1. Active wake under WAKE_WHEN_NEEDED uses dedicated wakeInputLock with ACQUIRE_CAUSES_WAKEUP.
+            assertNull(VScreenAwake.wakePhoneForInputDisplay(37))
+            val wakeEntry = created.single { it.second == "agentvscreen:wake-for-input" }
+            assertTrue((wakeEntry.first and android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP) != 0)
+            assertFalse("wakeInputLock must be released on handoff", wakeEntry.third.isHeld)
+
+            // 2. Switch mode to KEEP_ON, end turn (releaseScreenLock), simulate thermal release (suspendForHeat).
+            VScreenStore.setPhoneScreenMode(VScreenStore.PhoneScreenMode.KEEP_ON)
+            VScreenAwake.releaseScreenLock()
+            VScreenAwake.suspendForHeat()
+
+            // 3. Next ordinary holdScreenLock MUST create/reuse plain keepOnLock WITHOUT ACQUIRE_CAUSES_WAKEUP!
+            VScreenAwake.holdScreenLock(ctx)
+            val keepEntry = created.last { it.second == "agentvscreen:keep-screen-on" }
+            assertEquals(android.os.PowerManager.SCREEN_DIM_WAKE_LOCK, keepEntry.first)
+            assertEquals(0, keepEntry.first and android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP)
+            assertEquals(0, VScreenAwake.lastKeepOnLockFlags and android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP)
+            assertTrue("keepOnLock must be held", keepEntry.third.isHeld)
+            assertFalse("wakeInputLock must NEVER be re-acquired by ordinary keep-on", wakeEntry.third.isHeld)
+            assertTrue("keepOnLock and wakeInputLock must be distinct WakeLock instances", keepEntry.third !== wakeEntry.third)
+        } finally {
+            VScreenAwake.resetWakeForTest()
+            InputReach.resetForTest()
+            VScreenStore.setPhoneScreenMode(VScreenStore.PhoneScreenMode.ALLOW_SLEEP)
+        }
+    }
 }
