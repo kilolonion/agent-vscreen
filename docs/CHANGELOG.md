@@ -1,6 +1,6 @@
-# Earlier releases
+# Changelog
 
-Current `main` version highlights are in [README.md](../README.md#whats-new). Full release history follows newest first.
+Full release history follows newest first. See also [GitHub Releases](https://github.com/kilolonion/agent-vscreen/releases) and [中文版本记录](CHANGELOG.zh-CN.md).
 
 ## 2.0.1-beta1 (versionCode 75)
 

@@ -11,9 +11,9 @@ import org.robolectric.RobolectricTestRunner
 import java.io.File
 
 /**
- * P0-1 single-source doc sync gate: keeps version lines and "What's new" highlights in
- * `README.md`, `README.zh-CN.md`, and `API.md` strictly synchronized with [BuildConfig] and
- * [Changes.releases]. Like [AbilitiesTest], rewrites files only when `AVS_REGEN=1`.
+ * P0-1 single-source doc sync gate: keeps version lines in `README.md`, `README.zh-CN.md`, and
+ * `API.md` strictly synchronized with [BuildConfig], and ensures [Changes.releases] tracks the
+ * current build version. Like [AbilitiesTest], rewrites files only when `AVS_REGEN=1`.
  */
 @RunWith(RobolectricTestRunner::class)
 class DocsSyncTest {
@@ -41,13 +41,12 @@ class DocsSyncTest {
     }
 
     @Test
-    fun versionAndWhatsNewBlocksStaySynced() {
+    fun versionBlocksStaySynced() {
         val root = File("..")
         if (!File(root, "README.md").isFile) return
 
         val ver = BuildConfig.VERSION_NAME
         val code = BuildConfig.VERSION_CODE
-        val latest = Changes.releases.first()
         val regen = System.getenv("AVS_REGEN") == "1"
         val changed = ArrayList<String>()
 
@@ -64,29 +63,12 @@ class DocsSyncTest {
         val enVersion = "- Version on `main`: $ver (versionCode $code) · [Release APK](https://github.com/kilolonion/agent-vscreen/releases/tag/v$ver) · [Latest stable APK](https://github.com/kilolonion/agent-vscreen/releases/latest)"
         val apiVersion = "- 包名 `com.kilon.agentvscreen`，`main` 分支版本 $ver（versionCode $code）。官方测试版与正式版同签名可覆盖安装；安装前可按 [README 的说明](README.zh-CN.md#验证下载的-apk)验证签名。"
 
-        val zhWhatsNew = buildString {
-            append("### ").append(ver).append(" 更新内容\n\n")
-            latest.items.forEachIndexed { i, item ->
-                if (i > 0) append("\n")
-                append("- **").append(item.zhTitle).append("**：").append(item.zhDetail)
-            }
-        }
-        val enWhatsNew = buildString {
-            append("### What's new in ").append(ver).append("\n\n")
-            latest.items.forEachIndexed { i, item ->
-                if (i > 0) append("\n")
-                append("- **").append(item.enTitle).append("**: ").append(item.enDetail)
-            }
-        }
-
         sync(File(root, "README.zh-CN.md"), "<!-- version:start -->", "<!-- version:end -->", zhVersion)
-        sync(File(root, "README.zh-CN.md"), "<!-- whatsnew:start -->", "<!-- whatsnew:end -->", zhWhatsNew)
         sync(File(root, "README.md"), "<!-- version:start -->", "<!-- version:end -->", enVersion)
-        sync(File(root, "README.md"), "<!-- whatsnew:start -->", "<!-- whatsnew:end -->", enWhatsNew)
         sync(File(root, "API.md"), "<!-- version:start -->", "<!-- version:end -->", apiVersion)
 
         assertTrue(
-            "out of date, generated from BuildConfig & Changes.kt (./build.sh regen rewrites them): $changed",
+            "out of date, generated from BuildConfig (./build.sh regen rewrites them): $changed",
             regen || changed.isEmpty(),
         )
     }
