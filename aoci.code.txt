@@ -30,7 +30,7 @@ vscreen.sh[EN8L]: F:POSIX命令行客户端：读配置、支持VSCREEN_CODE或a
 dict.txt[FA5L]: F:PP-OCR识别模型的字符字典，每行一个字符，下标对应模型输出类别 | R:code:app/src/main/java/com/kilon/agentvscreen/core/VScreenPaddleOcr.kt | A:- | S:必须与rec模型同版本，行序即类别下标，增删或重排会让识别全错
 
 ===/<repository>/app/src/main/java/com/kilon/agentvscreen/===
-Changes.kt[SD6L]: F:版本更新日志单一事实源：按versionCode倒序维护中英条目(2.0.1-beta1含一次性接入码、公网配对/OAuth、协议19/MCP加固与Android 16/17分支发现)、受众与跳转路由，供升级弹窗、AgentNews及DocsSyncTest共享 | R:code:app/src/main/java/com/kilon/agentvscreen/api/AgentNews.kt,code:app/src/test/java/com/kilon/agentvscreen/api/DocsSyncTest.kt | A:Changes.releases,allUserReleases,agentItemsSince,selectAutoShow,init,consumeLaunchAutoShow | S:init须在VScreenApp早于ApiConfig.init运行，靠agent_vscreen_api是否为空区分全新安装与旧版升级；每次升versionCode须在releases首位补录条目且英文禁含全角标点
+Changes.kt[SD6L]: F:版本更新日志单一事实源：按versionCode倒序维护中英条目(2.0.1-beta1含接入码、公网CIMD/配对隔离、双栈MCP 2026-07-28、金融与屏幕隔离、熄屏/热锁及fn)、受众与路由，供升级弹窗、AgentNews与DocsSyncTest共享 | R:code:app/src/main/java/com/kilon/agentvscreen/api/AgentNews.kt,code:app/src/test/java/com/kilon/agentvscreen/api/DocsSyncTest.kt | A:Changes.releases,allUserReleases,agentItemsSince,selectAutoShow,init,consumeLaunchAutoShow | S:init须在VScreenApp早于ApiConfig.init运行，靠agent_vscreen_api是否为空区分全新安装与旧版升级；每次升versionCode须在releases首位补录条目且英文禁含全角标点
 I18n.kt[CL7T]: F:全应用语言与双语文本出口：管理UI语言choice(AUTO/中/英)、agent默认回复语言agentLang(默认en)及ThreadLocal按请求覆写与跨线程传递 | R:- | A:I18n.choice,agentLang,agentDefault,with,carry,tr | S:agent未指定语言时默认回复英文(AGENT_EN)，仅当agentLang设为auto才跟随UI语言；跨线程工作须用carry保留调用方语言
 
 ===/<repository>/app/src/main/java/com/kilon/agentvscreen/api/===
@@ -343,12 +343,12 @@ TaskTitleBarTest.kt[TU4T]: F:在禁用无限动画下以窄屏渲染任务顶栏
 robolectric.properties[TL2T]: F:Robolectric默认zh-rCN限定符，测试默认中文文字 | R:- | A:- | S:-
 
 ===/<repository>/docs/===
-CHANGELOG.md[SV3S]: F:英文完整版本更新历史，按时间倒序记录1.2.0至2.0.1-beta1(versionCode 75，含P0/P1安全、协议、Android 16/17兼容与CI门禁改动)并链接GitHub Releases与中文记录 | R:code:docs/CHANGELOG.zh-CN.md | A:- | S:-
-CHANGELOG.zh-CN.md[SV3M]: F:中文完整版本更新历史，按时间倒序记录1.1.0至2.0.1-beta1(versionCode 75，含P0/P1安全、协议、Android 16/17兼容与CI门禁改动)并链接GitHub Releases与英文记录 | R:code:docs/CHANGELOG.md | A:- | S:-
+CHANGELOG.md[SV3S]: F:英文完整版本更新历史，倒序记录1.2.0至2.0.1-beta1(versionCode 75，含P0/P1安全、双栈MCP 2026-07-28、CIMD、金融/屏幕隔离、#48/#60/#61、fn与看门狗)并链接Releases与中文记录 | R:code:docs/CHANGELOG.zh-CN.md | A:- | S:-
+CHANGELOG.zh-CN.md[SV3M]: F:中文完整版本更新历史，倒序记录1.1.0至2.0.1-beta1(versionCode 75，含P0/P1安全、双栈MCP 2026-07-28、CIMD、金融/屏幕隔离、#48/#60/#61、fn与看门狗)并链接Releases与英文记录 | R:code:docs/CHANGELOG.md | A:- | S:-
 REFERENCE.md[SG6L]: F:中英双语命令与结果码完整参考，覆盖闭环手势、--on/--hold、权限提权、fn(Android 16+ AppFunctions只读探测)及全量结果码(含FINANCE_APP_RISK、FN_UNSUPPORTED、FN_NOT_FOUND与双栈MCP码) | R:code:app/src/main/java/com/kilon/agentvscreen/cmd/CommandSpec.kt,code:app/src/main/java/com/kilon/agentvscreen/cmd/Codes.kt,code:app/src/test/java/com/kilon/agentvscreen/cmd/V120Test.kt | A:- | S:由CommandSpec与Codes经V120Test自动生成勿手改；变更后须执行build.sh regen并提交，否则CI校验工作区非空失败
 RELEASE-PROCESS.md[SV5T]: F:发布流程与安全门禁规范：定义分级沉淀期、候选版本核查清单(含regen与AOCI覆盖率)、release-device同标签矩阵及GitHub release环境隔离签名与非覆写发布规则 | R:code:.github/workflows/ci.yml,code:.github/workflows/device.yml,code:app/build.gradle.kts | A:- | S:私钥仅存release环境且限v*标签人工审批；android产出未签名APK不触密钥；签名Job不checkout、拒已签名输入、16KB对齐签名并验唯一证书SHA-256，绝不覆盖已有Release资产
 SPIKE-FRONT-DOOR.md[SR3T]: F:入口迁入Shizuku用户服务的1.2.0原始验证设计文档，顶部说明端口托管与冻结唤醒部分由core/Gate.kt守门人落地 | R:code:app/src/main/java/com/kilon/agentvscreen/core/Gate.kt,code:app/src/main/java/com/kilon/agentvscreen/api/ApiServer.kt | A:- | S:-
-TASKS.md[SQ5S]: F:发版前真机固定回归任务集(A至I组，覆盖2.0六行权限表、强确认、一次性接入码、敏感剪贴板与实验性公网MCP)及通用测试agent提示词 | R:code:docs/RELEASE-PROCESS.md | A:- | S:每轮换用不同应用并覆盖A到I全部任务，不针对具体第三方应用写死步骤
+TASKS.md[SQ5S]: F:发版前真机固定回归任务集(A至J组，覆盖2.0六行权限表、强确认、一次性接入码、公网CIMD、双栈MCP 2026-07-28、金融/屏幕隔离、fn及#48/#60/#61)及通用测试agent提示词 | R:code:docs/RELEASE-PROCESS.md | A:- | S:每轮换用不同应用并覆盖A到J全部任务，不针对具体第三方应用写死步骤
 
 ===/<repository>/gradle/wrapper/===
 gradle-wrapper.properties[FV3T]: F:固定Gradle发行版版本 | R:- | A:- | S:-
@@ -357,7 +357,7 @@ gradle-wrapper.properties[FV3T]: F:固定Gradle发行版版本 | R:- | A:- | S:-
 .gitignore[FE1T]: F:忽略打包出的toolpkg | R:- | A:- | S:-
 README.md[SE4T]: F:Operit ToolPkg中英说明：Shizuku/兼容分支或Root前提、安装及vscreen_configure兑换10分钟一次性接入码(avc_...)或静态令牌、vscreen工具用法与打包说明 | R:code:integrations/operit/manifest.json,code:integrations/operit/dist/packages/agent_vscreen.js | A:- | S:-
 build.sh[OE4T]: F:把manifest.json、dist与resources打成toolpkg zip | R:code:integrations/operit/manifest.json | A:- | S:每次发版都要重打toolpkg
-manifest.json[FE5T]: F:Operit ToolPkg清单：声明包ID、2.0.0版本、api_version、中英元数据、入口dist/main.js与agent_vscreen子包及图标资源 | R:code:integrations/operit/dist/packages/agent_vscreen.js,code:integrations/operit/dist/main.js,code:integrations/operit/build.sh | A:- | S:api_version保持1.0.0以兼容旧版Operit；CI先校验JSON合法性再由operit/build.sh打包
+manifest.json[FE5T]: F:Operit ToolPkg清单：声明包ID、2.0.1-beta1版本、api_version、中英元数据、入口dist/main.js与agent_vscreen子包及图标资源 | R:code:integrations/operit/dist/packages/agent_vscreen.js,code:integrations/operit/dist/main.js,code:integrations/operit/build.sh | A:- | S:api_version保持1.0.0以兼容旧版Operit；CI先校验JSON合法性再由operit/build.sh打包
 
 ===/<repository>/integrations/operit/dist/===
 main.js[EE3T]: F:ToolPkg入口，工具都在子包里，此处无需注册 | R:code:integrations/operit/dist/packages/agent_vscreen.js | A:- | S:-
@@ -476,6 +476,7 @@ build.sh[OV6T]: F:将锁定版本的cloudflared与Android DNS overlay静态编�
 ===/<repository>/docs/release-notes/===
 v2.0.0-beta15.md[SV2T]: F:v2.0.0-beta15预发布版说明，供CI发布Job直接用作GitHub Release正文，概述公网MCP、权限档位、强确认与手势闭环 | R:code:.github/workflows/ci.yml | A:- | S:-
 v2.0.0.md[SV2T]: F:v2.0.0正式版发布说明，供CI发布Job直接用作GitHub Release正文，汇总相对1.4.1的全部功能、改进与下载包信息 | R:code:.github/workflows/ci.yml | A:- | S:-
+v2.0.1-beta1.md[SV2T]: F:v2.0.1-beta1预发布版说明，供CI发布Job直接用作GitHub Release正文，概述安全加固、双栈MCP、CIMD、金融与屏幕隔离、#48/#60/#61、fn及待真机确认项 | R:code:.github/workflows/ci.yml | A:- | S:-
 
 ===/<repository>/element-detector/tools/detector/===
 train_colab.ipynb[XA2L]: F:含Colab A100实跑输出日志的无字元素检测训练笔记本副本，配置MODE=full与默认模型student-992x448，记录至第7轮 | R:code:tools/detector/train_colab.ipynb,code:tools/detector/prepare.py | A:- | S:属含运行日志的副本，正式训练模板在tools/detector/train_colab.ipynb
