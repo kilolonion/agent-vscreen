@@ -41,6 +41,7 @@ internal class Gate(
     private val readWchan: ((Collection<String>) -> List<Pair<String, String>>?)? = null,
     private val cleanupOnInit: Boolean = false,
     private val resolveLaunchers: (() -> Set<String>)? = null,
+    private val watchdog: LoopWatchdog = if (service != null) LoopWatchdog.process else LoopWatchdog(),
 ) {
     constructor(service: VScreenDisplayService) : this(service, SystemClockImpl, ProcessShell, cleanupOnInit = true)
 
@@ -96,7 +97,8 @@ internal class Gate(
 
     private val activeConns = AtomicInteger(0)
     private val openSockets = Collections.synchronizedSet(HashSet<Socket>())
-    @Volatile private var watchThread: Thread? = null
+    @Volatile private var watchHandle: LoopWatchdog.Handle? = null
+    @Volatile private var acceptHandle: LoopWatchdog.Handle? = null
 
     // Stats & wake state (guarded by wakeLock for updates, read cleanly via statusJson).
     @Volatile private var staleCount: Long = 0L
@@ -151,7 +153,11 @@ internal class Gate(
                 this.processName = processName
                 this.sdk = sdk
                 beat()
-                Thread({ acceptLoop(ss) }, "vscreen-gate-accept").apply { isDaemon = true }.start()
+                acceptHandle = watchdog.startLoop(
+                    name = "vscreen-gate-accept",
+                    critical = true,
+                    shouldRun = { !stopped && !ss.isClosed },
+                ) { ctx -> acceptLoop(ss, ctx) }
                 ensureWatchThreadLocked()
                 return p
             }
@@ -175,8 +181,8 @@ internal class Gate(
         runCatching { unhold() }
         synchronized(lifecycleLock) {
             stopped = true
-            watchThread?.interrupt()
-            watchThread = null
+            watchHandle?.stop()
+            watchHandle = null
             closeListenerLocked()
             hasBeat = false
             cancelledForCurrentStale.set(false)
@@ -184,6 +190,8 @@ internal class Gate(
     }
 
     private fun closeListenerLocked() {
+        acceptHandle?.stop()
+        acceptHandle = null
         val ss = server
         server = null
         boundPort = 0
@@ -410,6 +418,9 @@ internal class Gate(
         .put("last_wake_ms", lastWakeMs)
         .put("last_wake_cmds", JSONArray(lastWakeCmds))
         .put("held", JSONArray(heldProcsSnapshot()))
+        .put("watchdogs", watchdog.jsonArray())
+        .put("service_thread_deaths", ThreadGuard.deaths)
+        .put("last_service_thread_death", ThreadGuard.last ?: JSONObject.NULL)
 
     internal fun isBeatStale(nowMs: Long = clock.nowMs()): Boolean =
         !hasBeat || (nowMs - lastBeatMs > BEAT_STALE_MS)
@@ -459,23 +470,25 @@ internal class Gate(
     }
 
     private fun ensureWatchThreadLocked() {
-        if (!startWatchThread || watchThread?.isAlive == true) return
-        watchThread = Thread({
-            while (!Thread.currentThread().isInterrupted && !stopped) {
-                try {
-                    Thread.sleep(if (hasHeldProcs) HOLD_WATCH_MS else FINGER_WATCH_MS)
-                } catch (_: InterruptedException) {
-                    return@Thread
-                }
-                if (stopped) return@Thread
+        if (!startWatchThread || watchHandle?.alive == true) return
+        watchHandle = watchdog.startLoop(
+            name = "vscreen-gate-watch",
+            critical = true,
+            shouldRun = { !stopped },
+        ) { ctx ->
+            while (ctx.active) {
+                Thread.sleep(if (hasHeldProcs) HOLD_WATCH_MS else FINGER_WATCH_MS)
+                ctx.beat()
+                if (stopped) break
                 runCatching { checkHoldExpiry() }
                 runCatching { checkStaleFingers() }
             }
-        }, "vscreen-gate-watch").apply { isDaemon = true; start() }
+        }
     }
 
-    private fun acceptLoop(ss: ServerSocket) {
-        while (!ss.isClosed) {
+    private fun acceptLoop(ss: ServerSocket, ctx: LoopWatchdog.LoopContext? = null) {
+        ctx?.beat()
+        while (!ss.isClosed && (ctx?.active != false)) {
             val client = try {
                 ss.accept()
             } catch (_: SocketException) {
@@ -483,6 +496,7 @@ internal class Gate(
             } catch (_: Exception) {
                 continue
             }
+            ctx?.beat()
             if (activeConns.incrementAndGet() > MAX_CONN) {
                 activeConns.decrementAndGet()
                 runCatching { client.close() }

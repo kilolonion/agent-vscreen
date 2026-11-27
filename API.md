@@ -53,7 +53,7 @@ Agent-VScreen 是一个独立的 Android 应用。它在一块看不见的副屏
 - 服务运行时在主屏左上角放一个 1 像素、完全透明、不接收触摸的悬浮窗，让系统把它当作“用户可感知”的应用，不去冻结；
 - 每秒自检一次。亮屏时被冻结过（1.1.6 起熄屏时的不算），首页会出现 **后台运行受限**，点 **去设置** 会打开系统的后台管理页（荣耀/华为是“应用启动管理”，改成手动管理，允许自启动、关联启动和后台活动）；
 - 前台服务被系统拒绝时（比如手机在后台重启了 App），会等所选的权限来源就绪后通过它重试；打开一次 App 也会补上；
-- `vscreen status` 的 `host` 里有 `foreground_service`、`frozen_count`、`last_frozen_s`、`keep_alive_window`；被冻结过时，`degraded` 里会有 `frozen_in_background`；
+- `vscreen status` 的 `host` 里有 `foreground_service`、`frozen_count`、`last_frozen_s`、`keep_alive_window`、`swallowed_total`、`watchdogs`（以及 `gate.watchdogs`、`gate.service_thread_deaths`）；被冻结过时 `degraded` 里会有 `frozen_in_background`，关键后台循环异常停止或触发熔断时会有 `watchdog_unhealthy`；
 - 命令行先用 5 秒探一下 App：没有回应就直接说明“多半被冻结了”，不再干等。
 
 **端口被占用与自动顺延（1.4.0）**：如果是还没退出的旧 Agent-VScreen 进程，App 会自己重试接管。如果是别的程序（或分身空间里的另一份 Agent-VScreen）占着默认端口 `18765`，服务会自动顺延绑定 `18765..18774` 中第一个空闲端口；`vscreen` 命令行和 Operit 工具包会通过 `GET /v2/ping?me=<令牌id>&n=<随机数>` 自动校验并找到持有当前令牌的端口，无需手动改端口。

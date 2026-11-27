@@ -70,7 +70,7 @@ class VScreenDisplay private constructor(
     val isPublic: Boolean,
     private val virtualDisplay: VirtualDisplay?,
     private val reader: ImageReader,
-    private val thread: HandlerThread,
+    @Volatile private var thread: HandlerThread,
     /** Created by the Shizuku shell service: owned by the shell uid, so `am start --display` may use it. */
     val shellOwned: Boolean = false,
     /** VIRTUAL_DISPLAY_FLAG_TRUSTED was granted (Android 13+ shell display). */
@@ -337,93 +337,153 @@ class VScreenDisplay private constructor(
 
     /** Pump-thread only: the newest frame skipped by the throttle, converted when the throttle opens. */
     private var pending: android.media.Image? = null
-    private var pumpHandler: Handler? = null
+    @Volatile private var pumpHandler: Handler? = null
+    private val pumpLock = Any()
+    @Volatile private var pumpWatchdog: LoopWatchdog.ExternalHandle? = null
     private var pendingCaptureMs = 0L
     private var pendingWasPreviewed = false
     private val flushPending = Runnable {
-        val p = pending ?: return@Runnable
-        pending = null
-        if (colorFastMode && latestRaw != null) {
+        try {
+            val p = pending ?: return@Runnable
+            pending = null
+            if (colorFastMode && latestRaw != null) {
+                pendingWasPreviewed = false
+                com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-flush") { p.close() }
+                return@Runnable
+            }
+            // The trailing frame is also the picture the viewer must end on.
+            val copiedScratch = if (previewIntervalMs != Long.MAX_VALUE && !pendingWasPreviewed) drawPreview(p) else null
             pendingWasPreviewed = false
-            com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-flush") { p.close() }
-            return@Runnable
+            convert(p, pendingCaptureMs, preCopied = copiedScratch)
+        } catch (vm: VirtualMachineError) {
+            throw vm
+        } catch (t: Throwable) {
+            AppLogger.warning(TAG, "flushPending failed on display $displayId: ${t.javaClass.simpleName}: ${t.message}")
+            pumpWatchdog?.recordError(t)
         }
-        // The trailing frame is also the picture the viewer must end on.
-        val copiedScratch = if (previewIntervalMs != Long.MAX_VALUE && !pendingWasPreviewed) drawPreview(p) else null
-        pendingWasPreviewed = false
-        convert(p, pendingCaptureMs, preCopied = copiedScratch)
     }
 
     private fun startPump() {
+        synchronized(pumpLock) {
+            pumpWatchdog = LoopWatchdog.process.registerExternal(
+                name = "minis-vscreen-frames",
+                critical = true,
+                aliveProbe = { !released && thread.isAlive },
+            )
+            attachPumpListenerLocked()
+        }
+    }
+
+    /** If the frame pump HandlerThread died unexpectedly while display is active, rebuild it under watchdog backoff. */
+    fun ensurePumpAlive(): Boolean {
+        if (released) return false
+        if (thread.isAlive && thread.looper != null) return true
+        return synchronized(pumpLock) {
+            if (released) return@synchronized false
+            if (thread.isAlive && thread.looper != null) return@synchronized true
+            val dog = pumpWatchdog
+            if (dog != null && dog.recordError(IllegalStateException("frame pump thread died")) < 0L) {
+                return@synchronized false
+            }
+            runCatching {
+                val next = HandlerThread("minis-vscreen-frames").apply { start() }
+                thread = next
+                attachPumpListenerLocked()
+                listener?.let { l ->
+                    val dm = watchContext?.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+                    if (dm != null) {
+                        runCatching { dm.unregisterDisplayListener(l) }
+                        runCatching { dm.registerDisplayListener(l, pumpHandler) }
+                    }
+                }
+                dog?.markAlive()
+                AppLogger.warning(TAG, "rebuilt frame pump thread on display $displayId")
+                true
+            }.onFailure { t ->
+                if (t is VirtualMachineError) throw t
+                AppLogger.warning(TAG, "failed to rebuild frame pump thread: ${t.javaClass.simpleName}: ${t.message}")
+            }.getOrDefault(false)
+        }
+    }
+
+    private fun attachPumpListenerLocked() {
         val h = Handler(thread.looper).also { pumpHandler = it }
         reader.setOnImageAvailableListener({ r ->
-            // Always acquire, and never hold more than one image (the pending one):
-            // the queue must never fill up.
-            val img = runCatching { r.acquireLatestImage() }.getOrNull() ?: return@setOnImageAvailableListener
-            val dropForHeat = com.kilon.agentvscreen.host.ThermalGuard.ocrPaused ||
-                (com.kilon.agentvscreen.host.ThermalGuard.limited && !throttle.isUrgent() && latestRaw != null)
-            if (dropForHeat || (VScreenAwake.screenOff && !BackgroundOperation.needsAwake())) {
-                img.close(); return@setOnImageAvailableListener
-            }
-            val now = SystemClock.elapsedRealtime()
-            lastFrameAtMs = now
-            if (colorWatches.isNotEmpty()) sampleColors(img, now)
-            if (colorFastMode && latestRaw != null) {
-                // 5.7 #1: never hold a pending ImageReader buffer or allocate a 10MB full-res LOS bitmap during
-                // pure-color hold; sample ColorWatch on every frame, and every 500ms update preview (reusing scratch)
-                // plus a lightweight 480px thumbnail for VScreenRecorder on the low-priority perception thread.
-                h.removeCallbacks(flushPending)
-                com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-pending") { pending?.close() }
-                pending = null
-                pendingWasPreviewed = false
-                val ref = maxOf(lastColorFastFrameMs, latestCaptureAtMs)
-                if (!colorFastFrameDue(now, ref)) {
+            try {
+                pumpWatchdog?.beat()
+                // Always acquire, and never hold more than one image (the pending one):
+                // the queue must never fill up.
+                val img = runCatching { r.acquireLatestImage() }.getOrNull() ?: return@setOnImageAvailableListener
+                val dropForHeat = com.kilon.agentvscreen.host.ThermalGuard.ocrPaused ||
+                    (com.kilon.agentvscreen.host.ThermalGuard.limited && !throttle.isUrgent() && latestRaw != null)
+                if (dropForHeat || (VScreenAwake.screenOff && !BackgroundOperation.needsAwake())) {
+                    img.close(); return@setOnImageAvailableListener
+                }
+                val now = SystemClock.elapsedRealtime()
+                lastFrameAtMs = now
+                if (colorWatches.isNotEmpty()) sampleColors(img, now)
+                if (colorFastMode && latestRaw != null) {
+                    // 5.7 #1: never hold a pending ImageReader buffer or allocate a 10MB full-res LOS bitmap during
+                    // pure-color hold; sample ColorWatch on every frame, and every 500ms update preview (reusing scratch)
+                    // plus a lightweight 480px thumbnail for VScreenRecorder on the low-priority perception thread.
+                    h.removeCallbacks(flushPending)
+                    com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-pending") { pending?.close() }
+                    pending = null
+                    pendingWasPreviewed = false
+                    val ref = maxOf(lastColorFastFrameMs, latestCaptureAtMs)
+                    if (!colorFastFrameDue(now, ref)) {
+                        com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-close") { img.close() }
+                        return@setOnImageAvailableListener
+                    }
+                    lastColorFastFrameMs = now
+                    val iw = img.width
+                    val ih = img.height
+                    val turn = bufferTurn
+                    val sc = runCatching { copyToScratch(img) }.getOrNull()
                     com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-close") { img.close() }
+                    if (sc != null && !sc.isRecycled) {
+                        if (previewIntervalMs != Long.MAX_VALUE) {
+                            runCatching { paintPreview(sc, iw, ih, turn) }
+                        }
+                        val small = runCatching { scaleForRecorder(sc, iw, ih, turn) }.getOrNull()
+                        if (small != null) {
+                            val recVer = _frameVersion.value * 1_000L + (++colorFastRecSeq)
+                            val old = synchronized(colorFastRecLock) {
+                                colorFastRecFrame.also { colorFastRecFrame = small to recVer }
+                            }
+                            old?.first?.recycle()
+                        }
+                    }
                     return@setOnImageAvailableListener
                 }
-                lastColorFastFrameMs = now
-                val iw = img.width
-                val ih = img.height
-                val turn = bufferTurn
-                val sc = runCatching { copyToScratch(img) }.getOrNull()
-                com.kilon.agentvscreen.host.quiet("VScreenDisplay:fast-close") { img.close() }
-                if (sc != null && !sc.isRecycled) {
-                    if (previewIntervalMs != Long.MAX_VALUE) {
-                        runCatching { paintPreview(sc, iw, ih, turn) }
-                    }
-                    val small = runCatching { scaleForRecorder(sc, iw, ih, turn) }.getOrNull()
-                    if (small != null) {
-                        val recVer = _frameVersion.value * 1_000L + (++colorFastRecSeq)
-                        val old = synchronized(colorFastRecLock) {
-                            colorFastRecFrame.also { colorFastRecFrame = small to recVer }
-                        }
-                        old?.first?.recycle()
-                    }
+                val previewBefore = _previewVersion.value
+                val copiedScratch = if (now - lastPreviewMs >= previewIntervalMs) drawPreview(img) else null
+                val previewed = _previewVersion.value != previewBefore
+                val wait = throttle.delayMs(now, frameInterval)
+                if (wait > 0 && latestRaw != null) {
+                    // Throttled. Keep this frame as the trailing one instead of dropping it:
+                    // otherwise the LAST frame of an animation (a list snapping back, a page
+                    // sliding in) can be lost and a static screen keeps showing a mid-animation
+                    // picture (e.g. two stacked title bars) until something else redraws.
+                    com.kilon.agentvscreen.host.quiet("VScreenDisplay:238") { pending?.close() }
+                    pending = img
+                    pendingCaptureMs = now
+                    pendingWasPreviewed = previewed
+                    h.removeCallbacks(flushPending)
+                    h.postDelayed(flushPending, wait)
+                    return@setOnImageAvailableListener
                 }
-                return@setOnImageAvailableListener
-            }
-            val previewBefore = _previewVersion.value
-            val copiedScratch = if (now - lastPreviewMs >= previewIntervalMs) drawPreview(img) else null
-            val previewed = _previewVersion.value != previewBefore
-            val wait = throttle.delayMs(now, frameInterval)
-            if (wait > 0 && latestRaw != null) {
-                // Throttled. Keep this frame as the trailing one instead of dropping it:
-                // otherwise the LAST frame of an animation (a list snapping back, a page
-                // sliding in) can be lost and a static screen keeps showing a mid-animation
-                // picture (e.g. two stacked title bars) until something else redraws.
-                com.kilon.agentvscreen.host.quiet("VScreenDisplay:238") { pending?.close() }
-                pending = img
-                pendingCaptureMs = now
-                pendingWasPreviewed = previewed
                 h.removeCallbacks(flushPending)
-                h.postDelayed(flushPending, wait)
-                return@setOnImageAvailableListener
+                com.kilon.agentvscreen.host.quiet("VScreenDisplay:245") { pending?.close() }
+                pending = null
+                pendingWasPreviewed = false
+                convert(img, now, preCopied = copiedScratch)
+            } catch (vm: VirtualMachineError) {
+                throw vm
+            } catch (t: Throwable) {
+                AppLogger.warning(TAG, "frame pump callback failed on display $displayId: ${t.javaClass.simpleName}: ${t.message}")
+                pumpWatchdog?.recordError(t)
             }
-            h.removeCallbacks(flushPending)
-            com.kilon.agentvscreen.host.quiet("VScreenDisplay:245") { pending?.close() }
-            pending = null
-            pendingWasPreviewed = false
-            convert(img, now, preCopied = copiedScratch)
         }, h)
     }
 
@@ -703,7 +763,10 @@ class VScreenDisplay private constructor(
     }
 
     /** Make the pump convert the very next frame regardless of the throttle. */
-    fun requestFreshFrame() { throttle.request() }
+    fun requestFreshFrame() {
+        ensurePumpAlive()
+        throttle.request()
+    }
 
     /**
      * A frame at least as new as [notOlderThanMs] (elapsed realtime), waiting
@@ -725,6 +788,8 @@ class VScreenDisplay private constructor(
     fun release() {
         if (released) return
         released = true
+        pumpWatchdog?.markStopped()
+        pumpWatchdog = null
         listener?.let { l -> runCatching { (watchContext?.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)?.unregisterDisplayListener(l) } }
         listener = null
         com.kilon.agentvscreen.host.quiet("VScreenDisplay:403") { reader.setOnImageAvailableListener(null, null) }

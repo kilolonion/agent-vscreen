@@ -42,6 +42,7 @@ internal fun diagText(context: android.content.Context): String = buildString {
         "native_allocated_kib=${android.os.Debug.getNativeHeapAllocatedSize() / 1024}")
     appendLine(com.kilon.agentvscreen.host.Privileged.diagnostics(context))
     appendLine("gate: ${com.kilon.agentvscreen.host.Liveness.gateJson()?.toString() ?: "off"}")
+    appendLine("watchdogs: ${com.kilon.agentvscreen.core.LoopWatchdog.process.summary()}")
     appendLine("hold: ${ActHold.diagSummary()}")
     appendLine("detector: ${com.kilon.agentvscreen.core.VScreenDetector.status(context)}")
     appendLine("onnx: ${com.kilon.agentvscreen.core.OnnxRuntime.summary(context)}")

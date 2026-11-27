@@ -87,7 +87,7 @@ object Liveness {
     }
 
     private fun interactive(): Boolean = runCatching { pm?.isInteractive }.getOrNull() ?: true
-    private var ticker: Thread? = null
+    private var tickerHandle: com.kilon.agentvscreen.core.LoopWatchdog.Handle? = null
 
     fun foregroundOk() { foreground = true; foregroundError = null }
     fun foregroundFailed(why: String) {
@@ -97,12 +97,17 @@ object Liveness {
     fun serviceGone() { foreground = false }
 
     @Synchronized fun start() {
-        if (ticker?.isAlive == true) return
-        ticker = Thread({
+        if (tickerHandle?.alive == true) return
+        tickerHandle = com.kilon.agentvscreen.core.LoopWatchdog.process.startLoop(
+            name = "vscreen-liveness",
+            critical = true,
+            priority = Thread.MAX_PRIORITY,
+        ) { ctx ->
             var last = SystemClock.uptimeMillis()
             var wasOn = interactive()
-            while (true) {
-                try { Thread.sleep(1_000) } catch (_: InterruptedException) { return@Thread }
+            while (ctx.active) {
+                Thread.sleep(1_000)
+                ctx.beat()
                 val now = SystemClock.uptimeMillis()
                 val gap = now - last - 1_000
                 last = now
@@ -118,7 +123,7 @@ object Liveness {
                 }
                 wasOn = on
             }
-        }, "vscreen-liveness").apply { isDaemon = true; priority = Thread.MAX_PRIORITY }.also { it.start() }
+        }
     }
 
     private fun visitedAt(): Long = app?.let { prefs(it).getLong("vendor_bg_visited", 0L) } ?: 0L
@@ -166,6 +171,8 @@ object Liveness {
         .put("previous_exit", ExitInfo.last ?: JSONObject.NULL)
         .put("background_thread_deaths", com.kilon.agentvscreen.core.ThreadGuard.deaths)
         .put("last_background_thread_death", com.kilon.agentvscreen.core.ThreadGuard.last ?: JSONObject.NULL)
+        .put("swallowed_total", Swallowed.totalCount())
+        .put("watchdogs", com.kilon.agentvscreen.core.LoopWatchdog.process.jsonArray())
         .put("gate", gateJson() ?: JSONObject.NULL)
         .put("ocr_selftest", com.kilon.agentvscreen.core.VScreenOcr.selfTestStatusJson(app))
 

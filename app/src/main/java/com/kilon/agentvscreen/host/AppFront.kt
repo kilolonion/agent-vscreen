@@ -47,6 +47,11 @@ object ExitInfo {
     fun init(ctx: android.content.Context) {
         // 1.4.2: a background thread's exception ends that thread, not the process (see ThreadGuard).
         com.kilon.agentvscreen.core.ThreadGuard.install({ AppLogger.error("Crash", it) }) { tag, t -> Swallowed.note(tag, t) }
+        com.kilon.agentvscreen.core.LoopWatchdog.process.attachLogger { name, msg, err ->
+            val suffix = err?.let { " / ${it.javaClass.simpleName}: ${it.message?.take(160)}" } ?: ""
+            AppLogger.warning("Watchdog/$name", "$msg$suffix")
+            if (err != null) Swallowed.note("watchdog/$name", err)
+        }
         runCatching {
             val am = ctx.getSystemService(android.app.ActivityManager::class.java) ?: return
             val r = am.getHistoricalProcessExitReasons(ctx.packageName, 0, 1).firstOrNull() ?: return

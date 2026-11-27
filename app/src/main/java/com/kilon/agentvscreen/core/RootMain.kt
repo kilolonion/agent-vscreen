@@ -72,17 +72,19 @@ class RootMain {
             keep = watcher
             send("start")
             // Uninstalled: nobody will ever send DESTROY, so give everything back and go.
-            Thread({
-                while (true) {
+            LoopWatchdog.process.startLoop("vscreen-root-watch", critical = true) { ctx ->
+                while (ctx.active) {
                     Thread.sleep(30_000)
+                    ctx.beat()
                     if (apk.isNotEmpty() && !File(apk).exists() && !installed(pkg)) {
                         log("$pkg is gone: stopping")
+                        ctx.stopCleanly()
                         val d = Parcel.obtain(); val r = Parcel.obtain()
                         runCatching { service.transact(VScreenDisplayService.DESTROY_CODE, d, r, 0) }
                         System.exit(0)
                     }
                 }
-            }, "vscreen-root-watch").apply { isDaemon = true }.start()
+            }
             log("up: uid=${android.os.Process.myUid()} sdk=${Build.VERSION.SDK_INT} pkg=$pkg v$version")
             Looper.loop()
         }

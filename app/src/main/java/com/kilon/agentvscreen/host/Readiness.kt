@@ -63,6 +63,8 @@ object Readiness {
         val shellOwned: Boolean? = null,
         /** 2.0.0-beta2: OCR engines that crashed during self-test and are disabled for this app versionCode. */
         val ocrCrashedEngines: Set<String> = emptySet(),
+        /** Critical background loops (app or privileged service) that tripped or exited unexpectedly. */
+        val unhealthyWatchdogs: List<String> = emptyList(),
     )
 
     fun evaluate(i: Inputs): List<Item> = buildList {
@@ -115,6 +117,17 @@ object Readiness {
             add(Item("ocr_degraded", false, tr("PP-OCRv6 在自检时崩溃，本版本已禁用，改由 ML Kit 接手（运行 diag 或升级应用后重试）",
                 "PP-OCRv6 crashed during self-test and is disabled for this version; ML Kit took over (run diag or update the app to retry)")))
         }
+        if (i.unhealthyWatchdogs.isNotEmpty()) {
+            val names = i.unhealthyWatchdogs.joinToString(", ")
+            add(Item(
+                "watchdog_unhealthy",
+                false,
+                tr(
+                    "后台循环异常停止或触发熔断（$names），部分后台能力可能失活；请查看 diag 并重启服务",
+                    "Background loop stopped or tripped ($names); some background features may be inactive; inspect diag and restart the service",
+                ),
+            ))
+        }
     }
 
     fun inputs(ctx: Context): Inputs {
@@ -127,6 +140,11 @@ object Readiness {
             Tailnet.Mode.SYSTEM -> HostService.server?.tailAddress != null
             else -> true
         }
+        val unhealthy = buildList {
+            addAll(com.kilon.agentvscreen.core.LoopWatchdog.process.unhealthyCriticalNames())
+            val remote = Liveness.gateJson()?.optJSONArray("watchdogs")
+            addAll(com.kilon.agentvscreen.core.LoopWatchdog.unhealthyFromJson(remote, prefix = "service/"))
+        }.distinct()
         return Inputs(
             serviceOn = !Prefs.blocked(ctx), serviceAlive = HostService.isAlive, foreground = Liveness.foreground,
             privilege = s.privilege.name, connection = s.connection.name, needsReconnect = s.needsExplicitReconnect,
@@ -134,6 +152,7 @@ object Readiness {
             remoteWhy = if (!remoteUp && phase != null) runCatching { Tailnet.line(ctx) }.getOrNull() else null,
             liveWhy = Liveness.problem(),
             ocrCrashedEngines = com.kilon.agentvscreen.core.VScreenOcr.crashedEngines(ctx),
+            unhealthyWatchdogs = unhealthy,
         )
     }
 

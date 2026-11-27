@@ -153,43 +153,112 @@ class HostService : Service() {
         com.kilon.agentvscreen.core.VScreenOwnership.start(applicationContext)
         com.kilon.agentvscreen.core.VScreenOcr.maybeStartSelfTest(applicationContext)
         // 1.3 beta4: woken while hidden: go back once nothing needs the service (ServiceControl.shouldSleep).
+        val sleeperDog = com.kilon.agentvscreen.core.LoopWatchdog.process.registerExternal("vscreen-host-sleeper", critical = true)
+        sleeperWatchdog = sleeperDog
         sleeper = scope.launch {
-            while (true) {
-                kotlinx.coroutines.delay(60_000L)
-                PublicAccess.checkIdle(applicationContext)
-                if (ServiceControl.shouldSleep(applicationContext)) {
-                    AppLogger.info("HostService", "nothing needs the service: hidden again")
-                    BackgroundOperation.stopAndRelease(tr("用完了，自动收起", "Done: hidden again"))
-                    stopSelf(); break
+            try {
+                while (true) {
+                    kotlinx.coroutines.delay(60_000L)
+                    try {
+                        sleeperDog.beat()
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            PublicAccess.checkIdle(applicationContext)
+                        }
+                        val sleepNow = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                            ServiceControl.shouldSleep(applicationContext)
+                        }
+                        if (sleepNow) {
+                            AppLogger.info("HostService", "nothing needs the service: hidden again")
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                BackgroundOperation.stopAndRelease(tr("用完了，自动收起", "Done: hidden again"))
+                            }
+                            stopSelf()
+                            break
+                        }
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (t: Throwable) {
+                        if (t is VirtualMachineError) throw t
+                        val backoff = sleeperDog.recordError(t)
+                        if (backoff < 0L) break
+                        kotlinx.coroutines.delay(backoff)
+                    }
                 }
+            } finally {
+                if (!sleeperDog.tripped) sleeperDog.markStopped()
             }
         }
         // 1.1.6: the Stop lock and a hidden window are never silent: both live in the notification shade.
+        val watchDog = com.kilon.agentvscreen.core.LoopWatchdog.process.registerExternal("vscreen-host-watch", critical = true)
+        watchWatchdog = watchDog
         watch = scope.launch {
-            kotlinx.coroutines.flow.combine(
-                BackgroundOperation.state.map { Triple(it.userStopped, it.windowHidden && it.displayId != null, it.stoppedAt) }.distinctUntilChanged(),
-                Tailnet.status.map { it.state to it.ip }.distinctUntilChanged(),
-            ) { a, _ -> a }.collect { (stopped, _, _) -> renotify(); stoppedNote(stopped) }
+            try {
+                while (true) {
+                    try {
+                        kotlinx.coroutines.flow.combine(
+                            BackgroundOperation.state.map { Triple(it.userStopped, it.windowHidden && it.displayId != null, it.stoppedAt) }.distinctUntilChanged(),
+                            Tailnet.status.map { it.state to it.ip }.distinctUntilChanged(),
+                        ) { a, _ -> a }.collect { (stopped, _, _) ->
+                            try {
+                                watchDog.beat()
+                                renotify()
+                                stoppedNote(stopped)
+                            } catch (e: kotlinx.coroutines.CancellationException) {
+                                throw e
+                            } catch (t: Throwable) {
+                                if (t is VirtualMachineError) throw t
+                                AppLogger.warning("HostService", "watch update failed: ${t.javaClass.simpleName}: ${t.message}")
+                                Swallowed.note("HostService:watch", t)
+                            }
+                        }
+                        break
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (t: Throwable) {
+                        if (t is VirtualMachineError) throw t
+                        val backoff = watchDog.recordError(t)
+                        if (backoff < 0L) break
+                        kotlinx.coroutines.delay(backoff)
+                    }
+                }
+            } finally {
+                if (!watchDog.tripped) watchDog.markStopped()
+            }
         }
     }
 
-    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
+    private val scope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() +
+            kotlinx.coroutines.Dispatchers.Main +
+            kotlinx.coroutines.CoroutineExceptionHandler { _, t ->
+                if (t is VirtualMachineError) throw t
+                AppLogger.error("HostService", "uncaught coroutine error", t)
+                Swallowed.note("HostService:scope", t)
+            },
+    )
     private var watch: kotlinx.coroutines.Job? = null
     private var sleeper: kotlinx.coroutines.Job? = null
+    private var watchWatchdog: com.kilon.agentvscreen.core.LoopWatchdog.ExternalHandle? = null
+    private var sleeperWatchdog: com.kilon.agentvscreen.core.LoopWatchdog.ExternalHandle? = null
     private var refusedBlocked = false
-    @Volatile private var beatThread: Thread? = null
+    @Volatile private var beatHandle: com.kilon.agentvscreen.core.LoopWatchdog.Handle? = null
 
     /** 2.0.0-beta2: periodic heartbeat to Gate off the main thread; stops when HostService is destroyed. */
     private fun startGateBeat() {
-        if (beatThread?.isAlive == true) return
-        beatThread = Thread({
-            while (!Thread.currentThread().isInterrupted && isAlive) {
+        if (beatHandle?.alive == true) return
+        beatHandle = com.kilon.agentvscreen.core.LoopWatchdog.process.startLoop(
+            name = "vscreen-gate-beat",
+            critical = true,
+            shouldRun = { isAlive },
+        ) { ctx ->
+            while (ctx.active) {
+                ctx.beat()
                 if (Privileged.isReady() && server?.usingGate == true) {
                     runCatching { com.kilon.agentvscreen.core.VScreenRemoteDisplay.gateBeat() }
                 }
-                try { Thread.sleep(1_000L) } catch (_: InterruptedException) { break }
+                Thread.sleep(1_000L)
             }
-        }, "vscreen-gate-beat").apply { isDaemon = true }.also { it.start() }
+        }
     }
 
     /**
@@ -257,8 +326,10 @@ class HostService : Service() {
             return
         }
         isAlive = false
-        beatThread?.interrupt(); beatThread = null
+        beatHandle?.stop(); beatHandle = null
         watch?.cancel(); sleeper?.cancel()
+        watchWatchdog?.markStopped(); watchWatchdog = null
+        sleeperWatchdog?.markStopped(); sleeperWatchdog = null
         Tailnet.stop("service destroyed")
         PublicAccess.onServiceDestroyed(applicationContext)
         com.kilon.agentvscreen.host.quiet("HostService:167") { getSystemService(NotificationManager::class.java)?.cancel(STOP_NOTE_ID) }
