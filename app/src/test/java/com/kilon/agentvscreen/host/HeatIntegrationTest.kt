@@ -26,8 +26,22 @@ class HeatIntegrationTest {
         assertEquals(ServiceControl.State.BLOCKED, ServiceControl.now(app))
         assertFalse(ServiceControl.wake(app, "booked window"))
         HostService.start(app); assertNull(shadowOf(app).nextStartedService)
-        try { BackgroundOperation.acquire("agent", true); fail("display created while hot") } catch (e: BackgroundOperation.ActionError) { assertEquals("THERMAL_STOP", e.code) }
+        try {
+            BackgroundOperation.acquire("agent", true)
+            fail("display created while hot")
+        } catch (e: BackgroundOperation.ActionError) {
+            assertEquals("THERMAL_STOP", e.code)
+            val th = e.data?.optJSONObject("thermal")
+            assertNotNull("THERMAL_STOP must carry structured thermal payload", th)
+            assertTrue(th!!.getBoolean("hard_stop_enabled"))
+        }
         assertEquals(0, VScreenRules.restore()); assertFalse(HostService.isAlive)
+
+        // Turning off hard-stop while locked unlocks immediately and clears persisted locked state.
+        ThermalGuard.setHardStopEnabled(false)
+        assertFalse(ThermalGuard.locked)
+        assertFalse(app.getSharedPreferences("thermal_safety_v1", Context.MODE_PRIVATE).getBoolean("locked", true))
+        ThermalGuard.setHardStopEnabled(true)
     }
     @Test fun systemBatteryBroadcastTripsLatchWithoutWritingUserServicePreference() {
         val app = RuntimeEnvironment.getApplication()

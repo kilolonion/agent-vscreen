@@ -80,6 +80,7 @@ class ExecAllowlistTest {
         ok("dumpsys", "activity", "activities")
         ok("dumpsys", "window", "windows")
         ok("dumpsys", "media_session")
+        ok("dumpsys", "input")
         ok("dumpsys", "input_method")
         ok("dumpsys", "SurfaceFlinger")
         ok("dumpsys", "deviceidle", "whitelist", "+$ownPkg")

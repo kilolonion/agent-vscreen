@@ -34,7 +34,10 @@ internal fun diagText(context: android.content.Context): String = buildString {
     }
     com.kilon.agentvscreen.core.VScreenDisplay.lastRemoteError?.let { appendLine("screen service error: $it") }
     com.kilon.agentvscreen.core.VScreenRemoteDisplay.rejectedFlags.forEach { appendLine("display flags refused: $it") }
-    appendLine("keep screen on: enabled=${com.kilon.agentvscreen.core.VScreenStore.keepScreenOn.value}, held=${com.kilon.agentvscreen.core.VScreenAwake.screenLockHeld}")
+    val screenMode = com.kilon.agentvscreen.core.VScreenStore.phoneScreenMode.value
+    appendLine("keep screen on: mode=${screenMode.key}, enabled=${com.kilon.agentvscreen.core.VScreenStore.keepScreenOnEnabled}, held=${com.kilon.agentvscreen.core.VScreenAwake.screenLockHeld}, woke=${com.kilon.agentvscreen.core.VScreenAwake.screenWokeCount}")
+    appendLine("input reach: ${com.kilon.agentvscreen.core.InputReach.diagSummary(st.displayId)}")
+    appendLine("thermal: ${com.kilon.agentvscreen.host.ThermalGuard.thermalJson()}")
     appendLine("app heap: managed_used_kib=${(Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / 1024}, " +
         "native_allocated_kib=${android.os.Debug.getNativeHeapAllocatedSize() / 1024}")
     appendLine(com.kilon.agentvscreen.host.Privileged.diagnostics(context))

@@ -126,7 +126,7 @@ internal object VScreenRules {
 
     /** Caller holds live while checking limits and publishing the entry. */
     private fun register(spec: Spec): Live {
-        if (com.kilon.agentvscreen.host.ThermalGuard.locked) throw BackgroundOperation.ActionError("THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) com.kilon.agentvscreen.host.ThermalGuard.throwStopped()
         if (live.values.count { it.spec.agentId == spec.agentId } >= MAX) {
             throw IllegalStateException(tr("最多同时盯 $MAX 个条件，先 keep off 一个", "At most $MAX conditions can be watched at once; turn one off with keep off first"))
         }

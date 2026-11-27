@@ -89,10 +89,28 @@ object VScreenTyping {
      */
     /** What typing did: the method, the field it went to (bounds, id) and what that field reads afterwards. */
     /** [checked] false = accessibility could not look at the screen, so [field] null says nothing about focus. */
-    class TypeFact(val method: String, val field: String?, val bounds: Rect?, val fieldId: String?, val checked: Boolean = true, val password: Boolean = false,
-                   /** 1.3.0-beta16: keys or paste went out, but the field reads exactly what it read before (a web page or a
-                    *  self-drawn box whose accessibility text is its placeholder): its content cannot be read back. */
-                   val unreadable: Boolean = false)
+    class TypeFact(
+        val method: String,
+        val field: String?,
+        val bounds: Rect?,
+        val fieldId: String?,
+        val checked: Boolean = true,
+        val password: Boolean = false,
+        /** 1.3.0-beta16: keys or paste went out, but the field reads exactly what it read before (a web page or a
+         *  self-drawn box whose accessibility text is its placeholder): its content cannot be read back. */
+        val unreadable: Boolean = false,
+        /** True when `ACTION_SET_TEXT` wrote the field via accessibility without injecting key events. */
+        val viaA11y: Boolean = false,
+        /** True when `a11yOnly = true` was requested but no writable node accepted `ACTION_SET_TEXT`. */
+        val a11yFailed: Boolean = false,
+    )
+
+    /** True when the accessibility service is connected and can see a focused/tapped editable node on [displayId]. */
+    fun hasWritableNode(displayId: Int, tappedAt: Pair<Int, Int>? = null): Boolean {
+        val svc = VScreenAccessibilityService.getInstance() ?: return false
+        if (BackgroundOperation.nodeRoots(displayId).isEmpty()) return false
+        return runCatching { focusedEditable(displayId, tappedAt) != null }.getOrDefault(false)
+    }
 
     /** The field that has input focus now, as "id@l,t,r,b" (null: none / not visible to accessibility). */
     fun focusedFieldKey(displayId: Int): String? = runCatching {
@@ -107,7 +125,14 @@ object VScreenTyping {
      * types normally.
      */
     @Throws(ActionError::class)
-    fun typeFact(displayId: Int, text: String, append: Boolean, tappedAt: Pair<Int, Int>? = null, focusBefore: String? = null): TypeFact {
+    fun typeFact(
+        displayId: Int,
+        text: String,
+        append: Boolean,
+        tappedAt: Pair<Int, Int>? = null,
+        focusBefore: String? = null,
+        a11yOnly: Boolean = false,
+    ): TypeFact {
         // 1.4.2-beta6: asked for every piece typed (slow and paced typing call this per character / piece), so typing
         // stops the moment the user takes over or stops, instead of going on into whatever box they are using.
         Control.admitInput()
@@ -139,6 +164,15 @@ object VScreenTyping {
         Control.admitInput()
         val method = when {
             node != null && svc!!.setNodeText(node, if (append) before + text else text) -> { wrote = true; tr("无障碍写入", "accessibility write") }
+            a11yOnly -> return TypeFact(
+                method = tr("无障碍写入", "accessibility write"),
+                field = null,
+                bounds = nb,
+                fieldId = nid,
+                checked = a11y,
+                viaA11y = false,
+                a11yFailed = true,
+            )
             text.all { it.code in 32..126 } -> {
                 val r = VScreenShell.typeKeys(displayId, text)
                 if (!r.ok) throw ActionError(r.code, r.message)
@@ -152,7 +186,7 @@ object VScreenTyping {
                 "Nothing typed: no input box has focus (this text would go through the clipboard, and the user's clipboard is not touched when nothing would take it). Tap the input box first and type once [Now] marks it \"focused\""))
             else -> { pasteText(displayId, text); tr("剪贴板粘贴", "clipboard paste") }
         }
-        if (!a11y) return TypeFact(method, null, null, null, checked = false)
+        if (!a11y) return TypeFact(method, null, null, null, checked = false, viaA11y = wrote)
         // 1.2.0-beta2: wait until the field shows the text (at most 2 s) instead of reading it once after a fixed
         // 250 ms: a web page reports its box's new value late, and the single early read called a typed text missing.
         var after = focusedEditable(displayId, tappedAt) ?: node
@@ -168,7 +202,15 @@ object VScreenTyping {
         val now = after?.let { if (it.isPassword) "•".repeat(fieldText(it).length) else fieldText(it) }
         val ab = after?.let { n -> Rect().also { n.getBoundsInScreen(it) } }?.let { d?.toFrame(it) ?: it }
         val unreadable = !wrote && after != null && !after.isPassword && now?.contains(text) != true && after.text?.toString() == rawBefore
-        return TypeFact(method, now, ab, after?.viewIdResourceName?.substringAfterLast('/'), password = after?.isPassword == true, unreadable = unreadable)
+        return TypeFact(
+            method = method,
+            field = now,
+            bounds = ab,
+            fieldId = after?.viewIdResourceName?.substringAfterLast('/'),
+            password = after?.isPassword == true,
+            unreadable = unreadable,
+            viaA11y = wrote,
+        )
     }
 
     private fun restoreClip(cm: ClipboardManager, prev: ClipData?) {

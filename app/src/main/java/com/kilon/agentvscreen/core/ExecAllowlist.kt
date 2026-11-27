@@ -20,7 +20,7 @@ object ExecAllowlist {
     private val CGROUP_EVENTS_RE = Regex("^/sys/fs/cgroup/[A-Za-z0-9_./:-]+/cgroup\\.events$")
     private val READONLY_DUMPSYS = setOf(
         "audio", "activity", "window", "display", "package", "power",
-        "media_session", "input_method", "SurfaceFlinger",
+        "media_session", "input_method", "SurfaceFlinger", "input",
     )
     private val SETTINGS_NS = setOf("secure", "global", "system")
     private val OWN_APPOPS = setOf("SYSTEM_ALERT_WINDOW", "RUN_ANY_IN_BACKGROUND", "RUN_IN_BACKGROUND")

@@ -20,11 +20,15 @@ object A11yTree {
         val depth: Int,
         val children: List<Node>,
     ) {
+        /** Parent node in the captured tree snapshot, or null for window roots. */
+        var parent: Node? = null
+            internal set
         val box: Rect = Rect().also { info.getBoundsInScreen(it) }
         val visible: Boolean = info.isVisibleToUser
         /** Its words: text, else content description, on one line; null when it has none. */
         val words: String? = wordsOf(info)
         val clickable get() = info.isClickable
+        val longClickable get() = info.isLongClickable
         val editable get() = info.isEditable
         val checkable get() = info.isCheckable
         val checked get() = info.isChecked
@@ -39,6 +43,18 @@ object A11yTree {
         /** 2.0.0-beta8 (L.3): clickable icon button (ImageButton, or clickable node with contentDescription but no text). */
         val isIconButton: Boolean get() = clickable && ((className?.endsWith("ImageButton") == true) || (!hasText && hasContentDesc))
         fun all(): Sequence<Node> = sequence { yield(this@Node); children.forEach { yieldAll(it.all()) } }
+
+        /** Nearest clickable (or ACTION_CLICK-capable) node starting from this node and walking up to ancestors. */
+        fun clickableAncestor(): Node? = generateSequence(this) { it.parent }.firstOrNull { n ->
+            n.clickable || n.editable || n.checkable ||
+                runCatching { n.info.actionList.any { a -> a.id == AccessibilityNodeInfo.ACTION_CLICK } }.getOrDefault(false)
+        }
+
+        /** Nearest long-clickable (or ACTION_LONG_CLICK-capable) node starting from this node and walking up to ancestors. */
+        fun longClickableAncestor(): Node? = generateSequence(this) { it.parent }.firstOrNull { n ->
+            n.longClickable ||
+                runCatching { n.info.actionList.any { a -> a.id == AccessibilityNodeInfo.ACTION_LONG_CLICK } }.getOrDefault(false)
+        }
     }
 
     class Snapshot(val roots: List<Node>) {
@@ -81,6 +97,76 @@ object A11yTree {
             return out
         }
 
+        /**
+         * Match a resolved screen element ([targetBox] in frame coordinates, optional [label]) back to its backing
+         * accessibility [Node] so screen-off routing can perform a verified node action. Returns null for OCR-only or
+         * canvas elements with no matching node (never falls back to an unrelated full-screen container).
+         */
+        fun findNodeFor(targetBox: Rect, label: String?, toFrame: (Rect) -> Rect): Node? {
+            if (!readable || targetBox.isEmpty) return null
+            val normLabel = label?.trim()?.takeIf { it.isNotEmpty() }?.let { VScreenOcr.norm(it) }?.takeIf { it.isNotEmpty() }
+            val cx = targetBox.centerX()
+            val cy = targetBox.centerY()
+            val targetArea = targetBox.width().toLong() * targetBox.height().toLong()
+
+            fun iou(a: Rect, b: Rect): Double {
+                val l = maxOf(a.left, b.left)
+                val t = maxOf(a.top, b.top)
+                val r = minOf(a.right, b.right)
+                val bt = minOf(a.bottom, b.bottom)
+                if (r <= l || bt <= t) return 0.0
+                val inter = (r - l).toLong() * (bt - t).toLong()
+                val union = a.width().toLong() * a.height().toLong() + b.width().toLong() * b.height().toLong() - inter
+                return if (union <= 0L) 0.0 else inter.toDouble() / union.toDouble()
+            }
+
+            fun closeBox(a: Rect, b: Rect): Boolean =
+                kotlin.math.abs(a.left - b.left) <= 24 && kotlin.math.abs(a.top - b.top) <= 24 &&
+                    kotlin.math.abs(a.right - b.right) <= 24 && kotlin.math.abs(a.bottom - b.bottom) <= 24
+
+            data class Cand(val node: Node, val score: Int, val area: Long)
+            val cands = ArrayList<Cand>()
+            for (n in nodes) {
+                if (!n.visible) continue
+                val fb = toFrame(n.box)
+                if (fb.isEmpty) continue
+                val area = fb.width().toLong() * fb.height().toLong()
+                val ov = iou(fb, targetBox)
+                val containsCenter = fb.contains(cx, cy)
+                val intersects = Rect.intersects(fb, targetBox)
+                if (!intersects && !containsCenter && !closeBox(fb, targetBox)) continue
+                val normWords = n.words?.let { VScreenOcr.norm(it) }?.takeIf { it.isNotEmpty() }
+                val textExact = normLabel != null && normWords != null && normWords == normLabel
+                val textHit = textExact || (normLabel != null && normWords != null && (normWords.contains(normLabel) || (normLabel.length >= 2 && normLabel.contains(normWords))))
+                val boxMatch = ov >= 0.35 || closeBox(fb, targetBox)
+                if (!textHit && !boxMatch) continue
+                // Guard against matching a giant container layout for a tiny OCR-only item unless text matches directly.
+                if (!textHit && area > targetArea * 6L) continue
+                val score = (if (textExact) 40 else if (textHit) 25 else 0) +
+                    (ov * 30.0).toInt() +
+                    (if (containsCenter) 10 else 0) +
+                    (if (n.clickableAncestor() != null) 5 else 0)
+                cands += Cand(n, score, area)
+            }
+            return cands.sortedWith(compareByDescending<Cand> { it.score }.thenBy { it.area }).firstOrNull()?.node
+        }
+
+        /** Perform a verified `ACTION_CLICK` on [node] (or its nearest clickable ancestor). */
+        fun performClick(node: Node): Boolean {
+            Control.admitInput()
+            val target = node.clickableAncestor() ?: return false
+            if (!com.kilon.agentvscreen.host.VScreenAccessibilityService.verifyNodeForAction(target.info, "ACTION_CLICK")) return false
+            return runCatching { target.info.performAction(AccessibilityNodeInfo.ACTION_CLICK) }.getOrDefault(false)
+        }
+
+        /** Perform a verified `ACTION_LONG_CLICK` on [node] (or its nearest long-clickable ancestor). */
+        fun performLongClick(node: Node): Boolean {
+            Control.admitInput()
+            val target = node.longClickableAncestor() ?: return false
+            if (!com.kilon.agentvscreen.host.VScreenAccessibilityService.verifyNodeForAction(target.info, "ACTION_LONG_CLICK")) return false
+            return runCatching { target.info.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK) }.getOrDefault(false)
+        }
+
         /** Whether the largest visible scrollable area can go further ([forward]) or back; null when there is none. */
         fun canScroll(forward: Boolean): Boolean? {
             val best = nodes.filter { it.scrollable && it.visible }.maxByOrNull { it.box.width().toLong() * it.box.height() } ?: return null
@@ -94,6 +180,53 @@ object A11yTree {
             val best = nodes.filter { it.scrollable && it.visible }.maxByOrNull { it.box.width().toLong() * it.box.height() } ?: return false
             if (!com.kilon.agentvscreen.host.VScreenAccessibilityService.verifyNodeForAction(best.info, "ACTION_SCROLL_FORWARD")) return false
             return runCatching { best.info.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) }.getOrDefault(false)
+        }
+
+        private fun scrollActionsFor(direction: String): Pair<Pair<Int, String>, Pair<Int, String>> = when (direction.lowercase()) {
+            "up" -> (AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.id to "ACTION_SCROLL_UP") to
+                (AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD to "ACTION_SCROLL_BACKWARD")
+            "left" -> (AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT.id to "ACTION_SCROLL_LEFT") to
+                (AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD to "ACTION_SCROLL_BACKWARD")
+            "right" -> (AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT.id to "ACTION_SCROLL_RIGHT") to
+                (AccessibilityNodeInfo.ACTION_SCROLL_FORWARD to "ACTION_SCROLL_FORWARD")
+            else -> (AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id to "ACTION_SCROLL_DOWN") to
+                (AccessibilityNodeInfo.ACTION_SCROLL_FORWARD to "ACTION_SCROLL_FORWARD")
+        }
+
+        /** Locate a visible scrollable container, preferring one supporting [direction] and covering [atPoint] if given. */
+        fun findScrollable(direction: String = "down", atPoint: Pair<Int, Int>? = null, toFrame: ((Rect) -> Rect)? = null): Node? {
+            val scrollables = nodes.filter { it.scrollable && it.visible }
+            if (scrollables.isEmpty()) return null
+            val (dirAct, fbAct) = scrollActionsFor(direction)
+            val supporting = scrollables.filter { n ->
+                val ids = runCatching { n.info.actionList.map { it.id } }.getOrDefault(emptyList())
+                dirAct.first in ids || fbAct.first in ids
+            }.ifEmpty { scrollables }
+            if (atPoint != null) {
+                val atMatch = supporting.filter { n ->
+                    val fb = toFrame?.invoke(n.box) ?: n.box
+                    fb.contains(atPoint.first, atPoint.second)
+                }.minByOrNull { it.box.width().toLong() * it.box.height() }
+                if (atMatch != null) return atMatch
+            }
+            return supporting.maxByOrNull { it.box.width().toLong() * it.box.height() }
+        }
+
+        /**
+         * Perform a verified directional accessibility scroll (`down`/`up`/`left`/`right`), preferring the matching
+         * directional `ACTION_SCROLL_*` action and falling back to `ACTION_SCROLL_FORWARD`/`ACTION_SCROLL_BACKWARD`.
+         */
+        fun scroll(direction: String, atPoint: Pair<Int, Int>? = null, toFrame: ((Rect) -> Rect)? = null): Boolean {
+            Control.admitInput()
+            val best = findScrollable(direction, atPoint, toFrame) ?: return false
+            val ids = runCatching { best.info.actionList.map { it.id } }.getOrDefault(emptyList())
+            val (dirAct, fbAct) = scrollActionsFor(direction)
+            if (dirAct.first in ids) {
+                if (!com.kilon.agentvscreen.host.VScreenAccessibilityService.verifyNodeForAction(best.info, dirAct.second)) return false
+                if (runCatching { best.info.performAction(dirAct.first) }.getOrDefault(false)) return true
+            }
+            if (!com.kilon.agentvscreen.host.VScreenAccessibilityService.verifyNodeForAction(best.info, fbAct.second)) return false
+            return runCatching { best.info.performAction(fbAct.first) }.getOrDefault(false)
         }
 
         /** Visible editable fields, in tree order. */
@@ -116,7 +249,9 @@ object A11yTree {
             if (n == null || depth > MAX_DEPTH || seen++ > MAX_NODES) return null
             val kids = ArrayList<Node>()
             for (i in 0 until n.childCount) read(runCatching { n.getChild(i) }.getOrNull(), depth + 1)?.let { kids += it }
-            return Node(n, depth, kids)
+            val node = Node(n, depth, kids)
+            kids.forEach { it.parent = node }
+            return node
         }
         return Snapshot(roots.mapNotNull { read(it, 0) })
     }

@@ -665,6 +665,7 @@ internal class GestureOut(
     val missReason: String? = null,
     val notRead: Boolean = false,
     val alreadyAtStart: Boolean = false,
+    val via: String? = null,
 )
 
 /**
@@ -1167,6 +1168,20 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
     var seekMissReason: String? = null
     var seekNotRead = false
     var beforeEls: List<El>? = null
+    var gestureVia: String? = null
+
+    fun ensureTouchReady() {
+        val reach = com.kilon.agentvscreen.core.InputReach.probe(d.displayId)
+        val wakeOn = com.kilon.agentvscreen.core.VScreenStore.phoneScreenMode.value ==
+            com.kilon.agentvscreen.core.VScreenStore.PhoneScreenMode.WAKE_WHEN_NEEDED
+        val route = com.kilon.agentvscreen.core.InputRoute.choose(
+            reach = reach,
+            kind = com.kilon.agentvscreen.core.InputRoute.Kind.POINT_OR_GESTURE,
+            hasNode = false,
+            wakeEnabled = wakeOn,
+        )
+        gestureVia = executeWakeOrRefuse(d, route)
+    }
 
     try {
         Gesture.checkLoopInterrupts(d, call)
@@ -1182,6 +1197,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
 
         if (step.loop == Loop.HOLD) {
             Gesture.checkLoopInterrupts(d, call)
+            ensureTouchReady()
             val down = VScreenShell.finger(d.displayId, "down", 0, startPt.first, startPt.second).first
             if (!down.ok) throw ActionError(down.code, down.message)
             fingerDown = true
@@ -1275,6 +1291,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
                 },
                 onDown = {
                     Gesture.checkLoopInterrupts(d, call)
+                    ensureTouchReady()
                     val down = VScreenShell.finger(d.displayId, "down", 0, startPt.first, startPt.second).first
                     if (!down.ok) throw ActionError(down.code, down.message)
                     fingerDown = true
@@ -1397,7 +1414,8 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
         listOf(intArrayOf(startPt.first, startPt.second))
     }
 
-    val actionFact = if (isDrag) {
+    val viaSuffix = gestureVia?.let { tr("（via=$it）", " (via=$it)") }.orEmpty()
+    val actionFact = (if (isDrag) {
         val shownPath = if (step.loop == Loop.SEEK) listOf(startPt, curPt) else path
         tr("按住拖过 ", "held and dragged through ") +
             shownPath.joinToString(" → ") { "(${it.first},${it.second})" } +
@@ -1406,7 +1424,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
     } else {
         tr("按住 (${startPt.first},${startPt.second}) ${totalMs}ms", "held (${startPt.first},${startPt.second}) ${totalMs}ms") +
             (pressTarget?.let { there(it) } ?: "")
-    }
+    }) + viaSuffix
 
     return GestureOut(
         met = metFact != null,
@@ -1422,5 +1440,6 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
         points = recPts,
         missReason = seekMissReason,
         notRead = seekNotRead,
+        via = gestureVia,
     )
 }

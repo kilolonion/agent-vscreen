@@ -43,14 +43,32 @@ object Turns {
 
     internal fun resetTurnsForTest() { synchronized(this) { turns.clear() } }
 
+    /** True while [sid] has an active turn (in-flight command or within its quiet window). */
+    fun isActive(sid: String): Boolean = synchronized(this) { sid in active }
+
     fun begin(sid: String) {
+        beginCommand(sid, passive = false)
+    }
+
+    /**
+     * Begin tracking a command in [sid]. When [passive] is true and [sid] has no active turn, does not open a turn
+     * and returns false (pass the return value to [endCommand]). When [sid] already has an active turn, joins and
+     * extends its quiet window as usual and returns true.
+     */
+    fun beginCommand(sid: String, passive: Boolean): Boolean {
         val start = synchronized(this) {
+            if (passive && sid !in active) return false
             enders.remove(sid)?.let { main.removeCallbacks(it) }
             inFlight[sid] = (inFlight[sid] ?: 0) + 1
             quietSince.remove(sid)
             active.add(sid)
         }
         if (start || !BackgroundOperation.isTaskActive(sid)) BackgroundOperation.onTaskStarted(sid)
+        return true
+    }
+
+    fun endCommand(sid: String, joined: Boolean) {
+        if (joined) end(sid)
     }
 
     fun end(sid: String) {

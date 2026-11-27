@@ -154,13 +154,43 @@ fun SettingsTab(bottom: Dp) {
             val idleSave by com.kilon.agentvscreen.core.VScreenStore.idlePowerSave.collectAsState()
             SwitchPreference(checked = idleSave, onCheckedChange = { BackgroundOperation.setIdlePowerSave(it) },
                 title = tr("空闲省电", "Idle power saving"), summary = tr("每轮任务结束后暂停副屏渲染", "Pause background-screen rendering after each turn"))
-            // 2.0.0 (issue #48): for phones where the background screen sleeps with the phone.
-            val keepOn by com.kilon.agentvscreen.core.VScreenStore.keepScreenOn.collectAsState()
+            // Issue #48 & #60: 3-mode phone screen behavior during tasks (allow sleep / keep on / wake when needed).
+            val screenMode by com.kilon.agentvscreen.core.VScreenStore.phoneScreenMode.collectAsState()
             val sleepsWithPhone = BackgroundOperation.currentDisplay()?.let { !com.kilon.agentvscreen.core.VScreenAwake.canWakeAlone(it) } == true
-            SwitchPreference(checked = keepOn, onCheckedChange = { com.kilon.agentvscreen.core.VScreenStore.setKeepScreenOn(it); com.kilon.agentvscreen.core.VScreenAwake.syncScreenLock() },
-                title = tr("任务中保持亮屏", "Keep screen on during tasks"),
-                summary = if (sleepsWithPhone) tr("这台手机熄屏后任务会停住，建议打开", "On this phone tasks pause when the screen turns off; turning this on is recommended")
-                    else tr("agent 任务进行时手机屏幕不自动熄灭", "The phone screen does not time out while an agent task runs"))
+            val inputBlocked = com.kilon.agentvscreen.core.InputReach.lastBlocked()
+            val modeItems = listOf(
+                tr("允许熄屏", "Allow sleep"),
+                tr("任务中保持亮屏", "Keep on during tasks") + if (sleepsWithPhone && !inputBlocked) tr("（推荐）", " (recommended)") else "",
+                tr("需要时点亮", "Wake when needed") + if (inputBlocked) tr("（推荐）", " (recommended)") else "",
+            )
+            val modeSummary = when {
+                inputBlocked && screenMode != com.kilon.agentvscreen.core.VScreenStore.PhoneScreenMode.WAKE_WHEN_NEEDED ->
+                    tr("熄屏时系统会拦截副屏触摸", "Touch on the background screen is blocked while off")
+                sleepsWithPhone && screenMode == com.kilon.agentvscreen.core.VScreenStore.PhoneScreenMode.ALLOW_SLEEP ->
+                    tr("副屏会随主屏休眠", "Background screen sleeps with the main screen")
+                else -> null
+            }
+            OverlayDropdownPreference(
+                items = modeItems,
+                selectedIndex = screenMode.ordinal,
+                title = tr("熄屏时", "When screen is off"),
+                summary = modeSummary,
+                onSelectedIndexChange = { i ->
+                    com.kilon.agentvscreen.core.VScreenStore.setPhoneScreenMode(com.kilon.agentvscreen.core.VScreenStore.PhoneScreenMode.entries[i])
+                    com.kilon.agentvscreen.core.VScreenAwake.syncScreenLock()
+                },
+            )
+            val heatStopOn by com.kilon.agentvscreen.host.ThermalGuard.hardStopEnabled.collectAsState()
+            ArrowPreference(
+                title = tr("过热保护", "Thermal protection"),
+                endActions = {
+                    Value(
+                        if (heatStopOn) tr("已开启", "On") else tr("已关闭", "Off"),
+                        if (!heatStopOn) Palette.stopped else MiuixTheme.colorScheme.onSurfaceVariantActions,
+                    )
+                },
+                onClick = { nav.go(Route.Thermal) },
+            )
             val opts = listOf(1, 3, 5, 10, 30)
             var quiet by remember { mutableIntStateOf(ApiConfig.quietMinutes) }
             OverlayDropdownPreference(items = opts.map { tr("$it 分钟", "$it min") }, selectedIndex = opts.indexOf(quiet).coerceAtLeast(0),
@@ -443,7 +473,8 @@ fun HelpPage() {
             tr("应用规则", "App rules") to H.rules,
             tr("悬浮窗", "Floating window") to H.window,
             tr("空闲省电", "Idle power saving") to H.idle,
-            tr("任务中保持亮屏", "Keep screen on during tasks") to H.keepOn,
+            tr("熄屏时", "When screen is off") to H.keepOn,
+            tr("过热保护", "Thermal protection") to H.thermal,
             tr("副屏静音", "Mute the screen") to H.mute,
             tr("任务轮次时长", "Turn length") to H.turn,
             tr("定时预约", "Schedules") to H.schedule,
@@ -481,8 +512,10 @@ internal object H {
         "Shown above all apps while the background screen exists. Drag to move, pinch to resize, push to an edge to fold it into a side tab, hold the picture 0.5 s to take over. While an agent waits for your reply, the tab shows a violet question mark.")
     val idle get() = tr("每轮任务结束后暂停副屏渲染以节省电量；页面状态保留，收到下一条命令时自动恢复。少数应用恢复时会重新加载，遇到这种情况可关闭此项。",
         "Pauses background-screen rendering after each turn to save power; the page is kept and resumes with the next command. A few apps reload on resume; turn this off if that happens.")
-    val keepOn get() = tr("熄屏运行需要副屏能单独保持唤醒。有些手机上副屏会随主屏一起休眠（状态页会写明），这时手机自动熄屏、锁屏后，agent 的任务就停住了。打开此项后，只在 agent 任务进行时让手机屏幕保持亮着（可以变暗），任务结束、出错或被停止时立刻恢复。你按电源键熄屏仍然有效，不会被重新点亮。注意：任务期间手机不会自动锁屏，别人拿到手机就能操作；也会多耗电。",
-        "Running with the screen off needs the background screen to stay awake on its own. On some phones it sleeps with the main screen (the status page says so); then an agent's task stops once the phone times out and locks. With this on, the phone screen stays on (it may dim) only while an agent task runs, and is let go as soon as the task ends, fails or is stopped. Pressing the power button still turns the screen off, and it is not turned back on. Note: the phone does not lock itself during a task, so anyone holding it can use it, and it uses more battery.")
+    val keepOn get() = tr("决定手机熄屏时对主屏与副屏输入的处理方式：\n\n• 允许熄屏（默认）：主屏按系统超时自动熄屏，不点亮主屏。若系统在熄屏时拦截副屏触摸，按文字或元素编号的点击、滚动和输入会自动改走无障碍通道，坐标或手势操作会直接报错提示。\n• 任务中保持亮屏：仅在 agent 任务进行期间保持主屏不自动熄灭（可变暗），任务结束、出错或停止时立刻释放；按电源键手动熄屏仍有效，不会主动重新点亮。\n• 需要时点亮：包含“任务中保持亮屏”的全部行为；另外当手机已熄屏、系统拦截副屏触摸且操作只能走触摸手势时，会短暂点亮主屏（停在锁屏页，不解锁）并受频率和过热保护限制，任务结束后自动释放。\n\n注意：保持亮屏期间手机不会自动锁屏，也会多耗电。",
+        "Controls main-screen wake and background-screen input when the phone screen turns off:\n\n• Allow sleep (default): the main screen sleeps normally and is never woken. When the system blocks touch on the background screen while off, element taps, scrolls, and typing switch to accessibility automatically; coordinate taps and gestures refuse with guidance.\n• Keep on during tasks: prevents the main screen from timing out (may dim) only while an agent turn is active, and releases immediately when the turn ends, fails, or stops. Pressing the power button still turns the screen off without waking it back up.\n• Wake when needed: includes Keep on during tasks; additionally, when the screen is off, touch is blocked, and a gesture or coordinate action cannot use accessibility, it briefly wakes the main screen to the lock screen (never unlocking) under rate and thermal limits, then releases when the turn ends.\n\nNote: while kept on, the phone does not auto-lock and uses more battery.")
+    val thermal get() = tr("为避免长时间后台任务导致手机过热，热保护分三层：\n\n• 降负载与暂停识别：电池升温或系统热状态升高时，自动降低副屏帧率、改用轻量文字识别，必要时暂停 OCR 与后台唤醒。\n• 过热自动停止（默认开启）：电池达到 45.0°C 或系统热状态达到严重级别时停止后台任务并锁定。离开危险区后，电池低于 43.0°C 且热状态低于严重持续 60 秒即可在首页电源菜单手动恢复（1 小时内再次触发将收紧为低于 39.0°C 且热状态低于中度持续 180 秒）。\n• 关闭过热自动停止：不再强制停止或锁定，进入高温区时仅发一条不阻断的高优先级提醒；降负载策略与 Android 系统自带的降频和过热关机保护仍然有效。",
+        "Thermal protection works in three layers to keep long background runs safe:\n\n• Load throttling: as battery temperature or system thermal status rises, frame rate drops, OCR falls back to the lighter engine, and OCR or background wakes pause when needed.\n• Auto-stop when overheating (on by default): stops background work and latches when battery reaches 45.0°C or system thermal status reaches severe. Once out of the danger zone, holding below 43.0°C and below severe status for 60 s lets you resume manually in the Home power menu (a second trip within 1 hour tightens recovery to below 39.0°C and below moderate status for 180 s).\n• Turning auto-stop off: disables hard stop and latch, posting a single non-blocking high-priority warning per danger-zone entry while keeping load throttling and Android's built-in thermal protection active.")
     val mute get() = tr("副屏中的应用不通过手机扬声器播放声音（如视频、直播）。应用移到主屏或副屏释放时恢复声音；App 异常退出后，下次连接时自动恢复。",
         "Apps on the background screen do not play sound through the phone (videos, live streams). Sound returns when an app moves to the main screen or the screen is released; after a crash it is restored on the next connection.")
     val turn get() = tr("agent 超过该时长未发送新命令即视为本轮任务结束：副屏随后进入省电暂停，10 分钟后释放。agent 也可以用 vscreen done 立即结束本轮。该时长同时决定“本轮任务内”许可的有效期。",
@@ -580,6 +613,119 @@ fun FloatingWindowPage() {
                     lineHeight = 20.sp,
                 )
             },
+            confirmButton = { LinkButton(onClick = { help = false }) { Text(tr("完成", "Done")) } },
+        )
+    }
+}
+
+/** Settings › Thermal protection — live temperature/phase status and opt-out hard-stop switch with risk confirmation. */
+@Composable
+fun ThermalPage() {
+    val hardStopOn by com.kilon.agentvscreen.host.ThermalGuard.hardStopEnabled.collectAsState()
+    var snap by remember { mutableStateOf(com.kilon.agentvscreen.host.ThermalGuard.snapshot()) }
+    var confirmOff by remember { mutableStateOf(false) }
+    var help by remember { mutableStateOf(false) }
+
+    androidx.compose.runtime.LaunchedEffect(hardStopOn) {
+        while (true) {
+            try {
+                snap = withContext(Dispatchers.IO) { com.kilon.agentvscreen.host.ThermalGuard.snapshot() }
+                kotlinx.coroutines.delay(2_000L)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                kotlinx.coroutines.delay(2_000L)
+            }
+        }
+    }
+
+    val tempText = snap.tempTenths?.let { String.format(java.util.Locale.ROOT, "%.1f°C", it / 10.0) } ?: tr("未知", "Unknown")
+    val statusText = com.kilon.agentvscreen.host.ThermalGuard.thermalStatusName(snap.status)
+    val phaseText = when (snap.phase) {
+        com.kilon.agentvscreen.host.HeatPolicy.Phase.NORMAL -> tr("正常", "Normal")
+        com.kilon.agentvscreen.host.HeatPolicy.Phase.LOCKED_HOT -> tr("过热锁定", "Locked (hot)")
+        com.kilon.agentvscreen.host.HeatPolicy.Phase.COOLING -> tr("冷却等待", "Cooling")
+        com.kilon.agentvscreen.host.HeatPolicy.Phase.READY -> tr("可手动恢复", "Ready to resume")
+    }
+
+    MiuixPage(
+        title = tr("过热保护", "Thermal protection"),
+        actions = {
+            LinkButton(onClick = { help = true }) { Text("?") }
+        },
+    ) {
+        Group(tr("当前状态", "Current status")) {
+            BasicComponent(
+                title = tr("电池温度", "Battery temperature"),
+                endActions = { Value(tempText) },
+            )
+            BasicComponent(
+                title = tr("系统热状态", "Thermal status"),
+                endActions = { Value(statusText) },
+            )
+            BasicComponent(
+                title = tr("保护状态", "Protection state"),
+                summary = if (snap.phase != com.kilon.agentvscreen.host.HeatPolicy.Phase.NORMAL) {
+                    com.kilon.agentvscreen.host.ThermalGuard.formatReason(snap)
+                } else null,
+                endActions = {
+                    Value(
+                        phaseText,
+                        if (snap.phase == com.kilon.agentvscreen.host.HeatPolicy.Phase.LOCKED_HOT) Palette.stopped
+                        else MiuixTheme.colorScheme.onSurfaceVariantActions,
+                    )
+                },
+            )
+        }
+
+        Group(tr("控制", "Control")) {
+            SwitchPreference(
+                checked = hardStopOn,
+                onCheckedChange = { want ->
+                    if (want) {
+                        com.kilon.agentvscreen.host.ThermalGuard.setHardStopEnabled(true)
+                        snap = com.kilon.agentvscreen.host.ThermalGuard.snapshot()
+                    } else {
+                        confirmOff = true
+                    }
+                },
+                title = tr("过热自动停止", "Auto-stop when overheating"),
+            )
+        }
+    }
+
+    if (confirmOff) {
+        GlassDialog(
+            onDismissRequest = { confirmOff = false },
+            title = { DialogTitle(tr("关闭过热自动停止？", "Turn off overheat auto-stop?")) },
+            text = {
+                Text(
+                    tr(
+                        "关闭后，长时间任务可能让手机过热：发烫、降频卡顿、电池加速老化，严重时系统会强制关机。之后只剩 Android 系统自带的降频和过热关机保护。",
+                        "When turned off, long-running tasks may overheat the phone: excessive heat, thermal throttling and lag, accelerated battery wear, and in severe cases forced shutdown by the system. Only Android's built-in throttling and thermal shutdown will remain.",
+                    ),
+                    fontSize = 13.5.sp,
+                    lineHeight = 20.sp,
+                )
+            },
+            confirmButton = {
+                LinkButton(onClick = {
+                    com.kilon.agentvscreen.host.ThermalGuard.setHardStopEnabled(false)
+                    snap = com.kilon.agentvscreen.host.ThermalGuard.snapshot()
+                    confirmOff = false
+                }) { Text(tr("确认关闭", "Turn off"), color = Palette.stopped) }
+            },
+            dismissButton = {
+                LinkButton(onClick = { confirmOff = false }) { Text(tr("取消", "Cancel")) }
+            },
+        )
+    }
+
+    if (help) {
+        GlassDialog(
+            onDismissRequest = { help = false },
+            title = { DialogTitle(tr("过热保护说明", "About thermal protection")) },
+            text = { Text(H.thermal, fontSize = 13.5.sp, lineHeight = 20.sp) },
             confirmButton = { LinkButton(onClick = { help = false }) { Text(tr("完成", "Done")) } },
         )
     }
