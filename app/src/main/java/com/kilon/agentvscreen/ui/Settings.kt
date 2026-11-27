@@ -365,7 +365,7 @@ fun TokensPage() {
                     summary = tr("仅提供给信任的 agent", "Only for agents you trust"),
                     endActions = {
                         IconButton(onClick = { show = !show }) { Icon(if (show) MiuixIcons.Hide else MiuixIcons.Show, tr("显示令牌", "Show token")) }
-                        IconButton(onClick = { host.copy(tr("令牌", "Token"), token) }) { Icon(MiuixIcons.Copy, tr("复制令牌", "Copy token")) }
+                        IconButton(onClick = { host.copy(tr("令牌", "Token"), token, sensitive = true) }) { Icon(MiuixIcons.Copy, tr("复制令牌", "Copy token")) }
                         IconButton(onClick = { askRenew = true }) { Icon(MiuixIcons.Refresh, tr("换一个令牌", "New token")) }
                     },
                 )
@@ -382,7 +382,7 @@ fun TokensPage() {
             TokenRow(t, fmt, open = { nav.go(Route.Agent(t.id)) }, remove = { askRemove = t })
         }
     }
-    if (adding) NewTokenDialog(ApiConfig.baseUrl, { l, t -> host.copy(l, t) }) { adding = false }
+    if (adding) NewTokenDialog(ApiConfig.baseUrl, { l, t -> host.copy(l, t, sensitive = true) }) { adding = false }
     askUnused?.let { drop ->
         GlassDialog(
             onDismissRequest = { askUnused = null },

@@ -29,6 +29,7 @@ URL="${VSCREEN_URL:-$(conf VSCREEN_URL)}"; URL="${URL:-http://127.0.0.1:$CLI_POR
 BASE_URL="$URL"
 TOKEN="${VSCREEN_TOKEN:-$(conf VSCREEN_TOKEN)}"
 if [ "$1" = "install" ] && [ -n "$2" ]; then TOKEN="$2"; fi
+if [ "$1" = "install" ]; then case "${VSCREEN_CODE:-$TOKEN}" in avc_*) TOKEN="" ;; esac; fi
 SESSION="${VSCREEN_SESSION:-default}"
 SHOT_DIR="${VSCREEN_SHOT_DIR:-${TMPDIR:-/tmp}/vscreen-shots}"
 
@@ -134,9 +135,60 @@ skill_sync() {
   fi
 }
 
+# Loopback port discovery without a token yet (used before exchanging a one-time onboarding code).
+find_app_port() {
+  case "$URL" in http://127.0.0.1:*|http://localhost:*) ;; *) return 0 ;; esac
+  _b=${URL%:*}; _p0=${URL##*:}; _p0=${_p0%%/*}
+  case "$_p0" in ''|*[!0-9]*) return 0 ;; esac
+  _i=0
+  while [ $_i -lt 10 ]; do
+    _p=$((_p0 + _i)); _i=$((_i + 1))
+    [ $_p -gt 65535 ] && break
+    _r=$(c -s -m 2 "$_b:$_p/v2/ping" 2>/dev/null)
+    case "$_r" in *'"app":"agent-vscreen"'*) [ $_p -ne $_p0 ] && URL="$_b:$_p"; return 0 ;; esac
+  done
+  return 0
+}
+
 if [ "$1" = "install" ]; then
-  tok="$2"; dest="$3"
-  [ -n "$tok" ] || { echo "«用法: vscreen install <令牌> [安装目录]|usage: vscreen install <token> [install dir]»" >&2; exit 2; }
+  code=""; tok=""; dest=""
+  if [ -n "$VSCREEN_CODE" ]; then
+    code="$VSCREEN_CODE"; dest="$2"
+  else
+    case "$2" in
+      avc_*) code="$2"; dest="$3" ;;
+      *) tok="$2"; dest="$3" ;;
+    esac
+  fi
+  if [ -n "$code" ]; then
+    case "$code" in
+      avc_*[!A-Za-z0-9_]*|*[!A-Za-z0-9_]*) echo "vscreen: «一次性接入码格式不对|Invalid onboarding code format»" >&2; exit 2 ;;
+    esac
+    find_app_port
+    _ex=$(mktemp -d "${TMPDIR:-/tmp}/vscreen-ex.XXXXXX") || exit 3
+    trap 'rm -rf "$_ex"' EXIT INT TERM
+    printf '{"code":"%s"}' "$code" > "$_ex/req"
+    c -sS -m 15 -X POST -H "Content-Type: application/json; charset=utf-8" -H "Accept: application/json" \
+      -D "$_ex/h" -o "$_ex/b" --data-binary "@$_ex/req" "$URL/v2/pair/exchange"
+    _rc=$?
+    _st=$( [ $_rc -eq 0 ] && http_status "$_ex/h" || echo 0 )
+    if [ "$_st" = "200" ]; then
+      tok=$(sed -n 's/.*"token":"\([^"]*\)".*/\1/p' "$_ex/b" | head -n1)
+    fi
+    if [ -z "$tok" ]; then
+      _err=$(sed -n 's/.*"code":"\([^"]*\)".*/\1/p' "$_ex/b" | head -n1)
+      rm -rf "$_ex"
+      if [ "$_err" = "CODE_INVALID_OR_EXPIRED" ] || [ "$_st" = "401" ]; then
+        echo "vscreen: CODE_INVALID_OR_EXPIRED «一次性接入码无效、已过期（超过 10 分钟）或已被使用：请在 Agent-VScreen 的“接入”里重新生成接入码|The one-time onboarding code is invalid, expired (over 10 min), or already used: generate a new onboarding code under Connect in Agent-VScreen»" >&2
+      else
+        echo "vscreen: «兑换接入码失败（HTTP $_st）：确认 Agent-VScreen 正在运行且地址可达|Failed to exchange onboarding code (HTTP $_st): check that Agent-VScreen is running and reachable»" >&2
+      fi
+      exit 1
+    fi
+    rm -rf "$_ex"
+    trap - EXIT INT TERM
+  fi
+  [ -n "$tok" ] || { echo "«用法: VSCREEN_CODE=<接入码> sh -s -- install [安装目录] 或 vscreen install <令牌> [安装目录]|usage: VSCREEN_CODE=<code> sh -s -- install [install dir] or vscreen install <token> [install dir]»" >&2; exit 2; }
   if [ -z "$dest" ]; then
     for d in "$PREFIX/bin" "$HOME/.local/bin" /usr/local/bin; do
       [ -n "$d" ] && [ "$d" != "/bin" ] || continue
@@ -161,7 +213,7 @@ if [ "$1" = "install" ]; then
   printf 'VSCREEN_URL=%s\nVSCREEN_TOKEN=%s\n' "$SAVE_URL" "$tok" > "$CONF_DIR/env"
   [ -n "$PROXY" ] && printf 'VSCREEN_PROXY=%s\n' "$PROXY" >> "$CONF_DIR/env"
   chmod 600 "$CONF_DIR/env" 2>/dev/null
-  echo "«已安装：$dest/vscreen（令牌存在 $CONF_DIR/env）|Installed: $dest/vscreen (token saved in $CONF_DIR/env)»"
+  echo "«已安装：$dest/vscreen（令牌已安全存进 $CONF_DIR/env）|Installed: $dest/vscreen (token saved safely in $CONF_DIR/env)»"
   skill_sync show
   case ":$PATH:" in *":$dest:"*) ;; *) echo "«注意：$dest 不在 PATH 里，用全路径调用或加进 PATH|Note: $dest is not on PATH; call it by full path or add it to PATH»" ;; esac
   "$dest/vscreen" status >/dev/null 2>&1 && echo "«连接正常：vscreen help 看用法|Connected: vscreen help shows usage»" || echo "«已安装，但现在连不上：确认 App 里服务已启动|Installed, but it cannot connect now: check that the service is on in the app»"

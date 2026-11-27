@@ -187,7 +187,12 @@ object VScreenTyping {
         var clipOk = false
         Handler(Looper.getMainLooper()).post {
             previous = runCatching { cm.primaryClip }.getOrNull()
-            clipOk = runCatching { cm.setPrimaryClip(ClipData.newPlainText("agent-vscreen", text)) }.isSuccess
+            val clip = ClipData.newPlainText("agent-vscreen", text).apply {
+                description.extras = android.os.PersistableBundle().apply {
+                    putBoolean("android.content.extra.IS_SENSITIVE", true)
+                }
+            }
+            clipOk = runCatching { cm.setPrimaryClip(clip) }.isSuccess
             latch.countDown()
         }
         latch.await(2, TimeUnit.SECONDS)

@@ -106,6 +106,7 @@ internal object Codes {
         Code("TASK_RUNNING", Next.WAIT, "任务还在执行。", "The task is still running."),
         // transport
         Code("BAD_TOKEN", Next.USER, "令牌缺失、不对或已被用户撤销。请用户在 Agent-VScreen 的“接入 agent”里重新复制接入的话。", "The token is missing, wrong or was revoked by the user. Ask the user to copy the connect message again under Connect an agent in Agent-VScreen."),
+        Code("CODE_INVALID_OR_EXPIRED", Next.USER, "一次性接入码无效、已过期（超过 10 分钟）或已被使用。请用户在 Agent-VScreen 的“接入”里重新生成接入码。", "The one-time onboarding code is invalid, expired (over 10 minutes), or already used. Ask the user to generate a new onboarding code under Connect in Agent-VScreen."),
         Code("BAD_SIGNATURE", Next.USER, "请求签名不对或时间差太大（命令行会自动校时重试一次）。", "The request signature is wrong or the clocks differ too much (the CLI corrects its clock and retries once)."),
         Code("RATE_LIMITED", Next.WAIT, "这个来源连续用错令牌，被暂时拒绝。", "This source kept using wrong tokens and is refused for a while."),
         Code("SERVER_BUSY", Next.WAIT, "同时进来的连接太多。", "Too many connections at once."),

@@ -57,13 +57,19 @@
         {
             "name": "vscreen_configure",
             "description": {
-                "zh": "保存 Agent-VScreen 的令牌和地址（存进 Operit 的环境变量），并检测能否连上。",
-                "en": "Save the Agent-VScreen token and address (as Operit environment variables) and test the connection."
+                "zh": "保存 Agent-VScreen 的令牌或兑换 10 分钟一次性接入码（存进 Operit 的环境变量），并检测能否连上。",
+                "en": "Save the Agent-VScreen token or exchange a 10-minute one-time onboarding code (as Operit environment variables) and test the connection."
             },
             "parameters": [
                 {
+                    "name": "code",
+                    "description": { "zh": "10 分钟一次性接入码（avc_ 开头，由插件直接兑换为长期令牌并保存）", "en": "10-minute one-time onboarding code (starts with avc_; exchanged directly for a permanent token and saved)" },
+                    "type": "string",
+                    "required": false
+                },
+                {
                     "name": "token",
-                    "description": { "zh": "Agent-VScreen 的令牌（用户在 App 里复制给你）", "en": "Agent-VScreen token (the user copies it from the app)" },
+                    "description": { "zh": "Agent-VScreen 的令牌（或一次性接入码）", "en": "Agent-VScreen token (or one-time onboarding code)" },
                     "type": "string",
                     "required": false
                 },
@@ -335,10 +341,73 @@ const agentVScreen = (function () {
         return r.text;
     }
 
+    async function exchangeCode(url, code) {
+        let targetUrl = url;
+        if (isLocal(url)) {
+            const m = /^(.*):(\d+)$/.exec(url);
+            if (m) {
+                for (let i = 0; i < 10; i += 1) {
+                    const probe = m[1] + ":" + (Number(m[2]) + i);
+                    try {
+                        const pr = await Tools.Net.http({ url: probe + "/v2/ping", method: "GET", connect_timeout: 2, read_timeout: 2, validateStatus: false });
+                        const pd = JSON.parse(String((pr && pr.content) || "{}"));
+                        if (pd && pd.app === "agent-vscreen") { targetUrl = probe; break; }
+                    } catch (e) { /* try next port */ }
+                }
+            }
+        }
+        let r;
+        try {
+            r = await Tools.Net.http({
+                url: targetUrl + "/v2/pair/exchange",
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json; charset=utf-8",
+                    "Accept": "application/json",
+                    "X-VScreen-Lang": zh() ? "zh" : "en"
+                },
+                body: asciiJson({ code: code }),
+                connect_timeout: 10,
+                read_timeout: 15,
+                validateStatus: false
+            });
+        } catch (e) {
+            return { ok: false, text: unreachable({ url: targetUrl, token: "" }, e && e.message ? e.message : String(e)) };
+        }
+        let data = null;
+        try { data = JSON.parse(String((r && r.content) || "")); } catch (e) { data = null; }
+        if (r && r.statusCode === 200 && data && data.ok && data.token) {
+            return { ok: true, token: String(data.token), url: targetUrl };
+        }
+        const errCode = String((data && data.code) || (r ? r.statusCode : "ERROR"));
+        const why = String((data && (data.error || data.text || data.message)) || "");
+        if (errCode === "CODE_INVALID_OR_EXPIRED" || (r && r.statusCode === 401)) {
+            return {
+                ok: false,
+                text: "CODE_INVALID_OR_EXPIRED：" + (why || t("一次性接入码无效、已过期（超过 10 分钟）或已被使用。", "The one-time onboarding code is invalid, expired, or already used.")) + "\n" +
+                    t("请用户在 Agent-VScreen 的“接入”里重新生成 10 分钟接入码再发给你。", "Ask the user to generate a fresh 10-minute onboarding code under Connect in Agent-VScreen.")
+            };
+        }
+        return { ok: false, text: "HTTP " + (r ? r.statusCode : 0) + " · " + errCode + (why ? "：" + why : "") };
+    }
+
     async function vscreen_configure(params) {
         const over = {};
-        if (params && params.token != null && String(params.token).trim()) over.token = String(params.token).trim();
         if (params && params.base_url != null && String(params.base_url).trim()) over.url = baseUrl(params.base_url);
+        let rawCode = (params && params.code != null) ? String(params.code).trim() : "";
+        const rawToken = (params && params.token != null) ? String(params.token).trim() : "";
+        if (!rawCode && rawToken.startsWith("avc_")) {
+            rawCode = rawToken;
+        } else if (rawToken) {
+            over.token = rawToken;
+        }
+        if (rawCode) {
+            const targetUrl = over.url || baseUrl(env("VSCREEN_URL"));
+            const ex = await exchangeCode(targetUrl, rawCode);
+            if (!ex.ok) return ex.text;
+            over.token = ex.token;
+            foundUrl = null;
+        }
         // Operit < 1.10 has no Tools.SoftwareSettings: the values cannot be saved from here. Check the connection with
         // them anyway, then tell the user where to put them by hand instead of failing with a script error.
         const settings = (typeof Tools !== "undefined" && Tools.SoftwareSettings && typeof Tools.SoftwareSettings.writeEnvironmentVariable === "function") ? Tools.SoftwareSettings : null;

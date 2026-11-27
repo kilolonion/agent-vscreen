@@ -367,6 +367,7 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `TASK_NOT_FOUND` | `fix_command` | 没有这个任务号（任务结果保留 30 分钟）。task 列出本会话的任务。 |
 | `TASK_RUNNING` | `retry_later` | 任务还在执行。 |
 | `BAD_TOKEN` | `ask_user` | 令牌缺失、不对或已被用户撤销。请用户在 Agent-VScreen 的“接入 agent”里重新复制接入的话。 |
+| `CODE_INVALID_OR_EXPIRED` | `ask_user` | 一次性接入码无效、已过期（超过 10 分钟）或已被使用。请用户在 Agent-VScreen 的“接入”里重新生成接入码。 |
 | `BAD_SIGNATURE` | `ask_user` | 请求签名不对或时间差太大（命令行会自动校时重试一次）。 |
 | `RATE_LIMITED` | `retry_later` | 这个来源连续用错令牌，被暂时拒绝。 |
 | `SERVER_BUSY` | `retry_later` | 同时进来的连接太多。 |
@@ -755,6 +756,7 @@ scope: `look`
 | `TASK_NOT_FOUND` | `fix_command` | No such task id (results are kept 30 minutes). task lists this session's tasks. |
 | `TASK_RUNNING` | `retry_later` | The task is still running. |
 | `BAD_TOKEN` | `ask_user` | The token is missing, wrong or was revoked by the user. Ask the user to copy the connect message again under Connect an agent in Agent-VScreen. |
+| `CODE_INVALID_OR_EXPIRED` | `ask_user` | The one-time onboarding code is invalid, expired (over 10 minutes), or already used. Ask the user to generate a new onboarding code under Connect in Agent-VScreen. |
 | `BAD_SIGNATURE` | `ask_user` | The request signature is wrong or the clocks differ too much (the CLI corrects its clock and retries once). |
 | `RATE_LIMITED` | `retry_later` | This source kept using wrong tokens and is refused for a while. |
 | `SERVER_BUSY` | `retry_later` | Too many connections at once. |

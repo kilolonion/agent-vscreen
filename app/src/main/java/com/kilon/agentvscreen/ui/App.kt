@@ -147,7 +147,7 @@ internal object ChangesSheetHost {
 
 /** What a page may ask of the activity. */
 interface AppHost {
-    fun copy(label: String, text: String)
+    fun copy(label: String, text: String, sensitive: Boolean = false)
     fun say(text: String)
     fun grantShizuku()
     fun diagnostics(items: List<Setup.Item>): String

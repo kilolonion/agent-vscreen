@@ -87,6 +87,8 @@ object Tokens {
             return allowed.take(allowed.indexOf(effective).coerceAtLeast(0) + 1).toSet()
         }
         val trusted: Boolean get() = trustUntil > System.currentTimeMillis()
+        /** Local/tailnet token created via onboarding code and waiting for its one-time exchange. */
+        val isPending: Boolean get() = !publicOnly && key.isEmpty() && !revoked
         fun json(): JSONObject = JSONObject().put("id", id).put("name", name).put("key", key).put("scope", scope)
             .put("created", createdAt).put("used", lastUsedAt).put("revoked", revoked).put("trust_until", trustUntil)
             .put("public", publicOnly).put("level", level).put("custom", Policy.toJson(custom))
@@ -164,6 +166,7 @@ object Tokens {
         if (drop.isEmpty()) return
         save(_list.value.filter { it.id !in drop })
         drop.forEach { id ->
+            OnboardingCodes.revokeForToken(id)
             com.kilon.agentvscreen.host.StrongConfirm.revokeAllForToken(id)
             PublicOAuth.revokeAllForToken(id)
         }
@@ -212,6 +215,32 @@ object Tokens {
         val t = Token(id, name.trim().take(NAME_MAX).ifEmpty { "agent-$id" }, sha256(secret), Policy.scopeOf(Policy.table(lv, custom)), System.currentTimeMillis(), level = lv, custom = custom)
         save(_list.value + t)
         return t to "avs_${id}_$secret"
+    }
+
+    /**
+     * Create a local/tailnet agent entry with no active secret yet (`key = ""`).
+     * It cannot authenticate until redeemed once via [activateWithSecret] through `POST /v2/pair/exchange`.
+     */
+    @Synchronized fun createPending(name: String, level: String, custom: Map<String, Policy.Act> = emptyMap()): Token {
+        var id: String
+        do { id = random(6).lowercase() } while (_list.value.any { it.id == id })
+        val lv = if (level in LEVELS) level else FREE
+        val t = Token(id, name.trim().take(NAME_MAX).ifEmpty { "agent-$id" }, "", Policy.scopeOf(Policy.table(lv, custom)), System.currentTimeMillis(), level = lv, custom = custom)
+        save(_list.value + t)
+        return t
+    }
+
+    /**
+     * Atomically mint and store the permanent secret hash for a pending local/tailnet token [id].
+     * Returns `null` if [id] does not exist, is revoked, is `publicOnly`, or has already been activated.
+     */
+    @Synchronized fun activateWithSecret(id: String): Pair<Token, String>? {
+        val cur = _list.value.firstOrNull { it.id == id && !it.revoked } ?: return null
+        if (cur.publicOnly || cur.key.isNotEmpty()) return null
+        val secret = random(28)
+        val updated = Token(cur.id, cur.name, sha256(secret), cur.scope, cur.createdAt, cur.lastUsedAt, cur.revoked, cur.trustUntil, cur.publicOnly, cur.level, cur.custom)
+        save(_list.value.map { if (it.id == id) updated else it })
+        return updated to "avs_${cur.id}_$secret"
     }
 
     /**
@@ -271,6 +300,7 @@ object Tokens {
     @Synchronized fun revoke(id: String) {
         if (id != MAIN) {
             save(_list.value.filter { it.id != id })
+            OnboardingCodes.revokeForToken(id)
             com.kilon.agentvscreen.host.StrongConfirm.revokeAllForToken(id)
             PublicOAuth.revokeAllForToken(id)
         }
