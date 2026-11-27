@@ -126,6 +126,7 @@ internal fun VScreenOffloadHandler.status(sid: String?, args: OffloadArgs): Nati
             .put("service_connected", VScreenRemoteDisplay.isConnected())
             .put("service_tasks_api", runCatching { VScreenRemoteDisplay.listTasksIfConnected(0) != null }.getOrDefault(false)))
     data.put("screen_off", com.kilon.agentvscreen.core.VScreenAwake.json(d))
+    data.put("thermal", com.kilon.agentvscreen.host.ThermalGuard.thermalJson())
     if (d != null) {
         data.put("recording", com.kilon.agentvscreen.core.VScreenRecorder.status(d.displayId))
         data.put("display_flags", JSONArray(VScreenDisplayService.flagNames(d.flags)))

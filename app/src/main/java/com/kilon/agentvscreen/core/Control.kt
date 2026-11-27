@@ -66,7 +66,7 @@ object Control {
      */
     @Throws(ActionError::class)
     fun admitInput(checkPlan: Boolean = true) {
-        if (com.kilon.agentvscreen.host.ThermalGuard.locked) throw BackgroundOperation.ActionError("THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) com.kilon.agentvscreen.host.ThermalGuard.throwStopped()
         if (isUser()) return
         val s = BackgroundOperation.state.value
         val code = refusal(s.userStopped, s.takeoverSessionId != null, if (checkPlan) planned() else Long.MAX_VALUE, epoch) ?: return

@@ -319,6 +319,29 @@ internal object CommandSpec {
     /** Words the transport answers itself (no screen, no table entry needed for options). */
     val TRANSPORT_WORDS = setOf("guide", "remembered", "help")
 
+    /**
+     * Commands that inspect state without waking or touching the background display.
+     * When a session has no active turn, these do not start a new turn (no screen wake lock, no idle-release reset);
+     * when a turn is already active, they extend its quiet window as usual.
+     * Screen-touching commands (`launch`, `act`, `look`, `frames`, `zoom`, `spots`, `collect`, `tasks`, `handoff`, etc.)
+     * always return false.
+     */
+    internal fun isPassiveReadOnly(argv: List<String>): Boolean {
+        val sub = argv.firstOrNull()?.lowercase() ?: return true
+        if (sub in TRANSPORT_WORDS || sub == "--help" || sub == "-h") return true
+        if (argv.drop(1).any { it == "--help" || it == "-h" }) return true
+        return when (sub) {
+            "status", "diag", "apps", "permissions", "events" -> true
+            "task" -> argv.drop(1).firstOrNull { !it.startsWith("-") }?.lowercase() != "cancel"
+            "sound" -> {
+                val a1 = argv.drop(1).firstOrNull { !it.startsWith("-") }?.lowercase()
+                a1 == null || a1 == "list"
+            }
+            "keep", "schedule" -> argv.drop(1).none { !it.startsWith("-") }
+            else -> false
+        }
+    }
+
     /** Options every command takes (help, output shaping, reply language). */
     val GLOBAL_OPTIONS: Set<String> = setOf("help") + OffloadOutput.OUTPUT_FLAGS
 

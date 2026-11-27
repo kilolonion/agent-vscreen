@@ -478,8 +478,9 @@ class ApiServer(private val ctx: Context) {
                 Resp(status, "text/plain; charset=utf-8", t.toByteArray(), headers)
             fun html(h: String, status: Int = 200, headers: Map<String, String> = emptyMap()) =
                 Resp(status, "text/html; charset=utf-8", h.toByteArray(), headers)
-            fun err(status: Int, code: String, msg: String) = json(JSONObject().put("ok", false).put("code", code).put("error", msg)
-                .put("next", com.kilon.agentvscreen.cmd.Codes.next(code)), status, mapOf("X-VScreen-Code" to code))
+            fun err(status: Int, code: String, msg: String, extra: JSONObject? = null) = json(JSONObject().put("ok", false).put("code", code).put("error", msg)
+                .put("next", com.kilon.agentvscreen.cmd.Codes.next(code))
+                .also { o -> extra?.let { ex -> for (k in ex.keys()) o.put(k, ex.get(k)) } }, status, mapOf("X-VScreen-Code" to code))
             fun sse(block: (Emitter) -> Unit) = Resp(200, "text/event-stream; charset=utf-8", ByteArray(0), stream = block)
         }
     }
@@ -567,7 +568,7 @@ class ApiServer(private val ctx: Context) {
         val auth = when (val a = authenticate(r)) { is Auth -> a; is Resp -> return a; else -> return Resp.err(401, "BAD_TOKEN", "?") }
         r.auth = auth
         Tokens.used(auth.token.id)
-        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return Resp.err(503, "THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return Resp.err(503, "THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason(), com.kilon.agentvscreen.host.ThermalGuard.thermalErrorData())
         // 1.4.0-beta5: on demand, the server stays up in the app's process while the service sleeps (no notification,
         // no foreground service). A signed request is the agent needing the phone: wake the service and wait for it,
         // so any client (curl, Operit, MCP) wakes it, not only one with Android's `am` at hand.
@@ -612,7 +613,7 @@ class ApiServer(private val ctx: Context) {
         val who = r.peerName ?: "local"
         failLimiter.checkLocked(who, r.remote)?.let { return it }
         if (com.kilon.agentvscreen.host.ThermalGuard.locked) {
-            return Resp.err(503, "THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
+            return Resp.err(503, "THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason(), com.kilon.agentvscreen.host.ThermalGuard.thermalErrorData())
         }
         val json = runCatching { JSONObject(r.bodyText) }.getOrNull()
             ?: return Resp.err(400, "BAD_JSON", tr("请求体必须是合法 JSON", "Request body must be valid JSON"))
@@ -753,7 +754,8 @@ class ApiServer(private val ctx: Context) {
             }
         }
         com.kilon.agentvscreen.host.A11yHeal.maybeHeal(ctx, "command")
-        Turns.begin(session)
+        val passive = com.kilon.agentvscreen.cmd.CommandSpec.isPassiveReadOnly(argv)
+        val joinedTurn = Turns.beginCommand(session, passive)
         try {
             val res0 = handler.handle(NativeOffloadRequest(listOf("vscreen") + argv, session))
             // 1.3 beta4: the agent's note is for an older version: what changed, and how to refresh it (AgentNews).
@@ -768,7 +770,7 @@ class ApiServer(private val ctx: Context) {
             if (!fresh || argv.first() == "help") return res
             return res.copy(output = res.output.trimEnd() + tr("\n\n（Agent-VScreen：用法速查 `vscreen guide`；完整说明 `vscreen help all`。）\n", "\n\n(Agent-VScreen: quick usage `vscreen guide`; full reference `vscreen help all`.)\n"))
         }
-        finally { Turns.end(session) }
+        finally { Turns.endCommand(session, joinedTurn) }
     }
 
     /**
@@ -777,7 +779,7 @@ class ApiServer(private val ctx: Context) {
      */
     fun runFor(r: Req, argv: List<String>, session: String, requestId: String?, onStep: ((String) -> Unit)? = null): Pair<NativeOffloadResult, Boolean> {
         val auth = r.auth ?: return NativeOffloadResult(1, "", "BAD_TOKEN") to false
-        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return NativeOffloadResult(1, tr("设备过热已暂停：", "Thermal stop: ") + com.kilon.agentvscreen.host.ThermalGuard.reason(), "THERMAL_STOP") to false
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return NativeOffloadResult(1, tr("设备过热已暂停：", "Thermal stop: ") + com.kilon.agentvscreen.host.ThermalGuard.reason(), "THERMAL_STOP", data = com.kilon.agentvscreen.host.ThermalGuard.thermalErrorData()) to false
         val t = Tokens.byId(auth.token.id) ?: auth.token
         val via = when {
             r.path.startsWith("/mcp") -> Abilities.Via.MCP

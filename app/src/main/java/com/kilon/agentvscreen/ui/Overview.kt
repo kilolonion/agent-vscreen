@@ -574,7 +574,7 @@ private fun ShieldSheet(show: Boolean, close: () -> Unit) {
     val ctx = LocalContext.current
     val app = LocalApp.current
     val host = LocalHost.current
-    val st = remember(show, app.tick) { ServiceControl.now(ctx) }
+    val st = remember(show, app.tick) { if (show) com.kilon.agentvscreen.host.ThermalGuard.sampleNow(); ServiceControl.now(ctx) }
     val awake = remember(show, app.tick) { HostService.isAlive }
     OverlayBottomSheet(show = show, title = tr("服务", "Service"), onDismissRequest = close) {
         Column(Modifier.padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

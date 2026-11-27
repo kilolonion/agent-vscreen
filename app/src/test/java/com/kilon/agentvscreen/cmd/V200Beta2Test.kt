@@ -434,7 +434,7 @@ class V200Beta2Test {
     @Test
     fun serviceGateBinderTransactionLifecycleAndProtocolVersion() {
         assertEquals(19, VScreenDisplayService.PROTOCOL)
-        assertEquals(VScreenDisplayService.RESTORE_MAIN_FOCUS, VScreenDisplayService.LAST_CALL)
+        assertEquals(VScreenDisplayService.IS_DISPLAY_INTERACTIVE, VScreenDisplayService.LAST_CALL)
         val svc = VScreenDisplayService().apply { ownAppUidFn = { android.os.Binder.getCallingUid() } }
         val wantPort = freePort()
 

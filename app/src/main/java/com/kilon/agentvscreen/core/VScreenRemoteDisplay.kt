@@ -363,6 +363,17 @@ internal object VScreenRemoteDisplay {
     fun restoreMainFocus(fromDisplayId: Int, mainTaskId: Int): Result<Boolean> =
         call(VScreenDisplayService.RESTORE_MAIN_FOCUS, { it.writeInt(fromDisplayId); it.writeInt(mainTaskId) }) { it.readInt() != 0 }
 
+    /** Probe whether [displayId] is interactive according to the privileged PowerManager / IPowerManager API. Null if unavailable. */
+    fun isDisplayInteractive(displayId: Int): Boolean? {
+        if (binder?.isBinderAlive != true) return null
+        val code = call(VScreenDisplayService.IS_DISPLAY_INTERACTIVE, { it.writeInt(displayId) }) { it.readInt() }.getOrNull() ?: return null
+        return when (code) {
+            1 -> true
+            0 -> false
+            else -> null
+        }
+    }
+
     fun touch(displayId: Int) {
         if (binder?.isBinderAlive != true) return
         call(VScreenDisplayService.TOUCH, { it.writeInt(displayId) }) { }

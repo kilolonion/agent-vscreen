@@ -347,6 +347,7 @@ look x1,y1,x2,y2 的旧写法：放大看一块区域（图边上标着副屏坐
 | `STALE_SCREEN` | `look` | 这个操作是针对已经重建过的旧副屏的。 |
 | `NOT_SUPPORTED` | `ask_user` | 这台手机做不了这个操作（副屏服务不可用）。status 的 degraded 里有原因。 |
 | `INPUT_FAILED` | `look` | 系统没有接受这次输入注入。 |
+| `INPUT_BLOCKED_SCREEN_OFF` | `ask_user` | 手机熄屏时，系统不让副屏接收触摸。可以改用按文字点击、滚动或输入，或者请用户在设置里把‘熄屏时’改成‘需要时点亮’，或者点亮屏幕。 |
 | `APP_NOT_FOUND` | `fix_command` | 找不到这个包的启动入口。 |
 | `APP_NOT_SUPPORTED` | `fix_command` | 这个应用不能在副屏上打开（例如 Agent-VScreen 自己）。 |
 | `LAUNCH_FAILED` | `look` | 应用没启动起来。 |
@@ -736,6 +737,7 @@ scope: `look`
 | `STALE_SCREEN` | `look` | This action was meant for an older screen that has been rebuilt. |
 | `NOT_SUPPORTED` | `ask_user` | This phone cannot do this (the screen service is unavailable). See degraded in status. |
 | `INPUT_FAILED` | `look` | The system did not accept the injected input. |
+| `INPUT_BLOCKED_SCREEN_OFF` | `ask_user` | While the phone screen is off, the system blocks touch input on the background display. Use text-based tap, scroll, or typing instead, or ask the user to set 'When screen is off' to 'Wake when needed' in Settings, or turn the screen on. |
 | `APP_NOT_FOUND` | `fix_command` | No launch entry for this package. |
 | `APP_NOT_SUPPORTED` | `fix_command` | This app cannot open on the background screen (e.g. Agent-VScreen itself). |
 | `LAUNCH_FAILED` | `look` | The app did not start. |

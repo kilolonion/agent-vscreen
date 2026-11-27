@@ -27,6 +27,21 @@ internal object VScreenStore {
     private const val K_RULES = "app_rules"
     private const val K_IDLE_SAVE = "idle_power_save"
     private const val K_KEEP_SCREEN_ON = "keep_screen_on"
+    private const val K_PHONE_SCREEN_MODE = "phone_screen_mode"
+
+    enum class PhoneScreenMode(val key: String) {
+        ALLOW_SLEEP("allow_sleep"),
+        KEEP_ON("keep_on"),
+        WAKE_WHEN_NEEDED("wake_when_needed");
+
+        companion object {
+            fun of(s: String?): PhoneScreenMode? = entries.firstOrNull { it.key == s }
+
+            /** Pure migration: new key wins when valid; otherwise legacy true -> KEEP_ON, false/null -> ALLOW_SLEEP. */
+            internal fun migrate(newVal: String?, legacyKeepOn: Boolean?): PhoneScreenMode =
+                of(newVal) ?: if (legacyKeepOn == true) KEEP_ON else ALLOW_SLEEP
+        }
+    }
 
     enum class Rule(val key: String, private val zhText: String, private val enText: String) {
         BLOCK("block", "禁止操作", "blocked"), READONLY("readonly", "只读", "read-only"),
@@ -45,9 +60,13 @@ internal object VScreenStore {
 
     private val _idlePowerSave = MutableStateFlow(true)
     val idlePowerSave: StateFlow<Boolean> = _idlePowerSave.asStateFlow()
-    /** 2.0.0 (issue #48): keep the phone's own screen on (dimmed) while an agent turn runs. Off by default. */
-    private val _keepScreenOn = MutableStateFlow(false)
-    val keepScreenOn: StateFlow<Boolean> = _keepScreenOn.asStateFlow()
+
+    /** Three-mode phone screen policy during active agent turns (migrated from legacy keep_screen_on). */
+    private val _phoneScreenMode = MutableStateFlow(PhoneScreenMode.ALLOW_SLEEP)
+    val phoneScreenMode: StateFlow<PhoneScreenMode> = _phoneScreenMode.asStateFlow()
+
+    /** Compatibility flag derived from [phoneScreenMode] (`mode != ALLOW_SLEEP`). */
+    val keepScreenOnEnabled: Boolean get() = _phoneScreenMode.value != PhoneScreenMode.ALLOW_SLEEP
 
     fun init(context: Context) {
         if (appContext != null) return
@@ -58,7 +77,19 @@ internal object VScreenStore {
             o.keys().asSequence().mapNotNull { k -> Rule.of(o.optString(k))?.let { k to it } }.toMap()
         }.getOrDefault(emptyMap())
         _idlePowerSave.value = prefs.getBoolean(K_IDLE_SAVE, true)
-        _keepScreenOn.value = prefs.getBoolean(K_KEEP_SCREEN_ON, false)
+        loadAndMigratePhoneScreenMode(prefs)
+    }
+
+    internal fun loadAndMigratePhoneScreenMode(sp: SharedPreferences): PhoneScreenMode {
+        val rawNew = sp.getString(K_PHONE_SCREEN_MODE, null)
+        val hasLegacy = sp.contains(K_KEEP_SCREEN_ON)
+        val legacy = if (hasLegacy) sp.getBoolean(K_KEEP_SCREEN_ON, false) else null
+        val mode = PhoneScreenMode.migrate(rawNew, legacy)
+        if (rawNew == null && hasLegacy) {
+            sp.edit().putString(K_PHONE_SCREEN_MODE, mode.key).remove(K_KEEP_SCREEN_ON).apply()
+        }
+        _phoneScreenMode.value = mode
+        return mode
     }
 
     private fun ready() = appContext != null
@@ -83,10 +114,10 @@ internal object VScreenStore {
         prefs.edit().putBoolean(K_IDLE_SAVE, on).apply()
     }
 
-    fun setKeepScreenOn(on: Boolean) {
+    fun setPhoneScreenMode(mode: PhoneScreenMode) {
+        _phoneScreenMode.value = mode
         if (!ready()) return
-        _keepScreenOn.value = on
-        prefs.edit().putBoolean(K_KEEP_SCREEN_ON, on).apply()
+        prefs.edit().putString(K_PHONE_SCREEN_MODE, mode.key).remove(K_KEEP_SCREEN_ON).apply()
     }
 
     /** File-name-safe key; keeps Chinese, letters, digits, '-', '_' and '.'. */

@@ -698,6 +698,11 @@ class VScreenDisplayService : Binder {
                     val ok = restoreMainFocus(fromDisplay, mainTaskId)
                     out.writeInt(0); out.writeInt(if (ok) 1 else 0)
                 }
+                IS_DISPLAY_INTERACTIVE -> {
+                    val id = data.readInt()
+                    val res = isDisplayInteractive(id)
+                    out.writeInt(0); out.writeInt(res)
+                }
             }
         } catch (t: Throwable) {
             val cause = (t as? java.lang.reflect.InvocationTargetException)?.targetException ?: t
@@ -721,6 +726,34 @@ class VScreenDisplayService : Binder {
         wm.javaClass.getMethod("setDisplayImePolicy", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
             .invoke(wm, displayId, DISPLAY_IME_POLICY_HIDE)
         return true
+    }
+
+    /**
+     * Probe per-display interactive state in the privileged process via hidden PowerManager / IPowerManager APIs.
+     * Returns 1 (interactive), 0 (non-interactive), or -1 when unavailable on this Android build. Never throws.
+     */
+    private fun isDisplayInteractive(displayId: Int): Int {
+        if (displayId <= android.view.Display.DEFAULT_DISPLAY) return -1
+        runCatching {
+            val pm = (base ?: systemContext()).getSystemService(Context.POWER_SERVICE)
+            if (pm != null) {
+                val m = pm.javaClass.getMethod("isInteractive", Int::class.javaPrimitiveType)
+                val v = m.invoke(pm, displayId) as? Boolean
+                if (v != null) return if (v) 1 else 0
+            }
+        }
+        runCatching {
+            val sm = Class.forName("android.os.ServiceManager")
+            val binder = sm.getMethod("getService", String::class.java).invoke(null, "power") ?: return@runCatching
+            val ipm = Class.forName("android.os.IPowerManager\$Stub")
+                .getMethod("asInterface", android.os.IBinder::class.java).invoke(null, binder) ?: return@runCatching
+            for (name in listOf("isDisplayInteractive", "isInteractiveForDisplay")) {
+                val m = runCatching { ipm.javaClass.getMethod(name, Int::class.javaPrimitiveType) }.getOrNull() ?: continue
+                val v = m.invoke(ipm, displayId) as? Boolean
+                if (v != null) return if (v) 1 else 0
+            }
+        }
+        return -1
     }
 
     /**
@@ -1333,6 +1366,8 @@ class VScreenDisplayService : Binder {
         const val HIDE_IME = FIRST_CALL_TRANSACTION + 24
         /** Protocol 19: restore focus from our virtual display back to the already-visible top app task on display 0. */
         const val RESTORE_MAIN_FOCUS = FIRST_CALL_TRANSACTION + 25
+        /** Optional read-only probe for per-display interactive state (PROTOCOL remains 19). */
+        const val IS_DISPLAY_INTERACTIVE = FIRST_CALL_TRANSACTION + 26
         /** The rule of [mayInject]: never the main screen; a display this service created, or one the app owns. */
         /**
          * 2.0.0-beta12 (test on HONOR: `key back`, `esc` did nothing on the screen while enter/del worked): BACK went in
@@ -1363,7 +1398,7 @@ class VScreenDisplayService : Binder {
             }.getOrDefault(false)
         }
         /** The newest call code; onTransact serves CREATE..LAST_CALL. A new code moves this. */
-        const val LAST_CALL = RESTORE_MAIN_FOCUS
+        const val LAST_CALL = IS_DISPLAY_INTERACTIVE
         /** Apps the service silenced, so a service that was killed gives them back on its next start. Shell-owned. */
         const val FILE = "/data/local/tmp/agent-vscreen-muted.json"
         /** "allow" / "ignore" / "default" … as `appops get` says it, or null when it cannot be read. */

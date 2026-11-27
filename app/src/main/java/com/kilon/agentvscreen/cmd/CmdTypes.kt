@@ -120,9 +120,12 @@ class StepOut(val n: String, val step: String, var status: String, var text: Str
     var imgAgeMs: Long? = null
     /** 2.0.0-beta16 (Item 8): concise label for `task recap` on control-flow containers; empty string omits duplicate closing entries. */
     var recapLabel: String? = null
+    /** Input delivery channel when non-default (e.g. `a11y` or `wake`). */
+    var via: String? = null
     fun json(): org.json.JSONObject = org.json.JSONObject().put("n", n).put("step", step).put("status", status)
         .also { o ->
             fact?.let { o.put("fact", it) }; code?.let { o.put("code", it) }
+            via?.let { o.put("via", it) }
             waitedFor?.let { o.put("waited_for", it).put("met", waitMet == true).put("waited_ms", waitMs ?: 0) }
             point?.let { o.put("x", it.first).put("y", it.second) }
             changed?.let { o.put("changed", it) }

@@ -356,11 +356,16 @@ object BackgroundOperation {
 
     /** Background rules watching the screen between turns: while > 0 the idle screen is neither paused nor released. */
     @Volatile private var holds = 0
+    private val _awakeHolds = MutableStateFlow(0)
+    val awakeHolds: StateFlow<Int> = _awakeHolds.asStateFlow()
     /** Sessions with a chat turn running right now (onTaskStarted .. onTaskFinished). */
     private val turns = HashSet<String>()
+    private val _activeTurns = MutableStateFlow<Set<String>>(emptySet())
+    val activeTurns: StateFlow<Set<String>> = _activeTurns.asStateFlow()
 
     fun hold(on: Boolean) {
         val now = synchronized(lock) { holds = (holds + if (on) 1 else -1).coerceAtLeast(0); holds }
+        _awakeHolds.value = now
         if (on) {
             VScreenAwake.kick(tr("盯守", "Watching"))
             mainHandler.removeCallbacks(idlePark)
@@ -639,6 +644,8 @@ object BackgroundOperation {
         // 1.4.0-beta4: the task on a screen ends with the screen, even when its agent never said done.
         _state.value.ownerSessionId?.let { TaskLog.onTurnEnd(it, _state.value.userStopped) }
         _state.update { it.copy(displayId = null, ownerSessionId = null, takeoverSessionId = null, operating = false, note = reason) }
+        InputReach.invalidate(d.displayId)
+        VScreenAwake.reconcile(tr("副屏释放", "display released"))
         AppLogger.info(TAG, "released display ${d.displayId} gen=${d.generation}: $reason")
         // A lesson being recorded and the questions answered on this screen end with it (1.3.0-beta14).
         com.kilon.agentvscreen.cmd.Teach.screenClosed(appContext)
@@ -653,13 +660,15 @@ object BackgroundOperation {
             cancelIdleRelease(); mainHandler.removeCallbacks(idlePark); _state.update { it.copy(idle = false) }
             display?.takeIf { it.parked }?.let { d -> Thread { runCatching { unpark(d) } }.apply { isDaemon = true }.start() }
         }
-        synchronized(lock) {
+        val activeSnap = synchronized(lock) {
             // 1.4.2-beta4: a re-read owed from between turns (hand-back after the turn ended) carries into the new turn.
             tasks[sessionId] = TaskInfo(sessionId).also { t ->
                 if (rereadOwed.owes(sessionId)) { t.rereadRequired = true; t.rereadReason = rereadOwed.settle(sessionId) }
             }
             turns.add(sessionId)
+            turns.toSet()
         }
+        _activeTurns.value = activeSnap
         // A window the user hid during the previous turn comes back for the new one.
         if (_state.value.windowHidden) _state.update { it.copy(windowHidden = false) }
         VScreenAwake.kick(tr("任务开始", "Task started"))
@@ -671,7 +680,8 @@ object BackgroundOperation {
      */
     fun onTaskFinished(sessionId: String) {
         if (sessionId.isEmpty()) return
-        synchronized(lock) { tasks.remove(sessionId); turns.remove(sessionId) }
+        val activeSnap = synchronized(lock) { tasks.remove(sessionId); turns.remove(sessionId); turns.toSet() }
+        _activeTurns.value = activeSnap
         clearParking(sessionId)
         // 2.0.0: the phone's screen is let go as soon as the turn ends, not at the keeper's next check.
         VScreenAwake.syncScreenLock()
@@ -916,7 +926,7 @@ object BackgroundOperation {
     }
 
     private fun acquireOwned(sid: String, create: Boolean, landscape: Boolean?, scale: Double): VScreenDisplay {
-        if (com.kilon.agentvscreen.host.ThermalGuard.locked) throw BackgroundOperation.ActionError("THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) com.kilon.agentvscreen.host.ThermalGuard.throwStopped()
         val s0 = _state.value
         if (!s0.enabled) throw ActionError("DISABLED", tr("Agent-VScreen 的服务已被用户关闭。请用户打开 Agent-VScreen 点“启动服务”", "The user turned off the Agent-VScreen service. Ask the user to open Agent-VScreen and turn the service on"))
         if (s0.connection != Connection.READY) {
@@ -930,13 +940,14 @@ object BackgroundOperation {
             }
         }
         synchronized(lock) {
-            if (com.kilon.agentvscreen.host.ThermalGuard.locked) throw BackgroundOperation.ActionError("THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
+            if (com.kilon.agentvscreen.host.ThermalGuard.locked) com.kilon.agentvscreen.host.ThermalGuard.throwStopped()
             val cur = display
             val s = _state.value
             if (cur != null && !cur.released) {
                 if (s.ownerSessionId == sid) {
                     cancelIdleRelease()
                     if (s.idle) _state.update { it.copy(idle = false) }
+                    VScreenAwake.reconcile(tr("继续副屏", "resume display"))
                     return cur
                 }
                 val ownerBusy = s.ownerSessionId != null && s.ownerSessionId != sid && tasks.containsKey(s.ownerSessionId)
@@ -954,12 +965,13 @@ object BackgroundOperation {
                     it.copy(ownerSessionId = sid, idle = false, takeoverSessionId = null,
                         note = tr("接手了上一轮留下的副屏（display ${cur.displayId}）", "Took over the screen left by the last turn (display ${cur.displayId})"))
                 }
+                VScreenAwake.reconcile(tr("接手副屏", "take over display"))
                 AppLogger.info(TAG, "session $sid took over idle display ${cur.displayId} from $prev")
                 return cur
             }
         }
         synchronized(lock) {
-            if (com.kilon.agentvscreen.host.ThermalGuard.locked) throw BackgroundOperation.ActionError("THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason())
+            if (com.kilon.agentvscreen.host.ThermalGuard.locked) com.kilon.agentvscreen.host.ThermalGuard.throwStopped()
             val cur = display
             val s = _state.value
             if (cur != null && !cur.released) {
@@ -994,6 +1006,8 @@ object BackgroundOperation {
                         it.copy(displayId = d.displayId, generation = d.generation, ownerSessionId = sid, idle = false,
                             note = tr("接回了上次留下的副屏（$why）", "Picked up the screen left last time ($why)"))
                     }
+                    InputReach.invalidate(d.displayId)
+                    VScreenAwake.reconcile(tr("接回副屏", "adopted display"))
                     AppLogger.info(TAG, "adopted display ${d.displayId} for $sid")
                     return d
                 }
@@ -1017,6 +1031,8 @@ object BackgroundOperation {
             _state.update {
                 it.copy(displayId = d.displayId, generation = d.generation, ownerSessionId = sid, idle = false, note = null)
             }
+            InputReach.invalidate(d.displayId)
+            VScreenAwake.reconcile(tr("新建副屏", "created display"))
             // Keyboard must never pop up on the user's screen for this display.
             val ime = runCatching { VScreenShell.hideImeOn(ctx(), d.displayId) }.getOrNull()
             if (ime != null && !ime.ok) AppLogger.warning(TAG, ime.message)

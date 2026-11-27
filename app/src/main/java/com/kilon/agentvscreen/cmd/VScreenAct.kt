@@ -10,6 +10,8 @@ import android.os.SystemClock
 import com.kilon.agentvscreen.cmd.NativeOffloadResult
 import com.kilon.agentvscreen.core.BackgroundOperation
 import com.kilon.agentvscreen.core.BackgroundOperation.ActionError
+import com.kilon.agentvscreen.core.InputReach
+import com.kilon.agentvscreen.core.InputRoute
 import com.kilon.agentvscreen.core.Mask
 import com.kilon.agentvscreen.core.MotionTrack
 import com.kilon.agentvscreen.core.VPixels
@@ -1224,6 +1226,7 @@ internal fun VScreenOffloadHandler.runSegment(
         if (step.loop != Loop.NONE) {
             appRule(d, step)
             com.kilon.agentvscreen.host.Risk.recordInputAction(Call.current()?.tokenId)
+            val reachBefore = InputReach.probe(d.displayId)
             val out = BackgroundOperation.agentAction(sid, null, isRead = false, describe = com.kilon.agentvscreen.host.Audit.redact(listOf(step.raw)).take(40)) { dd ->
                 closedLoop(sid, dd, step, ctxAct)
             }
@@ -1231,9 +1234,11 @@ internal fun VScreenOffloadHandler.runSegment(
             if (out.points.isNotEmpty()) BackgroundOperation.actionLog(sid, 1).lastOrNull()?.trackN?.let { VScreenRecorder.setPoints(d.displayId, it, out.points) }
             VScreenPerception.noteAction(d.displayId, out.ms)
             lastTap = if (step.kind == StepKind.PRESS) ctxAct.point else null
+            noteViaChannel(notes, out.via)
             val want = step.until!!.joinToString(" or ") { it.raw }
             val so = StepOut(label, step.raw, if (out.met) "done" else "missed", "").also {
                 it.fact = out.actionFact
+                it.via = out.via
                 it.alreadyAtStart = out.alreadyAtStart
                 it.point = ctxAct.point.takeIf { step.kind == StepKind.PRESS }
                 it.waitedFor = want
@@ -1254,6 +1259,18 @@ internal fun VScreenOffloadHandler.runSegment(
                 }
             } else {
                 so.code = if (out.notRead) "NOT_READ" else "STEP_MISSED"
+                if (so.code == "STEP_MISSED" && VScreenAwake.screenOff) {
+                    InputReach.invalidate(d.displayId)
+                    val reprobed = InputReach.probe(d.displayId, force = true)
+                    if (reachBefore == InputReach.Reach.UNKNOWN && reprobed == InputReach.Reach.BLOCKED) {
+                        val msg = inputBlockedMessage()
+                        so.code = "INPUT_BLOCKED_SCREEN_OFF"
+                        so.text = tr("$label ${step.raw} → ${out.actionFact}；$msg", "$label ${step.raw} → ${out.actionFact}; $msg")
+                        missed = msg
+                        put(so)
+                        return
+                    }
+                }
                 val reasonSuffix = out.missReason?.let { tr("（$it）", " ($it)") } ?: ""
                 so.text = tr("$label ${step.raw} → ${out.actionFact}；等 $want：${s1(out.ms)} 未满足$reasonSuffix", "$label ${step.raw} → ${out.actionFact}; wait $want: not met after ${s1(out.ms)}$reasonSuffix")
                 missed = tr("第 $label 步 ${step.raw} 做了，但没等到 $want$reasonSuffix。", "Step $label ${step.raw} was done, but $want never came$reasonSuffix. ") + screenNow()
@@ -1269,6 +1286,7 @@ internal fun VScreenOffloadHandler.runSegment(
         val editKey = step.kind == StepKind.KEY && step.text.orEmpty().let { k -> '+' in k || k.length == 1 || k == "del" || k == "forward_del" || k == "space" }
         val before = if (step.until == null && !quick && step.kind != StepKind.TYPE && !editKey) d.latestFrame()?.let { VScreenPerception.small(it) } else null
         try {
+            val reachBefore = InputReach.probe(d.displayId)
             val tAct = SystemClock.elapsedRealtime()
             val done1 = doAction(sid, d, step, ctxAct, lastTap)
             probe?.acted(step.kind, done1.typedField, done1.typedBounds, done1.typeVerified)
@@ -1277,8 +1295,10 @@ internal fun VScreenOffloadHandler.runSegment(
             // 1.4.0-beta14 (test K6: tap a web box; key ctrl+a; type → the box was not found and the words were lost):
             // an editing key keeps focus where the tap put it, so the tapped point still names the box typed into.
             lastTap = if (step.kind == StepKind.TAP || step.kind == StepKind.PRESS) ctxAct.point else if (step.kind == StepKind.TYPE || editKey) lastTap else null
+            noteViaChannel(notes, done1.via)
             val so = StepOut(label, step.raw, "done", "").also {
                 it.fact = fact
+                it.via = done1.via
                 it.point = ctxAct.point.takeIf { step.kind == StepKind.TAP || step.kind == StepKind.PRESS }
                 it.typeVerified = done1.typeVerified
                 it.isActionOrRepeatUntil = own
@@ -1301,8 +1321,22 @@ internal fun VScreenOffloadHandler.runSegment(
                 else -> {
                     val seenNow = probe.now()
                     so.status = "missed"; so.code = probe.timeoutCode()
-                    missed = tr("第 $label 步 ${step.raw} 做了，但没等到 ${so.waitedFor}（$seenNow）。", "Step $label ${step.raw} was done, but ${so.waitedFor} never came ($seenNow). ") + screenNow()
-                    tr("等 ${so.waitedFor}：${s1(w.ms)} 到时间，没等到（$seenNow）", "wait ${so.waitedFor}: time up at ${s1(w.ms)}, never came ($seenNow)")
+                    if (so.code == "STEP_MISSED" && VScreenAwake.screenOff) {
+                        InputReach.invalidate(d.displayId)
+                        val reprobed = InputReach.probe(d.displayId, force = true)
+                        if (reachBefore == InputReach.Reach.UNKNOWN && reprobed == InputReach.Reach.BLOCKED) {
+                            val msg = inputBlockedMessage()
+                            so.code = "INPUT_BLOCKED_SCREEN_OFF"
+                            missed = msg
+                            msg
+                        } else {
+                            missed = tr("第 $label 步 ${step.raw} 做了，但没等到 ${so.waitedFor}（$seenNow）。", "Step $label ${step.raw} was done, but ${so.waitedFor} never came ($seenNow). ") + screenNow()
+                            tr("等 ${so.waitedFor}：${s1(w.ms)} 到时间，没等到（$seenNow）", "wait ${so.waitedFor}: time up at ${s1(w.ms)}, never came ($seenNow)")
+                        }
+                    } else {
+                        missed = tr("第 $label 步 ${step.raw} 做了，但没等到 ${so.waitedFor}（$seenNow）。", "Step $label ${step.raw} was done, but ${so.waitedFor} never came ($seenNow). ") + screenNow()
+                        tr("等 ${so.waitedFor}：${s1(w.ms)} 到时间，没等到（$seenNow）", "wait ${so.waitedFor}: time up at ${s1(w.ms)}, never came ($seenNow)")
+                    }
                 }
             }
             // 1.2: an action after which not one sampled pixel differs is said: the usual cause is a tap that hit nothing.
@@ -1475,9 +1509,17 @@ internal class ActCtx(val sid: String) {
 }
 
 /** A resolved target: the point, the words there, and (for #N) whether the element had moved. */
-internal class Target(val x: Int, val y: Int, val label: String?, val moved: String? = null, val box: Rect? = null,
+internal class Target(
+    val x: Int,
+    val y: Int,
+    val label: String?,
+    val moved: String? = null,
+    val box: Rect? = null,
     /** What is at the point itself, for the payment / irreversible check (differs from [label] for a point beside words). */
-    val atPoint: String? = label)
+    val atPoint: String? = label,
+    /** True when resolved from an element (#N or text without coordinate offset), false for raw/offset points. */
+    val isElement: Boolean = false,
+)
 
 /**
  * 2.0.0-beta11 (test R14: `tap 1012 2688` on a checkout page pressed 立即支付 with no confirmation, `tap 自己付款` asked):
@@ -1563,7 +1605,7 @@ internal fun VScreenOffloadHandler.target(sid: String, d: VScreenDisplay, t: Ste
             throw StepRefused("NOT_FOUND", tr("没有 #${t.n} 这个编号（最新列表共 ${set.list.size} 个）", "There is no #${t.n} (the latest list has ${set.list.size})"))
         }
         val fresh = !ctx.acted && System.currentTimeMillis() - set.atMs <= 3_000L
-        if (fresh) Target(e.box.centerX(), e.box.centerY(), e.label, box = e.box)
+        if (fresh) Target(e.box.centerX(), e.box.centerY(), e.label, box = e.box, isElement = true)
         else {
             val snapAt = SystemClock.elapsedRealtime()
             val sn = snapshot(d)
@@ -1586,9 +1628,9 @@ internal fun VScreenOffloadHandler.target(sid: String, d: VScreenDisplay, t: Ste
             fun withList(m: El) = shift != null && shift.third >= 2 && Math.abs(m.box.centerX() - e.box.centerX() - shift.first) <= 24 && Math.abs(m.box.centerY() - e.box.centerY() - shift.second) <= 24
             when {
                 !page -> throw StepRefused("STALE_ELEMENT", tr("#${t.n}“${e.label.take(24)}”是上一页的编号，页面已经换了，没点。看【现在】的新列表再用编号", "#${t.n} \"${e.label.take(24)}\" is a number from the previous page and the page has changed; nothing was tapped. Use the numbers of the new list in [Now]"))
-                here != null -> Target(here.box.centerX(), here.box.centerY(), here.label, box = here.box)
+                here != null -> Target(here.box.centerX(), here.box.centerY(), here.label, box = here.box, isElement = true)
                 // Wordless elements (icons) cannot be told apart by what they say: only the same place counts.
-                same.size == 1 && !e.placeholder && withList(same[0]) -> same[0].let { Target(it.box.centerX(), it.box.centerY(), it.label, tr("它从 (${e.box.centerX()},${e.box.centerY()}) 移到了这里", "it moved here from (${e.box.centerX()},${e.box.centerY()})")) }
+                same.size == 1 && !e.placeholder && withList(same[0]) -> same[0].let { Target(it.box.centerX(), it.box.centerY(), it.label, tr("它从 (${e.box.centerX()},${e.box.centerY()}) 移到了这里", "it moved here from (${e.box.centerX()},${e.box.centerY()})"), box = it.box, isElement = true) }
                 else -> throw StepRefused("STALE_ELEMENT", tr("#${t.n}“${e.label.take(24)}”已经不在 (${e.box.centerX()},${e.box.centerY()}) 了（页面变了" + (if (same.size > 1) "，现在有 ${same.size} 处一样的字" else "") + "），没点。看【现在】的新列表再用编号",
                     "#${t.n} \"${e.label.take(24)}\" is no longer at (${e.box.centerX()},${e.box.centerY()}) (the page changed" + (if (same.size > 1) "; the same text is now in ${same.size} places" else "") + "); nothing was tapped. Use the numbers of the new list in [Now]"))
             }
@@ -1596,14 +1638,14 @@ internal fun VScreenOffloadHandler.target(sid: String, d: VScreenDisplay, t: Ste
     }
     is StepTarget.Words -> run {
         // 1.4.0-beta5: with an offset the point is beside the words, not on them (no box: it is a point tap).
-        fun hit(e: El): Target = if (t.dx == 0 && t.dy == 0) Target(e.box.centerX(), e.box.centerY(), e.label, box = e.box)
+        fun hit(e: El): Target = if (t.dx == 0 && t.dy == 0) Target(e.box.centerX(), e.box.centerY(), e.label, box = e.box, isElement = true)
             else {
                 // 1.4.0-beta8 (test: `tap 蓝牙 +60%,+0%` tapped off the screen and only said "nothing changed"): a point
                 // beside words that falls off the screen is refused, as a point off the screen is.
                 val x = e.box.centerX() + t.dx; val y = e.box.centerY() + t.dy
                 if (x !in 0 until d.width || y !in 0 until d.height)
                     throw StepRefused("OUT_OF_BOUNDS", tr("「${e.label.orEmpty().take(24)}」在 (${e.box.centerX()},${e.box.centerY()})，偏移后 ($x,$y) 在副屏 ${d.width}x${d.height} 外面；百分比偏移按整屏宽高算", "\"${e.label.orEmpty().take(24)}\" is at (${e.box.centerX()},${e.box.centerY()}); with the offset ($x,$y) is outside the ${d.width}x${d.height} screen; % offsets are shares of the whole screen"))
-                Target(x, y, tr("「${e.label.orEmpty().take(24)}」旁", "beside \"${e.label.orEmpty().take(24)}\""), atPoint = wordsAt(sid, d, x, y))
+                Target(x, y, tr("「${e.label.orEmpty().take(24)}」旁", "beside \"${e.label.orEmpty().take(24)}\""), atPoint = wordsAt(sid, d, x, y), isElement = false)
             }
         fun choose(hits: List<El>): El? = if (t.nth != 0) hits.getOrNull(if (t.nth > 0) t.nth - 1 else hits.size + t.nth)
             else hits.singleOrNull() ?: hits.filter { it.clickable || it.editable }.singleOrNull()
@@ -1771,6 +1813,41 @@ internal fun connectionLost(d: VScreenDisplay): String? {
         tr("告诉用户；Shizuku / Root 恢复运行后重新 launch", "Tell the user; once Shizuku / root runs again, launch again")
 }
 
+/** Bilingual message for `INPUT_BLOCKED_SCREEN_OFF`. */
+internal fun inputBlockedMessage(extra: String? = null): String {
+    val base = tr(
+        "手机熄屏时，系统不让副屏接收触摸。可以改用按文字点击、滚动或输入，或者请用户在设置里把“熄屏时”改成“需要时点亮”，或者点亮屏幕。",
+        "While the phone screen is off, the system does not allow touch input on the background display. Use text-based tap, scroll, or type instead, or ask the user to set 'When screen is off' to 'Wake when needed' in Settings, or turn on the screen.",
+    )
+    return if (extra.isNullOrBlank()) base else "$base${tr("（$extra）", " ($extra)")}"
+}
+
+/** Execute `WAKE_THEN_TOUCH` or throw `StepRefused("INPUT_BLOCKED_SCREEN_OFF")` on `REFUSE` or wake failure. */
+internal fun executeWakeOrRefuse(d: VScreenDisplay, route: InputRoute.Route): String? = when (route) {
+    InputRoute.Route.TOUCH -> null
+    InputRoute.Route.WAKE_THEN_TOUCH -> {
+        val err = VScreenAwake.wakePhoneForInput(d)
+        if (err != null) throw StepRefused("INPUT_BLOCKED_SCREEN_OFF", inputBlockedMessage(err))
+        "wake"
+    }
+    InputRoute.Route.REFUSE -> throw StepRefused("INPUT_BLOCKED_SCREEN_OFF", inputBlockedMessage())
+    InputRoute.Route.A11Y -> "a11y"
+}
+
+/** Append an informational routing note (`via=a11y` / `via=wake`) when a non-default channel was used. */
+internal fun noteViaChannel(notes: Notes, via: String?) {
+    when (via) {
+        "a11y" -> notes += tr(
+            "via=a11y（手机熄屏期间已通过无障碍节点执行操作）",
+            "via=a11y (action performed via accessibility node while phone screen is off)",
+        )
+        "wake" -> notes += tr(
+            "via=wake（已按设置临时点亮主屏后执行触摸）",
+            "via=wake (main screen temporarily woken per setting before touch)",
+        )
+    }
+}
+
 /** What one action did ([text]), and [miss] when its own effect could not be confirmed (it ends the stretch; [code] says which kind). */
 internal class Done(
     val text: String,
@@ -1780,6 +1857,7 @@ internal class Done(
     val gesture: GestureRecord? = null,
     val typedField: String? = null,
     val typedBounds: Rect? = null,
+    val via: String? = null,
 )
 
 /** Do one action and say what was done (facts: where, with which method). */
@@ -1803,6 +1881,7 @@ private fun VScreenOffloadHandler.doAction(
     var typedField: String? = null
     var typedBounds: Rect? = null
     var dragRecord: GestureRecord? = null
+    var actionVia: String? = null
     val pts = ArrayList<IntArray>()
     val hu = ctx.human
     // 1.3.0-beta19: a person does not act the instant they decide: a short, uneven pause first.
@@ -1810,35 +1889,70 @@ private fun VScreenOffloadHandler.doAction(
     val fact = BackgroundOperation.agentAction(sid, null, isRead = false, describe = com.kilon.agentvscreen.host.Audit.redact(listOf(step.raw)).take(40)) { dd ->
         fun okOr(o: VScreenShell.Outcome) { if (!o.ok) throw ActionError(o.code, o.message) }
         fun there(t: Target) = (t.label?.let { tr("，那里是“${it.take(30)}”", ", which is \"${it.take(30)}\"") } ?: "") + (t.moved?.let { tr("（$it）", " ($it)") } ?: "")
+        fun viaTag(v: String?) = v?.let { tr("（via=$it）", " (via=$it)") }.orEmpty()
+        val reach = InputReach.probe(dd.displayId)
+        val wakeEnabled = VScreenStore.phoneScreenMode.value == VScreenStore.PhoneScreenMode.WAKE_WHEN_NEEDED
         when (step.kind) {
             StepKind.TAP -> {
                 val t = target(sid, dd, step.target!!, ctx)
                 payGuard(sid, dd, t.atPoint, t.x, t.y, fromRule = fromRule)
                 ctx.focusBefore = com.kilon.agentvscreen.core.VScreenTyping.focusedFieldKey(dd.displayId)
-                val (x, y) = hu?.near(t.x, t.y, t.box, dd.width, dd.height) ?: (t.x to t.y)
-                okOr(if (hu != null) VScreenShell.tap(dd.displayId, x, y, hu.holdMs()) else VScreenShell.tap(dd.displayId, x, y)); pts += intArrayOf(x, y); ctx.point = x to y
-                tr("点了 ($x,$y)", "tapped ($x,$y)") + there(t) + (if (hu != null) Human.said(pause ?: 0, t.x to t.y, x to y) else "")
+                val kind = if (t.isElement) InputRoute.Kind.ELEMENT_TAP else InputRoute.Kind.POINT_OR_GESTURE
+                val snap = if (reach == InputReach.Reach.BLOCKED && kind == InputRoute.Kind.ELEMENT_TAP) com.kilon.agentvscreen.core.A11yTree.snapshot(dd.displayId) else null
+                val a11yNode = if (snap != null && t.box != null) snap.findNodeFor(t.box, t.label, dd::toFrame) else null
+                val route = InputRoute.choose(reach, kind, hasNode = a11yNode?.clickableAncestor() != null, wakeEnabled = wakeEnabled)
+                if (route == InputRoute.Route.A11Y && snap != null && a11yNode != null && snap.performClick(a11yNode)) {
+                    actionVia = "a11y"
+                    pts += intArrayOf(t.x, t.y); ctx.point = t.x to t.y
+                    tr("点了 (${t.x},${t.y})", "tapped (${t.x},${t.y})") + there(t) + viaTag(actionVia)
+                } else {
+                    val touchRoute = if (route == InputRoute.Route.A11Y) {
+                        InputRoute.choose(reach, InputRoute.Kind.POINT_OR_GESTURE, hasNode = false, wakeEnabled = wakeEnabled)
+                    } else route
+                    actionVia = executeWakeOrRefuse(dd, touchRoute)
+                    val (x, y) = hu?.near(t.x, t.y, t.box, dd.width, dd.height) ?: (t.x to t.y)
+                    okOr(if (hu != null) VScreenShell.tap(dd.displayId, x, y, hu.holdMs()) else VScreenShell.tap(dd.displayId, x, y)); pts += intArrayOf(x, y); ctx.point = x to y
+                    tr("点了 ($x,$y)", "tapped ($x,$y)") + there(t) + (if (hu != null) Human.said(pause ?: 0, t.x to t.y, x to y) else "") + viaTag(actionVia)
+                }
             }
             StepKind.PRESS -> {
                 val t = target(sid, dd, step.target!!, ctx)
                 payGuard(sid, dd, t.atPoint, t.x, t.y, fromRule = fromRule)
-                val (x, y) = hu?.near(t.x, t.y, t.box, dd.width, dd.height) ?: (t.x to t.y)
-                val ms = hu?.vary(step.ms ?: 800L, 0.15) ?: (step.ms ?: 800L)
-                okOr(VScreenShell.longPress(dd.displayId, x, y, ms.toInt())); pts += intArrayOf(x, y); ctx.point = x to y
-                tr("按住 ($x,$y) ${ms}ms", "held ($x,$y) ${ms}ms") + there(t) + (if (hu != null) Human.said(pause ?: 0, t.x to t.y, x to y) else "")
+                val kind = if (t.isElement) InputRoute.Kind.ELEMENT_PRESS else InputRoute.Kind.POINT_OR_GESTURE
+                val snap = if (reach == InputReach.Reach.BLOCKED && kind == InputRoute.Kind.ELEMENT_PRESS) com.kilon.agentvscreen.core.A11yTree.snapshot(dd.displayId) else null
+                val a11yNode = if (snap != null && t.box != null) snap.findNodeFor(t.box, t.label, dd::toFrame) else null
+                val route = InputRoute.choose(reach, kind, hasNode = a11yNode?.longClickableAncestor() != null, wakeEnabled = wakeEnabled)
+                if (route == InputRoute.Route.A11Y && snap != null && a11yNode != null && snap.performLongClick(a11yNode)) {
+                    actionVia = "a11y"
+                    pts += intArrayOf(t.x, t.y); ctx.point = t.x to t.y
+                    tr("长按 (${t.x},${t.y})", "long-pressed (${t.x},${t.y})") + there(t) + viaTag(actionVia)
+                } else {
+                    val touchRoute = if (route == InputRoute.Route.A11Y) {
+                        InputRoute.choose(reach, InputRoute.Kind.POINT_OR_GESTURE, hasNode = false, wakeEnabled = wakeEnabled)
+                    } else route
+                    actionVia = executeWakeOrRefuse(dd, touchRoute)
+                    val (x, y) = hu?.near(t.x, t.y, t.box, dd.width, dd.height) ?: (t.x to t.y)
+                    val ms = hu?.vary(step.ms ?: 800L, 0.15) ?: (step.ms ?: 800L)
+                    okOr(VScreenShell.longPress(dd.displayId, x, y, ms.toInt())); pts += intArrayOf(x, y); ctx.point = x to y
+                    tr("按住 ($x,$y) ${ms}ms", "held ($x,$y) ${ms}ms") + there(t) + (if (hu != null) Human.said(pause ?: 0, t.x to t.y, x to y) else "") + viaTag(actionVia)
+                }
             }
             StepKind.SWIPE -> {
                 bounds(dd, step.points)
+                val route = InputRoute.choose(reach, InputRoute.Kind.POINT_OR_GESTURE, hasNode = false, wakeEnabled = wakeEnabled)
+                actionVia = executeWakeOrRefuse(dd, route)
                 val px = (minOf(dd.width, dd.height) * 0.015).toInt().coerceAtLeast(2)
                 val a = step.points[0].let { hu?.drift(it, px, dd.width, dd.height) ?: it }
                 val b = step.points[1].let { hu?.drift(it, px * 2, dd.width, dd.height) ?: it }
                 val ms = hu?.vary(step.ms ?: 300L) ?: (step.ms ?: 300L)
                 okOr(VScreenShell.swipe(dd.displayId, a.first, a.second, b.first, b.second, ms.toInt()))
                 pts += intArrayOf(a.first, a.second); pts += intArrayOf(b.first, b.second)
-                tr("从 (${a.first},${a.second}) 滑到 (${b.first},${b.second})，${ms}ms", "swiped (${a.first},${a.second}) → (${b.first},${b.second}), ${ms}ms") + (if (hu != null) Human.said(pause ?: 0) else "")
+                tr("从 (${a.first},${a.second}) 滑到 (${b.first},${b.second})，${ms}ms", "swiped (${a.first},${a.second}) → (${b.first},${b.second}), ${ms}ms") + (if (hu != null) Human.said(pause ?: 0) else "") + viaTag(actionVia)
             }
             StepKind.DRAG -> {
                 bounds(dd, step.points)
+                val route = InputRoute.choose(reach, InputRoute.Kind.POINT_OR_GESTURE, hasNode = false, wakeEnabled = wakeEnabled)
+                actionVia = executeWakeOrRefuse(dd, route)
                 // Human pacing: the hand is a little off at each turn (3 px: a drag usually has to land somewhere).
                 val path = if (hu != null) step.points.map { hu.drift(it, 3, dd.width, dd.height) } else step.points
                 val ms = hu?.vary(step.ms ?: 600L, 0.15) ?: (step.ms ?: 600L)
@@ -1873,60 +1987,100 @@ private fun VScreenOffloadHandler.doAction(
                 dragRecord = rec
                 path.forEach { pts += intArrayOf(it.first, it.second) }
                 tr("按住拖过 ", "held and dragged through ") + path.joinToString(" → ") { "(${it.first},${it.second})" } +
-                    tr("，${ms}ms", ", ${ms}ms") + rec.describeSuffix(omitUnknownWhenNotPicked = path.size == 2) + (if (hu != null) Human.said(pause ?: 0) else "")
+                    tr("，${ms}ms", ", ${ms}ms") + rec.describeSuffix(omitUnknownWhenNotPicked = path.size == 2) + (if (hu != null) Human.said(pause ?: 0) else "") + viaTag(actionVia)
             }
             StepKind.SCROLL -> {
                 val c = step.target?.let { val t = target(sid, dd, it, ctx); t.x to t.y } ?: (dd.width / 2 to dd.height / 2)
                 val dir = step.text!!
-                val vertical = dir == "up" || dir == "down"
-                val span = ((if (vertical) dd.height else dd.width) * (if (hu != null) 0.3 * (0.85 + Math.random() * 0.3) else 0.3)).toInt()
-                // "down" = see what is below: the finger moves up.
-                val (x1, y1, x2, y2) = when (dir) {
-                    "down" -> listOf(c.first, (c.second + span).coerceAtMost(dd.height - 2), c.first, (c.second - span).coerceAtLeast(1))
-                    "up" -> listOf(c.first, (c.second - span).coerceAtLeast(1), c.first, (c.second + span).coerceAtMost(dd.height - 2))
-                    "right" -> listOf((c.first + span).coerceAtMost(dd.width - 2), c.second, (c.first - span).coerceAtLeast(1), c.second)
-                    else -> listOf((c.first - span).coerceAtLeast(1), c.second, (c.first + span).coerceAtMost(dd.width - 2), c.second)
+                val atPt = if (step.target != null) c else null
+                val snap = if (reach == InputReach.Reach.BLOCKED) com.kilon.agentvscreen.core.A11yTree.snapshot(dd.displayId) else null
+                val hasScrollNode = snap?.findScrollable(dir, atPt, dd::toFrame) != null
+                val route = InputRoute.choose(reach, InputRoute.Kind.SCROLL, hasNode = hasScrollNode, wakeEnabled = wakeEnabled)
+                if (route == InputRoute.Route.A11Y && snap != null && snap.scroll(dir, atPt, dd::toFrame)) {
+                    actionVia = "a11y"
+                    tr("向 $dir 滚动", "scrolled $dir") + viaTag(actionVia)
+                } else {
+                    val touchRoute = if (route == InputRoute.Route.A11Y) {
+                        InputRoute.choose(reach, InputRoute.Kind.POINT_OR_GESTURE, hasNode = false, wakeEnabled = wakeEnabled)
+                    } else route
+                    actionVia = executeWakeOrRefuse(dd, touchRoute)
+                    val vertical = dir == "up" || dir == "down"
+                    val span = ((if (vertical) dd.height else dd.width) * (if (hu != null) 0.3 * (0.85 + Math.random() * 0.3) else 0.3)).toInt()
+                    // "down" = see what is below: the finger moves up.
+                    val (x1, y1, x2, y2) = when (dir) {
+                        "down" -> listOf(c.first, (c.second + span).coerceAtMost(dd.height - 2), c.first, (c.second - span).coerceAtLeast(1))
+                        "up" -> listOf(c.first, (c.second - span).coerceAtLeast(1), c.first, (c.second + span).coerceAtMost(dd.height - 2))
+                        "right" -> listOf((c.first + span).coerceAtMost(dd.width - 2), c.second, (c.first - span).coerceAtLeast(1), c.second)
+                        else -> listOf((c.first - span).coerceAtLeast(1), c.second, (c.first + span).coerceAtMost(dd.width - 2), c.second)
+                    }
+                    // A drag (eased, still at the end), not a fling: the list moves by what was dragged, every time.
+                    val px = (minOf(dd.width, dd.height) * 0.02).toInt().coerceAtLeast(2)
+                    val (sx, sy) = if (hu != null) hu.drift(x1 to y1, px, dd.width, dd.height) else (x1 to y1)
+                    val (ex, ey) = if (hu != null) hu.drift(x2 to y2, px, dd.width, dd.height) else (x2 to y2)
+                    okOr(VScreenShell.drag(dd.displayId, sx, sy, ex, ey, hu?.vary(350L)?.toInt() ?: 350, hu?.vary(80L, 0.4)?.toInt() ?: 80))
+                    pts += intArrayOf(sx, sy); pts += intArrayOf(ex, ey)
+                    tr("手指从 ($sx,$sy) 拖到 ($ex,$ey)", "finger dragged ($sx,$sy) → ($ex,$ey)") + (if (hu != null) Human.said(pause ?: 0) else "") + viaTag(actionVia)
                 }
-                // A drag (eased, still at the end), not a fling: the list moves by what was dragged, every time.
-                val px = (minOf(dd.width, dd.height) * 0.02).toInt().coerceAtLeast(2)
-                val (sx, sy) = if (hu != null) hu.drift(x1 to y1, px, dd.width, dd.height) else (x1 to y1)
-                val (ex, ey) = if (hu != null) hu.drift(x2 to y2, px, dd.width, dd.height) else (x2 to y2)
-                okOr(VScreenShell.drag(dd.displayId, sx, sy, ex, ey, hu?.vary(350L)?.toInt() ?: 350, hu?.vary(80L, 0.4)?.toInt() ?: 80))
-                pts += intArrayOf(sx, sy); pts += intArrayOf(ex, ey)
-                tr("手指从 ($sx,$sy) 拖到 ($ex,$ey)", "finger dragged ($sx,$sy) → ($ex,$ey)") + (if (hu != null) Human.said(pause ?: 0) else "")
             }
             StepKind.TYPE -> {
+                val text = step.text!!
                 val slow = step.ms
+                val hasWritable = if (reach == InputReach.Reach.BLOCKED) {
+                    com.kilon.agentvscreen.core.VScreenTyping.hasWritableNode(dd.displayId, tappedAt)
+                } else false
+                val route = InputRoute.choose(reach, InputRoute.Kind.TYPE, hasNode = hasWritable, wakeEnabled = wakeEnabled)
+                var a11yOnly = route == InputRoute.Route.A11Y
+                if (!a11yOnly) actionVia = executeWakeOrRefuse(dd, route)
+
+                fun runType(onlyA11y: Boolean): com.kilon.agentvscreen.core.VScreenTyping.TypeFact = when {
+                    slow != null -> {
+                        // 1.4.0-beta13: one character at a time with a gap (code points, so an emoji is one), first as asked
+                        // (replace or add), then added; each character is its own input event for the app's listeners.
+                        val chars = text.codePoints().toArray().map { String(Character.toChars(it)) }
+                        var tf = com.kilon.agentvscreen.core.VScreenTyping.typeFact(dd.displayId, chars[0], step.append, tappedAt, if (tappedAt != null) ctx.focusBefore else null, a11yOnly = onlyA11y)
+                        var i = 1
+                        while (i < chars.size && tf.field != null && !tf.a11yFailed) {
+                            if (tf.password && i == 1) { /* a password box shows nothing as you type: still one at a time */ }
+                            Thread.sleep(hu?.let { (slow * (0.6 + Math.random() * 0.8)).toLong() } ?: slow)
+                            tf = com.kilon.agentvscreen.core.VScreenTyping.typeFact(dd.displayId, chars[i], true, a11yOnly = onlyA11y)
+                            i++
+                        }
+                        if (i < chars.size && !tf.a11yFailed) tf = com.kilon.agentvscreen.core.VScreenTyping.typeFact(dd.displayId, chars.drop(i).joinToString(""), true, a11yOnly = onlyA11y)
+                        tf
+                    }
+                    hu == null || text.length > 60 ->
+                        com.kilon.agentvscreen.core.VScreenTyping.typeFact(dd.displayId, text, step.append, tappedAt, if (tappedAt != null) ctx.focusBefore else null, a11yOnly = onlyA11y)
+                    else -> {
+                        // Human pacing: a few characters at a time; the first piece as asked (replace or add), then added. No
+                        // box found, or a password box: the rest goes in at once (nothing to pace, or nothing to show).
+                        val parts = hu.pieces(text)
+                        var tf = com.kilon.agentvscreen.core.VScreenTyping.typeFact(dd.displayId, parts[0], step.append, tappedAt, if (tappedAt != null) ctx.focusBefore else null, a11yOnly = onlyA11y)
+                        var i = 1
+                        while (i < parts.size && tf.field != null && !tf.a11yFailed) {
+                            if (tf.password) { tf = com.kilon.agentvscreen.core.VScreenTyping.typeFact(dd.displayId, parts.drop(i).joinToString(""), true, a11yOnly = onlyA11y); break }
+                            Thread.sleep(hu.keyGapMs())
+                            tf = com.kilon.agentvscreen.core.VScreenTyping.typeFact(dd.displayId, parts[i], true, a11yOnly = onlyA11y)
+                            i++
+                        }
+                        tf
+                    }
+                }
+
                 val typeBefore = dd.latestFrame()?.let { VScreenPerception.small(it) }
-                val f = if (slow != null) {
-                    // 1.4.0-beta13: one character at a time with a gap (code points, so an emoji is one), first as asked
-                    // (replace or add), then added; each character is its own input event for the app's listeners.
-                    val chars = step.text!!.codePoints().toArray().map { String(Character.toChars(it)) }
-                    var tf = com.kilon.agentvscreen.core.VScreenTyping.typeFact(dd.displayId, chars[0], step.append, tappedAt, if (tappedAt != null) ctx.focusBefore else null)
-                    var i = 1
-                    while (i < chars.size && tf.field != null) {
-                        if (tf.password && i == 1) { /* a password box shows nothing as you type: still one at a time */ }
-                        Thread.sleep(hu?.let { (slow * (0.6 + Math.random() * 0.8)).toLong() } ?: slow)
-                        tf = com.kilon.agentvscreen.core.VScreenTyping.typeFact(dd.displayId, chars[i], true)
-                        i++
+                val f = try {
+                    val first = runType(a11yOnly)
+                    if (a11yOnly && first.a11yFailed) {
+                        val fb = InputRoute.choose(reach, InputRoute.Kind.POINT_OR_GESTURE, hasNode = false, wakeEnabled = wakeEnabled)
+                        actionVia = executeWakeOrRefuse(dd, fb)
+                        a11yOnly = false
+                        runType(false)
+                    } else {
+                        if (a11yOnly && first.viaA11y) actionVia = "a11y"
+                        first
                     }
-                    if (i < chars.size) tf = com.kilon.agentvscreen.core.VScreenTyping.typeFact(dd.displayId, chars.drop(i).joinToString(""), true)
-                    tf
-                } else if (hu == null || step.text!!.length > 60)
-                    com.kilon.agentvscreen.core.VScreenTyping.typeFact(dd.displayId, step.text!!, step.append, tappedAt, if (tappedAt != null) ctx.focusBefore else null)
-                else {
-                    // Human pacing: a few characters at a time; the first piece as asked (replace or add), then added. No
-                    // box found, or a password box: the rest goes in at once (nothing to pace, or nothing to show).
-                    val parts = hu.pieces(step.text)
-                    var tf = com.kilon.agentvscreen.core.VScreenTyping.typeFact(dd.displayId, parts[0], step.append, tappedAt, if (tappedAt != null) ctx.focusBefore else null)
-                    var i = 1
-                    while (i < parts.size && tf.field != null) {
-                        if (tf.password) { tf = com.kilon.agentvscreen.core.VScreenTyping.typeFact(dd.displayId, parts.drop(i).joinToString(""), true); break }
-                        Thread.sleep(hu.keyGapMs())
-                        tf = com.kilon.agentvscreen.core.VScreenTyping.typeFact(dd.displayId, parts[i], true)
-                        i++
-                    }
-                    tf
+                } catch (e: Throwable) {
+                    typeBefore?.recycle()
+                    throw e
                 }
                 val where = f.bounds?.let { b -> " [${b.left},${b.top},${b.right},${b.bottom}]" + (f.fieldId?.let { tr("（$it）", " ($it)") } ?: "") } ?: ""
                 // 2.0.0-beta15 (test B6: a browser address box took the URL and loaded it while the reply said TYPE_FAILED /
@@ -1935,35 +2089,37 @@ private fun VScreenOffloadHandler.doAction(
                 // typing is "unconfirmed", as for a box that cannot be read.
                 val pictureMoved = if (f.field == null && f.checked) typeBefore?.let { b -> pictureStill(dd, b).not() } ?: false
                     else { typeBefore?.recycle(); false }
-                when {
+                (when {
                     // 1.4.0-beta3: only a reading that saw no focused box is a failure. When the box could not be read at
                     // all (a web page, a self-drawn box) the text often did go in (beta2 test: the words reached the
                     // suggestions while the reply said TYPE_FAILED); that is "unconfirmed", said in the step, not a miss.
                     f.field == null && f.checked && !pictureMoved -> {
                         missCode = "TYPE_FAILED"
                         miss = tr("没有获得焦点的输入框，字很可能没进去。先点输入框（【现在】里标“可输入”的），等它标“有焦点”再 type", "No input box has focus, so the text most likely did not go in. Tap the input box first (marked \"input\" in [Now]) and type once it is marked \"focused\"")
-                        tr("按 ${f.method} 发了 ${step.text.length} 个字；没有获得焦点的输入框", "sent ${step.text.length} characters by ${f.method}; no focused input box")
+                        tr("按 ${f.method} 发了 ${text.length} 个字；没有获得焦点的输入框", "sent ${text.length} characters by ${f.method}; no focused input box")
                     }
                     f.field == null -> {
-                        tr("按 ${f.method} 发了 ${step.text.length} 个字；读不到输入框（网页或自绘的界面），确认不了字落在哪，看截图核对", "sent ${step.text.length} characters by ${f.method}; no input box could be read (a web page or self-drawn screen), so where the text landed is unconfirmed: check the screenshot")
+                        tr("按 ${f.method} 发了 ${text.length} 个字；读不到输入框（网页或自绘的界面），确认不了字落在哪，看截图核对", "sent ${text.length} characters by ${f.method}; no input box could be read (a web page or self-drawn screen), so where the text landed is unconfirmed: check the screenshot")
                     }
-                    f.unreadable -> tr("按 ${f.method} 发了 ${step.text.length} 个字；输入框$where 的内容读不出来（网页或自绘的框，读到的还是原来的“${f.field.take(40)}”），看截图核对",
-                        "sent ${step.text.length} characters by ${f.method}; the input box$where cannot be read back (a web page or self-drawn box still reads \"${f.field.take(40)}\"); check the screenshot")
-                    f.password -> tr("输入 ${step.text.length} 个字（${f.method}）；密码框$where 现在 ${f.field.length} 个字符", "typed ${step.text.length} characters (${f.method}); password box$where now holds ${f.field.length} characters")
-                    !f.field.contains(step.text) -> {
+                    f.unreadable -> tr("按 ${f.method} 发了 ${text.length} 个字；输入框$where 的内容读不出来（网页或自绘的框，读到的还是原来的“${f.field.take(40)}”），看截图核对",
+                        "sent ${text.length} characters by ${f.method}; the input box$where cannot be read back (a web page or self-drawn box still reads \"${f.field.take(40)}\"); check the screenshot")
+                    f.password -> tr("输入 ${text.length} 个字（${f.method}）；密码框$where 现在 ${f.field.length} 个字符", "typed ${text.length} characters (${f.method}); password box$where now holds ${f.field.length} characters")
+                    !f.field.contains(text) -> {
                         missCode = "TYPE_FAILED"
                         miss = tr("输入框$where 现在是“${f.field.take(60)}”，不含你输入的字（这个框可能不收这种输入，或焦点在别处）", "The input box$where now reads \"${f.field.take(60)}\" without your text (this box may not accept this kind of input, or focus is elsewhere)")
-                        tr("按 ${f.method} 发了 ${step.text.length} 个字；输入框$where 现在是“${f.field.take(60)}”，不含你输入的字", "sent ${step.text.length} characters by ${f.method}; the input box$where now reads \"${f.field.take(60)}\" without your text")
+                        tr("按 ${f.method} 发了 ${text.length} 个字；输入框$where 现在是“${f.field.take(60)}”，不含你输入的字", "sent ${text.length} characters by ${f.method}; the input box$where now reads \"${f.field.take(60)}\" without your text")
                     }
                     else -> {
                         typeVerified = true
                         typedField = f.field
                         typedBounds = f.bounds
-                        tr("输入 ${step.text.length} 个字（${f.method}）；输入框$where 现在是“${f.field.take(60)}”", "typed ${step.text.length} characters (${f.method}); the input box$where now reads \"${f.field.take(60)}\"")
+                        tr("输入 ${text.length} 个字（${f.method}）；输入框$where 现在是“${f.field.take(60)}”", "typed ${text.length} characters (${f.method}); the input box$where now reads \"${f.field.take(60)}\"")
                     }
-                }
+                }) + viaTag(actionVia)
             }
             StepKind.KEY -> {
+                val route = InputRoute.choose(reach, InputRoute.Kind.POINT_OR_GESTURE, hasNode = false, wakeEnabled = wakeEnabled)
+                actionVia = executeWakeOrRefuse(dd, route)
                 val k = step.text!!.lowercase()
                 // 2.0.0-beta15 (test B1 on HONOR: `key esc` on a settings sub-page was sent and nothing happened, while
                 // `key back` went back): many apps ignore Esc, and Android only turns an unhandled Esc into Back on some
@@ -1972,17 +2128,17 @@ private fun VScreenOffloadHandler.doAction(
                 val escToBack = (k == "esc" || k == "escape") && com.kilon.agentvscreen.core.VScreenTyping.focusedFieldKey(dd.displayId) == null
                 val before = if (escToBack) dd.latestFrame()?.let { VScreenPerception.small(it) } else null
                 okOr(VScreenShell.key(dd.displayId, step.text))
-                if (before != null && pictureStill(dd, before)) {
+                (if (before != null && pictureStill(dd, before)) {
                     okOr(VScreenShell.key(dd.displayId, "back"))
                     tr("按了 ${step.text}，这页没反应（这个应用不处理 Esc），接着按了 back", "pressed ${step.text}; this page ignored it (the app does not handle Esc), so pressed back")
-                } else tr("按了 ${step.text}", "pressed ${step.text}")
+                } else tr("按了 ${step.text}", "pressed ${step.text}")) + viaTag(actionVia)
             }
             else -> throw StepRefused("INVALID_STEP", tr("不是动作：${step.raw}", "not an action: ${step.raw}"))
         }
     }
     ctx.acted = true
     if (pts.isNotEmpty()) BackgroundOperation.actionLog(sid, 1).lastOrNull()?.trackN?.let { VScreenRecorder.setPoints(d.displayId, it, pts) }
-    return Done(fact, miss, missCode, typeVerified, dragRecord, typedField, typedBounds)
+    return Done(fact, miss, missCode, typeVerified, dragRecord, typedField, typedBounds, via = actionVia)
 }
 
 /** Whether the picture stayed as [before] for [ESC_WAIT_MS] (an Esc that did nothing, keys that showed nothing); [before] is recycled. */
