@@ -1,7 +1,7 @@
 {
   "version": 1,
   "created_at": "2026-11-19T04:18:00Z",
-  "updated_at": "2026-11-27T10:37:42Z",
+  "updated_at": "2026-11-27T11:46:24Z",
   "files": {
     ".gitattributes": {
       "role": "index",
@@ -65,21 +65,21 @@
     },
     "README.md": {
       "role": "index",
-      "sha256": "c7a005087ca78abe9a716f65d6fc9925f8cba773899962c12f0546c060383558",
-      "size": 8797,
-      "normalized_sha256": "c7a005087ca78abe9a716f65d6fc9925f8cba773899962c12f0546c060383558"
+      "sha256": "45fb1b2c3ff1d73f86f8dfd56b781c9a57236d5dd0e6a9d85b60a41a4bd54b73",
+      "size": 8789,
+      "normalized_sha256": "45fb1b2c3ff1d73f86f8dfd56b781c9a57236d5dd0e6a9d85b60a41a4bd54b73"
     },
     "README.zh-CN.md": {
       "role": "index",
-      "sha256": "47a5d36d70230e2360b21f085b5e7519cac083e936d77efea2b16e1dd7316185",
-      "size": 8369,
-      "normalized_sha256": "47a5d36d70230e2360b21f085b5e7519cac083e936d77efea2b16e1dd7316185"
+      "sha256": "0eaf8c56e019e650ce2e385ddb51af188547c9250168d1b25c5f454ae50cce8f",
+      "size": 8366,
+      "normalized_sha256": "0eaf8c56e019e650ce2e385ddb51af188547c9250168d1b25c5f454ae50cce8f"
     },
     "aoci.code.txt": {
       "role": "index",
-      "sha256": "d42ba0f67154de09c39ca870d8a6d8decfc369a8f16693962b6f0fc6d63ecfa7",
-      "size": 190540,
-      "normalized_sha256": "d42ba0f67154de09c39ca870d8a6d8decfc369a8f16693962b6f0fc6d63ecfa7"
+      "sha256": "c0ee3f93c99248191044eb5d216d461d6f79c08ccad1ae4b5c4a70920c4208b1",
+      "size": 190755,
+      "normalized_sha256": "c0ee3f93c99248191044eb5d216d461d6f79c08ccad1ae4b5c4a70920c4208b1"
     },
     "aoci.meta.txt": {
       "role": "index",
@@ -1328,9 +1328,9 @@
     },
     "app/src/test/java/com/kilon/agentvscreen/api/DocsSyncTest.kt": {
       "role": "index",
-      "sha256": "747eb0e3bcc9aef1ef5ea19f6e7a80cda1ace80fae23dbdefadbc3aafc6467ee",
-      "size": 4184,
-      "normalized_sha256": "747eb0e3bcc9aef1ef5ea19f6e7a80cda1ace80fae23dbdefadbc3aafc6467ee"
+      "sha256": "1ea30cc0eb490789bc1f8e0d6c968d5749cb59567427818aa15e5c46b3c1f3c4",
+      "size": 4770,
+      "normalized_sha256": "1ea30cc0eb490789bc1f8e0d6c968d5749cb59567427818aa15e5c46b3c1f3c4"
     },
     "app/src/test/java/com/kilon/agentvscreen/api/HttpCoreSecurityTest.kt": {
       "role": "index",

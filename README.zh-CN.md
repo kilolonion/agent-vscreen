@@ -17,7 +17,7 @@
 Agent-VScreen 在一块看不见的虚拟屏上打开和操作别的应用，你的主屏照常用，不会被打断；屏幕上只有一个悬浮小窗，让你看到 AI 在做什么，随时可以接管或叫停。不绑定任何模型或客户端，支持命令行 `vscreen`、MCP 与 HTTP。
 
 <!-- version:start -->
-- `main` 分支版本：2.0.1-beta1（versionCode 75） · [本版 APK](https://github.com/kilolonion/agent-vscreen/releases/tag/v2.0.1-beta1) · [最新正式版 APK](https://github.com/kilolonion/agent-vscreen/releases/latest)
+- `main` 分支版本：2.0.1-beta1（versionCode 75） · [最新正式版 APK](https://github.com/kilolonion/agent-vscreen/releases/latest) · [全部版本 / 测试版](https://github.com/kilolonion/agent-vscreen/releases)
 <!-- version:end -->
 - 环境：Android 11+（arm64，推荐 Android 14+） · 包名 `com.kilon.agentvscreen` · 特权：[Shizuku](https://shizuku.rikka.app/) / 兼容分支或 Root
 
