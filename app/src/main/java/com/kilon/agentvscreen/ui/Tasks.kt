@@ -89,8 +89,8 @@ fun taskTitle(t: TaskLog.Task, app: String?): String = t.title
 /** How it ended, and whether that is good news. */
 fun taskOutcome(t: TaskLog.Task): Pair<String, Boolean> = when {
     t.running -> tr("进行中", "Running") to true
-    t.stoppedByUser -> tr("你停止了", "You stopped it") to false
-    t.lastCode != "OK" -> tr("没做完", "Not finished") to false
+    t.stoppedByUser -> tr("已由你停止", "Stopped by you") to false
+    t.lastCode != "OK" -> tr("未完成", "Not finished") to false
     else -> tr("完成", "Done") to true
 }
 
@@ -205,7 +205,7 @@ fun TaskCard(t: TaskLog.Task, onClick: () -> Unit) {
 @Composable
 fun TaskPage(id: Long) {
     val t = remember(id) { TaskLog.recent().firstOrNull { it.id == id } }
-    if (t == null) { MiuixPage(tr("任务", "Task")) { Note(tr("这条记录已经不在了", "This record is gone"), modifier = Modifier.padding(24.dp)) }; return }
+    if (t == null) { MiuixPage(tr("任务", "Task")) { Note(tr("该记录已不存在", "This record no longer exists"), modifier = Modifier.padding(24.dp)) }; return }
     val (app, _) = appOf(t.pkg)
     val (word, good) = taskOutcome(t)
     val rows by produceState(emptyList<JSONObject>(), id) {

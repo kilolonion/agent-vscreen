@@ -59,9 +59,9 @@ internal fun pendingAsks(): List<UserAsk.Ask> {
 internal object AskWords {
     fun who(a: UserAsk.Ask) = if (a.kind == UserAsk.Kind.CONFIRM) tr("「${a.tokenName}」要你确认", "\"${a.tokenName}\" needs your OK") else tr("「${a.tokenName}」在问你", "\"${a.tokenName}\" asks you")
     fun go(k: UserAsk.Kind) = when (k) {
-        UserAsk.Kind.POINT -> tr("去点一下", "Point it out")
-        UserAsk.Kind.AREA -> tr("去框一块", "Mark an area")
-        UserAsk.Kind.TEACH -> tr("去演示", "Show it")
+        UserAsk.Kind.POINT -> tr("指出位置", "Select a location")
+        UserAsk.Kind.AREA -> tr("框选区域", "Select an area")
+        UserAsk.Kind.TEACH -> tr("开始示教", "Start teaching")
         else -> tr("去回答", "Answer")
     }
     /** Time left at [now]. Callers pass a ticking `now` ([rememberNow]) so the countdown redraws; reading the clock here alone never did. */
@@ -75,7 +75,7 @@ internal object AskWords {
     fun openPage(ctx: Context, a: UserAsk.Ask) {
         // A lesson starts right on the tap (take over, record), whatever page opens after it.
         if (a.kind == UserAsk.Kind.TEACH && !com.kilon.agentvscreen.cmd.Teach.beginFor(a) && com.kilon.agentvscreen.cmd.Teach.lesson.value !is com.kilon.agentvscreen.cmd.Lesson.None)
-            android.widget.Toast.makeText(ctx, tr("先完成当前的示教", "Finish the lesson under way first"), android.widget.Toast.LENGTH_SHORT).show()
+            android.widget.Toast.makeText(ctx, tr("先完成当前的示教", "Finish the current routine first"), android.widget.Toast.LENGTH_SHORT).show()
         MainDisplay.start(ctx, UserAsk.answerIntent(ctx, a.id))
     }
 }
@@ -174,7 +174,7 @@ internal fun HomeAskCard(a: UserAsk.Ask, count: Int) {
             }
             UserAsk.Kind.CHOOSE -> {
                 a.options.forEachIndexed { i, o -> OptionRow(i, o) { AskWords.choose(ctx, a, i) } }
-                LinkButton(onClick = { AskWords.answer(ctx, a, false) }, modifier = Modifier.align(Alignment.End)) { Text(tr("都不是 / 不回答", "None / decline")) }
+                LinkButton(onClick = { AskWords.answer(ctx, a, false) }, modifier = Modifier.align(Alignment.End)) { Text(tr("以上都不是 / 不回答", "None / decline")) }
             }
             else -> Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 PrimaryButton(onClick = { AskWords.openPage(ctx, a) }, modifier = Modifier.weight(1f)) { Text(AskWords.go(a.kind)) }
@@ -210,8 +210,8 @@ internal fun OptionRow(i: Int, text: String, selected: Boolean = false, onClick:
  */
 internal object ReviewWords {
     fun title(r: com.kilon.agentvscreen.cmd.Teach.Result) = tr("录好了 ${r.lines.size} 步，等你保存", "${steps(r.lines.size)} recorded, waiting to be saved")
-    fun who(r: com.kilon.agentvscreen.cmd.Teach.Result) = r.ask?.let { tr("「${it.tokenName}」请你演示：${it.title}", "\"${it.tokenName}\" asked: ${it.title}") }
-        ?: tr("你自己录的示教", "A lesson of your own")
+    fun who(r: com.kilon.agentvscreen.cmd.Teach.Result) = r.ask?.let { tr("「${it.tokenName}」请求示教：${it.title}", "\"${it.tokenName}\" asked: ${it.title}") }
+        ?: tr("你录制的示教", "A routine you recorded")
     fun open(ctx: Context) = Surface.openReview(ctx)
     fun discard(ctx: Context, r: com.kilon.agentvscreen.cmd.Teach.Result) {
         r.askId?.let { UserAsk.answer(ctx, it, false) }

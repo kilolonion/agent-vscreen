@@ -154,6 +154,6 @@ fun SoundPage() {
     msg?.let { m ->
         GlassDialog(onDismissRequest = { msg = null }, title = { DialogTitle(tr("应用静音", "App sound")) },
             text = { Text(m, fontSize = 14.sp, lineHeight = 21.sp) },
-            confirmButton = { LinkButton(onClick = { msg = null }) { Text(tr("知道了", "Got it")) } })
+            confirmButton = { LinkButton(onClick = { msg = null }) { Text(tr("知道了", "OK")) } })
     }
 }

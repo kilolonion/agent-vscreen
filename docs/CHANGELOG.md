@@ -5,6 +5,7 @@ Full release history follows newest first. See also [GitHub Releases](https://gi
 ## 2.0.1-beta2 (versionCode 76)
 
 - **Japanese UI, language follows the system**: added a Japanese UI (`assets/i18n/ja.json`, looked up by the English text); the default language follows the system (Japanese, Chinese, otherwise English).
+- **Clearer, standard wording**: statuses, setting names and descriptions use standard system wording (service modes Always running / On demand / Off; states Running / Standby / Connected); routines, watches, setup messages and setup codes are named consistently across Chinese, English and Japanese.
 - **Cleaner settings & consistent layout**: removed the duplicate Connect group from Settings and moved General before Recognition; shared `Edge` constants plus `DotLine`, `AvsField` and `SectionHeader` components align titles, edges, dotted cards, input fields and section entries across Home, Connect, Records and Settings; the home status pill folds to a dot on scroll; task details show only real frames.
 
 ## 2.0.1-beta1 (versionCode 75)

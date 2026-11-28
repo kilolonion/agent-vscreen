@@ -177,7 +177,7 @@ class FullscreenActivity : PageActivity() {
                         is com.kilon.agentvscreen.cmd.Lesson.Review -> Box(Modifier.fillMaxSize().backdrop()) {
                             ReviewPane(l.result, l.screenGone || !screenUp, onLeave = { back() }, onAgain = {
                                 if (Teach.again()) { pane.value = Pane.LIVE; Surface.report(Pane.LIVE) }
-                                else toast(tr("副屏已经关了，没法重录", "The background screen is closed; cannot record again"))
+                                else toast(tr("副屏已关闭，无法重新录制", "Background screen closed; cannot record again"))
                             })
                         }
                         else -> Box(Modifier.fillMaxSize().backdrop(), contentAlignment = Alignment.Center) {
@@ -375,7 +375,7 @@ class FullscreenActivity : PageActivity() {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(7.dp).clip(CircleShape).background(if (mode == Mode.ACTING) Brush.sweepGradient(Palette.rainbow) else SolidColor(Palette.of(mode))))
                         Spacer(Modifier.width(5.dp))
-                        val word = if (recording) tr("示教录制中 · 已记 $teachN 步", "Recording a lesson · ${steps(teachN)}") else if (prepId != null) tr("示教准备中：先走到起点", "Getting ready to show") else s.agentTitle ?: (Palette.word(mode) + if (mode == Mode.STANDBY && left >= 0) (" · " + tr("${left / 60000}:${"%02d".format((left / 1000) % 60)} 后省电", "power save in ${left / 60000}:${"%02d".format((left / 1000) % 60)}")) else "")
+                        val word = if (recording) tr("示教录制中 · 已记 $teachN 步", "Recording a routine · ${steps(teachN)}") else if (prepId != null) tr("示教准备中：先走到起点", "Getting ready to show") else s.agentTitle ?: (Palette.word(mode) + if (mode == Mode.STANDBY && left >= 0) (" · " + tr("${left / 60000}:${"%02d".format((left / 1000) % 60)} 后省电", "power save in ${left / 60000}:${"%02d".format((left / 1000) % 60)}")) else "")
                         Text(word, color = Color(0xCCFFFFFF), fontSize = 12.sp, maxLines = 1, modifier = Modifier.scrollIfLong())
                     }
                 }
@@ -384,14 +384,14 @@ class FullscreenActivity : PageActivity() {
                 val wide = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
                 // 1.4.0-beta5: only when it helps: a landscape picture on an upright page, or the page already turned.
                 if (wide || s.screenWidth > s.screenHeight) {
-                    Circle(Icons.Filled.ScreenRotation, if (wide) tr("转回竖屏", "Back to portrait") else tr("转成横屏", "Turn to landscape"), Color(0x33FFFFFF)) {
+                    Circle(Icons.Filled.ScreenRotation, if (wide) tr("切换为竖屏", "Switch to portrait") else tr("切换为横屏", "Switch to landscape"), Color(0x33FFFFFF)) {
                         requestedOrientation = if (wide) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                     }
                     Spacer(Modifier.width(8.dp))
                 }
                 when {
                     recording || prepId != null -> {} // ended with 完成 / 不教 on the strip, not by closing the screen
-                    mode == Mode.ACTING || mode == Mode.STANDBY -> Pill(tr("停止 AI", "Stop AI"), Icons.Filled.Stop, Palette.stopped, Color.White) { BackgroundOperation.userStop() }
+                    mode == Mode.ACTING || mode == Mode.STANDBY -> Pill(tr("停止 agent", "Stop agent"), Icons.Filled.Stop, Palette.stopped, Color.White) { BackgroundOperation.userStop() }
                     else -> Circle(Icons.Filled.Close, tr("关闭副屏", "Close screen"), Color(0x33FFFFFF)) {
                         BackgroundOperation.userRelease(session); back()
                     }
@@ -468,12 +468,12 @@ class FullscreenActivity : PageActivity() {
                         if (!recording && prepId == null && !mark.finding) {
                             Circle(Icons.Filled.FiberManualRecord, tr("示教：录下接下来的操作", "Teach: record what you do next"), Color(0x22FFFFFF)) {
                                 if (Teach.start(session, null, null)) toast(if (Teach.recAskId() != null) tr("开始录制：照常操作，做完点“完成”", "Recording: do it as usual, then tap Done")
-                                    else tr("开始录制。没有 agent 在等，这段会存为你的经验", "Recording. No agent is waiting: it is saved as your own"))
+                                    else tr("开始录制。没有 agent 在等待，将保存为你的示教", "Recording. No agent is waiting: it is saved as your own routine"))
                             }
-                            Pill(tr("交还 AI", "Hand back"), Icons.Filled.SmartToy, Palette.takeover, Color(0xFF052E1C)) { BackgroundOperation.userResume() }
+                            Pill(tr("交还 agent", "Hand back to agent"), Icons.Filled.SmartToy, Palette.takeover, Color(0xFF052E1C)) { BackgroundOperation.userResume() }
                         }
                     } else {
-                        if (mode == Mode.STOPPED) Pill(tr("交还 AI", "Hand back"), Icons.Filled.SmartToy, Palette.takeover, Color(0xFF052E1C)) { BackgroundOperation.userResume() }
+                        if (mode == Mode.STOPPED) Pill(tr("交还 agent", "Hand back to agent"), Icons.Filled.SmartToy, Palette.takeover, Color(0xFF052E1C)) { BackgroundOperation.userResume() }
                         Pill(tr("接管", "Take over"), Icons.Filled.TouchApp, Color(0x22FFFFFF), Color.White) {
                             BackgroundOperation.beginTakeover(session)
                         }

@@ -25,7 +25,7 @@ object Access {
         val led = AgentLedger.snap.value
         val local = Way(tr("本机", "This phone"), when (st) {
             ServiceControl.State.ON -> tr("可用", "ready")
-            ServiceControl.State.HIDDEN -> tr("用到时唤起", "woken on use")
+            ServiceControl.State.HIDDEN -> tr("按需启动", "on demand")
             ServiceControl.State.BLOCKED -> tr("已禁止", "blocked")
         }, st != ServiceControl.State.BLOCKED, led.lastLocalAt > 0 && now - led.lastLocalAt < IN_USE_MS)
         val remoteInUse = led.lastRemoteAt > 0 && now - led.lastRemoteAt < IN_USE_MS
@@ -33,14 +33,14 @@ object Access {
             Tailnet.Mode.OFF -> null
             Tailnet.Mode.SYSTEM -> Way("Tailscale App", when (st) {
                 ServiceControl.State.ON -> tr("可用", "ready")
-                ServiceControl.State.HIDDEN -> tr("收起时连不上", "offline while hidden")
+                ServiceControl.State.HIDDEN -> tr("待机时不可连接", "unavailable in standby")
                 ServiceControl.State.BLOCKED -> tr("已禁止", "blocked")
             }, st == ServiceControl.State.ON, remoteInUse)
             Tailnet.Mode.BUILTIN -> {
                 val p = Tailnet.phase(ctx)
                 Way("Tailscale", when (p) {
                     Tailnet.Phase.CONNECTED -> tr("已连接", "connected")
-                    Tailnet.Phase.SERVICE_OFF -> if (st == ServiceControl.State.BLOCKED) tr("已禁止", "blocked") else tr("收起时离线", "offline while hidden")
+                    Tailnet.Phase.SERVICE_OFF -> if (st == ServiceControl.State.BLOCKED) tr("已禁止", "blocked") else tr("待机时离线", "offline in standby")
                     Tailnet.Phase.STARTING -> tr("连接中", "connecting")
                     Tailnet.Phase.NEEDS_LOGIN -> tr("要登录", "log in")
                     Tailnet.Phase.EXPIRED -> tr("要重新登录", "log in again")

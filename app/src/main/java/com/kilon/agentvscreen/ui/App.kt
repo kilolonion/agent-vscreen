@@ -357,7 +357,7 @@ private fun ChangesBottomSheet(
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                 color = MiuixTheme.colorScheme.primary,
             ) {
-                Text(tr("知道了", "Got it"), color = MiuixTheme.colorScheme.onPrimary)
+                Text(tr("知道了", "OK"), color = MiuixTheme.colorScheme.onPrimary)
             }
         }
     }
@@ -615,7 +615,7 @@ fun rememberFold(keep: Int = 4): Fold = Fold(keep, androidx.compose.runtime.save
 fun FoldToggle(fold: Fold, size: Int) {
     Row(Modifier.fillMaxWidth().clickable { fold.open.value = !fold.open.value }.padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Text(if (fold.open.value) tr("收起", "Show less") else tr("还有 ${size - fold.keep} 个", "${size - fold.keep} more"),
+        Text(if (fold.open.value) tr("收起", "Collapse") else tr("还有 ${size - fold.keep} 个", "${size - fold.keep} more"),
             modifier = Modifier.weight(1f), fontSize = 15.sp, color = MiuixTheme.colorScheme.primary)
         top.yukonga.miuix.kmp.basic.Icon(
             if (fold.open.value) androidx.compose.material.icons.Icons.Outlined.KeyboardArrowUp else androidx.compose.material.icons.Icons.Outlined.KeyboardArrowDown,

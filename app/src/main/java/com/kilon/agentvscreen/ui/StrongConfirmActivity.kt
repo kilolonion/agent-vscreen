@@ -573,7 +573,7 @@ class StrongConfirmActivity : ComponentActivity() {
                         } else {
                             if (req.risks.size > 1) {
                                 InfoLine(
-                                    label = tr("本次一并确认", "Confirming together"),
+                                    label = tr("同时确认以下操作", "Also confirming"),
                                     value = req.risks.joinToString(" + ") { it.title },
                                 )
                             }
@@ -664,7 +664,7 @@ class StrongConfirmActivity : ComponentActivity() {
                     )
                 },
                 confirmButton = {
-                    LinkButton(onClick = { showHelp = false }) { Text(tr("知道了", "Got it")) }
+                    LinkButton(onClick = { showHelp = false }) { Text(tr("知道了", "OK")) }
                 },
             )
         }

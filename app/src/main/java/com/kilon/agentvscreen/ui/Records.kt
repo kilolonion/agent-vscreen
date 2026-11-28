@@ -146,7 +146,7 @@ fun RecordsTab(bottom: Dp) {
         item(key = "chips") {
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = Edge.text, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(Filter.ALL to tr("全部", "All"), Filter.TASKS to tr("任务", "Tasks"), Filter.ASKS to tr("提问", "Questions"),
-                    Filter.PLANS to tr("预约与盯守", "Plans"), Filter.LESSONS to tr("经验", "Kept")).forEach { (f, label) ->
+                    Filter.PLANS to tr("预约与监视", "Schedules and watches"), Filter.LESSONS to tr("示教", "Routines")).forEach { (f, label) ->
                     FilterChip(label, filter == f) { filter = f }
                 }
             }
@@ -158,7 +158,7 @@ fun RecordsTab(bottom: Dp) {
                 if (shown.isEmpty()) item(key = "empty") {
                     Column(Modifier.padding(horizontal = 12.dp)) {
                         if (filter == Filter.ASKS) EmptyState(androidx.compose.material.icons.Icons.Outlined.QuestionAnswer, tr("还没有提问", "No questions yet"),
-                            tr("agent 拿不准时会在手机上问你，你的回答会记在这里", "When an agent is unsure it asks you on the phone; your answers are kept here"))
+                            tr("agent 需要确认时会在手机上向你提问，你的回答会保存在这里", "When an agent needs input it asks you on the phone; your answers are kept here"))
                         else EmptyState(androidx.compose.material.icons.Icons.Outlined.History, tr("还没有任务", "No tasks yet"),
                             tr("agent 每次用副屏做了什么，会按时间排在这里", "What an agent did on the screen each time appears here, newest first"))
                     }
@@ -202,7 +202,7 @@ private fun lineKey(l: Line): String = when (l) { is Line.T -> "t:" + l.t.id; is
 /** What the user did with a question, in their words; null for answers the app gave itself (pre-authorized, automatic). */
 private fun answerWord(a: String): String? = when {
     a == "allowed" || a.startsWith("allowed (") -> tr("你允许了", "you allowed")
-    a == "covered" -> tr("按你之前的允许放行", "let through by an earlier allow")
+    a == "covered" -> tr("沿用此前的许可", "allowed by an earlier permission")
     a == "not allowed" -> tr("你定的规则不允许", "not allowed by your rules")
     a == "denied" -> tr("你拒绝了", "you refused")
     a.startsWith("answered") -> tr("你回答了", "you answered")
@@ -249,7 +249,7 @@ private fun Plans(beat: Int) {
             val running = !l.stopped
             val who = if (tokens.size > 1) " · " + com.kilon.agentvscreen.api.Agents.name(l.spec.agentId) else ""
             BasicComponent(
-                title = tr("盯守 · ", "Watch · ") + l.spec.name + who,
+                title = tr("监视 · ", "Watch · ") + l.spec.name + who,
                 summary = l.spec.describe() + " · " + (if (running) l.status + tr(" · 还剩 ${l.json().opt("ends_in_min")} 分钟", " · ${l.json().opt("ends_in_min")} min left") else (l.endReason ?: tr("已结束", "ended"))),
                 endActions = {
                     LinkButton(onClick = { if (running) VScreenRules.stop(l.spec.agentId, l.spec.name) else VScreenRules.clearEnded(l.spec.agentId, l.spec.name); app.bump() }) {
@@ -288,7 +288,7 @@ fun SchedulesPage() {
     val app = LocalApp.current
     MiuixPage(tr("定时预约", "Schedules")) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { SchedulesCards(app.tick) }
-        Text(tr("到点前 3 分钟会拉起服务并检查，没准备好就通知你。点开一条可以改时间；关掉开关会保留它，但到点不触发。", "3 minutes before, the service is started and checked; you are told if it is not ready. Open one to change it; switched off it is kept but does not fire."),
+        Text(tr("预约时间前 3 分钟会启动服务并自检，未就绪时通知你。点开可修改；关闭开关会保留预约但不执行。", "3 minutes before, the service starts and self-checks; you are notified if it is not ready. Open an item to edit it; switching it off keeps it but it will not run."),
             fontSize = 12.sp, color = top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
     }
 }
@@ -297,7 +297,7 @@ fun SchedulesPage() {
 @Composable
 fun LessonsPage() {
     val app = LocalApp.current
-    MiuixPage(tr("经验", "Kept")) {
+    MiuixPage(tr("示教", "Routines")) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { LessonsList(app.tick) }
     }
 }

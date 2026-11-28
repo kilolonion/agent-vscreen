@@ -133,7 +133,7 @@ import kotlin.math.roundToInt
  *  - top right: ⤢ full screen and × close. × is always there and always one tap: while the AI works it only hides the
  *    window for this turn (the AI goes on; the notification can bring it back); when nothing runs it closes the screen.
  *    Closing never stops or locks the AI.
- *  - bottom centre, only while the AI acts or waits: the red tr("停止 AI", "Stop AI") pill (its calls get USER_STOPPED until you allow
+ *  - bottom centre, only while the AI acts or waits: the red tr("停止 agent", "Stop agent") pill (its calls get USER_STOPPED until you allow
  *    it again: green 交还 AI pill here, the "已停止 AI" notification, or the app's home).
  * While our own full-screen page is in front, the window steps aside (the page already shows the same picture).
  */
@@ -307,7 +307,7 @@ object Overlay {
         val l = com.kilon.agentvscreen.cmd.Teach.lesson.value
         if (l is com.kilon.agentvscreen.cmd.Lesson.Ready || l is com.kilon.agentvscreen.cmd.Lesson.Recording) {
             dock(dockRight.value)
-            ctx?.let { android.widget.Toast.makeText(it, tr("收到边上了，示教还在继续", "Folded to the edge; the lesson goes on"), android.widget.Toast.LENGTH_SHORT).show() }
+            ctx?.let { android.widget.Toast.makeText(it, tr("已贴边收起为侧边标签，示教仍在进行", "Docked to the edge; teaching continues"), android.widget.Toast.LENGTH_SHORT).show() }
             return
         }
         val msg = BackgroundOperation.closeWindow()
@@ -1044,19 +1044,19 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
     val givenAll by com.kilon.agentvscreen.core.VScreenOwnership.given.collectAsState()
     val mine = givenAll.values.firstOrNull { it.session == owner && !it.agentMovedOn }
     val mineLabel = remember(mine?.pkg) { mine?.let { com.kilon.agentvscreen.core.VScreenOwnership.label(octx, it.pkg) } }
-    val title = mineLabel?.let { tr("已交给你 · $it", "With you · $it") } ?: teachN?.let { tr("示教录制中 · 已记 $it 步", "Recording a lesson · ${steps(it)}") } ?: (if (lesson is com.kilon.agentvscreen.cmd.Lesson.Ready) tr("示教准备中", "Getting ready to show") else null) ?: s.agentTitle ?: when (mode) {
+    val title = mineLabel?.let { tr("已交由你操作 · $it", "Handed to you · $it") } ?: teachN?.let { tr("示教录制中 · 已记 $it 步", "Recording a routine · ${steps(it)}") } ?: (if (lesson is com.kilon.agentvscreen.cmd.Lesson.Ready) tr("示教准备中", "Getting ready to show") else null) ?: s.agentTitle ?: when (mode) {
         Mode.ACTING -> s.action?.take(18) ?: Palette.word(mode)
-        Mode.STANDBY -> if (left >= 0) tr("AI 待命", "AI on standby") + " · ${left / 60000}:${"%02d".format((left / 1000) % 60)}" else Palette.word(mode)
-        Mode.IDLE -> if (s.powerSaving) tr("空闲 · 省电暂停", "Idle · paused to save power") else tr("空闲", "Idle")
+        Mode.STANDBY -> if (left >= 0) tr("agent 待机", "Agent standby") + " · ${left / 60000}:${"%02d".format((left / 1000) % 60)}" else Palette.word(mode)
+        Mode.IDLE -> if (s.powerSaving) tr("待机 · 已暂停（省电）", "Standby · paused (power saving)") else tr("空闲", "Idle")
         else -> Palette.word(mode)
     }
     val chip = Color(0xCC12141C)
     val action: Triple<String, Color, () -> Unit>? = when {
-        mine != null -> Triple(tr("交回 agent", "Hand back"), Palette.takeover) { val c = octx.applicationContext; val p = mine.pkg; Thread { com.kilon.agentvscreen.core.VScreenOwnership.handBack(c, p, "overlay") }.start() }
+        mine != null -> Triple(tr("交还 agent", "Hand back to agent"), Palette.takeover) { val c = octx.applicationContext; val p = mine.pkg; Thread { com.kilon.agentvscreen.core.VScreenOwnership.handBack(c, p, "overlay") }.start() }
         showing -> null // the lesson strip under the window has 完成 / 不教
-        mode == Mode.TAKEOVER || mode == Mode.STOPPED -> Triple(tr("交还 AI", "Hand back"), Palette.takeover) { BackgroundOperation.userResume() }
+        mode == Mode.TAKEOVER || mode == Mode.STOPPED -> Triple(tr("交还 agent", "Hand back to agent"), Palette.takeover) { BackgroundOperation.userResume() }
         // 1.3.0-beta19 (rainbow): stop only while the AI acts or waits; idle shows nothing.
-        mode == Mode.ACTING || mode == Mode.STANDBY -> Triple(tr("停止 AI", "Stop AI"), Palette.stopped) { BackgroundOperation.userStop() }
+        mode == Mode.ACTING || mode == Mode.STANDBY -> Triple(tr("停止 agent", "Stop agent"), Palette.stopped) { BackgroundOperation.userStop() }
         else -> null
     }
 
@@ -1137,7 +1137,7 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
                 // 2.0.0-beta8 (G.4): dragged into top-right corner: overlay only a compact text pill, keeping the preview un-dimmed.
                 if (Overlay.cornerHot.value) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        tr("松手收成小窗", "Let go for a small window"),
+                        tr("松开后缩为小窗", "Release to shrink to the mini window"),
                         color = Color.White,
                         fontSize = (12 * k).sp,
                         fontWeight = FontWeight.SemiBold,
@@ -1290,7 +1290,7 @@ private fun PictureLayer(owner: String, k: Float, picture: (@Composable (String)
         val showHint = Overlay.hintAt.longValue > 0 && now - Overlay.hintAt.longValue < 2500
         AnimatedVisibility(showHint, Modifier.align(Alignment.Center), enter = fadeIn(), exit = fadeOut()) {
             // 1.3.0-beta18: one gesture per line (rainbow: three lines, not one run-on line).
-            Text(tr("长按 0.5 秒接管\n按住底部横条拖动缩放\n拖到右上角收成小窗", "Hold 0.5 s to take over\nDrag the bottom bar to resize\nDrag to the top right for a small window"), color = Color.White, fontSize = (11 * k).sp,
+            Text(tr("长按 0.5 秒接管\n拖动底部横条调整大小\n拖到右上角缩为小窗", "Hold 0.5 s to take over\nDrag the bottom bar to resize\nDrag to the top right for the mini window"), color = Color.White, fontSize = (11 * k).sp,
                 lineHeight = (16 * k).sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xDD12141C)).padding(horizontal = 10.dp, vertical = 6.dp))
         }

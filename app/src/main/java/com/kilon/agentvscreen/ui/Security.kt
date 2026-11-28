@@ -97,11 +97,11 @@ internal fun NewTokenDialog(base: String, copy: (String, String) -> Unit, close:
     else GlassDialog(onDismissRequest = close, title = { Text(tr("令牌「${m.first.name}」", "Token \"${m.first.name}\"")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Small(tr("令牌只显示这一次（App 里只存它的指纹）。现在就复制给 agent 的话，或单独复制令牌。", "The token is shown only this once (the app keeps only its fingerprint). Copy the message for the agent now, or the token alone."))
+                Small(tr("令牌只显示这一次（App 里只存它的指纹）。现在就复制接入消息，或单独复制令牌。", "The token is shown only this once (the app keeps only its fingerprint). Copy the setup message now, or the token alone."))
                 Text(m.second, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                PrimaryButton(onClick = { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboard(base, m.second)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制给 agent 的话（命令行）", "Copy message for the agent (shell)")) }
-                SoftButton(onClick = { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboardMcp(base, m.second)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制给 agent 的话（MCP）", "Copy message for the agent (MCP)")) }
-                SoftButton(onClick = { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboardHttp(base, m.second)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制给 agent 的话（HTTP）", "Copy message for the agent (HTTP)")) }
+                PrimaryButton(onClick = { copy(tr("接入消息", "Setup message"), AgentGuide.onboard(base, m.second)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制接入消息（命令行）", "Copy setup message (Shell)")) }
+                SoftButton(onClick = { copy(tr("接入消息", "Setup message"), AgentGuide.onboardMcp(base, m.second)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制接入消息（MCP）", "Copy setup message (MCP)")) }
+                SoftButton(onClick = { copy(tr("接入消息", "Setup message"), AgentGuide.onboardHttp(base, m.second)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制接入消息（HTTP）", "Copy setup message (HTTP)")) }
                 SoftButton(onClick = { copy(tr("令牌", "Token"), m.second) }, modifier = Modifier.fillMaxWidth()) { Text(tr("只复制令牌", "Copy the token only")) }
             }
         },

@@ -66,7 +66,7 @@ object ServiceControl {
         if (ThermalGuard.locked) return
         Prefs.setServiceOn(ctx, false); Prefs.setBlocked(ctx, false)
         HostService.ensureServer(ctx)
-        BackgroundOperation.stopAndRelease(tr("服务改成按需（agent 用到时会再叫醒）", "The service is on demand now (an agent wakes it when needed)"))
+        BackgroundOperation.stopAndRelease(tr("服务已改为按需启动（agent 使用时自动启动）", "Service set to on demand (starts when an agent needs it)"))
         HostService.stop(ctx)
         now(ctx)
         AppLogger.info("ServiceControl", "hidden: $why")
@@ -204,30 +204,30 @@ object ServiceControl {
 
     /** The home page's status line when the service is not always on: the state, then what it means. */
     fun title(ctx: Context): String = when (now(ctx)) {
-        State.ON -> tr("常驻运行中", "Always on")
-        State.HIDDEN -> if (HostService.isAlive) tr("按需 · 现在被叫醒了", "On demand · awake right now")
-            else if (Tailnet.Mode.BUILTIN == com.kilon.agentvscreen.api.ApiConfig.tailnetMode) tr("按需 · 远程已下线", "On demand · remote offline") else tr("按需", "On demand")
+        State.ON -> tr("常驻运行中", "Always running")
+        State.HIDDEN -> if (HostService.isAlive) tr("按需启动 · 运行中", "On demand · Running")
+            else if (Tailnet.Mode.BUILTIN == com.kilon.agentvscreen.api.ApiConfig.tailnetMode) tr("按需启动 · 远程离线", "On demand · Remote offline") else tr("按需启动", "On demand")
         State.BLOCKED -> tr("已关闭", "Off")
     }
 
     fun sub(ctx: Context): String? = when (now(ctx)) {
         State.ON -> null
-        State.HIDDEN -> if (HostService.isAlive) tr("用完会自己收起", "It hides again when done")
-            else tr("agent 用到时自动唤起，用完再收起", "Woken when an agent needs it, hidden again after")
-        State.BLOCKED -> if (ThermalGuard.locked) ThermalGuard.reason() else tr("什么都叫不醒它，点右上角的电源键恢复", "Nothing wakes it; the power button at the top resumes it")
+        State.HIDDEN -> if (HostService.isAlive) tr("空闲后自动停止", "Stops automatically when idle")
+            else tr("agent 使用时自动启动，空闲后停止", "Starts when an agent uses it and stops when idle")
+        State.BLOCKED -> if (ThermalGuard.locked) ThermalGuard.reason() else tr("不会自动启动，点右上角电源键重新打开", "Will not start automatically; use the power button at the top to turn it on")
     }
 
     /** The full story behind the "?" next to the status line. */
     fun help(): String = tr(
-        "右上角的电源键里选它怎么运行，三选一，选了马上生效：\n\n" +
-            "常驻：一直在运行，通知栏里一直有它，本机和其它设备上的 agent 随时连得上。\n\n" +
-            "按需：平时不在后台。本机 agent 发命令、预约的时间到了，会把它叫起来；用完、安静 5 分钟后自己收起。按需时其它设备上的 agent 叫不醒它（内置 Tailscale 跑在服务里）。被叫醒时再点一次“按需”会马上收起。\n\n" +
-            "关闭：马上停下并离开通知栏，什么都叫不醒它，预约到点只通知你。通知上的“关闭”按钮是同一个意思。\n\n" +
-            "另外两个按钮不改变服务：悬浮窗的 × 只关掉副屏；“停止”只拦住 agent 当前的操作，直到你点“允许继续”。从最近任务里划掉 App 也不改变服务。",
-        "The power button at the top chooses how it runs, one of three, applied at once:\n\n" +
-            "Always on: always running, in the notification shade; agents here and on other devices reach it any time.\n\n" +
-            "On demand: not in the background. A local agent's command or a booked time wakes it; it puts itself away after 5 quiet minutes. Agents on other devices cannot wake it (the built-in Tailscale runs in the service). While woken, choosing On demand again puts it away at once.\n\n" +
-            "Off: stops now and leaves the shade; nothing wakes it, a booking only notifies you. The notification's Off button means the same.\n\n" +
-            "Two other buttons leave the service alone: the × on the floating window only closes the screen; Stop only holds the agent's actions until you tap Resume. Swiping the app away from recents does not change the service either.",
+        "右上角的电源键用于选择服务的运行方式，三选一，立即生效：\n\n" +
+            "常驻运行：服务持续运行，通知栏保留通知；本机和其它设备上的 agent 可随时连接。\n\n" +
+            "按需启动：平时不运行。本机 agent 发出命令，或预约时间到时自动启动；空闲 5 分钟后自动停止。此模式下其它设备上的 agent 无法启动服务（内置 Tailscale 运行在服务内）。服务运行期间再次点“按需启动”可立即停止。\n\n" +
+            "关闭：立即停止并移除通知，不会被任何方式启动；预约时间到时只通知你。通知上的“关闭”按钮作用相同。\n\n" +
+            "以下两个操作不改变服务状态：悬浮窗上的 × 只关闭副屏；“停止 agent”只拒绝 agent 的操作，直到你点“解除停止”。从最近任务中划掉应用也不影响服务。",
+        "The power button at the top chooses how the service runs. Pick one; it applies at once.\n\n" +
+            "Always running: the service keeps running with a persistent notification; agents on this and other devices can connect at any time.\n\n" +
+            "On demand: not running normally. It starts when a local agent sends a command or a schedule is due, and stops after 5 minutes of inactivity. Agents on other devices cannot start it (the built-in Tailscale runs inside the service). While it is running, choosing On demand again stops it immediately.\n\n" +
+            "Off: stops immediately and removes the notification; nothing starts it. A schedule that comes due only sends you a notification. The Off button on the notification does the same.\n\n" +
+            "Two other buttons do not change the service: the × on the floating window only closes the background screen, and Stop agent only refuses the agent's actions until you tap Resume agent. Swiping the app away from recents does not change it either.",
     )
 }
