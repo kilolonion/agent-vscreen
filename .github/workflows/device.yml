@@ -11,7 +11,8 @@ name: Device tests (emulator)
 #    the next app process adopts it, and switching back to Shizuku stops it.
 on:
   push:
-    branches: [main, v1.4, v2.0, 'v2/**', 'beta/**']
+    # Feature branches are covered by their pull_request run; pushing them too would run every job twice.
+    branches: [main, v1.4, v2.0]
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -215,6 +216,8 @@ jobs:
           path: logcat.txt
           retention-days: 7
   eval:
+    # Reply-quality eval (~17 min): after merge to main, on release tags and on manual runs, not on every PR.
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 45
