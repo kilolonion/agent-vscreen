@@ -115,7 +115,7 @@ internal fun SchedulesCards(tick: Int, showEmpty: Boolean = true) {
     var editing by remember { mutableStateOf<Wake.Entry?>(null) }
     LaunchedEffect(tick, again) { list = withContext(Dispatchers.IO) { Wake.arm(ctx); Wake.list(ctx) } }
     if (list.isEmpty()) {
-        if (showEmpty) EmptyState(androidx.compose.material.icons.Icons.Outlined.Alarm, tr("还没有预约或盯守", "Nothing booked or watched"),
+        if (showEmpty) EmptyState(androidx.compose.material.icons.Icons.Outlined.Alarm, tr("还没有预约或监视", "No schedules or watches yet"),
             tr("agent 要定时用手机，或要等一件事发生时，会出现在这里", "When an agent books a time on the phone, or waits for something to happen, it shows up here"))
         return
     }
@@ -245,7 +245,7 @@ private fun ScheduleEditor(e: Wake.Entry, onClose: () -> Unit) {
     if (askDelete) GlassDialog(
         onDismissRequest = { askDelete = false },
         title = { Text(tr("删除这个预约？", "Delete this schedule?")) },
-        text = { Text(tr("${e.by} 预约的「${e.name}」会被删掉，到点不再拉起服务。", "\"${e.name}\" booked by ${e.by} goes; the service is no longer started for it.")) },
+        text = { Text(tr("将删除 ${e.by} 预约的「${e.name}」，之后不会再为它启动服务。", "\"${e.name}\" scheduled by ${e.by} will be deleted; the service will no longer start for it.")) },
         confirmButton = { LinkButton(onClick = { Wake.remove(ctx, e.name, e.agentId); askDelete = false; onClose() }) { Text(tr("删除", "Delete"), color = Palette.stopped) } },
         dismissButton = { LinkButton(onClick = { askDelete = false }) { Text(tr("取消", "Cancel")) } },
     )
@@ -315,8 +315,8 @@ internal fun LessonsList(tick: Int) {
     var query by remember { mutableStateOf("") }
     var picking by remember { mutableStateOf(false) }
     var picked by remember { mutableStateOf(setOf<String>()) }
-    if (kept.isEmpty()) { EmptyState(androidx.compose.material.icons.Icons.Outlined.School, tr("还没有经验", "Nothing kept yet"),
-        tr("你示教存下的段、agent 自己存的段和记下的经验，都按应用放在这里", "Segments you taught, segments agents saved and what they noted, by app, are kept here")); return }
+    if (kept.isEmpty()) { EmptyState(androidx.compose.material.icons.Icons.Outlined.School, tr("还没有示教", "No routines yet"),
+        tr("你录制的示教和 agent 保存的示教，按应用归类显示在这里", "Routines you recorded and routines agents saved are listed here by app")); return }
     val labels = remember(kept) { kept.map { it.pkg }.distinct().associateWith { pkg -> runCatching { ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg) } }
     val q = query.trim()
     val shown = if (q.isEmpty()) all else all.filter { (p, s) -> lessonMatches(q, s.name, labels[p] ?: p, p, s.steps) }
@@ -357,7 +357,7 @@ internal fun LessonsList(tick: Int) {
     val keptOf = remember(kept) { kept.associateBy { it.pkg } }
     fun noteHits(k: VScreenMap.Kept?) = k?.notes.orEmpty().filter { q.isEmpty() || lessonMatches(q, it.text, labels[k!!.pkg] ?: k.pkg) }
     val pkgs = (shown.map { it.first } + kept.map { it.pkg }.filter { p -> noteHits(keptOf[p]).isNotEmpty() || (q.isEmpty() && keptOf[p]?.habits?.isNotEmpty() == true) }).distinct()
-    if (pkgs.isEmpty()) Note(tr("没有匹配“$q”的经验", "Nothing kept matches \"$q\""))
+    if (pkgs.isEmpty()) Note(tr("没有匹配“$q”的示教", "No routines match \"$q\""))
     pkgs.forEach { pkg ->
         val list = shown.filter { it.first == pkg }
         Text(labels[pkg] ?: pkg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
@@ -416,7 +416,7 @@ internal fun LessonsList(tick: Int) {
         val one = list.singleOrNull()?.second
         GlassDialog(
             onDismissRequest = { askDelete = null },
-            title = { Text(if (one != null) tr("删除示教「${one.name}」？", "Delete lesson \"${one.name}\"?") else tr("删除这 ${list.size} 个示教？", "Delete these ${list.size} lessons?")) },
+            title = { Text(if (one != null) tr("删除示教「${one.name}」？", "Delete routine \"${one.name}\"?") else tr("删除这 ${list.size} 个示教？", "Delete these ${list.size} routines?")) },
             text = { Text(if (one != null) tr("agent 以后不能再用 use ${one.name} 重放它。", "Agents can no longer replay it with use ${one.name}.")
                 else list.joinToString(tr("、", ", ")) { it.second.name }.take(200) + tr("\nagent 以后不能再用 use 重放它们。", "\nAgents can no longer replay them with use.")) },
             confirmButton = { LinkButton(onClick = {

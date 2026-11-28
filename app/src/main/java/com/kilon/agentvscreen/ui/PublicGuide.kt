@@ -53,7 +53,6 @@ import com.kilon.agentvscreen.host.PublicAccess
 import com.kilon.agentvscreen.tr
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -160,8 +159,7 @@ private fun GuideField(label: String, saved: String?, onSave: (String) -> String
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (saved != null) Text("✓ " + saved, fontSize = 13.sp, color = Palette.takeover)
-        TextField(value = v, onValueChange = { v = it; problem = null }, label = label, useLabelAsPlaceholder = true, singleLine = true,
-            modifier = Modifier.fillMaxWidth())
+        AvsField(value = v, onValueChange = { v = it; problem = null }, placeholder = label)
         problem?.let { Text(it, fontSize = 12.5.sp, lineHeight = 18.sp, color = MiuixTheme.colorScheme.error) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SoftButton(onClick = {
@@ -257,7 +255,7 @@ private fun CloudflareGuide() {
         Text(tr("有自己的域名（或愿意花几十元买一个），想要固定、好记的地址，例如 https://phone.example.com/mcp；也适合用 Headscale 的情况。手机主动连到 Cloudflare，不需要公网 IP，也不用开端口。",
             "You have a domain (or will buy a cheap one) and want a fixed, memorable address such as https://phone.example.com/mcp; also for Headscale users. The phone dials out to Cloudflare: no public IP, no open port."),
             fontSize = 13.5.sp, lineHeight = 20.sp)
-        Text(tr("要知道：Cloudflare 会在它的服务器上解开 HTTPS 再转发，技术上看得到请求内容。配对、OAuth 和权限检查仍在手机上进行。在中国大陆，Cloudflare 的连接速度和稳定性因网络而异。",
+        Text(tr("注意：Cloudflare 会在其服务器上解密 HTTPS 再转发，技术上可以看到请求内容。配对、OAuth 和权限检查仍在手机上进行。在中国大陆，Cloudflare 的连接速度和稳定性因网络而异。",
             "Note: Cloudflare decrypts HTTPS on its servers before forwarding, so it can technically see requests. Pairing, OAuth and permission checks still happen on the phone. In mainland China, Cloudflare's speed and stability vary by network."),
             fontSize = 12.5.sp, lineHeight = 18.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
     }
@@ -311,7 +309,7 @@ private fun CloudflareSteps(here: Boolean) {
             field = { GuideField(tr("公网域名，例如 phone.example.com", "Public hostname, e.g. phone.example.com"), cf.hostname) { Cloudflared.save(null, it) } },
             after = if (here) emptyList() else listOf(backToPublic()))
         Step(6, tr("等两项变绿，再交给客户端", "Wait for two green rows, then give it to the client"),
-            tr("“隧道连接”显示已连上、“公网地址自检”通过，说明外网已经能到这台手机。复制 MCP 地址添加到云端客户端；第一次连接时在手机上核对配对码并批准。",
+            tr("“隧道连接”显示已连接、“公网地址自检”通过，说明外网已经能到这台手机。复制 MCP 地址添加到云端客户端；第一次连接时在手机上核对配对码并批准。",
                 "When Tunnel connection shows connected and Public address self-test passes, the internet can reach this phone. Copy the MCP address into the cloud client; on the first connection check the pairing code on the phone and approve."))
     }
 }
@@ -326,7 +324,7 @@ fun TunnelRunning(t: PublicTunnel, mcpUrl: String?) {
     val p = t.provider
     val where = listOfNotNull(if (st.connections > 1) tr("${st.connections} 条连接", "${st.connections} connections") else null, st.location).joinToString(" · ")
     val (title, color) = when (st.state) {
-        TunnelState.CONNECTED -> tr("已连上 $p", "Connected to $p") + (if (where.isNotEmpty()) tr("（$where）", " ($where)") else "") to Palette.takeover
+        TunnelState.CONNECTED -> tr("已连接 $p", "Connected to $p") + (if (where.isNotEmpty()) tr("（$where）", " ($where)") else "") to Palette.takeover
         TunnelState.STARTING -> tr("正在连接 $p…", "Connecting to $p…") to Palette.standby
         TunnelState.ERROR -> tr("没有连上 $p", "Not connected to $p") to Palette.stopped
         TunnelState.OFF -> tr("未运行", "Not running") to Palette.stopped
@@ -361,19 +359,19 @@ fun TunnelRunning(t: PublicTunnel, mcpUrl: String?) {
 @Composable
 private fun NgrokGuide() {
     Group(tr("适合谁", "Who it suits"), padded = true) {
-        Text(tr("没有自己的域名、不想折腾 DNS，也不用 Tailscale；或者用的是 Headscale。注册 ngrok 免费账号即可，免费账号自带一个固定域名，地址形如 https://名字.ngrok-free.app/mcp（新账号是 .ngrok-free.dev）。手机主动连到 ngrok，不需要公网 IP，也不用开端口。",
-            "You have no domain, don't want to deal with DNS, and don't use Tailscale; or you use Headscale. A free ngrok account is enough: it comes with one static domain, so the address looks like https://name.ngrok-free.app/mcp (.ngrok-free.dev for newer accounts). The phone dials out to ngrok: no public IP, no open port."),
+        Text(tr("没有自己的域名、不想配置 DNS，也不使用 Tailscale；或者使用 Headscale。注册 ngrok 免费账号即可，免费账号自带一个固定域名，地址形如 https://名字.ngrok-free.app/mcp（新账号是 .ngrok-free.dev）。手机主动连接 ngrok，不需要公网 IP，也不用开放端口。",
+            "You have no domain, don't want to configure DNS, and don't use Tailscale; or you use Headscale. A free ngrok account is enough: it comes with one static domain, so the address looks like https://name.ngrok-free.app/mcp (.ngrok-free.dev for newer accounts). The phone connects out to ngrok: no public IP, no open port."),
             fontSize = 13.5.sp, lineHeight = 20.sp)
-        Text(tr("要知道：ngrok 会在它的服务器上解开 HTTPS 再转发，技术上看得到请求内容。配对、OAuth 和权限检查仍在手机上进行。免费账号有流量和请求数上限，个人使用一般够用；同一账号同时只能有一个 ngrok 在线。在中国大陆，连接速度因网络而异。",
-            "Note: ngrok decrypts HTTPS on its servers before forwarding, so it can technically see requests. Pairing, OAuth and permission checks still happen on the phone. Free accounts have traffic and request limits, usually enough for personal use, and allow one ngrok online at a time. In mainland China, speed varies by network."),
+        Text(tr("注意：ngrok 会在其服务器上解密 HTTPS 再转发，技术上可以看到请求内容。配对、OAuth 和权限检查仍在手机上进行。免费账号有流量和请求数上限，个人使用一般够用；同一账号同时只能有一个 ngrok 客户端在线。在中国大陆，连接速度因网络而异。",
+            "Note: ngrok decrypts HTTPS on its servers before forwarding, so it can technically see requests. Pairing, OAuth and permission checks still happen on the phone. Free accounts have traffic and request limits, usually enough for personal use, and allow one ngrok client online at a time. In mainland China, speed varies by network."),
             fontSize = 12.5.sp, lineHeight = 18.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
     }
     NgrokSteps(here = false)
     Group(tr("常见问题", "Common problems")) {
         Problem(tr("不认这个 authtoken（ERR_NGROK_105）", "Authtoken not accepted (ERR_NGROK_105)"), tr("重新从 Your Authtoken 复制。在后台重置过令牌后，旧令牌会失效。", "Copy it again from Your Authtoken. Resetting it in the dashboard invalidates the old one."))
-        Problem(tr("已有代理在线（ERR_NGROK_108）", "An agent is already online (ERR_NGROK_108)"), tr("免费账号同时只能一个 ngrok 在线：关掉电脑等其它地方的 ngrok，或在后台 Agents 页面断开。", "Free accounts allow one ngrok online at a time: stop ngrok elsewhere, or disconnect it under Agents in the dashboard."))
+        Problem(tr("已有 ngrok 客户端在线（ERR_NGROK_108）", "An ngrok client is already online (ERR_NGROK_108)"), tr("免费账号同时只能一个 ngrok 在线：关掉电脑等其它地方的 ngrok，或在后台 Agents 页面断开。", "Free accounts allow one ngrok online at a time: stop ngrok elsewhere, or disconnect it under Agents in the dashboard."))
         Problem(tr("域名不属于这个账号", "Domain not on this account"), tr("填写的域名必须是这个账号 Domains 页面里列出的那个，注意拼写。", "The domain must be the one listed under Domains for this account; check the spelling."))
-        Problem(tr("自检：地址离线（ERR_NGROK_3200）", "Self-test: address offline (ERR_NGROK_3200)"), tr("等“隧道连接”变为已连上再自检；一直离线时检查 authtoken 和域名是否属于同一个账号。", "Wait for Tunnel connection to show connected; if it stays offline, check the authtoken and domain are on the same account."))
+        Problem(tr("自检：地址离线（ERR_NGROK_3200）", "Self-test: address offline (ERR_NGROK_3200)"), tr("等“隧道连接”变为已连接再自检；一直离线时检查 authtoken 和域名是否属于同一个账号。", "Wait for Tunnel connection to show connected; if it stays offline, check the authtoken and domain are on the same account."))
         Problem(tr("一直连不上 ngrok", "Never connects to ngrok"), tr("开着代理 VPN 时把 Agent-VScreen 设为直连；部分网络会拦截 ngrok，换个网络试试。", "With a proxy VPN, let Agent-VScreen bypass it; some networks block ngrok, try another."))
     }
     Footnote(tr("authtoken 相当于这个 ngrok 账号的钥匙，只保存在本机。怀疑泄露时，在 ngrok 后台重置，再把新令牌粘贴进来。ngrok 后台的菜单名称以其当前界面为准。",
@@ -386,7 +384,7 @@ private fun NgrokSteps(here: Boolean) {
     val ngrok by Ngrok.config.collectAsState()
     Group(tr("步骤", "Steps")) {
         Step(1, tr("注册 ngrok 账号", "Sign up for ngrok"),
-            tr("用邮箱或 GitHub、Google 账号注册（免费），按提示完成验证。不需要下载或安装 ngrok：代理就在这台手机上。", "Sign up with email, GitHub or Google (free) and finish the verification it asks for. No need to download or install ngrok: the agent is this phone."),
+            tr("用邮箱或 GitHub、Google 账号注册（免费），按提示完成验证。无需下载或安装 ngrok：这台手机本身就是 ngrok 客户端。", "Sign up with email, GitHub or Google (free) and finish the verification it asks for. No need to download or install ngrok: this phone itself is the ngrok client."),
             buttons = listOf(Btn(tr("打开 ngrok 注册", "Open ngrok sign-up")) { open(Ngrok.SIGNUP_URL) }), docs = Ngrok.DOCS_URL)
         Step(2, tr("复制 authtoken", "Copy your authtoken"),
             tr("点“打开 Your Authtoken”直接进到后台的 Getting Started › Your Authtoken，点复制，回来点“粘贴并保存”。复制整条 ngrok config add-authtoken 命令也可以。", "Open Your Authtoken goes straight to Getting Started › Your Authtoken in the dashboard; press copy, come back and press Paste and save. Copying the whole ngrok config add-authtoken command works too."),
@@ -400,6 +398,6 @@ private fun NgrokSteps(here: Boolean) {
             tr("上面两项都保存后，", "With both saved above, ") + turnOnWhere(here) + tr("清单全部 ✓，同意风险说明，点“开启公网接入”并验证指纹。", "when the checklist is all ✓, accept the risk note, press Turn on public access and confirm with your fingerprint."),
             buttons = if (here) emptyList() else listOf(backToPublic()))
         Step(5, tr("等两项变绿，再交给客户端", "Wait for two green rows, then give it to the client"),
-            tr("“隧道连接”显示已连上、“公网地址自检”通过，就可以复制 MCP 地址添加到云端客户端。第一次连接时在手机上核对配对码并批准。在浏览器里打开配对页时，ngrok 可能先显示一个提示页，点 Visit Site 继续即可。", "When Tunnel connection shows connected and Public address self-test passes, copy the MCP address into the cloud client. On the first connection check the pairing code on the phone and approve. If a browser opens the pairing page, ngrok may show a notice first; press Visit Site to continue."))
+            tr("“隧道连接”显示已连接、“公网地址自检”通过，就可以复制 MCP 地址添加到云端客户端。第一次连接时在手机上核对配对码并批准。在浏览器里打开配对页时，ngrok 可能先显示一个提示页，点 Visit Site 继续即可。", "When Tunnel connection shows connected and Public address self-test passes, copy the MCP address into the cloud client. On the first connection check the pairing code on the phone and approve. If a browser opens the pairing page, ngrok may show a notice first; press Visit Site to continue."))
     }
 }

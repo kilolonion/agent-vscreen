@@ -185,11 +185,11 @@ object Tailnet {
         val k = known(ctx)
         return when (phase(ctx)) {
             Phase.OFF -> tr("仅本机", "This phone only")
-            Phase.SERVICE_OFF -> (if (ServiceControl.now(ctx) == ServiceControl.State.BLOCKED) tr("服务已关闭", "Service off") else tr("按需（没被叫醒）", "On demand (asleep)")) +
+            Phase.SERVICE_OFF -> (if (ServiceControl.now(ctx) == ServiceControl.State.BLOCKED) tr("服务已关闭", "Service off") else tr("按需启动 · 待机", "On demand · Standby")) +
                 (k?.let { " · ${it.ip}" } ?: "")
             Phase.STARTING -> tr("Tailscale 连接中…", "Tailscale connecting…")
-            Phase.NEEDS_LOGIN -> tr("Tailscale 要登录", "Tailscale: log in")
-            Phase.EXPIRED -> tr("Tailscale 要重新登录", "Tailscale: log in again")
+            Phase.NEEDS_LOGIN -> tr("Tailscale 需要登录", "Tailscale: log in")
+            Phase.EXPIRED -> tr("Tailscale 需要重新登录", "Tailscale: log in again")
             Phase.NEEDS_APPROVAL -> tr("等待批准这台设备", "Waiting for approval")
             Phase.CONNECTED -> "Tailscale · ${_status.value.ip}" + if (_status.value.flaps >= 2) tr("（10 分钟内掉线 ${_status.value.flaps} 次）", " (dropped ${_status.value.flaps}× in 10 min)") else ""
             Phase.UNSTABLE -> tr("Tailscale 断开了，重连中", "Tailscale dropped, reconnecting")
@@ -245,7 +245,7 @@ object Tailnet {
         return struggling && throughVpn(ctx)
     }
 
-    fun vpnAdvice(): String = tr("手机的流量正经过代理 / VPN App 的虚拟网卡，它掐断了 Tailscale 的长连接（连上几秒、断约两分钟）。在代理 App 的分应用设置里把 Agent-VScreen 排除（绕过），或换一个节点、关掉代理。",
+    fun vpnAdvice(): String = tr("手机流量正经过代理 / VPN 应用的虚拟网卡，它会中断 Tailscale 的长连接（连通几秒后中断约 2 分钟）。在代理应用的分应用设置中排除（绕过）Agent-VScreen，或更换节点、关闭代理。",
         "The phone's traffic goes through a proxy / VPN app's virtual interface, which cuts Tailscale's long connections (up a few seconds, gone about two minutes). In the proxy app's per-app settings exclude (bypass) Agent-VScreen, or switch its server or turn it off.")
 
     private val _status = MutableStateFlow(Status())

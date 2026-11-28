@@ -98,10 +98,10 @@ internal fun RequestCard(a: UserAsk.Ask?, session: String, recording: Boolean, p
     ) {
         val kind = a?.kind
         val head = when {
-            recording -> tr("示范中 · 已记 $steps 步", "Showing · ${com.kilon.agentvscreen.steps(steps)}") + if (paused) tr(" · 已暂停", " · paused") else ""
+            recording -> tr("录制中 · 已记 $steps 步", "Recording · ${com.kilon.agentvscreen.steps(steps)}") + if (paused) tr(" · 已暂停", " · paused") else ""
             prep -> tr("准备：先走到起点", "Getting ready: go to the start")
             a == null -> ""
-            kind == UserAsk.Kind.TEACH -> tr("「${a.tokenName}」请你演示", "\"${a.tokenName}\" asks you to show")
+            kind == UserAsk.Kind.TEACH -> tr("「${a.tokenName}」请求示教", "\"${a.tokenName}\" requests a routine")
             else -> AskWords.who(a)
         }
         Row(Modifier.clickable { open = !open }, verticalAlignment = Alignment.CenterVertically) {
@@ -125,7 +125,7 @@ internal fun RequestCard(a: UserAsk.Ask?, session: String, recording: Boolean, p
         if (saying && a != null) {
             // "说一句": the user's words go back instead of the answer that was asked for.
             Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0x22FFFFFF)).padding(horizontal = 12.dp, vertical = 10.dp)) {
-                if (said.isEmpty()) Text(tr("比如：你要的不是这个页面 / 我的意思是…", "e.g. that's the wrong page / what I meant is…"), color = Color(0x88FFFFFF), fontSize = 14.sp)
+                if (said.isEmpty()) Text(tr("例如：这不是我要的页面 / 我的意思是…", "e.g. that's the wrong page / what I meant is…"), color = Color(0x88FFFFFF), fontSize = 14.sp)
                 BasicTextField(said, { said = it.take(300) }, Modifier.fillMaxWidth(), textStyle = TextStyle(color = Color.White, fontSize = 14.sp), cursorBrush = SolidColor(Palette.standby))
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -134,14 +134,14 @@ internal fun RequestCard(a: UserAsk.Ask?, session: String, recording: Boolean, p
                     // 1.4.0-beta12: during a lesson (getting ready or recording) the words are a message to the agent;
                     // the lesson and its request go on. Before a lesson starts they answer the request instead.
                     if (recording || prep) {
-                        if (UserAsk.say(ctx, a.id, said)) android.widget.Toast.makeText(ctx, tr("已发给 agent，示教继续", "Sent to the agent; the lesson goes on"), android.widget.Toast.LENGTH_SHORT).show()
+                        if (UserAsk.say(ctx, a.id, said)) android.widget.Toast.makeText(ctx, tr("已发送给 agent，示教继续", "Sent to the agent; teaching continues"), android.widget.Toast.LENGTH_SHORT).show()
                         said = ""; saying = false
                         return@GlassPill
                     }
                     if (takenOver && kind == UserAsk.Kind.TEACH) BackgroundOperation.userResume()
                     feedback(ctx, a, said)
                 }
-                GlassPill(tr("算了", "Never mind"), false, 1f) { saying = false }
+                GlassPill(tr("取消", "Cancel"), false, 1f) { saying = false }
             }
             return@Column
         }
@@ -153,13 +153,13 @@ internal fun RequestCard(a: UserAsk.Ask?, session: String, recording: Boolean, p
             }
             a == null -> {}
             kind == UserAsk.Kind.TEACH -> {
-                Text(tr("先接管副屏走到起点，再开始示范；觉得它要学的不对，就说一句。", "Take the screen and get to the start, then show it; if what it wants to learn is wrong, say so."),
+                Text(tr("请先接管副屏，操作到起点页面，再开始录制。如果 agent 要学的内容不对，可发消息告诉它。", "Take over the background screen, go to the starting page, then start recording. If what the agent wants to learn is wrong, send it a message."),
                     color = Color(0x99FFFFFF), fontSize = 12.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     // DESIGN §4.6: one lesson at a time; another agent's request waits until this one is saved or dropped.
                     val busy = Teach.lesson.collectAsState().value !is com.kilon.agentvscreen.cmd.Lesson.None
-                    GlassPill(if (busy) tr("先完成当前示教", "Finish the current lesson first") else tr("去示范", "Show it"), !busy, 1f, Modifier.weight(1f)) { if (!busy) Teach.beginFor(a) }
-                    GlassPill(tr("不教", "Skip"), false, 1f) { UserAsk.answer(ctx, a.id, false) }
+                    GlassPill(if (busy) tr("先完成当前示教", "Finish the current routine first") else tr("开始示教", "Start teaching"), !busy, 1f, Modifier.weight(1f)) { if (!busy) Teach.beginFor(a) }
+                    GlassPill(tr("跳过", "Skip"), false, 1f) { UserAsk.answer(ctx, a.id, false) }
                 }
                 Say { saying = true }
             }
@@ -167,12 +167,12 @@ internal fun RequestCard(a: UserAsk.Ask?, session: String, recording: Boolean, p
                 mark.reset(a.id)
                 val ready = send() != null
                 Text(when {
-                    mark.finding -> tr("把要指的东西滑进画面，再点“回来标注”。", "Bring the thing into view, then tap Mark it.")
-                    kind == UserAsk.Kind.POINT -> tr("在画面上点一下你说的地方。不在画面里就先滑过去。", "Tap the place on the picture. Not in view? Move there first.")
-                    else -> tr("在画面上拖出一个框。不在画面里就先滑过去。", "Drag a box on the picture. Not in view? Move there first.")
+                    mark.finding -> tr("先将目标移入画面，再点“返回标注”。", "Bring the target into view, then tap Return to mark.")
+                    kind == UserAsk.Kind.POINT -> tr("点击画面中的目标位置。目标不在画面内时，请先滚动到目标处。", "Tap the target on the screen. If it is not in view, scroll to it first.")
+                    else -> tr("在画面上拖出一个框选区域。区域不在画面内时，请先滚动到该处。", "Drag a box on the screen. If the area is not in view, scroll to it first.")
                 }, color = Color(0x99FFFFFF), fontSize = 12.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (mark.finding) GlassPill(tr("回来标注", "Mark it"), true, 1f, Modifier.weight(1f)) {
+                    if (mark.finding) GlassPill(tr("返回标注", "Return to mark"), true, 1f, Modifier.weight(1f)) {
                         mark.finding = false; mark.moved = true; mark.a = null; mark.b = null
                         if (BackgroundOperation.state.value.takeoverSessionId != null) BackgroundOperation.userResume()
                     } else {
@@ -180,7 +180,7 @@ internal fun RequestCard(a: UserAsk.Ask?, session: String, recording: Boolean, p
                             val r = send() ?: return@GlassPill
                             UserAsk.answer(ctx, a.id, true, r.put("moved", mark.moved))
                         }
-                        GlassPill(tr("先滑过去", "Move there"), false, 1f) {
+                        GlassPill(tr("先移动过去", "Move there first"), false, 1f) {
                             mark.finding = true
                             BackgroundOperation.beginTakeover(session)
                         }
@@ -235,7 +235,7 @@ internal fun RequestCard(a: UserAsk.Ask?, session: String, recording: Boolean, p
 
 @Composable
 private fun Say(modifier: Modifier = Modifier, onClick: () -> Unit) = Box(modifier) {
-    Text(tr("说一句…", "Say something…"), color = Color(0xCCD9C8FF), fontSize = 12.5.sp,
+    Text(tr("给 agent 发消息…", "Message the agent…"), color = Color(0xCCD9C8FF), fontSize = 12.5.sp,
         modifier = Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onClick).padding(horizontal = 6.dp, vertical = 4.dp))
 }
 
@@ -257,21 +257,21 @@ internal fun LessonStrip(session: String, k: Float, withHead: Boolean = false, o
         when (val l = lesson) {
             is com.kilon.agentvscreen.cmd.Lesson.Ready -> {
                 val a = UserAsk.byId(l.askId)
-                if (withHead) Text(tr("给「${a?.tokenName ?: "agent"}」示范：${a?.title.orEmpty()}", "Show \"${a?.tokenName ?: "agent"}\": ${a?.title.orEmpty()}"),
+                if (withHead) Text(tr("为「${a?.tokenName ?: "agent"}」示教：${a?.title.orEmpty()}", "Teach \"${a?.tokenName ?: "agent"}\": ${a?.title.orEmpty()}"),
                     color = Color.White, fontSize = (12.5f * k).sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(tr("先在副屏上走到要开始的页面，这时的操作不会被记下。到了再点“开始示范”。", "First get to the page where it starts on the screen; nothing is written down yet. Then tap Start."),
+                Text(tr("先在副屏上进入起始页面，此时的操作不会被记录。到达后点“开始录制”。", "First go to the starting page on the background screen; nothing is recorded yet. Then tap Start recording."),
                     color = Color(0x99FFFFFF), fontSize = (11.5f * k).sp)
                 Row(horizontalArrangement = Arrangement.spacedBy((6 * k).dp)) {
-                    GlassPill(tr("开始示范", "Start"), true, k, Modifier.weight(2f)) { Teach.startPrepared(session) }
-                    GlassPill(tr("不教", "Skip"), false, k, Modifier.weight(1f)) { UserAsk.answer(ctx, l.askId, false); Teach.cancelPrep(); BackgroundOperation.userResume() }
+                    GlassPill(tr("开始录制", "Start recording"), true, k, Modifier.weight(2f)) { Teach.startPrepared(session) }
+                    GlassPill(tr("跳过", "Skip"), false, k, Modifier.weight(1f)) { UserAsk.answer(ctx, l.askId, false); Teach.cancelPrep(); BackgroundOperation.userResume() }
                 }
             }
             is com.kilon.agentvscreen.cmd.Lesson.Recording -> {
                 if (withHead) Text(if (l.paused) tr("已暂停 · 现在的操作不记", "Paused · nothing is written down") else tr("录制中 · 已记 ${l.steps} 步", "Recording · ${com.kilon.agentvscreen.steps(l.steps)}"),
                     color = Color.White, fontSize = (12.5f * k).sp, fontWeight = FontWeight.SemiBold)
-                Text(l.askEnded?.let { tr("请求已结束（$it），录的会存为你的经验", "The request ended ($it); this is saved as your own") }
+                Text(l.askEnded?.let { tr("请求已结束（$it），录制内容将保存为你的示教", "The request ended ($it); the recording is saved as your own routine") }
                     ?: if (l.paused) tr("暂停中，操作不会被记下。", "Paused: nothing is written down.")
-                    else tr("照常操作就行，每一步都会记下。点错了可以撤掉；要调整又不想被记下就先暂停。", "Just do it; every step is written down. Undo a slip; pause to fix something without it being recorded."),
+                    else tr("照常操作即可，每一步都会被记录。操作有误可撤销；需要调整又不想被记录时，请先暂停。", "Operate as usual; every step is recorded. Undo a mistake; pause first to adjust something without recording it."),
                     color = if (l.askEnded != null) Palette.asking else Color(0x99FFFFFF), fontSize = (11.5f * k).sp)
                 // Small controls share one row; 完成 has a row of its own, so it is whole however narrow the window is.
                 Row(horizontalArrangement = Arrangement.spacedBy((6 * k).dp), verticalAlignment = Alignment.CenterVertically) {
@@ -280,8 +280,8 @@ internal fun LessonStrip(session: String, k: Float, withHead: Boolean = false, o
                 }
                 GlassPill(tr("完成", "Done"), true, k, Modifier.fillMaxWidth()) { Teach.finish(ctx); Surface.openReview(ctx) }
                 // 1.4.0-beta11 (rainbow): mark that the agent should look here before the lesson goes on (said better on the save page).
-                if (!l.paused) GlassPill(tr("这一步后让 agent 看一下", "Have the agent check after this step"), false, k, Modifier.fillMaxWidth()) {
-                    Teach.markCheck(); android.widget.Toast.makeText(ctx, tr("记下了：agent 会在这一步之后看一下，保存时可以写它看什么", "Marked: the agent checks after this step; say what on the save page"), android.widget.Toast.LENGTH_SHORT).show()
+                if (!l.paused) GlassPill(tr("此步骤后由 agent 复核", "Agent verifies after this step"), false, k, Modifier.fillMaxWidth()) {
+                    Teach.markCheck(); android.widget.Toast.makeText(ctx, tr("已标记：agent 会在此步骤后复核；保存时可填写复核内容", "Marked: the agent verifies after this step; describe what to check on the save page"), android.widget.Toast.LENGTH_SHORT).show()
                 }
             }
             else -> {}

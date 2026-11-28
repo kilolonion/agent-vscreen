@@ -107,10 +107,7 @@ private fun AddRuleDialog(
             val p = picked
             if (p == null) {
                 Column {
-                    top.yukonga.miuix.kmp.basic.TextField(
-                        value = query, onValueChange = { query = it }, singleLine = true,
-                        label = tr("搜索名称或包名", "Search name or package"), useLabelAsPlaceholder = true, modifier = Modifier.fillMaxWidth(),
-                    )
+                    AvsField(value = query, onValueChange = { query = it }, placeholder = tr("搜索名称或包名", "Search name or package"))
                     Spacer(Modifier.height(8.dp))
                     val q = query.trim().lowercase()
                     val shown = apps.filter { it.second !in existing && (q.isEmpty() || it.first.lowercase().contains(q) || it.second.lowercase().contains(q)) }

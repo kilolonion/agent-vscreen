@@ -44,7 +44,7 @@ fun DetectorPreference() {
     val accepted = remember(tick) { VScreenDetector.licenseAccepted(ctx) }
     val on = remember(tick) { VScreenDetector.active(ctx) }
     ArrowPreference(
-        title = tr("无字图标识别", "Textless icon finder"),
+        title = tr("无字图标识别", "Icon without text detection"),
         summary = tr("识别没有文字标签的按钮和图标", "Finds buttons and icons without text labels"),
         endActions = {
             Value(
@@ -84,7 +84,7 @@ fun DetectorPreference() {
 
     GlassDialog(
         onDismissRequest = { if (!busy) open = false },
-        title = { DialogTitle(tr("无字图标识别", "Textless icon finder")) },
+        title = { DialogTitle(tr("无字图标识别", "Icon without text detection")) },
         text = {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(

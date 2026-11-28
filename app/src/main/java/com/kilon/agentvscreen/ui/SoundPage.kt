@@ -33,7 +33,6 @@ import androidx.compose.ui.Alignment
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -138,7 +137,7 @@ fun SoundPage() {
             title = { DialogTitle(if (mute) tr("静音哪个应用", "Mute which app") else tr("哪个应用在副屏里也出声", "Which app keeps its sound")) },
             text = {
                 Column {
-                    TextField(value = q, onValueChange = { q = it.take(30) }, label = tr("搜索应用", "Search apps"), useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    AvsField(value = q, onValueChange = { q = it.take(30) }, placeholder = tr("搜索应用", "Search apps"))
                     Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()).padding(top = 8.dp)) {
                         apps.forEach { (name, pkg) ->
                             Text(name, fontSize = 15.sp, modifier = Modifier.fillMaxWidth().clickable {
@@ -155,6 +154,6 @@ fun SoundPage() {
     msg?.let { m ->
         GlassDialog(onDismissRequest = { msg = null }, title = { DialogTitle(tr("应用静音", "App sound")) },
             text = { Text(m, fontSize = 14.sp, lineHeight = 21.sp) },
-            confirmButton = { LinkButton(onClick = { msg = null }) { Text(tr("知道了", "Got it")) } })
+            confirmButton = { LinkButton(onClick = { msg = null }) { Text(tr("知道了", "OK")) } })
     }
 }

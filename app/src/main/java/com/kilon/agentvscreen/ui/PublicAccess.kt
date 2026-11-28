@@ -46,7 +46,6 @@ import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -236,7 +235,7 @@ fun PublicPairingCodeCard() {
                 errorMsg = tr("这条配对请求已过期或已处理，请在客户端重新发起连接。", "This pairing request expired or was already handled. Start pairing again from the client.")
             }
             PublicOAuth.ClaimResult.TooManyActive -> {
-                errorMsg = tr("当前有太多待确认的配对卡片，请先处理“等你处理”里的请求。", "Too many pairing cards are open right now. Handle existing requests in Needs you first.")
+                errorMsg = tr("待确认的配对请求过多，请先处理“待处理”中的请求。", "Too many pairing requests are waiting. Handle the requests under Pending first.")
             }
             PublicOAuth.ClaimResult.NoLockscreen -> {
                 errorMsg = tr("手机未设置锁屏密码或生物识别，无法批准公网配对。", "Set a screen lock PIN or biometric on the phone before approving public pairings.")
@@ -253,13 +252,10 @@ fun PublicPairingCodeCard() {
             endActions = { Value(if (byCode) tr("收起", "Hide") else tr("展开", "Show")) },
             onClick = { byCode = !byCode },
         )
-        if (byCode) TextField(
+        if (byCode) AvsField(
             value = codeInput,
             onValueChange = { codeInput = it; errorMsg = null },
-            label = tr("8 位配对码（如 ABCD-EFGH）", "8-character pairing code (e.g. ABCD-EFGH)"),
-            useLabelAsPlaceholder = true,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            placeholder = tr("8 位配对码，如 ABCD-EFGH", "8-character code, e.g. ABCD-EFGH"),
         )
         if (byCode) errorMsg?.let { err ->
             Text(err, fontSize = 12.5.sp, lineHeight = 18.sp, color = MiuixTheme.colorScheme.error)

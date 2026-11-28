@@ -77,7 +77,7 @@ object Heal {
     fun remote(ctx: Context): Pair<Boolean, String> {
         if (com.kilon.agentvscreen.api.ApiConfig.tailnetMode != Tailnet.Mode.BUILTIN)
             return false to tr("用的是系统里的 Tailscale：请用户打开 Tailscale 应用连上", "this uses the system's Tailscale: ask the user to open the Tailscale app and connect")
-        if (Tailnet.phase(ctx) == Tailnet.Phase.CONNECTED) return true to tr("Tailscale 已连上", "Tailscale is connected")
+        if (Tailnet.phase(ctx) == Tailnet.Phase.CONNECTED) return true to tr("Tailscale 已连接", "Tailscale is connected")
         Tailnet.restart(ctx.applicationContext)
         if (waitFor(20_000) { Tailnet.phase(ctx) == Tailnet.Phase.CONNECTED }) return true to tr("已重启内置 Tailscale，现在连上了", "restarted the built-in Tailscale; it is connected now")
         val line = runCatching { Tailnet.line(ctx) }.getOrNull()

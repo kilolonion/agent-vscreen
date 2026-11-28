@@ -194,7 +194,7 @@ object Cloudflared : PublicTunnel {
         line.contains("Tunnel not found", true) ->
             tr("这个隧道在 Cloudflare 上已不存在：在 Cloudflare 后台新建隧道，再粘贴新令牌。", "This tunnel no longer exists on Cloudflare: create a new one in the dashboard and paste its token.")
         line.contains("Unable to reach the origin service", true) || line.contains("connection refused", true) ->
-            tr("隧道已连上，但 Cloudflare 后台里这个域名的服务地址不对：应填 $ORIGIN_URL（类型 HTTP；不要写 localhost，也不要写别的端口）。",
+            tr("隧道已连接，但 Cloudflare 后台里这个域名的服务地址不对：应填 $ORIGIN_URL（类型 HTTP；不要写 localhost，也不要写别的端口）。",
                 "The tunnel is up, but the hostname's service in the Cloudflare dashboard is wrong: it must be $ORIGIN_URL (type HTTP; not localhost, no other port).")
         line.contains("edge discovery", true) || line.contains("lookup", true) && line.contains("argotunnel", true) ->
             tr("连不上 Cloudflare：查不到 Cloudflare 的接入地址。检查网络；开着代理 VPN 时，把 Agent-VScreen 设为直连或分流放行。",
@@ -223,7 +223,7 @@ object Cloudflared : PublicTunnel {
         return when {
             mine -> TunnelSelfTest.Ok
             body.contains("1033") -> TunnelSelfTest.Failed(tr("Cloudflare 显示隧道未连接", "Cloudflare says the tunnel is not connected"),
-                tr("这个域名指向的隧道当前没有在线的连接器。确认粘贴的是同一个隧道的令牌，并等待上方“隧道连接”变为已连上。", "No connector is online for the tunnel this hostname points at. Check that the token is from the same tunnel and wait for Tunnel connection above to show connected."), "HTTP $code")
+                tr("这个域名指向的隧道当前没有在线的连接器。确认粘贴的是同一个隧道的令牌，并等待上方“隧道连接”变为已连接。", "No connector is online for the tunnel this hostname points at. Check that the token is from the same tunnel and wait for Tunnel connection above to show connected."), "HTTP $code")
             code == 502 || code == 503 || code == 504 || body.contains("1016") -> TunnelSelfTest.Failed(tr("域名已到 Cloudflare，但转不到手机上的服务", "The hostname reaches Cloudflare but not the service on the phone"),
                 tr("在 Cloudflare 隧道的“公共主机名”里，把这个域名的服务改为 HTTP，地址 127.0.0.1:$ORIGIN_PORT。", "In the tunnel's Public Hostname, set this hostname's service to HTTP, address 127.0.0.1:$ORIGIN_PORT."), "HTTP $code")
             code in 300..399 -> TunnelSelfTest.Failed(tr("域名被重定向了", "The hostname redirects"),

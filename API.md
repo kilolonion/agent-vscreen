@@ -3,7 +3,7 @@
 Agent-VScreen 是一个独立的 Android 应用。它在一块看不见的副屏（虚拟屏）上打开和操作别的应用，用户的主屏不受打扰，屏幕上只有一个悬浮小窗显示进度。它不依赖任何特定的 agent 软件：任何 agent 都可以通过命令行、HTTP 或 MCP 调用它。
 
 <!-- version:start -->
-- 包名 `com.kilon.agentvscreen`，`main` 分支版本 2.0.1-beta1（versionCode 75）。官方测试版与正式版同签名可覆盖安装；安装前可按 [README 的说明](README.zh-CN.md#验证下载的-apk)验证签名。
+- 包名 `com.kilon.agentvscreen`，`main` 分支版本 2.0.1-beta2（versionCode 76）。官方测试版与正式版同签名可覆盖安装；安装前可按 [README 的说明](README.zh-CN.md#验证下载的-apk)验证签名。
 <!-- version:end -->
 - 需要 Android 11 及以上、arm64。
 - **2.0.x**：守门人（`Gate`）托管公开本机端口并在 App 被冻结或强停后自动唤醒；特权服务（协议 19）全事务码调用方 UID 强校验与 `ExecAllowlist` 零 `sh -c` 白名单；令牌可选有效期（默认长期）与可选 10 分钟一次性接入码（`avc_...` / `POST /v2/pair/exchange`）与敏感剪贴板（`IS_SENSITIVE`）；每 agent 独立六行权限表（`Policy`）与防遮挡独立强确认页（`StrongConfirm`）；实验性公网 MCP 接入（Tailscale Funnel / Cloudflare Tunnel / ngrok + OAuth 2.1 + 手机确认卡核对配对码 + 30 秒刷新容错 + `2026-07-28` HTTP 400 回退）；Shizuku 兼容分支动态发现与 Android 16/17 兼容；回复协议 v3 与闭环手势；任务中保持亮屏；完整版本记录见 [docs/CHANGELOG.zh-CN.md](docs/CHANGELOG.zh-CN.md)。

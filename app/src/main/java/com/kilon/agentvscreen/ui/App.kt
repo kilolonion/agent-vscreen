@@ -357,7 +357,7 @@ private fun ChangesBottomSheet(
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                 color = MiuixTheme.colorScheme.primary,
             ) {
-                Text(tr("知道了", "Got it"), color = MiuixTheme.colorScheme.onPrimary)
+                Text(tr("知道了", "OK"), color = MiuixTheme.colorScheme.onPrimary)
             }
         }
     }
@@ -480,8 +480,11 @@ fun MiuixPage(
     back: Boolean = true,
     bottom: Dp = 0.dp,
     subtitle: String = "",
-    /** Top-left of the bar when there is no back arrow (the home page's state pill). */
-    lead: (@Composable () -> Unit)? = null,
+    /**
+     * Top-left of the bar when there is no back arrow (the home page's state pill). It is given how far the large
+     * title has folded into the bar (0..1), so it can step aside for the folded title (2.0.1-beta2).
+     */
+    lead: (@Composable (folded: () -> Float) -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     marqueeTitle: Boolean = false,
     resetScrollKey: Any? = null,
@@ -508,7 +511,7 @@ fun MiuixPage(
                 val navigation: @Composable () -> Unit = {
                     if (back) IconButton(onClick = { nav.back() }, modifier = Modifier.padding(start = 16.dp)) {
                         Icon(MiuixIcons.Back, tr("返回", "Back"))
-                    } else lead?.invoke()
+                    } else lead?.invoke { bar.state.collapsedFraction }
                 }
                 val barColor = if (blurNow) Color.Transparent else surface
                 if (marqueeTitle) TaskTitleBar(title, subtitle, bar, barColor, navigation, actions)
@@ -612,7 +615,7 @@ fun rememberFold(keep: Int = 4): Fold = Fold(keep, androidx.compose.runtime.save
 fun FoldToggle(fold: Fold, size: Int) {
     Row(Modifier.fillMaxWidth().clickable { fold.open.value = !fold.open.value }.padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Text(if (fold.open.value) tr("收起", "Show less") else tr("还有 ${size - fold.keep} 个", "${size - fold.keep} more"),
+        Text(if (fold.open.value) tr("收起", "Collapse") else tr("还有 ${size - fold.keep} 个", "${size - fold.keep} more"),
             modifier = Modifier.weight(1f), fontSize = 15.sp, color = MiuixTheme.colorScheme.primary)
         top.yukonga.miuix.kmp.basic.Icon(
             if (fold.open.value) androidx.compose.material.icons.Icons.Outlined.KeyboardArrowUp else androidx.compose.material.icons.Icons.Outlined.KeyboardArrowDown,

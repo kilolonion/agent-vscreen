@@ -71,7 +71,7 @@ internal fun NewTokenDialog(base: String, copy: (String, String) -> Unit, close:
     if (m == null) GlassDialog(onDismissRequest = close, title = { Text(tr("新建令牌", "New token")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                top.yukonga.miuix.kmp.basic.TextField(value = name, onValueChange = { name = it.take(24) }, label = tr("给谁用（如 电脑上的助手）", "Who it is for (e.g. desktop assistant)"), useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth())
+                AvsField(value = name, onValueChange = { name = it.take(24) }, placeholder = tr("给谁用（如 电脑上的助手）", "Who it is for (e.g. desktop assistant)"))
                 Tokens.LEVELS.filter { it != com.kilon.agentvscreen.api.Policy.CUSTOM }.forEach { lv ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         top.yukonga.miuix.kmp.basic.RadioButton(selected = level == lv, onClick = { level = lv })
@@ -97,11 +97,11 @@ internal fun NewTokenDialog(base: String, copy: (String, String) -> Unit, close:
     else GlassDialog(onDismissRequest = close, title = { Text(tr("令牌「${m.first.name}」", "Token \"${m.first.name}\"")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Small(tr("令牌只显示这一次（App 里只存它的指纹）。现在就复制给 agent 的话，或单独复制令牌。", "The token is shown only this once (the app keeps only its fingerprint). Copy the message for the agent now, or the token alone."))
+                Small(tr("令牌只显示这一次（App 里只存它的指纹）。现在就复制接入消息，或单独复制令牌。", "The token is shown only this once (the app keeps only its fingerprint). Copy the setup message now, or the token alone."))
                 Text(m.second, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
-                PrimaryButton(onClick = { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboard(base, m.second)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制给 agent 的话（命令行）", "Copy message for the agent (shell)")) }
-                SoftButton(onClick = { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboardMcp(base, m.second)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制给 agent 的话（MCP）", "Copy message for the agent (MCP)")) }
-                SoftButton(onClick = { copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboardHttp(base, m.second)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制给 agent 的话（HTTP）", "Copy message for the agent (HTTP)")) }
+                PrimaryButton(onClick = { copy(tr("接入消息", "Setup message"), AgentGuide.onboard(base, m.second)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制接入消息（命令行）", "Copy setup message (Shell)")) }
+                SoftButton(onClick = { copy(tr("接入消息", "Setup message"), AgentGuide.onboardMcp(base, m.second)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制接入消息（MCP）", "Copy setup message (MCP)")) }
+                SoftButton(onClick = { copy(tr("接入消息", "Setup message"), AgentGuide.onboardHttp(base, m.second)) }, modifier = Modifier.fillMaxWidth()) { Text(tr("复制接入消息（HTTP）", "Copy setup message (HTTP)")) }
                 SoftButton(onClick = { copy(tr("令牌", "Token"), m.second) }, modifier = Modifier.fillMaxWidth()) { Text(tr("只复制令牌", "Copy the token only")) }
             }
         },
@@ -128,9 +128,11 @@ fun RemoteSafety() {
         }
         Switch(checked = signed, onCheckedChange = { signed = it; ApiConfig.remoteSigned = it; Audit.security("remote_signed", it.toString()) })
     }
-    top.yukonga.miuix.kmp.basic.TextField(value = peers, onValueChange = { peers = it; ApiConfig.tailnetPeers = it.split(',', '\n', ' ').map { p -> p.trim().lowercase() }.filter { p -> p.isNotEmpty() }.toSet() }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-        label = tr("只允许这些设备（设备名、登录名或 100.x 地址，逗号分开；留空 = 所有设备）", "Only these devices (names, logins or 100.x addresses, comma separated; empty = every device)"))
-    top.yukonga.miuix.kmp.basic.TextField(value = suffix, onValueChange = { suffix = it; ApiConfig.tailnetSuffix = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-        label = tr("自建控制服务器的域名后缀（可选，如 tail.example.com）", "Name suffix of a self-hosted control server (optional, e.g. tail.example.com)"))
+    // 2.0.1-beta2: a short title and a short placeholder; what goes in is said under the field.
+    AvsField(value = peers, onValueChange = { peers = it; ApiConfig.tailnetPeers = it.split(',', '\n', ' ').map { p -> p.trim().lowercase() }.filter { p -> p.isNotEmpty() }.toSet() },
+        title = tr("只允许这些设备", "Only these devices"), placeholder = tr("留空 = 所有设备", "Blank = every device"), modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+    Small(tr("设备名、登录名或 100.x 地址，逗号分开", "Device names, logins or 100.x addresses, comma separated"))
+    AvsField(value = suffix, onValueChange = { suffix = it; ApiConfig.tailnetSuffix = it },
+        title = tr("自建控制服务器域名后缀", "Self-hosted control server suffix"), placeholder = tr("可选，如 tail.example.com", "Optional, e.g. tail.example.com"), modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
 }
 

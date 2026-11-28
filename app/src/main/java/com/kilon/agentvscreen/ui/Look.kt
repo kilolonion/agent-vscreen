@@ -66,8 +66,8 @@ object Palette {
     }
 
     fun word(m: Mode): String = when (m) {
-        Mode.ACTING -> tr("AI 操作中", "AI working"); Mode.STANDBY -> tr("AI 待命", "AI on standby"); Mode.IDLE -> tr("空闲", "Idle")
-        Mode.TAKEOVER -> tr("你在操作", "You're in control"); Mode.STOPPED -> tr("已停止 AI", "AI stopped")
+        Mode.ACTING -> tr("agent 操作中", "Agent working"); Mode.STANDBY -> tr("agent 待机", "Agent standby"); Mode.IDLE -> tr("空闲", "Idle")
+        Mode.TAKEOVER -> tr("你正在操作", "You are in control"); Mode.STOPPED -> tr("已停止 agent", "Agent stopped")
     }
 }
 

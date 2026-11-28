@@ -455,8 +455,8 @@ object Wake {
                 if (items.any { it.blocking && it.code == "service_off" })
                     com.kilon.agentvscreen.core.VScreenHandoff.alert(ctx, 7702,
                         tr("agent 预约的 $whenText 到了，但服务是关闭的", "The agent's booking $whenText is due, but the service is off"),
-                        tr("这次 agent 用不了手机。要让它来，现在打开服务；只想让服务不占通知栏的话，在电源键里选“按需”，预约照样能叫醒它。",
-                            "The agent cannot use the phone this time. To let it in, turn the service on now. If you only want it out of the notification shade, choose On demand with the power button; bookings still wake it."),
+                        tr("这次 agent 无法使用手机。如需使用，请现在打开服务；如果只是不想让服务常驻通知栏，可在电源键中选择“按需启动”，预约到时仍会启动服务。",
+                            "The agent cannot use the phone this time. To allow it, turn the service on now. To keep the service out of the notification shade, choose On demand with the power button; schedules still start the service."),
                         tap, listOf(tr("现在打开服务", "Turn on now") to on))
                 else com.kilon.agentvscreen.core.VScreenHandoff.alert(ctx, 7702,
                     tr("agent 预约的 $whenText 快到了，但还有问题要你处理", "The agent's booking $whenText is due, but something needs you"),

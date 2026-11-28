@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="a11y_desc">Agent-VScreen はバックグラウンド画面（仮想画面）の画面要素を読み取り、その入力欄に文字を書き込むだけです。エージェントがその画面でアプリを操作するために使います。ジェスチャーは行わず、タッチ操作の探索もオンにせず、他のユーザー補助サービスにも影響しません。</string>
+</resources>

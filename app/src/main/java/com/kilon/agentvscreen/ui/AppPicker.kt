@@ -32,7 +32,6 @@ import com.kilon.agentvscreen.tr
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** An app with a launcher entry: label, package, icon. */
@@ -59,8 +58,7 @@ internal fun AppPickerDialog(onDismiss: () -> Unit, onPick: (LaunchableApp) -> U
                 Text(tr("应用在后台副屏运行，不占主屏；你随时可以接管、交给 agent 或关掉。", "The app runs on the background screen, not your main screen; take it over, hand it to an agent or close it any time."),
                     style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                 Spacer(Modifier.height(8.dp))
-                TextField(value = query, onValueChange = { query = it }, singleLine = true,
-                    label = tr("搜索名称或包名", "Search name or package"), useLabelAsPlaceholder = true, modifier = Modifier.fillMaxWidth())
+                AvsField(value = query, onValueChange = { query = it }, placeholder = tr("搜索名称或包名", "Search name or package"))
                 Spacer(Modifier.height(8.dp))
                 val list = apps
                 if (list == null) Text(tr("读取应用列表…", "Loading apps…"), style = MiuixTheme.textStyles.footnote1,

@@ -63,7 +63,6 @@ import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.icon.extended.Refresh
@@ -89,48 +88,12 @@ fun SettingsTab(bottom: Dp) {
     val host = LocalHost.current
     val scope = rememberCoroutineScope()
     val s by BackgroundOperation.state.collectAsState()
-    val ts by com.kilon.agentvscreen.host.Tailnet.status.collectAsState()
-    val tokens by Tokens.list.collectAsState()
     val rules by com.kilon.agentvscreen.core.VScreenStore.rules.collectAsState()
     var eventDialog by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<Updates.Outcome?>(null) }
 
     MiuixPage(tr("设置", "Settings"), back = false, bottom = bottom) {
-        val pubOn by com.kilon.agentvscreen.host.PublicAccess.enabledFlow.collectAsState()
-
-        // Who can reach the phone: the phone in the middle, each way in as a line, lit when it works.
-        SmallTitle(tr("接入", "Connections"))
-        Card(Modifier.padding(horizontal = 12.dp).fillMaxWidth(), insideMargin = PaddingValues(18.dp)) {
-            val ways = remember(ts, app.serviceOn, app.tick) { com.kilon.agentvscreen.host.Access.ways(ctx) }
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ways.forEachIndexed { i, w ->
-                    WayLine(w, onClick = { if (i == 0) nav.go(Route.Connect) else nav.go(Route.Remote) })
-                }
-                if (ways.size == 1) WayLine(null, onClick = { nav.go(Route.Remote) })
-                val pubChannel by com.kilon.agentvscreen.host.PublicAccess.channelFlow.collectAsState()
-                val tunnelState = pubChannel.tunnel?.status?.collectAsState()?.value?.state
-                WayLine(
-                    com.kilon.agentvscreen.host.Access.Way(
-                        name = tr("云端（公网 MCP）", "Cloud (Public MCP)"),
-                        state = when {
-                            !pubOn -> tr("默认关闭 · ${pubChannel.title}", "Off · ${pubChannel.title}")
-                            tunnelState == com.kilon.agentvscreen.host.TunnelState.CONNECTED -> tr("已开启", "On")
-                            tunnelState == com.kilon.agentvscreen.host.TunnelState.ERROR -> tr("连接失败", "Failed")
-                            tunnelState != null -> tr("启动中…", "Starting…")
-                            ts.funnel == "on" -> tr("已开启", "On")
-                            ts.funnel == "cert" -> tr("申请证书中…", "Fetching cert…")
-                            ts.funnel == "error" -> tr("启动失败", "Failed")
-                            else -> tr("启动中…", "Starting…")
-                        },
-                        ok = pubOn && (if (tunnelState != null) tunnelState == com.kilon.agentvscreen.host.TunnelState.CONNECTED else ts.funnel == "on"),
-                        inUse = false,
-                    ),
-                    onClick = { nav.go(Route.PublicAccess) },
-                )
-                // 1.4.0-beta8: connecting an agent is the 接入 tab now; here only the tokens.
-                SoftButton(onClick = { nav.go(Route.Tokens) }, modifier = Modifier.fillMaxWidth()) { Text(tr("令牌 ${tokens.size}", "Tokens ${tokens.size}")) }
-            }
-        }
+        // 2.0.1-beta2 (rainbow): every way in (this phone, Tailscale, cloud, tokens) lives on the 接入 tab only.
 
         // 2.0.0-beta8 (feedback 2): how much an agent may do is set per agent (接入 › the agent); here only what is about
         // apps, and the table of levels to read.
@@ -165,9 +128,9 @@ fun SettingsTab(bottom: Dp) {
             )
             val modeSummary = when {
                 inputBlocked && screenMode != com.kilon.agentvscreen.core.VScreenStore.PhoneScreenMode.WAKE_WHEN_NEEDED ->
-                    tr("熄屏时系统会拦截副屏触摸", "Touch on the background screen is blocked while off")
+                    tr("熄屏时系统会阻止副屏触摸", "The system blocks background-screen touch while the screen is off")
                 sleepsWithPhone && screenMode == com.kilon.agentvscreen.core.VScreenStore.PhoneScreenMode.ALLOW_SLEEP ->
-                    tr("副屏会随主屏休眠", "Background screen sleeps with the main screen")
+                    tr("副屏随主屏熄屏而暂停", "The background screen pauses when the main screen turns off")
                 else -> null
             }
             OverlayDropdownPreference(
@@ -194,16 +157,8 @@ fun SettingsTab(bottom: Dp) {
             val opts = listOf(1, 3, 5, 10, 30)
             var quiet by remember { mutableIntStateOf(ApiConfig.quietMinutes) }
             OverlayDropdownPreference(items = opts.map { tr("$it 分钟", "$it min") }, selectedIndex = opts.indexOf(quiet).coerceAtLeast(0),
-                title = tr("任务轮次时长", "Turn length"), summary = tr("agent 无新命令多久后视为本轮结束", "Time without new commands before a turn ends"),
+                title = tr("任务轮次时长", "Turn idle timeout"), summary = tr("无新命令超过此时长，本轮任务结束", "A turn ends after this long with no new command"),
                 onSelectedIndexChange = { i -> ApiConfig.quietMinutes = opts[i]; quiet = opts[i] })
-        }
-
-        Group(tr("识别与录制", "Recognition and recording")) {
-            SwitchPreference(checked = s.accurateOcr, onCheckedChange = { BackgroundOperation.setAccurateOcr(it) },
-                title = tr("精确文字识别", "Accurate text recognition"), summary = tr("PP-OCRv6，本机离线运行", "PP-OCRv6, offline on this phone"))
-            DetectorPreference()
-            SwitchPreference(checked = s.recording, onCheckedChange = { BackgroundOperation.setRecording(it) },
-                title = tr("后台录制", "Background recording"), summary = tr("保存副屏画面，用于回放和排查", "Keeps background-screen video for replay and troubleshooting"))
         }
 
         Group(tr("通用", "General")) {
@@ -227,7 +182,7 @@ fun SettingsTab(bottom: Dp) {
                 summary = pvSummary,
                 onSelectedIndexChange = { i -> val v = com.kilon.agentvscreen.host.Privileged.Via.entries[i]
                     if (v != pv.via) scope.launch(Dispatchers.IO) { com.kilon.agentvscreen.host.Privileged.choose(ctx, v) } })
-            val names = listOf(tr("跟随系统", "System"), "中文", "English")
+            val names = listOf(tr("跟随系统", "System"), "中文", "English", "日本語")
             OverlayDropdownPreference(items = names, selectedIndex = I18n.Lang.entries.indexOf(I18n.choice), title = "语言 / Language",
                 onSelectedIndexChange = { i ->
                     if (I18n.Lang.entries[i] != I18n.choice) {
@@ -242,6 +197,14 @@ fun SettingsTab(bottom: Dp) {
                 selectedIndex = if (I18n.agentLang == I18n.AGENT_AUTO) 1 else 0,
                 title = tr("给 agent 的回复语言", "Language of replies to agents"),
                 onSelectedIndexChange = { i -> I18n.agentLang = if (i == 1) I18n.AGENT_AUTO else I18n.AGENT_EN })
+        }
+
+        Group(tr("识别与录制", "Recognition and recording")) {
+            SwitchPreference(checked = s.accurateOcr, onCheckedChange = { BackgroundOperation.setAccurateOcr(it) },
+                title = tr("精确文字识别", "Accurate text recognition"), summary = tr("PP-OCRv6，本机离线运行", "PP-OCRv6, offline on this phone"))
+            DetectorPreference()
+            SwitchPreference(checked = s.recording, onCheckedChange = { BackgroundOperation.setRecording(it) },
+                title = tr("后台录制", "Background recording"), summary = tr("保存副屏画面，用于回放和排查", "Keeps background-screen video for replay and troubleshooting"))
         }
 
         Group(tr("更新", "Updates")) {
@@ -285,9 +248,9 @@ fun SettingsTab(bottom: Dp) {
             title = { DialogTitle(tr("事件广播", "Event broadcast")) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(tr("盯守看到条件时，事件默认只放进队列。填一个应用的包名，事件会另外广播给它；留空就不广播。", "When a watch sees its condition, the event is only queued by default. With a package here it is also broadcast to that app; empty means none."),
+                    Text(tr("监视条件触发时，事件默认只进入队列。填写应用包名后，事件还会广播给该应用；留空则不广播。", "When a watch sees its condition, the event is only queued by default. With a package here it is also broadcast to that app; empty means none."),
                         fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                    TextField(value = target, onValueChange = { target = it.trim() }, label = tr("包名", "Package"), useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    AvsField(value = target, onValueChange = { target = it.trim() }, placeholder = tr("包名", "Package"))
                 }
             },
             confirmButton = { LinkButton(onClick = { ApiConfig.eventTarget = target.ifEmpty { null }; eventDialog = false; app.bump() }) { Text(tr("保存", "Save")) } },
@@ -298,25 +261,6 @@ fun SettingsTab(bottom: Dp) {
 }
 
 /** What a check found: the new version with its notes and a download, already the newest, or why it failed. */
-/** One way in: a dot (green when it works), its name and state; tap opens where it is set up. */
-@Composable
-private fun WayLine(w: com.kilon.agentvscreen.host.Access.Way?, onClick: () -> Unit) {
-    val c = MiuixTheme.colorScheme
-    val tint = when { w == null -> c.onSurfaceVariantSummary; w.ok -> Palette.takeover; else -> Palette.stopped }
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(tint.copy(alpha = 0.13f)), contentAlignment = Alignment.Center) {
-            Box(Modifier.size(10.dp).clip(CircleShape).background(tint))
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(w?.name ?: tr("其它设备", "Other devices"), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text(w?.let { it.state + if (it.inUse) tr(" · 刚用过", " · used lately") else "" } ?: tr("没开 · 经 Tailscale 从电脑或服务器连进来", "Off · from a computer or server through Tailscale"),
-                fontSize = 12.5.sp, color = c.onSurfaceVariantSummary, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-        Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = c.onSurfaceVariantSummary, modifier = Modifier.size(20.dp))
-    }
-}
-
 /** A level to choose: lit and ringed when chosen. */
 @Composable
 private fun LevelCard(title: String, sub: String, on: Boolean, modifier: Modifier, onClick: () -> Unit) {
@@ -340,7 +284,7 @@ private fun UpdateDialog(u: Updates.Outcome, close: () -> Unit) {
             title = { DialogTitle(if (u.r.prerelease || u.r.version.contains('-')) tr("测试版 ${u.r.version}", "Beta ${u.r.version}") else tr("新版本 ${u.r.version}", "New version ${u.r.version}")) },
             text = {
                 Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(tr("现在是 ${BuildConfig.VERSION_NAME}", "You have ${BuildConfig.VERSION_NAME}"), fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    Text(tr("当前版本 ${BuildConfig.VERSION_NAME}", "Current version ${BuildConfig.VERSION_NAME}"), fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     // 1.4.2: the notes are Markdown (GitHub release body); shown rendered, not as raw marks.
                     if (u.r.notes.isNotBlank()) MarkdownText(u.r.notes.take(6000))
                 }
@@ -351,12 +295,12 @@ private fun UpdateDialog(u: Updates.Outcome, close: () -> Unit) {
         is Updates.Outcome.Latest -> GlassDialog(
             onDismissRequest = close,
             title = { DialogTitle(tr("已是最新", "Up to date")) },
-            text = { Text(tr("现在是 ${BuildConfig.VERSION_NAME}", "You have ${BuildConfig.VERSION_NAME}") + (u.newest?.let { tr("，GitHub 上最新的发布是 $it", "; the newest release on GitHub is $it") } ?: "")) },
-            confirmButton = { LinkButton(onClick = close) { Text(tr("好", "OK")) } },
+            text = { Text(tr("当前版本 ${BuildConfig.VERSION_NAME}", "Current version ${BuildConfig.VERSION_NAME}") + (u.newest?.let { tr("，GitHub 上最新的发布是 $it", "; the newest release on GitHub is $it") } ?: "")) },
+            confirmButton = { LinkButton(onClick = close) { Text(tr("确定", "OK")) } },
         )
         is Updates.Outcome.Failed -> GlassDialog(
             onDismissRequest = close,
-            title = { DialogTitle(tr("没查到", "Could not check")) },
+            title = { DialogTitle(tr("检查失败", "Check failed")) },
             text = { Text(u.why) },
             confirmButton = { LinkButton(onClick = { view(Updates.PAGE) }) { Text(tr("打开发布页", "Open releases")) } },
             dismissButton = { LinkButton(onClick = close) { Text(tr("关闭", "Close")) } },
@@ -405,7 +349,7 @@ fun TokensPage() {
                     endActions = {
                         IconButton(onClick = { show = !show }) { Icon(if (show) MiuixIcons.Hide else MiuixIcons.Show, tr("显示令牌", "Show token")) }
                         IconButton(onClick = { host.copy(tr("令牌", "Token"), token, sensitive = true) }) { Icon(MiuixIcons.Copy, tr("复制令牌", "Copy token")) }
-                        IconButton(onClick = { askRenew = true }) { Icon(MiuixIcons.Refresh, tr("换一个令牌", "New token")) }
+                        IconButton(onClick = { askRenew = true }) { Icon(MiuixIcons.Refresh, tr("重新生成令牌", "Regenerate token")) }
                     },
                 )
             }
@@ -426,7 +370,7 @@ fun TokensPage() {
         GlassDialog(
             onDismissRequest = { askUnused = null },
             title = { DialogTitle(tr("删除 ${drop.size} 个没用过的令牌？", "Remove ${drop.size} never-used tokens?")) },
-            text = { Text(tr("它们从没被任何请求用过。删掉后这些令牌立即作废。", "No request ever used them. They stop working at once.")) },
+            text = { Text(tr("这些令牌从未被使用过，删除后立即失效。", "These tokens were never used; they stop working once removed.")) },
             confirmButton = { LinkButton(onClick = {
                 val ids = drop.map { it.id }.toSet()
                 Thread { com.kilon.agentvscreen.api.Agents.forgetMany(ids) }.start()
@@ -441,7 +385,7 @@ fun TokensPage() {
         GlassDialog(
             onDismissRequest = { askRemove = null },
             title = { DialogTitle(tr("删除「${t.name}」？", "Remove \"${t.name}\"?")) },
-            text = { Text(tr("它的令牌作废，连不上了；做过的任务还留在记录里。", "Its token stops working; its past tasks stay in the records.")) },
+            text = { Text(tr("该 agent 的令牌将立即失效，无法再连接；历史任务仍保留在记录中。", "The agent's token stops working at once and it can no longer connect; its past tasks stay in the records.")) },
             confirmButton = { LinkButton(onClick = {
                 val id = t.id
                 Thread { com.kilon.agentvscreen.api.Agents.forget(actx, id) }.start()
@@ -453,9 +397,9 @@ fun TokensPage() {
     }
     if (askRenew) GlassDialog(
         onDismissRequest = { askRenew = false },
-        title = { DialogTitle(tr("换一个主令牌？", "Make a new main token?")) },
-        text = { Text(tr("旧的立即失效，用它的 agent 都要重新接入。", "The old one stops working at once; every agent using it has to connect again.")) },
-        confirmButton = { LinkButton(onClick = { ApiConfig.resetToken(); token = ApiConfig.token; askRenew = false; host.say(tr("已换新令牌", "New token made")) }) { Text(tr("换新的", "Renew")) } },
+        title = { DialogTitle(tr("重新生成主令牌？", "Regenerate the main token?")) },
+        text = { Text(tr("旧令牌将立即失效，使用它的 agent 需要重新接入。", "The old token stops working at once; agents using it must connect again.")) },
+        confirmButton = { LinkButton(onClick = { ApiConfig.resetToken(); token = ApiConfig.token; askRenew = false; host.say(tr("已重新生成令牌", "Token regenerated")) }) { Text(tr("重新生成", "Regenerate")) } },
         dismissButton = { LinkButton(onClick = { askRenew = false }) { Text(tr("取消", "Cancel")) } },
     )
 }
@@ -465,7 +409,7 @@ fun TokensPage() {
 fun HelpPage() {
     MiuixPage(tr("帮助", "Help")) {
         listOf(
-            tr("常驻、按需和关闭", "Always on, on demand and off") to ServiceControl.help(),
+            tr("常驻运行、按需启动和关闭", "Always running, on demand and off") to ServiceControl.help(),
             tr("运行位置", "Where the agent runs") to H.where,
             tr("接入方式", "How it connects") to H.how,
             tr("令牌", "Tokens") to (H.token + "\n\n" + H.tokens),
@@ -476,9 +420,9 @@ fun HelpPage() {
             tr("熄屏时", "When screen is off") to H.keepOn,
             tr("过热保护", "Thermal protection") to H.thermal,
             tr("副屏静音", "Mute the screen") to H.mute,
-            tr("任务轮次时长", "Turn length") to H.turn,
+            tr("任务轮次时长", "Turn idle timeout") to H.turn,
             tr("定时预约", "Schedules") to H.schedule,
-            tr("示教", "Lessons") to H.lessons,
+            tr("示教", "Routines") to H.lessons,
             tr("操作日志", "Activity log") to H.audit,
             tr("事件广播", "Event broadcast") to H.events,
             tr("首次配置", "Setup") to H.setup,
@@ -498,11 +442,11 @@ fun Footnote(t: String) = Text(t, fontSize = 12.sp, lineHeight = 17.sp, color = 
 internal object H {
     val where get() = tr("本机运行的 agent（Termux、Minis、Operit 等）直接连接 127.0.0.1:${ApiConfig.port}，无需额外配置。\n\n电脑、云服务器或其他手机上的 agent 通过 Tailscale 连接：仅允许你的 Tailscale 网络内的设备访问，流量经加密隧道传输，局域网和公网均无法直接访问，且仍需令牌。“内置”模式无需安装 Tailscale App；“外部 App”模式使用本机已安装的 Tailscale。\n\n云端 agent 若不在你的 Tailscale 网络内，可使用公网 MCP（Tailscale Funnel、Cloudflare Tunnel 或 ngrok，均经手机上的 OAuth 配对），默认关闭。",
         "Agents on this phone (Termux, Minis, Operit, ...) connect to 127.0.0.1:${ApiConfig.port} directly; no setup is needed.\n\nAgents on a computer, a cloud server or another phone connect through Tailscale: only devices in your Tailscale network can reach the service, over an encrypted tunnel; the local network and the internet cannot, and a token is still required. Built-in mode needs no Tailscale app; External app mode uses the Tailscale app on this phone.\n\nCloud agents outside your Tailscale network can use public MCP (Tailscale Funnel, Cloudflare Tunnel or ngrok, all with OAuth pairing on the phone), which is off by default.")
-    val how get() = tr("命令行：适用于带终端的 agent。将“给 agent 的话”发送给它，它会安装 vscreen 命令，并把这项能力写入长期记忆，供之后的新对话使用；只提供安装命令时，多数 agent 不会保留这项能力。\n\nMCP：适用于支持 MCP 的 agent。“给 agent 的话”包含 MCP 配置（streamable HTTP，每条命令对应一个工具，截图随结果返回）和能力说明。\n\nHTTP：适用于自行编写调用代码的 agent 应用。返回 JSON（ok、code、next、text、images、steps、screen、notes），完整说明见 GET /v2/help。\n\n能力说明也可以直接粘贴到 agent 的“自定义指令”或“记忆”设置中。",
+    val how get() = tr("命令行：适用于带终端的 agent。将“接入消息”发送给它，它会安装 vscreen 命令，并把这项能力写入长期记忆，供之后的新对话使用；只提供安装命令时，多数 agent 不会保留这项能力。\n\nMCP：适用于支持 MCP 的 agent。“接入消息”包含 MCP 配置（streamable HTTP，每条命令对应一个工具，截图随结果返回）和能力说明。\n\nHTTP：适用于自行编写调用代码的 agent 应用。返回 JSON（ok、code、next、text、images、steps、screen、notes），完整说明见 GET /v2/help。\n\n能力说明也可以直接粘贴到 agent 的“自定义指令”或“记忆”设置中。",
         "Shell: agents with a terminal. Send them the message: it installs the vscreen command and has the agent save \"I can operate apps on the phone in the background\" in its long-term memory, so new conversations use it too. With only the install command, most agents forget it.\n\nMCP: agents with MCP. The message has the MCP config (streamable HTTP, one tool per command, screenshots attached) and the ability note.\n\nHTTP: agent apps that write their own calls. Replies are JSON (ok, code, next, text, images, steps, screen, notes); full reference at GET /v2/help.\n\nYou can also paste the ability note into the agent's custom instructions or memory setting.")
     val token get() = tr("令牌是 agent 的访问凭据，持有令牌即可在副屏上操作你的应用，请只提供给信任的 agent。服务只接受本机请求（开启远程后还接受你 Tailscale 网络内的设备），拒绝所有网页发起的调用。重新生成主令牌后旧令牌立即失效，使用它的 agent 需重新接入。",
         "A token is an agent's credential: whoever holds it can operate your apps on the background screen, so give it only to agents you trust. The service accepts only this phone (and, with remote access on, devices in your Tailscale network) and refuses all calls from web pages. Regenerating the main token invalidates the old one at once; agents using it must connect again.")
-    val autonomy get() = tr("确认分两种强度：\n• 指纹或锁屏密码（未设锁屏时长按 3 秒）：支付、接入新 agent、放宽 agent 的权限、开启公网接入、临时免确认支付。\n• 单击“允许”：其余需确认的操作，包括不可撤销操作、敏感操作、高频操作，以及设为“每次确认”的应用中的操作。\n\n单击确认可选择许可范围：仅此一次、本轮任务内（超过“任务轮次时长”无新命令即结束）或今天内。范围内同一 agent 在同一应用中的同类操作不再请求确认（设为“每次确认”的应用同样适用）。支付不用这些范围，每一笔单独确认；唯一例外是你在 agent 详情页开启的“临时免确认支付（30 分钟）”。\n\n所有档位下：每一步都写入操作日志；可随时在悬浮窗停止 AI 或接管；确认请求 60 秒内未处理时该步不执行，agent 会提示你处理。",
+    val autonomy get() = tr("确认分两种强度：\n• 指纹或锁屏密码（未设锁屏时长按 3 秒）：支付、接入新 agent、放宽 agent 的权限、开启公网接入、临时免确认支付。\n• 单击“允许”：其余需确认的操作，包括不可撤销操作、敏感操作、高频操作，以及设为“每次确认”的应用中的操作。\n\n单击确认可选择许可范围：仅此一次、本轮任务内（超过“任务轮次时长”无新命令即结束）或今天内。范围内同一 agent 在同一应用中的同类操作不再请求确认（设为“每次确认”的应用同样适用）。支付不用这些范围，每一笔单独确认；唯一例外是你在 agent 详情页开启的“临时免确认支付（30 分钟）”。\n\n所有档位下：每一步都写入操作日志；可随时在悬浮窗停止 agent 或接管；确认请求 60 秒内未处理时该步不执行，agent 会提示你处理。",
         "Confirmations come in two strengths:\n• Fingerprint or screen-lock PIN (a 3-second hold without a screen lock): payments, connecting a new agent, widening an agent's permissions, enabling public access, payments without confirmation.\n• One tap on Allow: everything else that needs confirmation, including irreversible, sensitive and high-rate actions and actions in confirm-every-time apps.\n\nA tap can cover Just this once, This turn (ends once no command arrives for a turn length) or Today; within that range the same agent, action type and app are not asked again (apps set to confirm every time included). Payments take no scope: each one is confirmed on its own, unless you turned on \"Payments without confirmation (30 min)\" on the agent's page.\n\nAt every level: each step is logged; you can stop the AI or take over from the floating window at any time; a confirmation left unanswered for 60 s means the step is not done, and the agent will ask you to respond.")
     val rules get() = tr("禁止操作：AI 不能在副屏打开、读取或操作该应用。\n只读：AI 可以打开、查看和滚动，但不能点击、输入或滑动。\n每次确认：AI 点击或输入前需在手机上确认，可选择仅此一次、本轮任务内或今天内。\n\n应用规则对所有 agent 生效，优先于 agent 的权限档位；仅作用于副屏，不影响你自己使用。",
         "Blocked: the AI cannot open, read or operate the app on the background screen.\nRead-only: the AI can open, view and scroll, but cannot tap, type or swipe.\nConfirm every time: before the AI taps or types, you confirm on the phone, for just this once, this turn or today.\n\nApp rules apply to every agent and take precedence over its permission level. They affect only the background screen, not your own use.")
@@ -520,13 +464,13 @@ internal object H {
         "Apps on the background screen do not play sound through the phone (videos, live streams). Sound returns when an app moves to the main screen or the screen is released; after a crash it is restored on the next connection.")
     val turn get() = tr("agent 超过该时长未发送新命令即视为本轮任务结束：副屏随后进入省电暂停，10 分钟后释放。agent 也可以用 vscreen done 立即结束本轮。该时长同时决定“本轮任务内”许可的有效期。",
         "A turn ends when the agent sends no command for this long: the screen then pauses to save power and is released 10 minutes later. The agent can end a turn at once with vscreen done. This length also sets how long a \"This turn\" allowance lasts.")
-    val lessons get() = tr("示教是你在副屏上演示并保存的操作流程。agent 用 act \"use 名称\" 按步骤执行；点开可查看每一步，不再需要的可删除。\n\n示教在全屏页面录制：由 agent 用 teach 发起请求，或你接管后手动开始录制。",
-        "A lesson is a procedure you demonstrated on the background screen and saved. An agent runs it with act \"use name\"; open one to see its steps, and delete those you no longer need.\n\nLessons are recorded on the full-screen page: an agent requests one with teach, or you take over and start recording.")
+    val lessons get() = tr("示教是你在副屏上录制并保存的操作流程。agent 用 act \"use 名称\" 调用；点开可查看每一步，不再需要的可删除。\n\n示教在全屏页面录制：由 agent 用 teach 发起请求，或你接管后手动开始录制。",
+        "A routine is a procedure you recorded on the background screen and saved. An agent calls it with act \"use name\"; open one to see its steps, and delete those you no longer need.\n\nRoutines are recorded on the full-screen page: an agent requests one with teach, or you take over and start recording.")
     val schedule get() = tr("agent 的定时任务需要使用手机时，可用 vscreen schedule 预约时间。预约时间前 3 分钟会启动服务并自检，未就绪时发送通知。\n\n服务处于暂停状态时，到点自动开启；服务已关闭时不自动开启，仅发送通知。\n\n点开预约可修改时间、重复规则和保持时长；关闭开关会保留预约但到点不触发。",
         "An agent whose timed task needs the phone can book the time with vscreen schedule. 3 minutes before, the service starts and checks itself, and you are notified if it is not ready.\n\nWhile the service is paused, a booking turns it on; while it is off, a booking only notifies you.\n\nOpen a booking to change its time, repeat rule and duration; switching it off keeps it without firing.")
     val audit get() = tr("记录每条命令的来源（令牌、设备或公网来源地址）、时间、内容和结果。输入的文字只记录字数。",
         "Records each command's source (token, device or public source address), time, content and result. Typed text is recorded as a length only.")
-    val events get() = tr("盯守条件满足时产生的事件默认只进入队列，由 agent 通过 vscreen events 读取。填写应用包名后，事件会同时以广播发送给该应用，其他应用无法接收。",
+    val events get() = tr("监视条件触发时，事件默认只进入队列，由 agent 通过 vscreen events 读取。填写应用包名后，事件还会广播给该应用，其他应用收不到。",
         "Events from watches are queued by default and read by agents with vscreen events. With a package name set, each event is also broadcast to that app only.")
     val privilege get() = tr("Agent-VScreen 需要 shell 级权限来创建副屏、注入点击和启动应用，可从以下两种来源中选择一种：\n\n• Shizuku / 兼容分支（默认）：无需 root，自动识别 Shizuku、Sui、AXManager 等兼容分支。手机每次重启后需重新启动服务；Android 17+ 如官方 Shizuku 受限，可选兼容分支或改用 Root。\n• Root：适用于已通过 Magisk、KernelSU、APatch 等获取 root 的手机，无需安装 Shizuku。首次使用时需在 root 管理器中授权，之后打开 App 即自动启动。副屏服务优先以 shell 身份运行，行为与 Shizuku 的 ADB 模式一致。\n\n切换来源时当前副屏会关闭，下一条命令通过新来源自动重新连接。",
         "Agent-VScreen needs shell-level permission to open the background screen, tap and start apps. It comes from one of two sources:\n\n• Shizuku / compatible forks (default): no root needed. Recognizes Shizuku, Sui, AXManager and other compatible forks. Restart the manager after each phone reboot; on Android 17+, if official Shizuku is limited, use a compatible fork or Root.\n• Root: for phones rooted with Magisk, KernelSU, APatch and the like; Shizuku is not needed. The root manager asks once; after that it starts by itself when the app opens. The screen service runs as the shell user where it can, exactly as under Shizuku's ADB mode.\n\nSwitching closes the current screen; the next command reconnects through the new source by itself.")
@@ -606,8 +550,8 @@ fun FloatingWindowPage() {
             text = {
                 Text(
                     tr(
-                        "• 打开方式：每次有新的副屏时，悬浮窗以右上角小窗打开，轻点放大；同一副屏期间，沿用你调整后的大小和位置。\n\n• 显示悬浮窗：有副屏时在最上层显示实时画面。\n\n• 小窗显示按钮：默认开启，右上角小窗也显示标题、全屏、关闭和停止 AI 按钮。\n\n• 点小窗自动放大：默认开启；关闭后轻点小窗不再居中放大，只保留拖动、贴边折叠和长按操作。",
-                        "• How it opens: each new background screen opens as the small window in the top right corner; tap to enlarge. While the same screen is up, your size and position are kept.\n\n• Show floating window: displays the live background screen above other apps.\n\n• Show buttons on mini window: on by default; the compact corner window also shows title, fullscreen, close, and stop-AI buttons.\n\n• Tap mini window to expand: on by default; turn off so tapping the mini window stays compact instead of expanding to center.",
+                        "• 打开方式：每次有新的副屏时，悬浮窗以右上角小窗打开，轻点放大；同一副屏期间，沿用你调整后的大小和位置。\n\n• 显示悬浮窗：有副屏时在最上层显示实时画面。\n\n• 小窗显示按钮：默认开启，右上角小窗也显示标题、全屏、关闭和停止 agent 按钮。\n\n• 点小窗自动放大：默认开启；关闭后轻点小窗不再居中放大，只保留拖动、贴边折叠和长按操作。",
+                        "• How it opens: each new background screen opens as the small window in the top right corner; tap to enlarge. While the same screen is up, your size and position are kept.\n\n• Show floating window: displays the live background screen above other apps.\n\n• Show buttons on mini window: on by default; the compact corner window also shows title, fullscreen, close and Stop agent buttons.\n\n• Tap mini window to expand: on by default; turn off so tapping the mini window stays compact instead of expanding to center.",
                     ),
                     fontSize = 13.5.sp,
                     lineHeight = 20.sp,

@@ -156,7 +156,7 @@ fun Help(title: String, body: String, tint: Color = top.yukonga.miuix.kmp.theme.
         onDismissRequest = { open = false },
         title = { DialogTitle(title) },
         text = { Text(body, fontSize = 14.sp, lineHeight = 21.sp) },
-        confirmButton = { LinkButton(onClick = { open = false }) { Text(tr("知道了", "Got it")) } },
+        confirmButton = { LinkButton(onClick = { open = false }) { Text(tr("知道了", "OK")) } },
     )
 }
 

@@ -17,7 +17,7 @@
 Agent-VScreen opens and drives other apps on an invisible virtual display so your main screen stays untouched. A small floating window shows what the AI is doing and lets you take over or stop it at any moment. Model-agnostic and works over the `vscreen` CLI, MCP, or plain HTTP.
 
 <!-- version:start -->
-- Version on `main`: 2.0.1-beta1 (versionCode 75) · [Latest stable APK](https://github.com/kilolonion/agent-vscreen/releases/latest) · [All releases / betas](https://github.com/kilolonion/agent-vscreen/releases)
+- Version on `main`: 2.0.1-beta2 (versionCode 76) · [Latest stable APK](https://github.com/kilolonion/agent-vscreen/releases/latest) · [All releases / betas](https://github.com/kilolonion/agent-vscreen/releases)
 <!-- version:end -->
 - Requirements: Android 11+ (arm64, Android 14+ recommended) · Package `com.kilon.agentvscreen` · Privileges: [Shizuku](https://shizuku.rikka.app/) / compatible forks or Root
 

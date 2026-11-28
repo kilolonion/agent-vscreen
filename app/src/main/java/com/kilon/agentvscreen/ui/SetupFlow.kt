@@ -90,8 +90,8 @@ fun SetupFlowPage() {
                     Box(Modifier.size(56.dp).clip(CircleShape).background(Palette.takeover.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
                         Text("✓", fontSize = 28.sp, color = Palette.takeover, fontWeight = FontWeight.Bold)
                     }
-                    Text(tr("都配好了", "All set"), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                    Text(if (skipped.isEmpty()) tr("现在可以去接入 agent。", "You can connect an agent now.") else tr("跳过的可选项在下面的列表里，随时能补上。", "Skipped optional items are in the list below; add them any time."),
+                    Text(tr("配置完成", "All set"), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (skipped.isEmpty()) tr("现在可以接入 agent。", "You can connect an agent now.") else tr("跳过的可选项在下方列表中，可随时补上。", "Skipped optional items are in the list below and can be set up any time."),
                         fontSize = 14.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, textAlign = TextAlign.Center)
                     PrimaryButton(onClick = { nav.back(); nav.go(Route.Connect) }, modifier = Modifier.fillMaxWidth(), color = MiuixTheme.colorScheme.primary) {
                         Text(tr("接入 agent", "Connect an agent"), color = MiuixTheme.colorScheme.onPrimary)

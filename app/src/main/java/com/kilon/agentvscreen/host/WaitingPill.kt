@@ -56,7 +56,7 @@ object WaitingPill {
         if (n == 0 || AppFront.visible) hide() else show(c, n)
     }
 
-    private fun text(n: Int) = tr("Agent 在等你处理 · $n 项  ›", "An agent is waiting for you · $n  ›")
+    private fun text(n: Int) = tr("$n 项待处理  ›", "$n items need you  ›")
 
     private fun show(c: Context, n: Int) {
         view?.let { if (shownCount != n) { it.text = text(n); shownCount = n }; return }

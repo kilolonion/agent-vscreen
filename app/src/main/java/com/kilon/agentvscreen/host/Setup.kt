@@ -35,10 +35,10 @@ object Setup {
                 ShizukuManager.State.READY -> if (sh.isSui) "Sui" else "Shizuku v${sh.version}"
             }),
             Item("overlay", tr("悬浮窗", "Floating window"), Settings.canDrawOverlays(ctx), tr("副屏小窗（看进度、接管）", "The screen's small window (progress, take over)")),
-            Item("accessibility", tr("无障碍（只读）", "Accessibility (read-only)"), VScreenAccessibilityService.getInstance() != null, tr("元素列表和中文输入更准；不开也能用（只靠文字识别）", "More accurate element lists and text input; works without it (text recognition only)")),
-            Item("notifications", tr("通知", "Notifications"), NotificationManagerCompat.from(ctx).areNotificationsEnabled(), tr("盯守提醒、交还提醒", "Watch alerts, hand-back reminders")),
+            Item("accessibility", tr("无障碍（只读）", "Accessibility (read-only)"), VScreenAccessibilityService.getInstance() != null, tr("使元素列表和中文输入更准确；不开启也能使用（仅靠文字识别）", "More accurate element lists and text input; works without it (text recognition only)")),
+            Item("notifications", tr("通知", "Notifications"), NotificationManagerCompat.from(ctx).areNotificationsEnabled(), tr("监视提醒、交还提醒", "Watch alerts, hand-back reminders")),
             Item("battery", tr("电池优化和后台运行", "Battery optimization and background running"), pw.ok, when {
-                pw.ok && VScreenPower.resets > 0 -> tr("已加入电池白名单、允许后台运行（系统收回过 ${VScreenPower.resets} 次：${VScreenPower.lastResetWhat}，每次都已自动补上，不用你管）", "Battery exemption and background running granted (the system took them back ${VScreenPower.resets} times: ${VScreenPower.lastResetWhat}; each time they were granted again automatically, nothing to do)")
+                pw.ok && VScreenPower.resets > 0 -> tr("已加入电池优化白名单并允许后台运行（系统曾 ${VScreenPower.resets} 次撤销：${VScreenPower.lastResetWhat}，均已自动重新授予，无需处理）", "Battery optimization exemption and background running granted (the system revoked them ${VScreenPower.resets} times: ${VScreenPower.lastResetWhat}; each was granted again automatically, no action needed)")
                 pw.ok -> tr("已加入电池白名单、允许后台运行（被系统收回时会自动补上）", "Battery exemption and background running granted (granted again automatically if the system takes them back)")
                 Privileged.isReady() -> tr("自动设置没成功：", "Automatic setup failed: ") + pw.problems().joinToString(tr("、", ", ")) + tr("。请手动：", ". Please do it by hand: ") + VScreenPower.manualSteps()
                 else -> pw.problems().joinToString(tr("、", ", ")) + tr("（${Privileged.name()} 就绪后会自动补上）", " (granted automatically once ${Privileged.name()} is ready)")
@@ -54,9 +54,9 @@ object Setup {
         if (com.kilon.agentvscreen.core.DetectorModels.builtIn(ctx) == null) return emptyList()
         val on = com.kilon.agentvscreen.core.VScreenDetector.licenseAccepted(ctx)
         val skipped = com.kilon.agentvscreen.core.VScreenDetector.declined(ctx)
-        return listOf(Item("detector", tr("无字图标识别", "Textless icon finder"), on || skipped, when {
+        return listOf(Item("detector", tr("无字图标识别", "Icon without text detection"), on || skipped, when {
             on -> tr("已开启：agent 的元素列表里会多出没有文字的图标、×、开关", "On: the agent's element list includes icons, × and switches without words")
-            skipped -> tr("已跳过，可以在设置里随时开启", "Skipped; turn it on in Settings any time")
+            skipped -> tr("已跳过，可在设置中随时开启", "Skipped; turn it on in Settings any time")
             else -> tr("帮 agent 找到图标、×、开关这类没有文字的按钮。", "Helps agents find buttons without words (icons, ×, switches). ") + com.kilon.agentvscreen.core.VScreenDetector.licenseNote()
         }))
     }
@@ -70,7 +70,7 @@ object Setup {
         val page = Liveness.vendorPage(ctx) ?: return emptyList()
         val done = Liveness.vendorSetupDone(ctx)
         return listOf(Item("vendor_bg", tr("系统后台管理", "System background management"), done,
-            if (done) tr("已在“$page”里设置；只有亮屏使用时又被冻结，这一项才会重新亮起", "Set in \"$page\"; this item only lights up again if the app is frozen while the screen is on")
+            if (done) tr("已在“$page”中设置。仅当亮屏使用时应用再次被冻结，此项才会重新显示。", "Set in \"$page\". This item appears again only if the app is frozen again while the screen is on.")
             else tr("在“$page”里把 Agent-VScreen 改成手动管理，允许自启动、关联启动和后台活动", "In \"$page\", set Agent-VScreen to manual management and allow auto-start, start by other apps and background activity")))
     }
 

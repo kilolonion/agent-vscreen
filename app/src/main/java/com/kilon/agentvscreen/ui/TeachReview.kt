@@ -57,7 +57,7 @@ import org.json.JSONObject
  * the app (`use 名字`); when an agent asked for the lesson, the agent gets the steps as the answer.
  * 1.4.0-beta11: the REVIEW pane of the one screen page (was its own page, TeachActivity).
  */
-private fun defaultName(r: Teach.Result): String = (r.name ?: r.purpose?.take(16) ?: tr("示教", "lesson") + "-" +
+private fun defaultName(r: Teach.Result): String = (r.name ?: r.purpose?.take(16) ?: tr("示教", "routine") + "-" +
         java.text.SimpleDateFormat("HHmm", java.util.Locale.ROOT).format(java.util.Date())).trim().replace(Regex("\\s+"), "-")
 
 @Composable
@@ -76,16 +76,16 @@ internal fun ReviewPane(r: Teach.Result, screenGone: Boolean, onLeave: () -> Uni
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(24.dp)).padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(tr("把刚才的操作存成一段", "Save what you just did"), fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                    ask?.let { Text(tr("「${it.tokenName}」请你演示：${it.title}", "\"${it.tokenName}\" asked you to show: ${it.title}"), fontSize = 14.sp, color = MaterialTheme.colorScheme.primary) }
+                    Text(tr("保存刚才的示教", "Save this routine"), fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                    ask?.let { Text(tr("「${it.tokenName}」请求示教：${it.title}", "\"${it.tokenName}\" asked you to show: ${it.title}"), fontSize = 14.sp, color = MaterialTheme.colorScheme.primary) }
                     Text((r.app ?: tr("没认出应用", "app not recognised")) + " · " + steps(r.lines.size),
                         fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     // 1.4.0-beta11: nobody waits for it (no request, or the request ended while recording): say where it goes.
-                    if (ask == null) Text(tr("没有 agent 在等这一段，保存后存为你的经验，所有 agent 都能 use。", "No agent is waiting for this; it is saved as your own, and any agent can use it."),
+                    if (ask == null) Text(tr("没有 agent 在等待这段示教。保存后归你所有，所有 agent 都可以 use。", "No agent is waiting for this routine. It is saved as your own, and every agent can use it."),
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 OutlinedTextField(name, { name = it.replace(Regex("\\s+"), "-").take(32) }, Modifier.fillMaxWidth(), singleLine = true,
-                    label = { Text(tr("名字（agent 用 use 名字 来重放）", "Name (agents replay it with use <name>)")) }, shape = RoundedCornerShape(18.dp))
+                    label = { Text(tr("名称（agent 用 use 名称 调用）", "Name (agents call it with use <name>)")) }, shape = RoundedCornerShape(18.dp))
                 if (r.lines.isEmpty()) Text(tr("没有记到操作。", "Nothing was recorded."), fontSize = 15.sp)
                 r.lines.forEachIndexed { i, l -> StepRow(i, l, i in keep, i in literal, params = paramOf(r.lines, keep, literal, i),
                     onKeep = { keep = if (i in keep) keep - i else keep + i }, onLiteral = { literal = if (i in literal) literal - i else literal + i },
@@ -103,7 +103,7 @@ internal fun ReviewPane(r: Teach.Result, screenGone: Boolean, onLeave: () -> Uni
                 }
                 Spacer(Modifier.weight(1f))
                 // 1.4.0-beta11: 重录 stays on this page (the live pane); without the screen it is off and says why.
-                OutlinedButton(enabled = !screenGone, onClick = onAgain, modifier = Modifier.height(48.dp)) { Text(if (screenGone) tr("副屏已关，不能重录", "Screen closed") else tr("重录", "Again")) }
+                OutlinedButton(enabled = !screenGone, onClick = onAgain, modifier = Modifier.height(48.dp)) { Text(if (screenGone) tr("副屏已关闭，无法重新录制", "Background screen closed; cannot record again") else tr("重新录制", "Record again")) }
                 Button(enabled = name.isNotBlank() && keep.isNotEmpty() && r.app != null, onClick = { save(ctx, r, name, steps, params, keep); onLeave() }, modifier = Modifier.height(48.dp)) {
                     Text(tr("保存", "Save"), fontWeight = FontWeight.SemiBold)
                 }
@@ -142,21 +142,21 @@ private fun StepRow(i: Int, l: TeachLine, kept: Boolean, lit: Boolean, params: I
                 l.warn?.let { Text(it, fontSize = 12.sp, color = Palette.stopped) }
                 // 1.4.0-beta11: a check after this step: the run stops here and the agent looks (or puts it right) first.
                 if (kept) {
-                    if (check == null) Text(tr("＋ 之后让 agent 看一下", "+ Have the agent check after this"), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary,
+                    if (check == null) Text(tr("＋ 添加检查点（agent 复核）", "+ Add a checkpoint (agent verifies)"), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onCheck(Teach.CHECK_DEFAULT) }.padding(vertical = 2.dp))
                     else Column(Modifier.fillMaxWidth().padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         OutlinedTextField(check, { onCheck(it) }, Modifier.fillMaxWidth(), singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
-                            label = { Text(tr("之后让 agent 看：", "Then the agent checks:")) }, shape = RoundedCornerShape(14.dp))
+                            label = { Text(tr("检查点：", "Checkpoint: ")) }, shape = RoundedCornerShape(14.dp))
                         Text(tr("去掉这个检查", "Remove this check"), fontSize = 12.sp, color = MaterialTheme.colorScheme.outline,
                             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onCheck(null) }.padding(vertical = 2.dp))
                     }
                 }
-                if (l.kind == "value" && l.typed != null && kept) Text(if (lit) tr("每次都拨到「${l.typed}」 · 点这里改成由 agent 填", "Always set to \"${l.typed}\" · tap to let the agent fill it")
-                    else tr("由 agent 每次填（{$params}），这次是「${l.typed}」 · 点这里改成固定拨到这个值", "Filled by the agent each time ({$params}), \"${l.typed}\" this time · tap to always set this value"),
+                if (l.kind == "value" && l.typed != null && kept) Text(if (lit) tr("固定设置为「${l.typed}」 · 点按改为由 agent 填写", "Fixed to \"${l.typed}\" · tap to let the agent fill it in")
+                    else tr("每次由 agent 填写（{$params}），本次为「${l.typed}」 · 点按改为固定此值", "Filled in by the agent each time ({$params}), \"${l.typed}\" this time · tap to fix this value"),
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onLiteral).padding(vertical = 2.dp))
                 if (l.kind == "type" && kept) {
-                    if (l.secret) Text(tr("密码不会被保存，agent 用时要自己填", "The password is not kept; the agent fills it in"), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                    else Text(if (lit) tr("固定输入这段字 · 点这里改成由 agent 填", "Always types these words · tap to let the agent fill it")
+                    if (l.secret) Text(tr("不会保存密码，调用时由 agent 填写", "The password is not saved; the agent fills it in when calling"), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                    else Text(if (lit) tr("固定输入此文字 · 点按改为由 agent 填写", "Always types this text · tap to let the agent fill it in")
                         else tr("由 agent 每次填（{$params}）· 点这里改成固定输入原文", "Filled by the agent each time ({$params}) · tap to always type the original"),
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onLiteral).padding(vertical = 2.dp))
                 }

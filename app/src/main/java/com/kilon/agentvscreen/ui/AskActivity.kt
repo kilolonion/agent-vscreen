@@ -169,13 +169,13 @@ class AskActivity : PageActivity() {
                 when (a.kind) {
                     UserAsk.Kind.POINT, UserAsk.Kind.AREA -> {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (a.kind == UserAsk.Kind.POINT) tr("在画面上点一下你说的地方", "Tap the place you mean")
+                            Text(if (a.kind == UserAsk.Kind.POINT) tr("点击画面中的目标位置", "Tap the target on the screen")
                                 else tr("在画面上拖出一个框", "Drag a box on the picture"), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                             if (point != null || boxA != null) TextButton(onClick = { point = null; boxA = null; boxB = null }) {
-                                Icon(Icons.Filled.Refresh, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text(tr("重来", "Redo"))
+                                Icon(Icons.Filled.Refresh, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text(tr("重新选择", "Reselect"))
                             }
                         }
-                        if (bmp == null) Text(tr("画面没取到", "No picture"), color = MaterialTheme.colorScheme.error)
+                        if (bmp == null) Text(tr("无法获取画面", "Screen unavailable"), color = MaterialTheme.colorScheme.error)
                         else Box(
                             Modifier.fillMaxWidth().padding(horizontal = 24.dp).shadow(16.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp))
                                 .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(20.dp))
@@ -213,14 +213,14 @@ class AskActivity : PageActivity() {
             Row(Modifier.fillMaxWidth().glassSheet(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)).padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { send(a, null) }) { Text(when (a.kind) {
-                    UserAsk.Kind.CHOOSE -> tr("都不是 / 不回答", "None / decline")
+                    UserAsk.Kind.CHOOSE -> tr("以上都不是 / 不回答", "None / decline")
                     UserAsk.Kind.CONFIRM -> tr("拒绝", "Deny")
                     else -> tr("不回答", "Decline")
                 }) }
                 Spacer(Modifier.weight(1f))
                 Button(enabled = ready, onClick = { if (a.kind == UserAsk.Kind.CONFIRM) { UserAsk.answer(this@AskActivity, a.id, true, null); back() } else send(a, reply()) }, modifier = Modifier.height(48.dp)) {
                     Text(when (a.kind) {
-                        UserAsk.Kind.POINT, UserAsk.Kind.AREA -> tr("就是这里", "This one")
+                        UserAsk.Kind.POINT, UserAsk.Kind.AREA -> tr("选择此处", "Select here")
                         UserAsk.Kind.CONFIRM -> tr("允许", "Allow")
                         else -> tr("发送", "Send")
                     }, fontWeight = FontWeight.SemiBold)
