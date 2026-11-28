@@ -44,24 +44,18 @@ internal object VScreenStore {
     }
 
     enum class Rule(val key: String, private val zhText: String, private val enText: String) {
-        BLOCK("block", "禁止操作", "blocked"),
-        READONLY("readonly", "只读", "read-only"),
+        BLOCK("block", "禁止操作", "blocked"), READONLY("readonly", "只读", "read-only"),
         /** 1.2: every stretch that acts in this app is confirmed by the user on the phone first. */
-        ASK("ask", "每次确认", "confirm every time"),
-        /** Explicit user override relaxing a built-in default rule (e.g. financial apps) after strong confirmation. */
-        ALLOW("allow", "允许操作", "allowed");
+        ASK("ask", "每次确认", "confirm every time");
         val zh: String get() = tr(zhText, enText)
-        companion object {
-            fun of(s: String?): Rule? = entries.firstOrNull { it.key == s }
-            val RESTRICTIONS: List<Rule> = listOf(BLOCK, READONLY, ASK)
-        }
+        companion object { fun of(s: String?): Rule? = values().firstOrNull { it.key == s } }
     }
 
     @Volatile private var appContext: Context? = null
     private lateinit var prefs: SharedPreferences
 
     private val _rules = MutableStateFlow<Map<String, Rule>>(emptyMap())
-    /** package -> explicit user rule, for the settings screen. */
+    /** package -> rule, for the settings screen. */
     val rules: StateFlow<Map<String, Rule>> = _rules.asStateFlow()
 
     private val _idlePowerSave = MutableStateFlow(true)
@@ -102,23 +96,7 @@ internal object VScreenStore {
 
     // ── app rules ─────────────────────────────────────────────────────────
 
-    /** User-explicit rule stored for [pkg], or null if using the system default. */
-    fun explicitRuleFor(pkg: String?): Rule? = pkg?.let { _rules.value[it] }
-
-    /**
-     * Effective rule for [pkg]: user explicit override wins (including explicit [Rule.ALLOW] -> null),
-     * otherwise built-in financial/payment apps default to [Rule.ASK].
-     */
-    fun ruleFor(pkg: String?): Rule? {
-        if (pkg.isNullOrBlank()) return null
-        val explicit = _rules.value[pkg]
-        if (explicit != null) return if (explicit == Rule.ALLOW) null else explicit
-        return if (FinanceApps.isFinancial(pkg)) Rule.ASK else null
-    }
-
-    /** True when [pkg] is currently protected by the built-in financial-app default `Rule.ASK`. */
-    fun isDefaultFinancialAsk(pkg: String?): Boolean =
-        FinanceApps.isFinancial(pkg) && explicitRuleFor(pkg) == null
+    fun ruleFor(pkg: String?): Rule? = pkg?.let { _rules.value[it] }
 
     /** Only the settings screen calls this: the agent cannot change its own limits. */
     fun setRule(pkg: String, rule: Rule?) {
@@ -128,12 +106,6 @@ internal object VScreenStore {
         _rules.value = m
         val o = JSONObject(); m.forEach { (k, v) -> o.put(k, v.key) }
         prefs.edit().putString(K_RULES, o.toString()).apply()
-    }
-
-    internal fun setRuleForTest(pkg: String, rule: Rule?) {
-        val m = _rules.value.toMutableMap()
-        if (rule == null) m.remove(pkg) else m[pkg] = rule
-        _rules.value = m
     }
 
     fun setIdlePowerSave(on: Boolean) {

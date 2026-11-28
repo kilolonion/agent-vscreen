@@ -244,17 +244,16 @@ fun PublicPairingCodeCard() {
         }
     }
 
-    Group(tr("配对新客户端", "Pair a new client"), padded = true) {
-        Text(
-            tr(
-                "外部发起连接时手机不会自动弹窗。请在下方输入浏览器或 agent 给你的 8 位配对码，打开确认卡核对来源地址后批准。",
-                "Incoming requests never pop up automatically. Enter the 8-character pairing code from your browser or agent below to review the source address and approve.",
-            ),
-            fontSize = 13.sp,
-            lineHeight = 19.sp,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+    var byCode by remember { mutableStateOf(false) }
+    Group(tr("配对", "Pairing"), padded = true) {
+        // New clients pop up a confirmation card on their own; entering a code is only a fallback for a request that
+        // stayed queued because several cards were already open.
+        ArrowPreference(
+            title = tr("用配对码找回请求", "Find a request by its code"),
+            endActions = { Value(if (byCode) tr("收起", "Hide") else tr("展开", "Show")) },
+            onClick = { byCode = !byCode },
         )
-        TextField(
+        if (byCode) TextField(
             value = codeInput,
             onValueChange = { codeInput = it; errorMsg = null },
             label = tr("8 位配对码（如 ABCD-EFGH）", "8-character pairing code (e.g. ABCD-EFGH)"),
@@ -262,10 +261,10 @@ fun PublicPairingCodeCard() {
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        errorMsg?.let { err ->
+        if (byCode) errorMsg?.let { err ->
             Text(err, fontSize = 12.5.sp, lineHeight = 18.sp, color = MiuixTheme.colorScheme.error)
         }
-        Row(
+        if (byCode) Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -296,10 +295,7 @@ fun PublicPairingCodeCard() {
         }
         SwitchRow(
             title = tr("仅在手动开启窗口时允许新配对", "Only allow new pairings during a manual window"),
-            sub = tr(
-                "开启后，默认拒绝所有新客户端注册与配对，配对前先开 3 分钟窗口；已授权客户端不受影响。",
-                "When on, new client registrations and pairings are rejected unless you open a 3-minute window; authorized clients keep working.",
-            ),
+            sub = tr("已授权的客户端不受影响", "Authorized clients are not affected"),
             checked = strictWindow,
             onChange = { PublicAccess.setStrictPairingWindow(actx, it) },
         )
@@ -569,8 +565,8 @@ fun PublicChecklistSection(
         } else {
             val warnings = listOf(
                 tr(
-                    "1. 开启后，你的手机会有一个任何人都能访问的公网地址。这个地址会出现在公开的证书日志里，可能被扫描到。外部连接不会自动弹窗，必须由你在手机上输入配对码并验证指纹后才能接入。",
-                    "1. Once enabled, your phone will have a public address reachable by anyone. This address appears in public certificate logs and may be scanned. Incoming requests never pop up automatically; nothing connects until you enter the pairing code on the phone and confirm with your fingerprint.",
+                    "1. 开启后，你的手机会有一个任何人都能访问的公网地址。这个地址会出现在公开的证书日志里，可能被扫描到。没有你在手机上确认，谁也连不进来。",
+                    "1. Once enabled, your phone will have a public address reachable by anyone. This address appears in public certificate logs and may be scanned. Nobody can connect without your confirmation on the phone.",
                 ),
                 tr(
                     "2. 你授权的云端客户端会保存访问凭证。如果那个服务被入侵，对方可以在凭证有效期内操作你的手机。不用时请关闭或撤销。",
@@ -581,8 +577,8 @@ fun PublicChecklistSection(
                     "3. Text on the screen may contain malicious instructions written for the agent (such as content in web pages or messages). Payments, sending messages, installs, and similar actions will still require your confirmation on the phone.",
                 ),
                 tr(
-                    "4. 配对确认页默认选中“省心”档位（可点击和输入，付款/发送/安装等高风险操作仍需确认），批准前可改为“只看”或“谨慎”；“系统”权限永远不会开放到公网。",
-                    "4. Pairing confirmation defaults to \"Easy\" (tap and type; payments, sending, installs, and other high-risk actions still prompt) and can be changed to \"Look only\" or \"Careful\" before approving; \"system\" scope is never exposed to the public internet.",
+                    "4. 配对时默认“省心”档（付款、发送等仍要确认），批准前可以改；“系统”权限永远不会开放到公网。",
+                    "4. Pairing defaults to \"Easy\" (payments, sending and similar still ask) and can be changed before approving; \"system\" is never exposed to the public internet.",
                 ),
             )
             val shown = when (channel) {

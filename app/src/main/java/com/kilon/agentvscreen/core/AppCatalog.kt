@@ -35,7 +35,6 @@ object AppCatalog {
                 cache = null
                 val pkg = i.data?.schemeSpecificPart
                 pkg?.let { icons.remove(it) } ?: icons.evictAll()
-                AppFunctions.invalidate(pkg)
                 warm()
             }
         }

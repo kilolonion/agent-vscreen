@@ -76,7 +76,9 @@ object Tokens {
                 /** 2.0.0-beta8 (feedback 2): this agent's level (a preset of [Policy] or custom), see [LEVELS]. */
                 val level: String = defaultLevelFor(scope),
                 /** Rows the user changed on top of the preset (for custom: the whole table). */
-                val custom: Map<String, Policy.Act> = emptyMap()) {
+                val custom: Map<String, Policy.Act> = emptyMap(),
+                /** 2.0.1-beta1: wall-clock expiry chosen when the agent was connected; 0 = permanent (the default). */
+                val expiresAt: Long = 0L) {
         /** How each class of action is handled for this agent. */
         val policy: Map<String, Policy.Act> get() = Policy.table(level, custom, publicOnly)
         fun act(key: String): Policy.Act = policy[key] ?: Policy.Act.ASK
@@ -87,14 +89,16 @@ object Tokens {
             return allowed.take(allowed.indexOf(effective).coerceAtLeast(0) + 1).toSet()
         }
         val trusted: Boolean get() = trustUntil > System.currentTimeMillis()
+        /** Past its chosen lifetime: treated like a revoked token for every request (still listed so the user sees it). */
+        val expired: Boolean get() = expiresAt > 0L && System.currentTimeMillis() >= expiresAt
         /** Local/tailnet token created via onboarding code and waiting for its one-time exchange. */
         val isPending: Boolean get() = !publicOnly && key.isEmpty() && !revoked
         fun json(): JSONObject = JSONObject().put("id", id).put("name", name).put("key", key).put("scope", scope)
             .put("created", createdAt).put("used", lastUsedAt).put("revoked", revoked).put("trust_until", trustUntil)
-            .put("public", publicOnly).put("level", level).put("custom", Policy.toJson(custom))
+            .put("public", publicOnly).put("level", level).put("custom", Policy.toJson(custom)).put("expires", expiresAt)
         fun with(lastUsedAt: Long = this.lastUsedAt, revoked: Boolean = this.revoked, trustUntil: Long = this.trustUntil, name: String = this.name,
                  level: String = this.level, custom: Map<String, Policy.Act> = this.custom) =
-            Token(id, name, key, Policy.scopeOf(Policy.table(level, custom, publicOnly)), createdAt, lastUsedAt, revoked, trustUntil, publicOnly, level, custom)
+            Token(id, name, key, Policy.scopeOf(Policy.table(level, custom, publicOnly)), createdAt, lastUsedAt, revoked, trustUntil, publicOnly, level, custom, expiresAt)
     }
 
     private var prefs: SharedPreferences? = null
@@ -118,7 +122,8 @@ object Tokens {
                 val level = stored ?: migrateLevel(scope, autonomy, pub).also { migrated = true }
                 val custom = Policy.fromJson(o.optJSONObject("custom"))
                 Token(o.getString("id"), o.getString("name"), o.getString("key"), Policy.scopeOf(Policy.table(level, custom, pub)),
-                    o.optLong("created"), o.optLong("used"), o.optBoolean("revoked"), o.optLong("trust_until"), pub, level, custom)
+                    o.optLong("created"), o.optLong("used"), o.optBoolean("revoked"), o.optLong("trust_until"), pub, level, custom,
+                    if (pub) 0L else o.optLong("expires", 0L))
             }
         }.getOrDefault(emptyList())
         if (migrated) save(_list.value)
@@ -207,12 +212,12 @@ object Tokens {
         createLevel(name, defaultLevelFor(if (scope in SCOPES) scope else "operate"))
 
     /** 2.0.0-beta8 (feedback 2): a new agent at [level]. */
-    @Synchronized fun createLevel(name: String, level: String, custom: Map<String, Policy.Act> = emptyMap()): Pair<Token, String> {
+    @Synchronized fun createLevel(name: String, level: String, custom: Map<String, Policy.Act> = emptyMap(), expiresAt: Long = 0L): Pair<Token, String> {
         var id: String
         do { id = random(6).lowercase() } while (_list.value.any { it.id == id })
         val secret = random(28)
         val lv = if (level in LEVELS) level else FREE
-        val t = Token(id, name.trim().take(NAME_MAX).ifEmpty { "agent-$id" }, sha256(secret), Policy.scopeOf(Policy.table(lv, custom)), System.currentTimeMillis(), level = lv, custom = custom)
+        val t = Token(id, name.trim().take(NAME_MAX).ifEmpty { "agent-$id" }, sha256(secret), Policy.scopeOf(Policy.table(lv, custom)), System.currentTimeMillis(), level = lv, custom = custom, expiresAt = expiresAt.coerceAtLeast(0L))
         save(_list.value + t)
         return t to "avs_${id}_$secret"
     }
@@ -238,7 +243,7 @@ object Tokens {
         val cur = _list.value.firstOrNull { it.id == id && !it.revoked } ?: return null
         if (cur.publicOnly || cur.key.isNotEmpty()) return null
         val secret = random(28)
-        val updated = Token(cur.id, cur.name, sha256(secret), cur.scope, cur.createdAt, cur.lastUsedAt, cur.revoked, cur.trustUntil, cur.publicOnly, cur.level, cur.custom)
+        val updated = Token(cur.id, cur.name, sha256(secret), cur.scope, cur.createdAt, cur.lastUsedAt, cur.revoked, cur.trustUntil, cur.publicOnly, cur.level, cur.custom, cur.expiresAt)
         save(_list.value.map { if (it.id == id) updated else it })
         return updated to "avs_${cur.id}_$secret"
     }
@@ -264,7 +269,10 @@ object Tokens {
         return if (m != null) m.groupValues[1] to m.groupValues[2] else MAIN to text.trim()
     }
 
-    fun byId(id: String?): Token? = _list.value.firstOrNull { it.id == id && !it.revoked }
+    fun byId(id: String?): Token? = _list.value.firstOrNull { it.id == id && !it.revoked && !it.expired }
+
+    /** Lifetimes offered when connecting a local / tailnet agent; 0 = permanent (the default). */
+    val LIFETIMES_MS: List<Long> = listOf(0L, 30L * 86_400_000L, 7L * 86_400_000L, 86_400_000L)
 
     /** The live local/tailnet token a bearer text belongs to. Public OAuth identities are never accepted here (7.7). */
     fun byBearer(text: String?): Token? {

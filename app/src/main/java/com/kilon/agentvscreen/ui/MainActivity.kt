@@ -97,7 +97,7 @@ class MainActivity : ComponentActivity(), AppHost {
         }
         getSystemService(ClipboardManager::class.java)?.setPrimaryClip(clip)
         if (sensitive) {
-            say(tr("已复制：$label（已标记为敏感内容）", "Copied: $label (marked sensitive)"))
+            say(tr("已复制：$label", "Copied: $label"))
         } else {
             val flat = text.replace(Regex("\\s+"), " ").trim()
             val preview = if (flat.length > 40) flat.take(40) + "…" else flat

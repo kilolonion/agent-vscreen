@@ -1344,7 +1344,7 @@ internal fun VScreenOffloadHandler.runSegment(
                 if (so.code == "STEP_MISSED" && VScreenAwake.screenOff) {
                     InputReach.invalidate(d.displayId)
                     val reprobed = InputReach.probe(d.displayId, force = true)
-                    if (reachBefore == InputReach.Reach.UNKNOWN && reprobed == InputReach.Reach.BLOCKED) {
+                    if (reachBefore != InputReach.Reach.BLOCKED && reprobed == InputReach.Reach.BLOCKED) {
                         val msg = inputBlockedMessage()
                         so.code = "INPUT_BLOCKED_SCREEN_OFF"
                         so.text = tr("$label ${step.raw} → ${out.actionFact}；$msg", "$label ${step.raw} → ${out.actionFact}; $msg")
@@ -1415,7 +1415,7 @@ internal fun VScreenOffloadHandler.runSegment(
                     if (so.code == "STEP_MISSED" && VScreenAwake.screenOff) {
                         InputReach.invalidate(d.displayId)
                         val reprobed = InputReach.probe(d.displayId, force = true)
-                        if (reachBefore == InputReach.Reach.UNKNOWN && reprobed == InputReach.Reach.BLOCKED) {
+                        if (reachBefore != InputReach.Reach.BLOCKED && reprobed == InputReach.Reach.BLOCKED) {
                             val msg = inputBlockedMessage()
                             so.code = "INPUT_BLOCKED_SCREEN_OFF"
                             recordMissed(msg)
@@ -2095,7 +2095,7 @@ internal class SystemDialogs(val uninstallers: Set<String>, val settings: Set<St
     }
 }
 
-/** The user's per-app rule (and built-in financial app default) for the app on the screen. */
+/** The user's per-app rule for the app on the screen. */
 internal fun VScreenOffloadHandler.appRule(d: VScreenDisplay, step: Step, fromRule: Boolean = false) {
     val pkg = runCatching { VScreenShell.topPackage(d.displayId) }.getOrNull() ?: return
     appRuleForPkg(pkg, step, fromRule)
@@ -2802,23 +2802,7 @@ internal fun VScreenOffloadHandler.launchCmd(sid: String?, args: OffloadArgs): N
     val m = VScreenMap.load(pkg)
     val verNow = appVersion(pkg)
     done += formatLaunchMapLines(m, verNow)
-    val fnCount = com.kilon.agentvscreen.core.AppFunctions.cachedCount(pkg)
-    if (fnCount > 0) {
-        done += tr(
-            "可用结构化接口：$fnCount 个 AppFunctions（用 fn $pkg 查看）",
-            "Available structured functions: $fnCount AppFunctions (inspect with fn $pkg)",
-        )
-    }
     val notes = facts.notes
-    if (com.kilon.agentvscreen.core.FinanceApps.isFinancial(pkg) && VScreenStore.explicitRuleFor(pkg) != VScreenStore.Rule.ALLOW) {
-        notes.add(
-            "FINANCE_APP_RISK",
-            tr(
-                "该应用属于金融/支付类，已默认设为每次确认；自动化操作可能触发账号安全风控，必要时建议用 handoff out 交给用户在主屏完成",
-                "This is a finance/payment app with confirm-every-time enabled by default; automated actions may trigger account risk controls. Consider using handoff out so the user finishes sensitive steps on the main screen",
-            ),
-        )
-    }
     mainCheckLines(main0, s)?.let { notes.add("MAIN_SCREEN_CHANGED", it) }
     muteNote(d)?.let { notes += it }
     takeAdjusted().forEach { notes += tr("参数被调整：$it", "options adjusted: $it") }

@@ -309,12 +309,6 @@ internal object CommandSpec {
             listOf("修复 status 里列出的问题，并把被留下静音的应用恢复声音；每项修完再检查一遍，fixed 是检查的结果。会改系统设置或在主屏打开设置页的步骤：手机上会请用户确认。"),
             listOf("fix the problems listed in status and give sound back to apps left silent; each is checked again afterwards and fixed is that check. Steps that change system settings or open a settings page on the main screen: the phone asks the user to confirm."),
             listOf(Opt("open", Kind.SWITCH, null, null, "需要用户手动处理时，在主屏打开对应页面", "when the user must act by hand, open the page on the main screen")), scope = Scope.SYSTEM, screen = false),
-        Cmd("fn", "[应用名|包名]", "[app name|package]",
-            listOf("只读探测 Android 16+ 应用声明的 AppFunctions 结构化接口与参数 schema（不带参数列出设备上提供 AppFunctions 的应用）。旧系统或未开放服务返回 FN_UNSUPPORTED。"),
-            listOf("read-only discovery of Android 16+ AppFunctions declared by an app and their schemas (with no argument, lists installed apps exposing AppFunctions). Returns FN_UNSUPPORTED on older Android or when the service is unavailable."),
-            scope = Scope.LOOK, screen = false,
-            sumZh = "只读探测应用声明的 AppFunctions（Android 16+）",
-            sumEn = "read-only discovery of an app's Android 16+ AppFunctions"),
         Cmd("diag", "", "",
             listOf("导出一份诊断（版本、状态、最近的日志和被吞掉的异常；不含你输入的文字和截图），返回文本，出问题时交给开发者。"),
             listOf("export a diagnostic bundle (versions, status, recent logs and swallowed exceptions; none of your typed text or screenshots) as text, to hand to the developer when something is wrong."),
@@ -339,7 +333,7 @@ internal object CommandSpec {
         if (sub in TRANSPORT_WORDS || sub == "--help" || sub == "-h") return true
         if (argv.drop(1).any { it == "--help" || it == "-h" }) return true
         return when (sub) {
-            "status", "diag", "apps", "permissions", "events", "fn" -> true
+            "status", "diag", "apps", "permissions", "events" -> true
             "task" -> argv.drop(1).firstOrNull { !it.startsWith("-") }?.lowercase() != "cancel"
             "sound" -> {
                 val a1 = argv.drop(1).firstOrNull { !it.startsWith("-") }?.lowercase()

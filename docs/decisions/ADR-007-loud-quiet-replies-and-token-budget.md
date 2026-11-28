@@ -12,7 +12,7 @@ Returning full element lists and screenshots on every routine step inflates LLM 
 3. **Deterministic 1200-Token Reply Budget & Guide Caps**:
    - `applyReplyBudget` trims in strict priority order: flashed words → element details → timing metadata — NEVER trimming `【注意】` or failure facts.
    - `AgentGuide.guide()` is unit-test gated at `<= 1500` tokens; `AgentGuide.memoryFor()` is gated at `< 1880` chars (ZH) / `< 4170` chars (EN).
-4. **Prompt-Injection Boundaries (`ScreenText`)**: All third-party screen text, system toasts, input readbacks, app labels, and AppFunctions metadata strip `\r`/`\n`/control/Bidi overrides and neutralize fake section markers (`【...】`, `</screen-data>`). Text replies quote and fence screen content in `<screen-data>…</screen-data>`; structured JSON isolates untrusted text under top-level `screen_data` (`untrusted: true`) and separates `notes[].system_text` from `screen_excerpts`.
+4. **Prompt-Injection Boundaries (`ScreenText`)**: All third-party screen text, system toasts, input readbacks, and app labels strip `\r`/`\n`/control/Bidi overrides and neutralize fake section markers (`【...】`, `</screen-data>`). Text replies quote and fence screen content in `<screen-data>…</screen-data>`; structured JSON separates `notes[].system_text` from `screen_excerpts`. Element lists are not duplicated into a separate `screen_data` block, so every reply stays within the token budget.
 
 ## Consequences
 - Median `act` token usage stays low on expected steps with zero false-quiet regressions (`false_quiet == 0` CI eval gate) while maintaining explicit trust boundaries between system instructions and untrusted app text.

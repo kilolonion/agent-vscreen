@@ -60,7 +60,6 @@ object Guard {
             VScreenStore.Rule.READONLY -> if (act == Act.INPUT) Verdict.Deny("APP_READ_ONLY", tr("副屏上是 $pkg，用户设为只读：能看、滚动、返回，不能点击/输入/滑动。$hint",
                 "The screen shows $pkg, which the user set to read-only: you can look, scroll and go back, but not tap / type / swipe. $hint")) else Verdict.Allow
             VScreenStore.Rule.ASK -> if (act == Act.INPUT) Verdict.Ask("app:$pkg", pkg) else Verdict.Allow
-            VScreenStore.Rule.ALLOW -> Verdict.Allow
         }
     }
 

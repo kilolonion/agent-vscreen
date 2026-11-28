@@ -729,7 +729,7 @@ class ApiServer(private val ctx: Context) {
         val kid = r.headers["x-vscreen-key"]
         if (kid != null) {
             val t = Tokens.byId(kid)?.takeIf { !it.publicOnly && it.key.isNotEmpty() }
-                ?: return failed(r, "BAD_TOKEN", tr("没有这个令牌（可能已被用户撤销）：请用户在 Agent-VScreen 里重新复制接入命令", "No such token (the user may have revoked it): ask the user to copy the connect message in Agent-VScreen again"))
+                ?: return failed(r, "BAD_TOKEN", tr("没有这个令牌（可能已被用户撤销或已到期）：请用户在 Agent-VScreen 里重新复制接入命令", "No such token (revoked by the user or expired): ask the user to copy the connect message in Agent-VScreen again"))
             val ts = r.headers["x-vscreen-time"]?.toLongOrNull() ?: return failed(r, "BAD_SIGNATURE", "X-VScreen-Time missing")
             val nonce = r.headers["x-vscreen-nonce"]?.takeIf { it.length in 8..64 && it.all { c -> c.isLetterOrDigit() } } ?: return failed(r, "BAD_SIGNATURE", "X-VScreen-Nonce missing (8-64 letters/digits)")
             val sign = r.headers["x-vscreen-sign"]?.lowercase() ?: return failed(r, "BAD_SIGNATURE", "X-VScreen-Sign missing")
@@ -746,7 +746,7 @@ class ApiServer(private val ctx: Context) {
         val given = r.headers["authorization"]?.removePrefix("Bearer ")?.trim() ?: r.headers["x-vscreen-token"]
             ?: return failed(r, "BAD_TOKEN", tr("缺少令牌：在 Agent-VScreen 里复制接入命令（Authorization: Bearer <令牌>，或签名请求）" + if (r.q("token") != null) "。1.2 起不再接受网址里的 ?token=" else "",
                 "Missing token: copy the connect message in Agent-VScreen (Authorization: Bearer <token>, or a signed request)" + if (r.q("token") != null) ". Since 1.2 ?token= in the URL is no longer accepted" else ""))
-        val t = Tokens.byBearer(given) ?: return failed(r, "BAD_TOKEN", tr("令牌不对或已被撤销：在 Agent-VScreen 里重新复制接入命令", "Wrong or revoked token: copy the connect message in Agent-VScreen again"))
+        val t = Tokens.byBearer(given) ?: return failed(r, "BAD_TOKEN", tr("令牌不对、已被撤销或已到期：在 Agent-VScreen 里重新复制接入命令", "Wrong, revoked or expired token: copy the connect message in Agent-VScreen again"))
         // 1.3: through the built-in node the peer is a known tailnet device (WhoIs) on an encrypted tunnel: a token is
         // enough (MCP clients cannot sign). Signing stays required for the other remote way in, when the user wants it.
         val knownPeer = r.viaBuiltinTailnet && r.headers["x-vscreen-peer"].let { !it.isNullOrBlank() && it != "?" }

@@ -296,13 +296,13 @@ $extraEn
 - 收到 401 就是还没配对，不是出错：按下面的办法配对。哪一种都做不到时，直接告诉我“我接不了”，不要绕。
 
 按你的情况选一种（只选一种）：
-A. 我要在你的网页设置里添加连接器（比如 claude.ai、ChatGPT 的自定义连接器）：告诉我“请把 $url 添加为连接器”，我加好并在手机上的 Agent-VScreen 里输入页面显示的配对码批准后，你直接用 vscreen 工具。
-B. 你能自己改 MCP 配置（比如 Claude Code、Codex、Cursor）：加入下面这段（streamable HTTP，不要写令牌或 Authorization 头），连接时会打开授权页显示 8 位配对码，我在手机的 Agent-VScreen 里输入配对码并批准：
+A. 我要在你的网页设置里添加连接器（比如 claude.ai、ChatGPT 的自定义连接器）：告诉我“请把 $url 添加为连接器”，我加好并在手机上批准后，你直接用 vscreen 工具。
+B. 你能自己改 MCP 配置（比如 Claude Code、Codex、Cursor）：加入下面这段（streamable HTTP，不要写令牌或 Authorization 头），连接时会打开授权页，我在手机上核对配对码并批准：
 ${ApiConfig.mcpJsonPublic(url)}
 C. 你没有浏览器、但能发 HTTP 请求（云端主机、命令行）：用设备码配对（RFC 8628），按顺序做：
   1) POST $base/oauth/register，JSON：{"client_name":"<你的名字>","grant_types":["urn:ietf:params:oauth:grant-type:device_code","refresh_token"],"token_endpoint_auth_method":"none"}，记下 client_id。
   2) POST $base/oauth/device_authorization，表单：client_id=<client_id>&resource=$url&scope=operate，记下 device_code、user_code、interval。
-  3) 把 user_code 告诉我，等我在手机的 Agent-VScreen › 公网 MCP 里输入这个配对码并批准（手机不会自动弹窗）。
+  3) 把 user_code 告诉我，等我在手机上核对并批准。
   4) 每 interval 秒 POST $base/oauth/token，表单：grant_type=urn:ietf:params:oauth:grant-type:device_code&device_code=<device_code>&client_id=<client_id>&resource=$url。回 authorization_pending 就继续等；拿到 access_token 和 refresh_token 后保存好（过期时用 grant_type=refresh_token 换新的）。
   5) 调用工具，例如：
   $call
@@ -322,13 +322,13 @@ Two rules first:
 - A 401 means you are not paired yet, not that something is broken: pair as below. If none of the ways works for you, tell me "I can't connect" instead of working around it.
 
 Pick the one way that fits you:
-A. I add connectors in your web settings (e.g. custom connectors on claude.ai or ChatGPT): tell me "please add $url as a connector"; once I have added it, entered the pairing code in Agent-VScreen on my phone, and approved, just use the vscreen tool.
-B. You can edit your own MCP config (e.g. Claude Code, Codex, Cursor): add the block below (streamable HTTP; no token and no Authorization header). Connecting opens an approval page showing an 8-character pairing code; I enter it in Agent-VScreen on my phone and approve:
+A. I add connectors in your web settings (e.g. custom connectors on claude.ai or ChatGPT): tell me "please add $url as a connector"; once I have added it and approved on the phone, just use the vscreen tool.
+B. You can edit your own MCP config (e.g. Claude Code, Codex, Cursor): add the block below (streamable HTTP; no token and no Authorization header). Connecting opens an approval page; I check the pairing code on the phone and approve:
 ${ApiConfig.mcpJsonPublic(url)}
 C. You have no browser but can send HTTP requests (cloud VM, command line): pair with the device flow (RFC 8628), in order:
   1) POST $base/oauth/register with JSON {"client_name":"<your name>","grant_types":["urn:ietf:params:oauth:grant-type:device_code","refresh_token"],"token_endpoint_auth_method":"none"}; keep client_id.
   2) POST $base/oauth/device_authorization with form client_id=<client_id>&resource=$url&scope=operate; keep device_code, user_code and interval.
-  3) Tell me the user_code and wait while I enter it in Agent-VScreen > Public MCP on my phone and approve (no popup is sent automatically).
+  3) Tell me the user_code and wait while I check it on the phone and approve.
   4) Every interval seconds POST $base/oauth/token with form grant_type=urn:ietf:params:oauth:grant-type:device_code&device_code=<device_code>&client_id=<client_id>&resource=$url. On authorization_pending keep waiting; once you get access_token and refresh_token, keep them (when it expires, get a new one with grant_type=refresh_token).
   5) Call the tool, for example:
   $call

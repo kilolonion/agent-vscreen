@@ -246,7 +246,8 @@ object PublicOAuth {
     ) {
         /**
          * Pairing lifecycle:
-         * - `queued`: silently waiting until the user enters [code] on the phone (no popup/notification).
+         * - `queued`: no card yet (all [MAX_PENDING_PAIRINGS_GLOBAL] card slots busy, or no lock screen); the user can
+         *   still open it by entering [code] on the phone.
          * - `claimed`: user entered [code] on the phone; StrongConfirm card is active.
          * - `approved` / `denied` / `expired` / `completed`: settled states.
          */
@@ -939,6 +940,7 @@ object PublicOAuth {
             is Started.Ok -> started.pairing
             is Started.Refused -> return started.resp
         }
+        presentOnPhone(ctx, pairing)
         val html = pairingPageHtml(pairing)
         val csp = "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'"
         return ApiServer.Resp.html(html, 200, mapOf("Content-Security-Policy" to csp))
@@ -951,8 +953,9 @@ object PublicOAuth {
 
     /**
      * The one way a pairing starts (browser authorize and RFC 8628 device authorization): checks the optional
-     * strict pairing window, rate limits, and enqueues a silent `"queued"` entry. Never opens a popup or posts a
-     * notification on the phone until the user enters the pairing code in [claimPairingByCode].
+     * strict pairing window and rate limits and records a `"queued"` entry; the caller then shows its confirmation
+     * card on the phone right away ([presentOnPhone]). When the card slots are full the entry stays queued (bounded,
+     * FIFO) and the user can open it by its pairing code in [claimPairingByCode].
      */
     private fun startPairing(
         client: RegisteredClient,
@@ -982,9 +985,9 @@ object PublicOAuth {
             }
             val liveActive = pairings.values.filter { (it.status == "queued" || it.status == "claimed") && now - it.createdAt < PAIRING_TTL_MS }
             if (liveActive.count { it.sourceBucket == src } >= MAX_PENDING_PAIRINGS) {
-                return Started.Refused(oauthError(429, "temporarily_unavailable", "A pairing request from this source is already waiting; enter its code in Agent-VScreen or wait for it to expire"))
+                return Started.Refused(oauthError(429, "temporarily_unavailable", "A pairing request from this source is already waiting; approve or deny it on the phone, or wait for it to expire"))
             }
-            // Bound the silent queue with FIFO eviction of the oldest unclaimed entry so remote floods from
+            // Bound the overflow queue with FIFO eviction of the oldest unclaimed entry so remote floods from
             // distinct IPs cannot DoS legitimate pairings or evict an already-claimed confirmation card.
             val liveQueued = pairings.values.filter { it.status == "queued" && now - it.createdAt < PAIRING_TTL_MS }
             if (liveQueued.size >= MAX_QUEUED_PAIRINGS_GLOBAL) {
@@ -1027,11 +1030,22 @@ object PublicOAuth {
     }
 
     /**
-     * User-initiated pairing claim: after seeing the 8-char code on the client/browser, the user enters it
-     * in Agent-VScreen on the phone. Only then does the app create a [StrongConfirm] pairing card (with
+     * The phone shows the pairing card at once (notification, and the card itself when the app is in front), as before
+     * 2.0.1. Only when [MAX_PENDING_PAIRINGS_GLOBAL] cards are already open does a request stay queued; the user can
+     * still open it by its code on the Public MCP page, so a flood from many addresses cannot lock a real client out.
+     */
+    private fun presentOnPhone(ctx: Context, pairing: Pairing) {
+        val r = claimPairingByCode(ctx, pairing.code, openActivity = false, postNotify = true)
+        if (r !is ClaimResult.Opened) Audit.security("public_pairing_kept_queued", "client=${pairing.clientId} src=${pairing.sourceBucket} result=${r.javaClass.simpleName}")
+    }
+
+    /**
+     * Pairing claim by code: opens a pairing's confirmation card. Called right after a pairing starts
+     * (automatic, with a notification) and when the user enters the 8-char code by hand for a request that
+     * stayed queued. It creates a [StrongConfirm] pairing card (with
      * source address and self-reported client name) and open [com.kilon.agentvscreen.ui.StrongConfirmActivity].
      */
-    fun claimPairingByCode(ctx: Context, rawCode: String, openActivity: Boolean = true): ClaimResult {
+    fun claimPairingByCode(ctx: Context, rawCode: String, openActivity: Boolean = true, postNotify: Boolean = false): ClaimResult {
         if (!deviceSecureCheck(ctx)) return ClaimResult.NoLockscreen
         val norm = normalizePairingCode(rawCode) ?: return ClaimResult.InvalidFormat
         val now = nowMs()
@@ -1125,7 +1139,7 @@ object PublicOAuth {
                 selectableScopes = pairing.selectableScopes,
                 validMs = validMs,
                 sourceAddress = pairing.sourceDisplay,
-                postNotify = false,
+                postNotify = postNotify,
                 clientVerifiedDomain = pairing.verifiedDomain,
                 onApproveWithScope = { grantedScope ->
                     onPairingApproved(pairing, grantedScope, StrongConfirm.BY_BIOMETRIC)
@@ -1144,9 +1158,9 @@ object PublicOAuth {
     }
 
     /**
-     * 2.0.0-beta11: RFC 8628 device authorization. Enqueues a silent pairing request (no unsolicited popup on the
-     * phone); the client tells the user `user_code`, the user enters it in Agent-VScreen on the phone to open the
-     * confirmation card, and the client polls the token endpoint.
+     * 2.0.0-beta11: RFC 8628 device authorization. Starts a pairing and shows its confirmation card on the
+     * phone; the user checks that `user_code` matches what the client shows, approves, and the client polls the
+     * token endpoint.
      */
     fun handleDeviceAuthorization(ctx: Context, r: ApiServer.Req, base: String): ApiServer.Resp {
         val form = HttpCore.parseForm(r.bodyText)
@@ -1172,6 +1186,7 @@ object PublicOAuth {
             is Started.Ok -> started.pairing
             is Started.Refused -> return started.resp
         }
+        presentOnPhone(ctx, pairing)
         val verify = "${base.trimEnd('/')}/oauth/device"
         return ApiServer.Resp.json(
             JSONObject()
@@ -1181,17 +1196,17 @@ object PublicOAuth {
                 .put("verification_uri_complete", "$verify?user_code=" + URLEncoder.encode(pairing.code, "UTF-8"))
                 .put("expires_in", PAIRING_TTL_MS / 1000L)
                 .put("interval", DEVICE_INTERVAL_S)
-                .put("message", "Open Agent-VScreen on the phone (Public MCP), enter pairing code ${pairing.code}, verify the client and source address, and approve. No popup is sent automatically and no browser is needed."),
+                .put("message", "A confirmation card is now on the phone (Agent-VScreen). Check that it shows pairing code ${pairing.code}, then approve there. No browser is needed."),
         )
     }
 
     /** verification_uri page: instructs the user to enter the pairing code in Agent-VScreen on the phone. */
     fun devicePageHtml(): ApiServer.Resp = ApiServer.Resp.html(
         errorPageHtml(
-            tr("请在手机上输入配对码批准", "Enter the pairing code on your phone"),
+            tr("请在手机上批准", "Approve on your phone"),
             tr(
-                "手机不会自动弹窗。请打开手机上的 Agent-VScreen → 公网 MCP，输入 agent 给你的配对码，核对客户端名称与来源地址后批准即可，这个页面不用操作。",
-                "No popup is sent automatically. Open Agent-VScreen > Public MCP on your phone, enter the pairing code from the agent, check the client name and source address, and approve there; nothing to do on this page.",
+                "手机上已经弹出确认卡（或在通知里）。核对配对码与 agent 给你的一致后批准即可，这个页面不用操作。",
+                "A confirmation card is on your phone (or in its notifications). Check that its pairing code matches the one from the agent, then approve; nothing to do on this page.",
             ),
         ),
         200,
@@ -1211,7 +1226,7 @@ object PublicOAuth {
             p.lastPollAt = now
             when (p.status) {
                 "queued", "claimed" -> return if (tooFast) oauthError(400, "slow_down", "Poll every $DEVICE_INTERVAL_S s or slower")
-                else oauthError(400, "authorization_pending", "Waiting for the user to enter the pairing code and approve on the phone")
+                else oauthError(400, "authorization_pending", "Waiting for the user to approve on the phone")
                 "denied" -> return oauthError(400, "access_denied", "The user denied the pairing on the phone")
                 "approved" -> {
                     val c = p.deviceAuthCode ?: return oauthError(400, "expired_token", "device_code already used")
@@ -1776,14 +1791,14 @@ h1{font-size:20px;margin:0 0 8px}
 </head>
 <body>
 <div class="card">
-  <h1>请在手机的 Agent-VScreen 里输入配对码</h1>
-  <p class="sub">Open Agent-VScreen &rarr; Public MCP on your phone and enter this pairing code. No popup is sent automatically.</p>
+  <h1>请在手机的 Agent-VScreen 里确认</h1>
+  <p class="sub">Please confirm in Agent-VScreen on your phone and verify this pairing code matches.</p>
   <div class="code">$safeCode</div>
   <div class="meta">
     <div><strong>Client (self-reported):</strong> $safeName</div>
     <div><strong>Redirect host:</strong> $safeHost</div>
   </div>
-  <div id="st" class="status">等待手机输入配对码并确认… / Waiting for phone code entry &amp; approval…</div>
+  <div id="st" class="status">等待手机确认… / Waiting for phone confirmation…</div>
   <div id="cb">
     <div class="sub">若跳转后打不开（比如在手机浏览器里打开了电脑上的回调地址），复制下面的完整地址发给 agent。<br>If the redirect does not open (e.g. a computer's callback opened on a phone), copy this full address to the agent.</div>
     <textarea id="cbu" readonly></textarea>

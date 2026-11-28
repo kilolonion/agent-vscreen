@@ -548,8 +548,8 @@ object StrongConfirm {
     }
 
     /**
-     * Public OAuth pairing strong confirmation (`NEW_CLIENT`), created ONLY after the user enters the agent's
-     * pairing code on the phone. Displays pairing code, self-reported client name, source address, redirect host,
+     * Public OAuth pairing strong confirmation (`NEW_CLIENT`), shown as soon as a pairing starts (or when
+     * the user opens a queued one by its code). Displays pairing code, self-reported client name, source address, redirect host,
      * and permission level picker (never `system`, never hold-to-confirm).
      */
     fun createPublicPairingRequest(

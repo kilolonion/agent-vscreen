@@ -108,7 +108,7 @@ class Notes {
     val isEmpty: Boolean get() = list.isEmpty()
     /** The code that decides the reply's outcome: the first coded note that is not mere information. */
     fun firstBlocking(): String? = list.firstOrNull { it.code != null && Codes.of(it.code)?.next != Codes.Next.NONE && it.code !in INFO }?.code
-    companion object { val INFO = setOf("NO_CHANGE", "SNAP_BACK", "MAIN_SCREEN_CHANGED", "KEEP_LIMIT", "OCR_DOWN", "HOLD_UNSUPPORTED", "HOLD_REFUSED", "RULE_OFF", "FINANCE_APP_RISK") }
+    companion object { val INFO = setOf("NO_CHANGE", "SNAP_BACK", "MAIN_SCREEN_CHANGED", "KEEP_LIMIT", "OCR_DOWN", "HOLD_UNSUPPORTED", "HOLD_REFUSED", "RULE_OFF") }
 }
 
 /**
@@ -144,7 +144,7 @@ class StepOut(val n: String, val step: String, var status: String, var text: Str
     var recapLabel: String? = null
     /** Input delivery channel when non-default (e.g. `a11y` or `wake`). */
     var via: String? = null
-    /** Sanitized non-password input-box readback for `screen_data.readback` isolation. */
+    /** Sanitized non-password input-box readback (sanitized through ScreenText before it reaches a reply). */
     var readback: String? = null
     fun json(): org.json.JSONObject = org.json.JSONObject().put("n", n).put("step", step).put("status", status)
         .also { o ->

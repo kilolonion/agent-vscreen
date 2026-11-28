@@ -62,6 +62,7 @@ import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.RadioButtonPreference
+import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /*
@@ -247,6 +248,11 @@ fun NewAgentPage() {
     var made by remember { mutableStateOf<String?>(null) }
     var madeIsCode by remember { mutableStateOf(false) }
     var madeId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Token lifetime: permanent (default), 30 / 7 / 1 days, or (shell / HTTP only) a 10-minute one-time code.
+    var lifetime by rememberSaveable { mutableIntStateOf(0) }
+    val oneTime = how != 1 && lifetime == ONE_TIME_CHOICE
+    val staticToken = !oneTime
+    fun expiryNow(): Long = com.kilon.agentvscreen.api.Tokens.LIFETIMES_MS.getOrNull(lifetime)?.takeIf { it > 0L }?.let { System.currentTimeMillis() + it } ?: 0L
     // Fixed once: a name computed from the live token list moved every time a token was made (feedback 5).
     val suggested = rememberSaveable {
         val used = com.kilon.agentvscreen.api.Tokens.list.value.map { it.name }.toSet()
@@ -281,7 +287,7 @@ fun NewAgentPage() {
         val OC = com.kilon.agentvscreen.api.OnboardingCodes
         val existing = madeId?.let { T.byId(it) }
         fun ensureCredentialForExisting(tok: com.kilon.agentvscreen.api.Tokens.Token) {
-            if (how == 1) {
+            if (staticToken) {
                 if (tok.isPending) {
                     val activated = T.activateWithSecret(tok.id)
                     if (activated != null) {
@@ -319,8 +325,8 @@ fun NewAgentPage() {
         val req = com.kilon.agentvscreen.host.StrongConfirm.createUiMultiRiskRequest(actx, listOf(com.kilon.agentvscreen.host.Risk.NEW_CLIENT), draft,
             tr("接入 $want（${levelLabel(level)}）", "Connect $want (${levelLabel(level)})"), levelHint(level),
             onApprove = {
-                if (how == 1) {
-                    val (t, text) = T.createLevel(want, level, custom)
+                if (staticToken) {
+                    val (t, text) = T.createLevel(want, level, custom, expiryNow())
                     com.kilon.agentvscreen.host.StrongConfirm.grantAgent(t.id)
                     com.kilon.agentvscreen.host.Audit.security("token_created", "${t.name} ${t.level}")
                     made = text; madeIsCode = false; madeId = t.id; step = 3
@@ -428,6 +434,18 @@ fun NewAgentPage() {
                         Triple("HTTP", tr("自写调用的 agent：地址、令牌和说明", "Custom HTTP clients: address, token and note"), 2),
                     ).forEach { (t, sub, i) -> RadioButtonPreference(title = t, summary = sub, selected = how == i, onClick = { how = i; raw = false }) }
                 }
+                Group(tr("令牌", "Token")) {
+                    val choices = listOf(tr("长期", "Permanent"), tr("30 天", "30 days"), tr("7 天", "7 days"), tr("1 天", "1 day")) +
+                        (if (how != 1) listOf(tr("一次性接入码", "One-time code")) else emptyList())
+                    if (lifetime >= choices.size) lifetime = 0
+                    OverlayDropdownPreference(
+                        items = choices,
+                        selectedIndex = lifetime,
+                        title = tr("有效期", "Valid for"),
+                        summary = if (oneTime) tr("10 分钟内由 agent 换成长期令牌", "The agent exchanges it for a permanent token within 10 minutes") else null,
+                        onSelectedIndexChange = { lifetime = it },
+                    )
+                }
             }
         }
 
@@ -473,8 +491,7 @@ fun NewAgentPage() {
                             Text(tr("复制给 agent 的话", "Copy message for your agent"), color = MiuixTheme.colorScheme.onPrimary)
                         }
                     }
-                    PublicPairingCodeCard()
-                    Footnote(tr("外部连接不会自动弹窗：客户端或浏览器显示 8 位配对码后，在上方输入配对码核对来源地址并批准；不需要令牌。", "Incoming requests never pop up automatically: once the client or browser shows an 8-character pairing code, enter it above to verify the source address and approve. No token is needed."))
+                    Footnote(tr("第一次连接时会打开授权页，在这台手机上核对配对码批准；不需要令牌。", "The first connection opens an approval page; check the pairing code on this phone and approve. No token is needed."))
                     WizardStatus(where, null, openedAt)
                     Group(tr("预览", "Preview")) {
                         ArrowPreference(title = tr("完整消息", "Full message"), endActions = { Value(if (raw) tr("收起", "Hide") else tr("查看", "Show")) }, onClick = { raw = !raw })
@@ -487,7 +504,7 @@ fun NewAgentPage() {
                 if (tok == null) {
                     Footnote(tr("尚未确认接入，请返回第 3 步点击“确认接入”。", "Not confirmed yet. Go back to step 3 and tap Confirm."))
                 } else {
-                    val useCode = madeIsCode && how != 1
+                    val useCode = madeIsCode && !staticToken
                     val messageText = remember(how, base, tok, useCode) {
                         when {
                             how == 1 -> AgentGuide.onboardMcp(base, tok)
@@ -504,7 +521,7 @@ fun NewAgentPage() {
                         if (useCode) {
                             BasicComponent(
                                 title = tr("10 分钟一次性接入码", "10-minute one-time onboarding code"),
-                                summary = tr("agent 兑换一次后立即作废，长期令牌仅存本机，不进聊天记录", "Redeemed once and invalidated immediately; permanent token stays off chat history"),
+                                summary = tr("agent 用一次就作废", "Works once, then expires"),
                                 endActions = {
                                     if (currentTok?.isPending == true) LinkButton(onClick = {
                                         made = com.kilon.agentvscreen.api.OnboardingCodes.issue(currentTok.id)
@@ -527,8 +544,8 @@ fun NewAgentPage() {
                     }
                     WizardStatus(where, madeId, openedAt)
                     Footnote(
-                        if (useCode) tr("每个 agent 使用独立的一次性接入码（10 分钟有效）；若超时未兑换，可在此或该 agent 详情页重新生成。", "Each agent gets its own 10-minute one-time onboarding code; if it expires before redemption, regenerate it here or on the agent's page.")
-                        else tr("静态 MCP 配置内含仅显示一次的长期令牌（复制已标记敏感）；每个 agent 的记录、任务和提问分别归属。", "Static MCP config contains a one-time-displayed static token (copied as sensitive); each agent's records, tasks and questions stay apart."),
+                        if (useCode) tr("接入码 10 分钟内有效，过期了在这里或 agent 页面重新生成。", "The code is valid for 10 minutes; if it expires, make a new one here or on the agent's page.")
+                        else tr("令牌只在这里显示一次。每个 agent 的记录、任务和提问分开归属。", "The token is shown only here. Each agent's records, tasks and questions stay apart."),
                     )
                     Group(tr("预览与分段复制", "Preview & pieces")) {
                         val pieceText = remember(how, base, tok, useCode) {
@@ -622,7 +639,7 @@ fun AgentPage(id: String) {
             Group(tr("一次性接入码（尚未兑换）", "One-time onboarding code (pending)")) {
                 BasicComponent(
                     title = tr("重新生成接入码（10 分钟有效）", "Regenerate onboarding code (10 min)"),
-                    summary = tr("旧接入码会立即失效，无需删除重建此 agent", "Invalidates any earlier code immediately without deleting this agent"),
+                    summary = tr("旧的接入码随即失效", "The earlier code stops working"),
                     onClick = {
                         freshCode = com.kilon.agentvscreen.api.OnboardingCodes.issue(token.id)
                         com.kilon.agentvscreen.host.Audit.security("onboard_code_reissued", token.name)
@@ -632,17 +649,17 @@ fun AgentPage(id: String) {
                 freshCode?.let { code ->
                     BasicComponent(
                         title = tr("复制给 agent 的话（命令行）", "Copy message for the agent (shell)"),
-                        summary = tr("包含 10 分钟一次性接入码，已标记为敏感内容", "Contains the 10-minute one-time code, copied as sensitive"),
+                        summary = tr("含 10 分钟接入码", "Includes the 10-minute code"),
                         onClick = { host.copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboardWithCode(ApiConfig.baseUrl, code), sensitive = true) },
                     )
                     BasicComponent(
                         title = tr("复制给 agent 的话（HTTP）", "Copy message for the agent (HTTP)"),
-                        summary = tr("指引 agent 调 /v2/pair/exchange 兑换长期令牌", "Guides the agent to exchange via /v2/pair/exchange"),
+                        summary = tr("给只会发 HTTP 请求的 agent", "For agents that only send HTTP requests"),
                         onClick = { host.copy(tr("给 agent 的话", "Message for your agent"), AgentGuide.onboardHttpWithCode(ApiConfig.baseUrl, code), sensitive = true) },
                     )
                     BasicComponent(
                         title = tr("只复制接入码", "Copy onboarding code only"),
-                        summary = tr("适用于 Operit（vscreen_configure 的 code 参数）或手动兑换", "For Operit (vscreen_configure code parameter) or manual exchange"),
+                        summary = tr("填进 Operit 等工具", "Paste into Operit or similar tools"),
                         onClick = { host.copy(tr("接入码", "Onboarding code"), code, sensitive = true) },
                     )
                 }
@@ -1104,3 +1121,6 @@ private fun BuiltinState(ts: Tailnet.Status, host: AppHost, open: (String) -> Un
     if (appVpn.value != null) Footnote(tr("这台手机上的 Tailscale App 已经连着（${appVpn.value}）。手机要靠它的出口节点上网的话，App 得一直开着，这时直接选“外部 Tailscale App”更省事。",
         "The Tailscale app on this phone is already connected (${appVpn.value}). If the phone needs its exit node to get online, the app has to stay on anyway, so choosing \"External Tailscale app\" is simpler."))
 }
+
+/** Index of the "one-time code" entry in the new-agent lifetime picker (after the [com.kilon.agentvscreen.api.Tokens.LIFETIMES_MS] entries). */
+private const val ONE_TIME_CHOICE = 4
