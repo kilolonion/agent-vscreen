@@ -2,6 +2,11 @@
 
 以下按时间倒序列出完整版本历史；另见 [GitHub Releases](https://github.com/kilolonion/agent-vscreen/releases) 与 [English Changelog](CHANGELOG.md)。
 
+## 2.0.1-beta2（versionCode 76）
+
+- **日语界面，语言默认跟随系统**：新增日语界面（`assets/i18n/ja.json`，按英文原文查表）；默认语言跟随系统（日语、中文，其它为英文）。
+- **设置更简洁，页面对齐统一**：设置移除重复的接入分组，通用排到识别与录制前；新增统一的 `Edge` 边距常量与 `DotLine`、`AvsField`、`SectionHeader` 组件，首页、接入、记录、设置的标题、边距、状态点卡片、输入框和分组入口对齐一致；首页滑动后状态胶囊收为小圆点；任务详情只显示真实截图。
+
 ## 2.0.1-beta1（versionCode 75）
 
 - **过长的列表自动折叠与 UI 修复**：接入页的 agent、设置里的令牌、agent 页的临时许可和预约、盯守超过前几项时自动折叠，接入页按最近使用排序；修复 `TaskTitleBar` 折叠态置空导致 CJK 字体行高跳变的问题。

@@ -38,6 +38,22 @@ object Changes {
     /** Releases ordered newest first. Add a new [Release] entry whenever versionCode bumps. */
     val releases: List<Release> = listOf(
         Release(
+            versionCode = 76,
+            versionName = "2.0.1-beta2",
+            items = listOf(
+                Item(Kind.NEW, Audience.USER, "日语界面，语言默认跟随系统",
+                    "新增日语界面。语言默认跟随系统：日语系统显示日语，中文系统显示中文，其它显示英文；可在设置 > 通用里改。",
+                    "Japanese UI, language follows the system",
+                    "Added a Japanese UI. The language follows the system by default: Japanese, Chinese, or English otherwise; change it in Settings > General.",
+                    null),
+                Item(Kind.IMPROVED, Audience.USER, "设置更简洁，页面对齐统一",
+                    "接入功能只在接入页，设置里不再重复；通用排在识别与录制前面。各页标题、边距和分组标题对齐一致；首页滑动后状态胶囊收成小圆点，不再挤掉标题；“全部记录”等入口带箭头；输入框字号统一；任务详情只显示真实截图。",
+                    "Cleaner settings and consistent layout",
+                    "Connection features live only on the Connect tab; General now comes before Recognition. Page titles, edges and section headers line up across tabs; the home status pill shrinks to a dot when scrolled so the title stays readable; entries like \"All records\" show an arrow; input fields use one text size; task details show only real frames.",
+                    null),
+            ),
+        ),
+        Release(
             versionCode = 75,
             versionName = "2.0.1-beta1",
             items = listOf(

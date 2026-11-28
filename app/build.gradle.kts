@@ -15,8 +15,8 @@ android {
         applicationId = "com.kilon.agentvscreen"
         minSdk = 30
         targetSdk = 35
-        versionCode = (project.findProperty("avsVersionCode") as String?)?.toIntOrNull() ?: 75
-        versionName = "2.0.1-beta1"
+        versionCode = (project.findProperty("avsVersionCode") as String?)?.toIntOrNull() ?: 76
+        versionName = "2.0.1-beta2"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     // Unsigned CI builds do not even read local keystore settings. Local release builds keep existing behavior.
