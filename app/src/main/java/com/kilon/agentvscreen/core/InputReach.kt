@@ -103,20 +103,26 @@ internal object InputReach {
         return computed
     }
 
+    /**
+     * The question is whether InputDispatcher will deliver an injected event to [displayId], so its own view is asked
+     * first: `dumpsys input` lists the displays it treats as non-interactive. The hidden PowerManager / IPowerManager
+     * per-display call answers a different question (is the display's power group awake): a ROM can keep an
+     * OWN_DISPLAY_GROUP display awake while InputDispatcher still drops its input (issue #60), so that call is only a
+     * fallback when the dump has no readable line.
+     */
     private fun probeScreenOff(displayId: Int): ProbeResult {
-        val interactive = runCatching { interactiveProbe(displayId) }.getOrNull()
-        if (interactive != null) {
-            return ProbeResult(if (interactive) Reach.OK else Reach.BLOCKED, "isInteractive")
-        }
         val dump = runCatching { dumpsysRunner() }.getOrNull()
         if (dump != null && dump.exitCode == 0) {
             val nonInteractive = parseNonInteractive(dump.stdout)
             if (nonInteractive != null) {
                 return ProbeResult(if (displayId in nonInteractive) Reach.BLOCKED else Reach.OK, "dumpsys")
             }
-            return ProbeResult(Reach.UNKNOWN, "dumpsys")
         }
-        return ProbeResult(Reach.UNKNOWN, "n/a")
+        val interactive = runCatching { interactiveProbe(displayId) }.getOrNull()
+        if (interactive != null) {
+            return ProbeResult(if (interactive) Reach.OK else Reach.BLOCKED, "isInteractive")
+        }
+        return ProbeResult(Reach.UNKNOWN, if (dump != null && dump.exitCode == 0) "dumpsys" else "n/a")
     }
 
     /** Invalidate cached results for [displayId], or all displays when null. */

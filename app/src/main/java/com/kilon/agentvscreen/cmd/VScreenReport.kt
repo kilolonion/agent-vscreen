@@ -1178,35 +1178,6 @@ internal fun putScreenElements(
 }
 
 /**
- * P2-3, pure: isolated top-level `screen_data` block carrying all untrusted third-party text
- * separately from trusted system instructions/notes (`untrusted = true`).
- */
-internal fun buildScreenData(
-    appLabel: String?,
-    pageTitle: String,
-    allElements: List<El>,
-    shownElements: Collection<El>,
-    fullElements: Boolean,
-    meanwhileTexts: List<String>,
-    toasts: List<String>,
-    readbacks: List<String>,
-): org.json.JSONObject {
-    val els = (if (fullElements) allElements else shownElements.toList()).take(Report.MAX_JSON_ELEMENTS)
-    return org.json.JSONObject()
-        .put("untrusted", true)
-        .put("app_label", appLabel?.let { ScreenText.clean(it, maxLen = 64) } ?: org.json.JSONObject.NULL)
-        .put("page_title", ScreenText.clean(pageTitle, maxLen = 32))
-        .put("elements", org.json.JSONArray(els.map { e ->
-            e.json().put("text", ScreenText.clean(e.text, maxLen = 80)).also { o ->
-                e.hint?.let { o.put("hint", ScreenText.clean(it, maxLen = 64)) }
-            }
-        }))
-        .put("meanwhile_texts", org.json.JSONArray(meanwhileTexts.map { ScreenText.clean(it, maxLen = 120) }))
-        .put("toasts", org.json.JSONArray(toasts.map { ScreenText.clean(it, maxLen = 120) }))
-        .put("readback", org.json.JSONArray(readbacks.map { ScreenText.clean(it, maxLen = 120) }))
-}
-
-/**
  * 2.0.0-beta3 (3.3 & 3.11) + 2.0.0-beta16 (Item 3), pure: format the short reply for a quiet `act`
  * (when `loudReasons` is empty) and return both the rendered text and the exact current [El]s shown.
  */
@@ -1610,8 +1581,6 @@ internal fun VScreenOffloadHandler.fourBlocks(
     val ok = outcome == "done" || outcome == "stopped"
     val code = if (ok) "OK" else notes.firstBlocking() ?: "STEP_MISSED"
     val appPkg = snap.activity?.substringBefore('/')
-    val appLabel = appPkg?.let { com.kilon.agentvscreen.core.VScreenKnowledge.label(it) }
-    val readbacks = steps.mapNotNull { it.readback?.takeIf { r -> r.isNotEmpty() } }
 
     // ── Quiet short reply path (act only, loudReasons empty) ──
     if (actLoud != null && reasons.isEmpty()) {
@@ -1637,16 +1606,6 @@ internal fun VScreenOffloadHandler.fourBlocks(
             shown = shortReply.shown,
             fullElements = false,
         )
-        val screenData = buildScreenData(
-            appLabel = appLabel,
-            pageTitle = card.title,
-            allElements = els,
-            shownElements = shortReply.shown,
-            fullElements = false,
-            meanwhileTexts = emptyList(),
-            toasts = emptyList(),
-            readbacks = readbacks,
-        )
         val data = org.json.JSONObject()
             .put("timing", timing.json(total))
             .put("turn", turn)
@@ -1660,7 +1619,6 @@ internal fun VScreenOffloadHandler.fourBlocks(
             .put("meanwhile", org.json.JSONArray())
             .put("picture_changed", false)
             .put("screen", screen)
-            .put("screen_data", screenData)
         if (actLoud.hasRules || actLoud.rulesFired.isNotEmpty()) {
             data.put("rules_fired", org.json.JSONArray(actLoud.rulesFired.map { it.json() }))
         }
@@ -1840,16 +1798,6 @@ internal fun VScreenOffloadHandler.fourBlocks(
         shown = shown,
         fullElements = fullList || !card.canRef,
     )
-    val screenData = buildScreenData(
-        appLabel = appLabel,
-        pageTitle = card.title,
-        allElements = els,
-        shownElements = shown,
-        fullElements = fullList || !card.canRef,
-        meanwhileTexts = wordEv.allLines + picEv.detailLines,
-        toasts = toastLines,
-        readbacks = readbacks,
-    )
     val data = org.json.JSONObject()
         .put("timing", timing.json(total))
         .put("turn", turn)
@@ -1862,7 +1810,6 @@ internal fun VScreenOffloadHandler.fourBlocks(
         .put("meanwhile", org.json.JSONArray(allSinceLines))
         .put("picture_changed", pic != null && (picEv.changed || changedShare > 0.0 || changedRegions.isNotEmpty() || from != last || isLookOrFullCmd))
         .put("screen", screen)
-        .put("screen_data", screenData)
     if (actLoud != null) {
         data.put("loud", org.json.JSONArray(reasons))
         if (actLoud.hasRules || actLoud.rulesFired.isNotEmpty()) {

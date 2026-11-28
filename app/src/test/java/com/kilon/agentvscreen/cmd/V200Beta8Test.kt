@@ -845,7 +845,7 @@ class V200Beta8Test {
         val srcBResp = pubServer.route(pubReq("POST", "/mcp", """{"jsonrpc":"2.0","id":1,"method":"initialize"}""", src = "198.51.100.20"))
         assertEquals("source B must not be locked out by source A", 401, srcBResp.status)
 
-        // 3) Per-source pending pairing cap = 1, silent queue (no unsolicited notification), and claimed card cap = 3.
+        // 3) Per-source pending pairing cap = 1, card shown right away, and open card cap = 3 (extra requests queue).
         val regBody = """{"client_name":"ClientA","redirect_uris":["http://127.0.0.1:6274/cb"],"grant_types":["authorization_code","refresh_token"],"response_types":["code"],"token_endpoint_auth_method":"none"}"""
         val regResp = pubServer.route(pubReq("POST", "/oauth/register", regBody, src = "198.51.100.20"))
         assertEquals(201, regResp.status)
@@ -858,20 +858,20 @@ class V200Beta8Test {
             return m!!.groupValues[1]
         }
 
-        // Source 1 creates 1st queued pairing -> 200; same source 2nd -> 429; ZERO unsolicited notifications before claim.
+        // Source 1 creates 1st queued pairing -> 200; same source 2nd -> 429; its card is shown right away.
         val r1 = pubServer.route(pubReq("GET", authQuery("s1a"), src = "203.0.113.1"))
         assertEquals(200, r1.status)
         assertEquals(429, pubServer.route(pubReq("GET", authQuery("s1b"), src = "203.0.113.1")).status)
-        assertNull("remote /oauth/authorize must not create StrongConfirm cards before code claim", StrongConfirm.publicPairingNotificationSpec(fakeNow.get()))
+        assertNotNull("remote /oauth/authorize shows its StrongConfirm card right away", StrongConfirm.publicPairingNotificationSpec(fakeNow.get()))
 
-        // Claiming source 1's code creates the StrongConfirm card with source address and single-pairing spec.
+        // Entering source 1's code reopens the StrongConfirm card with source address and single-pairing spec.
         val c1 = PublicOAuth.claimPairingByCode(ctx, extractCode(r1), openActivity = false)
         assertTrue("expected Opened, got $c1", c1 is PublicOAuth.ClaimResult.Opened)
         val spec1 = StrongConfirm.publicPairingNotificationSpec(fakeNow.get())
         assertNotNull(spec1)
         assertTrue("single pairing notification should show pairing code: ${spec1!!.second}", spec1.second.contains("配对码"))
 
-        // Distinct sources 2, 3, and 4 all enqueue silently (no global DoS at /oauth/authorize).
+        // Distinct sources 2, 3, and 4 are all accepted (no global DoS at /oauth/authorize).
         val r2 = pubServer.route(pubReq("GET", authQuery("s2"), src = "203.0.113.2"))
         val r3 = pubServer.route(pubReq("GET", authQuery("s3"), src = "203.0.113.3"))
         val r4 = pubServer.route(pubReq("GET", authQuery("s4"), src = "203.0.113.4"))

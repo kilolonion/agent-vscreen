@@ -53,7 +53,8 @@ internal fun TokenRow(t: Tokens.Token, fmt: SimpleDateFormat, open: () -> Unit, 
             Text(if (t.id == Tokens.MAIN) tr("主令牌（默认内置令牌）", "Main token (built-in default)") else t.name, fontWeight = FontWeight.Medium, fontSize = 14.sp)
             Small(com.kilon.agentvscreen.api.Policy.levelTitle(t.level) + (if (t.custom.isNotEmpty() && t.level != com.kilon.agentvscreen.api.Policy.CUSTOM) tr("（改过 ${t.custom.size} 项）", " (${t.custom.size} changed)") else "") +
                 " · " + (if (t.lastUsedAt > 0) tr("上次使用 ", "last used ") + fmt.format(Date(t.lastUsedAt)) else tr("还没用过", "never used")) +
-                if (t.trusted) tr(" · 支付免确认至 ", " · payments unconfirmed until ") + fmt.format(Date(t.trustUntil)) else "")
+                (if (t.trusted) tr(" · 支付免确认至 ", " · payments unconfirmed until ") + fmt.format(Date(t.trustUntil)) else "") +
+                when { t.expired -> tr(" · 已到期", " · expired"); t.expiresAt > 0 -> tr(" · 到期 ", " · expires ") + fmt.format(Date(t.expiresAt)); else -> "" })
         }
         if (t.id != Tokens.MAIN) LinkButton(onClick = remove) { Text(tr("删除", "Remove"), color = MiuixTheme.colorScheme.error) }
     }

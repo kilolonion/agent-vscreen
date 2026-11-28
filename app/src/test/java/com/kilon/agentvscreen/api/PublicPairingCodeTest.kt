@@ -27,9 +27,9 @@ import java.net.URLEncoder
 
 /**
  * P0-3 regression tests:
- * - Remote `/oauth/authorize` & `/oauth/device_authorization` enqueue silently (zero popups/notifications).
- * - Multi-IP flood cannot DoS legitimate users (FIFO eviction on silent queue, never evicts claimed cards).
- * - User-initiated `claimPairingByCode` opens confirmation card with `sourceAddress` & default `Tokens.FREE`.
+ * - Remote `/oauth/authorize` & `/oauth/device_authorization` show a confirmation card right away (with source).
+ * - Multi-IP flood is capped (at most MAX_PENDING_PAIRINGS_GLOBAL cards, bounded FIFO queue, open cards never evicted).
+ * - `claimPairingByCode` opens a queued request's card with `sourceAddress` & default `Tokens.FREE`.
  * - Optional strict pairing window gates register/authorize/device_authorization and auto-closes on approval.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -132,37 +132,50 @@ class PublicPairingCodeTest {
     }
 
     @Test
-    fun remoteAuthorizeAndDeviceFlowNeverCreateUnsolicitedStrongConfirmCards() {
+    fun authorizeAndDeviceFlowShowTheCardOnThePhoneRightAway() {
         val cid = registerClient("RemoteClient", src = "198.51.100.1")
         val authResp = pubServer.route(req("GET", authorizeUrl(cid), src = "198.51.100.1"))
         assertEquals(200, authResp.status)
-        assertTrue("StrongConfirm.pending must be empty before user enters code", StrongConfirm.pending.value.isEmpty())
-        assertNull("notification spec must be null before user enters code", StrongConfirm.publicPairingNotificationSpec(fakeNow))
+        val code = extractCode(authResp)
+        val cards = StrongConfirm.pending.value
+        assertEquals("authorize shows one confirmation card without any extra step", 1, cards.size)
+        assertEquals("198.51.100.1", cards.single().sourceAddress)
+        assertEquals(code, cards.single().pairingCode)
 
         val devResp = pubServer.route(
             req("POST", "/oauth/device_authorization", formEncode("client_id" to cid, "resource" to resource), src = "198.51.100.2"),
         )
         assertEquals(200, devResp.status)
-        assertTrue("device_authorization must also leave StrongConfirm.pending empty", StrongConfirm.pending.value.isEmpty())
+        assertEquals("device_authorization shows its card too", 2, StrongConfirm.pending.value.size)
+
+        // Entering the code by hand for a request that already has a card reopens the same card.
+        val again = PublicOAuth.claimPairingByCode(ctx, code, openActivity = false)
+        assertTrue(again is PublicOAuth.ClaimResult.Opened)
+        assertEquals(cards.single().id, (again as PublicOAuth.ClaimResult.Opened).confirmId)
+        assertEquals(2, StrongConfirm.pending.value.size)
     }
 
     @Test
-    fun attackerFloodFrom35IpsCannotDoSLegitimatePairingOrEvictClaimedCard() {
+    fun floodFrom35IpsIsCappedAndCannotBlockOrEvictTheLegitimatePairing() {
         val cid = registerClient("FloodedClient", src = "198.51.100.1")
 
-        // 35 distinct attacker IPs flood /oauth/authorize (more than MAX_QUEUED_PAIRINGS_GLOBAL = 32).
+        // 35 distinct attacker IPs flood /oauth/authorize: at most MAX_PENDING_PAIRINGS_GLOBAL cards appear,
+        // the rest wait in the bounded queue (MAX_QUEUED_PAIRINGS_GLOBAL, FIFO).
         for (i in 1..35) {
             val r = pubServer.route(req("GET", authorizeUrl(cid, "atk$i"), src = "198.51.100.$i"))
-            assertEquals("attacker $i enqueues silently", 200, r.status)
+            assertEquals("attacker $i accepted", 200, r.status)
             fakeNow += 10L
         }
-        assertTrue("zero popups/cards created during flood", StrongConfirm.pending.value.isEmpty())
+        assertEquals("cards on the phone are capped", PublicOAuth.MAX_PENDING_PAIRINGS_GLOBAL, StrongConfirm.pending.value.size)
 
-        // Legitimate user from 203.0.113.77 initiates pairing -> succeeds and gets a claimable code.
+        // The legitimate request still gets a code; it waits in the queue while the card slots are busy.
         val legitResp = pubServer.route(req("GET", authorizeUrl(cid, "legit"), src = "203.0.113.77"))
         assertEquals(200, legitResp.status)
         val legitCode = extractCode(legitResp)
+        assertTrue(StrongConfirm.pending.value.none { it.sourceAddress == "203.0.113.77" })
 
+        // The user sees the unknown source addresses, denies those cards, then opens their own by its code.
+        StrongConfirm.pending.value.toList().forEach { assertTrue(StrongConfirm.deny(ctx, it.id)) }
         val claim = PublicOAuth.claimPairingByCode(ctx, legitCode, openActivity = false)
         assertTrue("expected ClaimResult.Opened, got $claim", claim is PublicOAuth.ClaimResult.Opened)
         val opened = claim as PublicOAuth.ClaimResult.Opened
@@ -173,13 +186,14 @@ class PublicPairingCodeTest {
         assertEquals("FloodedClient", confirmReq.publicClientName)
         assertEquals("default tier stays Easy (Tokens.FREE)", Tokens.FREE, confirmReq.defaultScope)
 
-        // Another wave of 35 attacker IPs must NOT evict the already-claimed legitimate card.
+        // Another wave of 35 attacker IPs must NOT evict the open legitimate card.
         for (i in 101..135) {
             val r = pubServer.route(req("GET", authorizeUrl(cid, "atk$i"), src = "198.51.100.$i"))
             assertEquals(200, r.status)
             fakeNow += 10L
         }
-        assertTrue("legitimate claimed card can still be approved", StrongConfirm.approve(ctx, opened.confirmId, StrongConfirm.BY_BIOMETRIC, Tokens.FREE))
+        assertTrue(StrongConfirm.pending.value.size <= PublicOAuth.MAX_PENDING_PAIRINGS_GLOBAL)
+        assertTrue("legitimate card can still be approved", StrongConfirm.approve(ctx, opened.confirmId, StrongConfirm.BY_BIOMETRIC, Tokens.FREE))
         val status = JSONObject(String(pubServer.route(req("GET", "/oauth/authorize/status?id=${opened.pairingId}")).body))
         assertEquals("approved", status.getString("status"))
     }
@@ -197,13 +211,19 @@ class PublicPairingCodeTest {
         assertEquals(PublicOAuth.ClaimResult.NotFound, PublicOAuth.claimPairingByCode(ctx, "AAAA-BBBB", openActivity = false))
 
         val cid = registerClient("GraceClient")
+        // Fill every card slot so this request waits in the queue without a card.
+        for (i in 1..PublicOAuth.MAX_PENDING_PAIRINGS_GLOBAL) {
+            assertEquals(200, pubServer.route(req("GET", authorizeUrl(cid, "fill$i"), src = "198.51.100.$i")).status)
+        }
         val r = pubServer.route(req("GET", authorizeUrl(cid), src = "203.0.113.9"))
         val code = extractCode(r)
+        assertTrue(StrongConfirm.pending.value.none { it.sourceAddress == "203.0.113.9" })
 
-        // No lockscreen -> NoLockscreen
+        // No lock screen -> NoLockscreen
         PublicOAuth.deviceSecureCheck = { false }
         assertEquals(PublicOAuth.ClaimResult.NoLockscreen, PublicOAuth.claimPairingByCode(ctx, code, openActivity = false))
         PublicOAuth.deviceSecureCheck = { true }
+        StrongConfirm.pending.value.toList().forEach { assertTrue(StrongConfirm.deny(ctx, it.id)) }
 
         // Claim 5 seconds before the 5-minute TTL -> gets at least CLAIM_MIN_CONFIRM_MS (60s) grace window.
         fakeNow += PublicOAuth.PAIRING_TTL_MS - 5_000L

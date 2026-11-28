@@ -247,7 +247,7 @@ private fun TailscaleSteps(here: Boolean) {
             turnOnWhere(here) + tr("清单会自动重查。全部 ✓ 后同意风险说明，点“开启公网接入”并验证指纹。第一次申请证书约 30–60 秒。", "the checklist rechecks by itself. When all show ✓, accept the risk note, press Turn on public access and confirm with your fingerprint. The first certificate takes about 30–60 seconds."),
             buttons = if (here) emptyList() else listOf(backToPublic()))
         Step(5, tr("把地址交给云端客户端", "Give the address to the cloud client"),
-            tr("复制 MCP 地址，在客户端里添加（如 claude.ai 的“添加连接器”）。第一次连接时手机不会自动弹窗：打开 App 的公网页面输入客户端显示的 8 位配对码，核对来源地址后批准，并选择权限档位。", "Copy the MCP address and add it in the client (e.g. Add connector on claude.ai). On the first connection the phone will not pop up automatically: enter the 8-character pairing code in this app's Public MCP page, check the source address, pick a permission level, and approve."))
+            tr("复制 MCP 地址，在客户端里添加（如 claude.ai 的“添加连接器”）。第一次连接时，手机上会弹出配对请求：核对配对码一致再批准，并选择这个客户端的权限档位。", "Copy the MCP address and add it in the client (e.g. Add connector on claude.ai). On the first connection the phone shows a pairing request: check the code matches, approve, and pick the client's permission level."))
     }
 }
 
@@ -311,8 +311,8 @@ private fun CloudflareSteps(here: Boolean) {
             field = { GuideField(tr("公网域名，例如 phone.example.com", "Public hostname, e.g. phone.example.com"), cf.hostname) { Cloudflared.save(null, it) } },
             after = if (here) emptyList() else listOf(backToPublic()))
         Step(6, tr("等两项变绿，再交给客户端", "Wait for two green rows, then give it to the client"),
-            tr("“隧道连接”显示已连上、“公网地址自检”通过，说明外网已经能到这台手机。复制 MCP 地址添加到云端客户端；第一次连接时手机不会自动弹窗，请在 App 的公网页面输入 8 位配对码，核对来源地址后批准。",
-                "When Tunnel connection shows connected and Public address self-test passes, the internet can reach this phone. Copy the MCP address into the cloud client; on the first connection enter the 8-character pairing code in this app's Public MCP page, check the source address, and approve."))
+            tr("“隧道连接”显示已连上、“公网地址自检”通过，说明外网已经能到这台手机。复制 MCP 地址添加到云端客户端；第一次连接时在手机上核对配对码并批准。",
+                "When Tunnel connection shows connected and Public address self-test passes, the internet can reach this phone. Copy the MCP address into the cloud client; on the first connection check the pairing code on the phone and approve."))
     }
 }
 
@@ -400,6 +400,6 @@ private fun NgrokSteps(here: Boolean) {
             tr("上面两项都保存后，", "With both saved above, ") + turnOnWhere(here) + tr("清单全部 ✓，同意风险说明，点“开启公网接入”并验证指纹。", "when the checklist is all ✓, accept the risk note, press Turn on public access and confirm with your fingerprint."),
             buttons = if (here) emptyList() else listOf(backToPublic()))
         Step(5, tr("等两项变绿，再交给客户端", "Wait for two green rows, then give it to the client"),
-            tr("“隧道连接”显示已连上、“公网地址自检”通过，就可以复制 MCP 地址添加到云端客户端。第一次连接时手机不会自动弹窗，请在 App 的公网页面输入 8 位配对码，核对来源地址后批准。在浏览器里打开配对页时，ngrok 可能先显示一个提示页，点 Visit Site 继续即可。", "When Tunnel connection shows connected and Public address self-test passes, copy the MCP address into the cloud client. On the first connection enter the 8-character pairing code in this app's Public MCP page, check the source address, and approve. If a browser opens the pairing page, ngrok may show a notice first; press Visit Site to continue."))
+            tr("“隧道连接”显示已连上、“公网地址自检”通过，就可以复制 MCP 地址添加到云端客户端。第一次连接时在手机上核对配对码并批准。在浏览器里打开配对页时，ngrok 可能先显示一个提示页，点 Visit Site 继续即可。", "When Tunnel connection shows connected and Public address self-test passes, copy the MCP address into the cloud client. On the first connection check the pairing code on the phone and approve. If a browser opens the pairing page, ngrok may show a notice first; press Visit Site to continue."))
     }
 }

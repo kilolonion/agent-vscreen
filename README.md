@@ -79,13 +79,13 @@ apksigner verify --print-certs downloaded.apk
 
 ### 2. Connect an agent
 
-Open **Connect › Connect a new agent**, pick where the agent runs and how it connects, then tap **Copy message for your agent** and send it as is. CLI, HTTP, and Operit default to **10-minute one-time onboarding codes (`avc_...`)** so long-lived secrets stay out of chat logs and shell history, and copied credentials are marked `IS_SENSITIVE` to hide clipboard previews.
+Open **Connect › Connect a new agent**, pick where the agent runs and how it connects, then tap **Copy message for your agent** and send it as is. New tokens are permanent by default; you can pick 30, 7 or 1 day instead, or for CLI, HTTP and Operit a **10-minute one-time onboarding code (`avc_...`)** that keeps the token out of chat logs and shell history. Copied credentials are marked `IS_SENSITIVE` to hide clipboard previews.
 
 | Mode | Transports | Notes |
 |---|---|---|
 | **Local** (default) | `vscreen` CLI / MCP / HTTP / [Operit ToolPkg](integrations/operit/) | Listens on `127.0.0.1:18765` only; unreachable off-device |
 | **Private remote** | Built-in Tailscale (recommended, supports Headscale) / Tailscale app / SSH | Private tailnet only; non-built-in remote calls require signed requests by default |
-| **Cloud Public MCP** (Experimental, off by default) | Tailscale Funnel / Cloudflare Tunnel / ngrok + OAuth 2.1 | No unsolicited popups (enter 8-char pairing code on phone + biometric/PIN); `system` never exposed; auto-closes after 24h without authenticated requests |
+| **Cloud Public MCP** (Experimental, off by default) | Tailscale Funnel / Cloudflare Tunnel / ngrok + OAuth 2.1 | Pairing card on the phone (shows pairing code and source address, biometric/PIN); `system` never exposed; auto-closes after 24h without authenticated requests |
 
 For full protocol details, security boundaries, ability list, and known limits, see [API.md](API.md).
 

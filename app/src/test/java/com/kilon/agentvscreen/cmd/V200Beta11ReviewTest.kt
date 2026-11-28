@@ -200,7 +200,7 @@ class V200Beta11ReviewTest {
         val userCode = dj.getString("user_code")
         assertTrue(userCode.isNotBlank())
         assertEquals(PublicOAuth.DEVICE_INTERVAL_S, dj.getLong("interval"))
-        assertNull("device_authorization must not auto-present confirmation card before user enters code", approve)
+        assertNotNull("device_authorization shows the confirmation card right away", approve)
 
         fun poll(): JSONObject = JSONObject(String(pub.route(req("POST", "/oauth/token",
             "grant_type=${java.net.URLEncoder.encode(PublicOAuth.DEVICE_GRANT, "UTF-8")}&device_code=$dc&client_id=$cid", form = true)).body))

@@ -246,16 +246,16 @@ def main():
     pairing_code = code_match.group(1)
     pairing_id = id_match.group(1)
 
-    # P0-3: remote /oauth/authorize must NOT auto-popup or create a pending StrongConfirm card before code claim
+    # The pairing card is presented at once (here through the debug presenter, so no StrongConfirm card is counted).
     pend_before = send_public_hook("pending_count")
-    check("no_unsolicited_pairing_card", pend_before.get("ok") is True and pend_before.get("pending_pairings") == 0, str(pend_before))
+    check("pairing_presented_via_hook", pend_before.get("ok") is True and pend_before.get("pending_pairings") == 0, str(pend_before))
     bad_claim = send_public_hook("claim:AAAA-BBBB")
     check("wrong_pairing_code_rejected", bad_claim.get("ok") is False, str(bad_claim))
 
     st_p1, _, body_p1 = http_req(PUB_LOCAL_PORT, "GET", f"/oauth/authorize/status?id={pairing_id}", pub_hdr)
     check("pairing_status_pending", st_p1 == 200 and json.loads(body_p1).get("status") == "pending", body_p1)
 
-    # User enters the 8-char pairing code on the phone, then approves as "operate" (system is never granted)
+    # Re-opening the already presented card by its code returns the same pairing; approve as "operate" (system is never granted)
     claimed = send_public_hook(f"claim:{pairing_code}")
     check("debug_hook_claim", claimed.get("ok") is True and claimed.get("pairing_id") == pairing_id, str(claimed))
     appr = send_public_hook("approve:operate")

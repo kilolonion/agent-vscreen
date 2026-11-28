@@ -432,12 +432,6 @@
       "size": 4091,
       "normalized_sha256": "69b15f49a93d471deaa1f9b92eae9d7639f25bc10bc276d593ce6fe6720bfd98"
     },
-    "app/src/main/java/com/kilon/agentvscreen/cmd/VScreenFn.kt": {
-      "role": "index",
-      "sha256": "88930abce8156fe0b703bcc024d5305c4c15670256f5c48d20472631c2a9b1a7",
-      "size": 5409,
-      "normalized_sha256": "88930abce8156fe0b703bcc024d5305c4c15670256f5c48d20472631c2a9b1a7"
-    },
     "app/src/main/java/com/kilon/agentvscreen/cmd/VScreenFrames.kt": {
       "role": "index",
       "sha256": "f0559ff0f2d96bee9f0c72c6cceb1f08fdeebe2581a398011ddcd7d1936f8bce",
@@ -534,12 +528,6 @@
       "size": 5276,
       "normalized_sha256": "6b97432a607630f44e2e04c69297264a166bc4e617da8d61708bcdc3593af2aa"
     },
-    "app/src/main/java/com/kilon/agentvscreen/core/AppFunctions.kt": {
-      "role": "index",
-      "sha256": "970e5e8352f390a6a8919224388d0c1fe66aa799bbcd0244cc2a357c79de6f94",
-      "size": 11100,
-      "normalized_sha256": "970e5e8352f390a6a8919224388d0c1fe66aa799bbcd0244cc2a357c79de6f94"
-    },
     "app/src/main/java/com/kilon/agentvscreen/core/BackgroundOperation.kt": {
       "role": "index",
       "sha256": "5dcdf95f6750c74cdde631d62c386133586319a807d9cde267c0f13afcddc7a2",
@@ -569,12 +557,6 @@
       "sha256": "25f07b6cfc988861ff3f49d6875250f3f652ffe069488d4294da6ba149f04e19",
       "size": 20614,
       "normalized_sha256": "25f07b6cfc988861ff3f49d6875250f3f652ffe069488d4294da6ba149f04e19"
-    },
-    "app/src/main/java/com/kilon/agentvscreen/core/FinanceApps.kt": {
-      "role": "index",
-      "sha256": "64c9a25fee99d5f496c0c25dce0ab4fa496148ee002651090e87efca13f886df",
-      "size": 3387,
-      "normalized_sha256": "64c9a25fee99d5f496c0c25dce0ab4fa496148ee002651090e87efca13f886df"
     },
     "app/src/main/java/com/kilon/agentvscreen/core/Gate.kt": {
       "role": "index",
@@ -1776,12 +1758,6 @@
       "size": 7985,
       "normalized_sha256": "825c72b11d3d11b9ccb4abe319fb60389ec4b8f0171525bc8808e768935bd638"
     },
-    "app/src/test/java/com/kilon/agentvscreen/core/AppFunctionsTest.kt": {
-      "role": "index",
-      "sha256": "5e101c0d8309ebdb2cc75e683610d4413bdd00ab74b608ae2dbb77d4e09bfe20",
-      "size": 7938,
-      "normalized_sha256": "5e101c0d8309ebdb2cc75e683610d4413bdd00ab74b608ae2dbb77d4e09bfe20"
-    },
     "app/src/test/java/com/kilon/agentvscreen/core/CaptureThrottleTest.kt": {
       "role": "index",
       "sha256": "5b4ac8a902310554fbd74e748891f8b8644b306d59c7a4d4a8b86420d3d25e17",
@@ -1793,12 +1769,6 @@
       "sha256": "9b8b61b1c8c80dcc3b9664acc36248559bb5362834c31c9d1cbc4afc43345b89",
       "size": 8904,
       "normalized_sha256": "9b8b61b1c8c80dcc3b9664acc36248559bb5362834c31c9d1cbc4afc43345b89"
-    },
-    "app/src/test/java/com/kilon/agentvscreen/core/FinanceAppsTest.kt": {
-      "role": "index",
-      "sha256": "6559c0e80d5c280899756ce5ee8a630f5738313e5c3cdeab95dcf00dd29dffa5",
-      "size": 9394,
-      "normalized_sha256": "6559c0e80d5c280899756ce5ee8a630f5738313e5c3cdeab95dcf00dd29dffa5"
     },
     "app/src/test/java/com/kilon/agentvscreen/core/LoopWatchdogTest.kt": {
       "role": "index",

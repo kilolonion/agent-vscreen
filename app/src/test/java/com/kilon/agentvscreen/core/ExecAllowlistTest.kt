@@ -108,7 +108,6 @@ class ExecAllowlistTest {
         ok("cmd", "game", "reset", "com.example.game")
         ok("cmd", "deviceidle", "tempwhitelist", "-d", "60000", ownPkg)
         ok("cmd", "netpolicy", "add", "restrict-background-whitelist", "10123")
-        ok("cmd", "app_function", "list-app-functions", "--package", "com.example.app")
         ok("am", "help")
         ok("am", "force-stop", "com.example.app")
         ok("am", "compat", "disable", "DOWNSCALED", "com.example.app")

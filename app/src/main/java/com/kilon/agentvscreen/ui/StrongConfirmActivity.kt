@@ -498,8 +498,8 @@ class StrongConfirmActivity : ComponentActivity() {
                                 ) {
                                     Text(
                                         tr(
-                                            "已验证元数据文档来源域名：${req.clientVerifiedDomain}",
-                                            "Verified metadata document domain: ${req.clientVerifiedDomain}",
+                                            "来自 ${req.clientVerifiedDomain}（已核实）",
+                                            "From ${req.clientVerifiedDomain} (verified)",
                                         ),
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.SemiBold,
@@ -516,7 +516,7 @@ class StrongConfirmActivity : ComponentActivity() {
                                     value = req.publicClientName ?: req.tokenName,
                                 )
                                 Text(
-                                    tr("未验证（动态注册，名称由对方填写）", "Unverified (dynamic registration; self-reported name)"),
+                                    tr("名称由对方自填，未核实", "Name is self-reported, not verified"),
                                     fontSize = 12.sp,
                                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                 )
@@ -591,7 +591,7 @@ class StrongConfirmActivity : ComponentActivity() {
                             )
                             req.screenLabel?.takeIf { it.isNotBlank() }?.let { lbl ->
                                 InfoLine(
-                                    label = tr("应用画面显示文字", "App screen text"),
+                                    label = tr("画面上的文字", "Text on screen"),
                                     value = com.kilon.agentvscreen.cmd.ScreenText.quote(lbl, maxLen = 40),
                                 )
                             }

@@ -1,7 +1,7 @@
 # CI for Agent-VScreen (free on public repositories).
 # Branches and PRs: check, unit tests (with regen & AOCI coverage gate), and debug + unsigned release APKs (zero signing secrets).
 # A tag v* (for example v2.0.1): `android`, `operit`, `secrets`, and `release-device` (full emulator matrix) must all pass,
-# then the isolated `release` job (under `environment: release`, with no checkout/build tools) verifies the APK is unsigned,
+# then the isolated `release` job (under `environment: release` for secret scoping only, no manual approval; no checkout/build tools) verifies the APK is unsigned,
 # aligns (16 KB) & signs it with AVS_KEYSTORE_* secrets, verifies the certificate SHA-256, and creates the GitHub Release.
 # Notes come from docs/release-notes/<tag>.md (required and non-empty).
 name: CI
@@ -208,7 +208,7 @@ jobs:
     uses: ./.github/workflows/device.yml
 
   release:
-    name: Approve, sign and publish
+    name: Sign and publish
     # Tag pushes only: a manual run on a tag ref must not sign or publish.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [android, operit, secrets, release-device]

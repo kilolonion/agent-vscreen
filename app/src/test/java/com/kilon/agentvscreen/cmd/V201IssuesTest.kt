@@ -139,6 +139,34 @@ class V201IssuesTest {
         }
     }
 
+    @Test
+    fun inputReachTrustsInputDispatcherOverPowerGroupState() {
+        try {
+            InputReach.resetForTest()
+            VScreenAwake.setScreenOffForTest(true)
+            // Issue #60: the display's power group is awake, but InputDispatcher marks it non-interactive.
+            InputReach.interactiveProbe = { true }
+            InputReach.dumpsysRunner = {
+                com.kilon.agentvscreen.host.ShizukuManager.ProcessResult(0, "INPUT MANAGER (dumpsys input)\n  Display not interactive: {0, 37}\n", "")
+            }
+            val blocked = InputReach.probeDirect(37)
+            assertEquals(InputReach.Reach.BLOCKED, blocked.reach)
+            assertEquals("dumpsys", blocked.via)
+            // A dump without the line falls back to the power-group answer.
+            InputReach.dumpsysRunner = { com.kilon.agentvscreen.host.ShizukuManager.ProcessResult(0, "INPUT MANAGER (dumpsys input)\n", "") }
+            val fallback = InputReach.probeDirect(37)
+            assertEquals(InputReach.Reach.OK, fallback.reach)
+            assertEquals("isInteractive", fallback.via)
+            // Neither source readable: unknown.
+            InputReach.dumpsysRunner = { null }
+            InputReach.interactiveProbe = { null }
+            assertEquals(InputReach.Reach.UNKNOWN, InputReach.probeDirect(37).reach)
+        } finally {
+            VScreenAwake.setScreenOffForTest(false)
+            InputReach.resetForTest()
+        }
+    }
+
     // ── Issue #48: Command classification, cold-start awake, done -> status ──
 
     @Test
@@ -295,6 +323,7 @@ class V201IssuesTest {
             // stays non-interactive for 2 polls and recovers on poll 3. Must NOT return early on poll 1!
             VScreenAwake.resetWakeForTest(ctx)
             InputReach.resetForTest()
+            InputReach.dumpsysRunner = { null }
             VScreenStore.setPhoneScreenMode(VScreenStore.PhoneScreenMode.WAKE_WHEN_NEEDED)
             VScreenAwake.setScreenOffForTest(true)
             var now = 100_000L
@@ -325,6 +354,7 @@ class V201IssuesTest {
             // Case 2: Main screen wakes, but virtual display 37 remains persistently BLOCKED -> must timeout with error!
             VScreenAwake.resetWakeForTest(ctx)
             InputReach.resetForTest()
+            InputReach.dumpsysRunner = { null }
             VScreenStore.setPhoneScreenMode(VScreenStore.PhoneScreenMode.WAKE_WHEN_NEEDED)
             VScreenAwake.setScreenOffForTest(true)
             now = 200_000L
@@ -345,6 +375,7 @@ class V201IssuesTest {
             // Case 3: Main screen itself never becomes interactive -> times out cleanly with error.
             VScreenAwake.resetWakeForTest(ctx)
             InputReach.resetForTest()
+            InputReach.dumpsysRunner = { null }
             VScreenStore.setPhoneScreenMode(VScreenStore.PhoneScreenMode.WAKE_WHEN_NEEDED)
             VScreenAwake.setScreenOffForTest(true)
             now = 300_000L
@@ -359,6 +390,7 @@ class V201IssuesTest {
         } finally {
             VScreenAwake.resetWakeForTest()
             InputReach.resetForTest()
+            InputReach.dumpsysRunner = { null }
             VScreenStore.setPhoneScreenMode(VScreenStore.PhoneScreenMode.ALLOW_SLEEP)
         }
     }
@@ -373,6 +405,7 @@ class V201IssuesTest {
         try {
             VScreenAwake.resetWakeForTest(ctx)
             InputReach.resetForTest()
+            InputReach.dumpsysRunner = { null }
             VScreenStore.setPhoneScreenMode(VScreenStore.PhoneScreenMode.WAKE_WHEN_NEEDED)
             VScreenAwake.setScreenOffForTest(true)
             var now = 400_000L
@@ -409,6 +442,7 @@ class V201IssuesTest {
         } finally {
             VScreenAwake.resetWakeForTest()
             InputReach.resetForTest()
+            InputReach.dumpsysRunner = { null }
             VScreenStore.setPhoneScreenMode(VScreenStore.PhoneScreenMode.ALLOW_SLEEP)
         }
     }

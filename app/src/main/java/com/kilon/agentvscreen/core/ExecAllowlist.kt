@@ -218,7 +218,6 @@ object ExecAllowlist {
                     "cmd netpolicy restricted to restrict-background-whitelist"
                 }
             }
-            "app_function" -> checkCmdAppFunction(argv)
             else -> "cmd service not allowed: ${argv[1]}"
         }
     }
@@ -322,19 +321,6 @@ object ExecAllowlist {
             else "cmd game reset requires valid package"
         }
         else -> "cmd game subcommand not allowed: ${argv[2]}"
-    }
-
-    private fun checkCmdAppFunction(argv: Array<String>): String? {
-        val sub = argv[2]
-        if (sub != "list-app-functions" && sub != "execute-app-function") {
-            return "cmd app_function subcommand not allowed: $sub"
-        }
-        if (sub == "list-app-functions" && argv.size == 3) return null
-        val pkgIdx = argv.indexOf("--package")
-        if (pkgIdx < 3 || pkgIdx + 1 >= argv.size || !PackageNames.isValid(argv[pkgIdx + 1])) {
-            return "cmd app_function requires valid --package"
-        }
-        return null
     }
 
     private fun checkAm(argv: Array<String>, ownPkg: String): String? {

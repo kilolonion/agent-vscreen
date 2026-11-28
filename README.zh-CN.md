@@ -79,13 +79,13 @@ apksigner verify --print-certs downloaded.apk
 
 ### 2. 接入 agent
 
-在 App 底部 **接入 › 新建接入** 中按向导选择运行位置与连接方式，点击 **复制给 agent 的话** 原样发给它即可。命令行、HTTP 与 Operit 默认签发 **10 分钟一次性接入码（`avc_...`）**，避免长期密钥留在聊天记录或命令历史中；复制凭证时自动标记系统敏感剪贴板隐藏预览。
+在 App 底部 **接入 › 新建接入** 中按向导选择运行位置与连接方式，点击 **复制给 agent 的话** 原样发给它即可。新令牌默认长期有效，也可选 30 天、7 天、1 天；命令行、HTTP 与 Operit 还可选 **10 分钟一次性接入码（`avc_...`）**，让令牌不进聊天记录和命令历史；复制凭证时自动标记系统敏感剪贴板隐藏预览。
 
 | 场景 | 连接方式 | 说明 |
 |---|---|---|
 | **本机**（默认） | 命令行 `vscreen` / MCP / HTTP / [Operit ToolPkg](integrations/operit/) | 仅监听 `127.0.0.1:18765`，手机外不可达 |
 | **私有远程** | 内置 Tailscale（推荐，支持 Headscale）/ Tailscale App / SSH | 仅限私有网络内设备，非内置方式默认要求请求签名 |
-| **云端公网 MCP**（实验性，默认关闭） | Tailscale Funnel / Cloudflare Tunnel / ngrok + OAuth 2.1 | 手机不自动弹窗，须在 App 输入 8 位配对码强确认；永不开放 `system`；24 小时无已认证请求自动关闭 |
+| **云端公网 MCP**（实验性，默认关闭） | Tailscale Funnel / Cloudflare Tunnel / ngrok + OAuth 2.1 | 手机弹出配对确认卡（显示配对码与来源地址，生物识别/PIN 确认）；永不开放 `system`；24 小时无已认证请求自动关闭 |
 
 完整连接协议、安全边界、能力清单与已知限制见 [API.md](API.md)。
 

@@ -57,95 +57,35 @@ fun VScreenAppRules() {
         labels = apps.associate { it.second to it.first }
     }
 
-    fun applyRule(pkg: String, nextRule: VScreenStore.Rule?) {
-        val label = labels[pkg] ?: pkg
-        if (com.kilon.agentvscreen.core.FinanceApps.isFinancial(pkg) && nextRule == VScreenStore.Rule.ALLOW) {
-            val mainTok = com.kilon.agentvscreen.api.Tokens.byId(com.kilon.agentvscreen.api.Tokens.MAIN)
-                ?: com.kilon.agentvscreen.api.Tokens.list.value.firstOrNull()
-                ?: return
-            val req = com.kilon.agentvscreen.host.StrongConfirm.createUiRequest(
-                ctx = ctx,
-                risk = com.kilon.agentvscreen.host.Risk.TRUST_SET,
-                token = mainTok,
-                commandName = tr("放宽金融应用默认确认：$label", "Relax finance default confirm: $label"),
-                detail = tr(
-                    "将 $label（$pkg）从默认的“每次确认”改为允许直接操作。付款按钮仍会触发支付强确认。",
-                    "Change $label ($pkg) from default confirm-every-time to allowed. Payment buttons still require payment confirmation.",
-                ),
-                onApprove = { VScreenStore.setRule(pkg, VScreenStore.Rule.ALLOW) },
-            )
-            StrongConfirmActivity.open(ctx, req.id)
-            return
-        }
-        VScreenStore.setRule(pkg, nextRule)
-    }
-
-    val installedFinanceDefaults = apps.filter { (_, pkg) ->
-        com.kilon.agentvscreen.core.FinanceApps.isFinancial(pkg) && pkg !in rules
-    }
-
-    if (rules.isEmpty() && installedFinanceDefaults.isEmpty()) {
+    if (rules.isEmpty()) {
         Text(tr("还没有限制，所有应用都可以操作", "No rules yet: every app can be operated"), fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
     } else {
-        if (rules.isNotEmpty()) {
-            rules.entries.sortedBy { labels[it.key] ?: it.key }.forEach { (pkg, rule) ->
-                val isFin = com.kilon.agentvscreen.core.FinanceApps.isFinancial(pkg)
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MiuixTheme.colorScheme.surfaceContainerHigh)
-                        .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(labels[pkg] ?: pkg, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            "${rule.zh} · $pkg", fontSize = 12.sp,
-                            color = if (rule == VScreenStore.Rule.BLOCK) MiuixTheme.colorScheme.error else MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    LinkButton(onClick = {
-                        val cycle = if (isFin) VScreenStore.Rule.entries else VScreenStore.Rule.RESTRICTIONS
-                        val next = cycle[(cycle.indexOf(rule).coerceAtLeast(0) + 1) % cycle.size]
-                        applyRule(pkg, next)
-                    }) { Text(tr("换一种", "Change")) }
-                    LinkButton(onClick = { VScreenStore.setRule(pkg, null) }) { Text(if (isFin) tr("恢复默认", "Default") else tr("移除", "Remove")) }
+        rules.entries.sortedBy { labels[it.key] ?: it.key }.forEach { (pkg, rule) ->
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MiuixTheme.colorScheme.surfaceContainerHigh)
+                    .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(labels[pkg] ?: pkg, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        "${rule.zh} · $pkg", fontSize = 12.sp,
+                        color = if (rule == VScreenStore.Rule.BLOCK) MiuixTheme.colorScheme.error else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
                 }
-            }
-        }
-        if (installedFinanceDefaults.isNotEmpty()) {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                tr("默认每次确认（金融与支付类）", "Ask every time by default (Finance & payment)"),
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            )
-            installedFinanceDefaults.forEach { (label, pkg) ->
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(MiuixTheme.colorScheme.surfaceContainerHigh)
-                        .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(label, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(
-                            "${tr("默认每次确认", "Default confirm every time")} · $pkg",
-                            fontSize = 12.sp,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    LinkButton(onClick = { applyRule(pkg, VScreenStore.Rule.BLOCK) }) { Text(tr("禁止", "Block")) }
-                    LinkButton(onClick = { applyRule(pkg, VScreenStore.Rule.ALLOW) }) { Text(tr("允许", "Allow")) }
-                }
+                LinkButton(onClick = {
+                    val all = VScreenStore.Rule.values()
+                    VScreenStore.setRule(pkg, all[(all.indexOf(rule) + 1) % all.size])
+                }) { Text(tr("换一种", "Change")) }
+                LinkButton(onClick = { VScreenStore.setRule(pkg, null) }) { Text(tr("移除", "Remove")) }
             }
         }
     }
     SoftButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) { Text(tr("添加应用", "Add app")) }
 
     if (adding) AddRuleDialog(apps, rules.keys, onDismiss = { adding = false }) { pkg, rule ->
-        applyRule(pkg, rule)
+        VScreenStore.setRule(pkg, rule)
         adding = false
     }
 }

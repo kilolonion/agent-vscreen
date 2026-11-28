@@ -160,22 +160,6 @@ fun OverviewTab(bottom: Dp) {
         IconButton(onClick = { shield = true }, modifier = Modifier.padding(end = 12.dp)) { Icon(Icons.Filled.PowerSettingsNew, tr("服务", "Service")) }
     }) {
         NeedsGroup()
-        val publicOn by com.kilon.agentvscreen.host.PublicAccess.enabledFlow.collectAsState()
-        if (publicOn) {
-            Card(
-                Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth().clickable { nav.go(Route.PublicAccess) },
-                insideMargin = PaddingValues(16.dp),
-            ) {
-                Text(tr("公网接入已开启 · 输入配对码", "Public access is on · Enter pairing code"), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                Text(
-                    tr("外部连接不会自动弹窗；要批准新客户端时，点这里输入 8 位配对码。", "Incoming requests never pop up automatically; tap here to enter an 8-character pairing code."),
-                    fontSize = 13.sp,
-                    lineHeight = 19.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
-            }
-        }
-
         val stage = @Composable { m: Modifier ->
             AnimatedContent(home, modifier = m, transitionSpec = { fadeIn(tween(260)) togetherWith fadeOut(tween(200)) }, label = "stage") { h ->
                 Box(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {

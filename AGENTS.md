@@ -123,5 +123,5 @@ Entry 的语义必须来自模型对真实证据的理解。不得仅依据路�
    - 单个源码文件建议控制在 `<= 800` 行；持久性架构决策记录在 `docs/decisions/ADR-NNN-*.md` 或对应模块注释中，避免散落一次性版本号注释。
 6. **发版安全红线**：
    - `app/src/debug/` 测试钩子与 `x86_64` 原生库绝不得进入 release APK（`tools/android-smoke/check_abis.sh` 与 `tools/android-smoke/check_release_hooks.sh` 守门）。
-   - CI 构建阶段只产出未签名 APK（`-PavsUnsignedRelease=true`），不接触签名私钥；签名发布仅在 `environment: release` 人工审批后执行且校验官方证书 SHA-256。
+   - CI 构建阶段只产出未签名 APK（`-PavsUnsignedRelease=true`），不接触签名私钥；签名发布只在 `environment: release` 中执行（该环境只对 `v*` 标签开放，用来隔离签名密钥，不设人工审批），并校验官方证书 SHA-256。
 

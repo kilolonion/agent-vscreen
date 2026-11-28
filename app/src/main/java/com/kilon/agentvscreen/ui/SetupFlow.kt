@@ -150,15 +150,6 @@ fun SetupFlowPage() {
                             )
                         }
                     }
-                    if (step.key == "privilege" && !root && api37Plus) {
-                        Text(
-                            tr("Android 17+ 上官方 Shizuku 可能受限，可使用兼容分支（如 AXManager / Sui）或直接改用 Root。",
-                                "On Android 17+, official Shizuku may be limited; compatible forks (such as AXManager / Sui) or Root are supported."),
-                            fontSize = 12.sp,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            textAlign = TextAlign.Center,
-                        )
-                    }
                     if (step.key == "privilege") Row(verticalAlignment = Alignment.CenterVertically) {
                         if (root) {
                             LinkButton(onClick = { choose(com.kilon.agentvscreen.host.Privileged.Via.SHIZUKU) }) {
