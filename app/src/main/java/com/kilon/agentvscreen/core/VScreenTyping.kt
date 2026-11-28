@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.S
+import com.kilon.agentvscreen.trPair
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -150,7 +152,7 @@ object VScreenTyping {
         if (tappedAt != null && nbRaw != null && nb != null && focusBefore != null && focusBefore == "${node.viewIdResourceName}@${nbRaw.left},${nbRaw.top},${nbRaw.right},${nbRaw.bottom}") {
             val slack = Rect(nb).apply { inset(-24, -24) }
             if (!slack.contains(tappedAt.first, tappedAt.second)) throw ActionError("FOCUS_ELSEWHERE",
-                tr("没有输入：有焦点的输入框在 [${nb.left},${nb.top},${nb.right},${nb.bottom}]" + (nid?.let { "（$it）" } ?: "") +
+                trPair("没有输入：有焦点的输入框在 [${nb.left},${nb.top},${nb.right},${nb.bottom}]" + (nid?.let { "（$it）" } ?: "") +
                     "，不是你刚点的 (${tappedAt.first},${tappedAt.second})。你点的地方可能不是输入框（网页格子、画布），或者它没拿到焦点：" +
                     "看【现在】里哪个元素是“可输入”，或换一种操作（如点屏幕上的数字键）",
                     "Nothing typed: the focused input box is at [${nb.left},${nb.top},${nb.right},${nb.bottom}]" + (nid?.let { " ($it)" } ?: "") +
@@ -163,9 +165,9 @@ object VScreenTyping {
         // Reading the box took time (up to 300 ms more): ask again right before writing into it.
         Control.admitInput()
         val method = when {
-            node != null && svc!!.setNodeText(node, if (append) before + text else text) -> { wrote = true; tr("无障碍写入", "accessibility write") }
+            node != null && svc!!.setNodeText(node, if (append) before + text else text) -> { wrote = true; tr(S.vscreen_typing_accessibility_write) }
             a11yOnly -> return TypeFact(
-                method = tr("无障碍写入", "accessibility write"),
+                method = tr(S.vscreen_typing_accessibility_write),
                 field = null,
                 bounds = nb,
                 fieldId = nid,
@@ -176,15 +178,13 @@ object VScreenTyping {
             text.all { it.code in 32..126 } -> {
                 val r = VScreenShell.typeKeys(displayId, text)
                 if (!r.ok) throw ActionError(r.code, r.message)
-                tr("按键注入", "key injection")
+                tr(S.vscreen_typing_key_injection)
             }
             // 2.0.0-beta12 (test F3: `type 蓝牙` with no box focused wrote the user's clipboard, which the background
             // cannot read back): when the screen can be read and no box has focus, nothing would take the paste; the
             // user's clipboard is not touched for it.
-            a11y && node == null -> throw ActionError("TYPE_FAILED", tr(
-                "没有输入：画面上没有获得焦点的输入框（这段字要走剪贴板，没有框接收时不动用户的剪贴板）。先点输入框，等【现在】里标“有焦点”再 type",
-                "Nothing typed: no input box has focus (this text would go through the clipboard, and the user's clipboard is not touched when nothing would take it). Tap the input box first and type once [Now] marks it \"focused\""))
-            else -> { pasteText(displayId, text); tr("剪贴板粘贴", "clipboard paste") }
+            a11y && node == null -> throw ActionError("TYPE_FAILED", tr(S.vscreen_typing_nothing_typed_no_input_box))
+            else -> { pasteText(displayId, text); tr(S.vscreen_typing_clipboard_paste) }
         }
         if (!a11y) return TypeFact(method, null, null, null, checked = false, viaA11y = wrote)
         // 1.2.0-beta2: wait until the field shows the text (at most 2 s) instead of reading it once after a fixed
@@ -239,7 +239,7 @@ object VScreenTyping {
             latch.countDown()
         }
         latch.await(2, TimeUnit.SECONDS)
-        if (!clipOk) throw ActionError("TYPE_FAILED", tr("无法写入剪贴板", "Cannot write the clipboard"))
+        if (!clipOk) throw ActionError("TYPE_FAILED", tr(S.vscreen_typing_cannot_write_the_clipboard))
         // 1.4.0-beta14 (test K6: the paste key did nothing in a web page, while ctrl+v there worked): paste with
         // ctrl+v, the shortcut every text box handles (native boxes too); the paste key only when that cannot be sent.
         // 1.4.2-beta6: the clipboard is put back whatever happens to the paste (it is refused once the user takes over).
@@ -259,7 +259,6 @@ object VScreenTyping {
             restore.countDown()
         }
         restore.await(2, TimeUnit.SECONDS)
-        return tr("clipboard paste（剪贴板：${when (how) { "restored" -> "已恢复原内容"; "cleared" -> "已清空（系统不让后台读取原内容，无法恢复）"; else -> "未能清理" }}）",
-            "clipboard paste (clipboard: ${when (how) { "restored" -> "original content restored"; "cleared" -> "cleared (the system does not let the background read the original, so it cannot be restored)"; else -> "could not be cleaned" }})")
+        return tr(S.vscreen_typing_clipboard_paste_clipboard, when (how) { "restored" -> "已恢复原内容"; "cleared" -> "已清空（系统不让后台读取原内容，无法恢复）"; else -> "未能清理" }, when (how) { "restored" -> "original content restored"; "cleared" -> "cleared (the system does not let the background read the original, so it cannot be restored)"; else -> "could not be cleaned" })
     }
 }

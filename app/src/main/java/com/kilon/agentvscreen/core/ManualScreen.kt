@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import com.kilon.agentvscreen.host.AppLogger
 import com.kilon.agentvscreen.tr
@@ -26,10 +27,10 @@ object ManualScreen {
     /** Open [pkg] on the background screen for the user. Network-free but slow (launch waits for the picture): call off the main thread. */
     fun open(ctx: Context, pkg: String): Result<String> = runCatching {
         val s = BackgroundOperation.state.value
-        if (!s.enabled) error(tr("服务关着：先在首页打开服务", "The service is off: turn it on on the home page first"))
+        if (!s.enabled) error(tr(S.manual_screen_the_service_is_off_turn))
         val owner = s.ownerSessionId
         if (s.displayId != null && owner != null && owner != SESSION && BackgroundOperation.isTaskActive(owner))
-            error(tr("agent 正在用副屏，等它这一轮结束，或先按“接管”", "An agent is using the screen; wait for its turn to end, or tap Take over first"))
+            error(tr(S.manual_screen_an_agent_is_using_the))
         BackgroundOperation.onTaskStarted(SESSION)
         val t0 = System.currentTimeMillis()
         try {
@@ -40,7 +41,7 @@ object ManualScreen {
             // A task like an agent's: the home page and the task list show this one, not the agent's before it.
             TaskLog.onCommand(SESSION, TOKEN, listOf("launch", pkg), "OK", 0, System.currentTimeMillis() - t0, facts)
             AppLogger.info("ManualScreen", "user opened $pkg: $facts")
-            tr("已在副屏打开 ${label(ctx, pkg)}", "Opened ${label(ctx, pkg)} on the background screen")
+            tr(S.manual_screen_opened_on_the_background_screen, label(ctx, pkg))
         } catch (t: Throwable) {
             BackgroundOperation.onTaskFinished(SESSION)
             throw t

@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import android.graphics.BitmapFactory
 import android.os.Bundle
 import androidx.activity.compose.setContent
@@ -99,8 +100,8 @@ class AskActivity : PageActivity() {
     private fun Gone() = Column(Modifier.fillMaxSize().statusBarsPadding().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally) {
         AskMark(48f, alpha = 0.5f)
-        Text(tr("这个问题已经回答过或过期了", "This question was already answered or has expired"), fontSize = 16.sp, fontWeight = FontWeight.Medium)
-        Button(onClick = { back() }) { Text(tr("关闭", "Close")) }
+        Text(tr(S.ask_activity_this_question_was_already_answered), fontSize = 16.sp, fontWeight = FontWeight.Medium)
+        Button(onClick = { back() }) { Text(tr(S.ask_activity_close)) }
     }
 
     private fun send(a: UserAsk.Ask, reply: JSONObject?) {
@@ -152,9 +153,9 @@ class AskActivity : PageActivity() {
                 Column(Modifier.weight(1f)) {
                     Text(AskWords.who(a), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     @Suppress("UNUSED_EXPRESSION") now
-                    Text(tr("会话 ${a.session} · 还剩 ${AskWords.left(a, now)}", "Session ${a.session} · ${AskWords.left(a, now)} left"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(tr(S.ask_activity_session_left, a.session, AskWords.left(a, now)), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                IconButton(onClick = { back() }) { Icon(Icons.Filled.Close, tr("稍后回答", "Answer later")) }
+                IconButton(onClick = { back() }) { Icon(Icons.Filled.Close, tr(S.ask_activity_answer_later)) }
             }
 
             Column(
@@ -169,13 +170,13 @@ class AskActivity : PageActivity() {
                 when (a.kind) {
                     UserAsk.Kind.POINT, UserAsk.Kind.AREA -> {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (a.kind == UserAsk.Kind.POINT) tr("点击画面中的目标位置", "Tap the target on the screen")
-                                else tr("在画面上拖出一个框", "Drag a box on the picture"), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                            Text(if (a.kind == UserAsk.Kind.POINT) tr(S.ask_activity_tap_the_target_on_the)
+                                else tr(S.ask_activity_drag_a_box_on_the), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
                             if (point != null || boxA != null) TextButton(onClick = { point = null; boxA = null; boxB = null }) {
-                                Icon(Icons.Filled.Refresh, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text(tr("重新选择", "Reselect"))
+                                Icon(Icons.Filled.Refresh, null, Modifier.size(16.dp)); Spacer(Modifier.width(4.dp)); Text(tr(S.ask_activity_reselect))
                             }
                         }
-                        if (bmp == null) Text(tr("无法获取画面", "Screen unavailable"), color = MaterialTheme.colorScheme.error)
+                        if (bmp == null) Text(tr(S.ask_activity_screen_unavailable), color = MaterialTheme.colorScheme.error)
                         else Box(
                             Modifier.fillMaxWidth().padding(horizontal = 24.dp).shadow(16.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp))
                                 .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(20.dp))
@@ -204,7 +205,7 @@ class AskActivity : PageActivity() {
                     UserAsk.Kind.CHOOSE -> a.options.forEachIndexed { i, o -> OptionRow(i, o, selected = picked == i) { picked = i } }
                     UserAsk.Kind.CONFIRM -> {}
                     else -> OutlinedTextField(text, { text = it.take(500) }, Modifier.fillMaxWidth(), minLines = 4,
-                        placeholder = { Text(tr("写下你的回答", "Write your answer")) },
+                        placeholder = { Text(tr(S.ask_activity_write_your_answer)) },
                         supportingText = { Text("${text.length}/500") }, shape = RoundedCornerShape(18.dp))
                 }
             }
@@ -213,16 +214,16 @@ class AskActivity : PageActivity() {
             Row(Modifier.fillMaxWidth().glassSheet(RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)).padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = { send(a, null) }) { Text(when (a.kind) {
-                    UserAsk.Kind.CHOOSE -> tr("以上都不是 / 不回答", "None / decline")
-                    UserAsk.Kind.CONFIRM -> tr("拒绝", "Deny")
-                    else -> tr("不回答", "Decline")
+                    UserAsk.Kind.CHOOSE -> tr(S.ask_activity_none_decline)
+                    UserAsk.Kind.CONFIRM -> tr(S.ask_activity_deny)
+                    else -> tr(S.ask_activity_decline)
                 }) }
                 Spacer(Modifier.weight(1f))
                 Button(enabled = ready, onClick = { if (a.kind == UserAsk.Kind.CONFIRM) { UserAsk.answer(this@AskActivity, a.id, true, null); back() } else send(a, reply()) }, modifier = Modifier.height(48.dp)) {
                     Text(when (a.kind) {
-                        UserAsk.Kind.POINT, UserAsk.Kind.AREA -> tr("选择此处", "Select here")
-                        UserAsk.Kind.CONFIRM -> tr("允许", "Allow")
-                        else -> tr("发送", "Send")
+                        UserAsk.Kind.POINT, UserAsk.Kind.AREA -> tr(S.ask_activity_select_here)
+                        UserAsk.Kind.CONFIRM -> tr(S.ask_activity_allow)
+                        else -> tr(S.ask_activity_send)
                     }, fontWeight = FontWeight.SemiBold)
                 }
             }

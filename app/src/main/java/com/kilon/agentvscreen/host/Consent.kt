@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import com.kilon.agentvscreen.cmd.Call
 import com.kilon.agentvscreen.core.BackgroundOperation.ActionError
@@ -61,8 +62,7 @@ object Consent {
         if (act == com.kilon.agentvscreen.api.Policy.Act.DENY) {
             Audit.consent(name, session, "$title — $detail", "not allowed")
             val row = com.kilon.agentvscreen.api.Policy.row(kind)?.title ?: kind
-            throw ActionError("SCOPE_DENIED", tr("用户给这个 agent 定的规则里，“$row”是不允许：$title 没有做。不要换别的办法绕过；需要的话请用户在 Agent-VScreen › 接入 › 这个 agent 里改",
-                "The user's rules for this agent say \"$row\" is not allowed: $title was not done. Don't work around it; if needed, ask the user to change it in Agent-VScreen › Connect › this agent"))
+            throw ActionError("SCOPE_DENIED", tr(S.consent_the_user_s_rules_for, row, title))
         }
         // "Payments allowed for a while" (the agent page) passes payments only, as its card says. 2.0.0-beta11 (review):
         // it used to pass every class, so an irreversible step set to ask went through without asking too.

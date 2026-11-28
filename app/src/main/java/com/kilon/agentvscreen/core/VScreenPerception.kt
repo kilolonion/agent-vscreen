@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.graphics.Bitmap
@@ -311,7 +312,7 @@ object VScreenPerception {
     // are the page's words and stay listed.
     internal fun still(items: List<VScreenOcr.Item>, mask: Mask?): List<VScreenOcr.Item> = if (mask == null || mask.mostly) items else items.filter { !mask.coversMostOf(it.box) }
 
-    fun engine(displayId: Int): String? = watcher(displayId)?.let { it.ocrEngine + if (it.ocrMs > 0) tr("（约 ${it.ocrMs}ms/次）", " (about ${it.ocrMs}ms each)") else "" }
+    fun engine(displayId: Int): String? = watcher(displayId)?.let { it.ocrEngine + if (it.ocrMs > 0) tr(S.vscreen_perception_about_ms_each, it.ocrMs) else "" }
 
     /** The words of one reading: OCR lines (no junk) + accessibility texts, trimmed, one each by normalised form. */
     internal fun wordsOf(items: List<VScreenOcr.Item>, a11y: List<String>): List<String> =

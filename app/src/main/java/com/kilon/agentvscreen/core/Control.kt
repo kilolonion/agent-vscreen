@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.cmd.Call
 import com.kilon.agentvscreen.core.BackgroundOperation.ActionError
 import com.kilon.agentvscreen.tr
@@ -75,10 +76,8 @@ object Control {
 
     fun message(code: String): String = when (code) {
         "USER_STOPPED" -> BackgroundOperation.userStoppedMessage()
-        "USER_TAKEOVER" -> tr("用户接管了副屏，这一步没有做（之后的步骤也不会做）。停下来告诉用户，等用户交还后先看一眼画面再继续",
-            "The user took over the screen; this step was not done (and the steps after it won't be). Stop and tell the user; once the user hands it back, look at the screen before going on")
-        "CONTROL_CHANGED" -> tr("这条命令执行期间用户接管或停止过副屏，页面可能已经变了，剩下的动作没有做。先看一眼现在的画面（act 不带步骤），再按新画面重发",
-            "The user took over or stopped the screen while this command ran, so the page may have changed; the rest of its actions were not done. Look at the screen now (act with no steps), then send what is still needed for the page you see")
+        "USER_TAKEOVER" -> tr(S.control_the_user_took_over_the)
+        "CONTROL_CHANGED" -> tr(S.control_the_user_took_over_or)
         else -> code
     }
 

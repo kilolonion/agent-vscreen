@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 import org.json.JSONObject
 
@@ -217,7 +218,7 @@ internal object PageBook {
         return activity?.substringAfterLast('.')?.substringAfterLast('/')
             ?.let { ScreenText.clean(it, maxLen = 32) }
             ?.takeIf { it.isNotBlank() }
-            ?: tr("页面", "Page")
+            ?: tr(S.page_book_page)
     }
 
     fun cards(sid: String): List<Card> = synchronized(books) { books[sid]?.cards?.values?.toList().orEmpty() }

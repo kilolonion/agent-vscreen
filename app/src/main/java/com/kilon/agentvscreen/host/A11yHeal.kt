@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.content.Context
@@ -33,7 +34,7 @@ object A11yHeal {
     fun onLost(ctx: Context) {
         if (healedAt > 0 && SystemClock.elapsedRealtime() - healedAt < USER_OFF_WINDOW_MS) {
             p(ctx).edit().putBoolean("a11y_user_off", true).apply()
-            lastResult = tr("无障碍刚自动打开又被关掉了：当作你不想开，不再自动打开（首页“一键配置”可再开）", "Accessibility was turned off right after being turned on automatically: taken as your choice, so it won't be turned on again (Set up the rest on the home page can turn it on)")
+            lastResult = tr(S.a11y_heal_accessibility_was_turned_off_right)
             AppLogger.info("A11yHeal", "turned off again after heal: stop healing")
         }
     }
@@ -46,10 +47,10 @@ object A11yHeal {
         if (lastTry != 0L && now - lastTry < MIN_GAP_MS) return
         lastTry = now
         Thread {
-            val (ok, msg) = runCatching { Heal.accessibility(ctx) }.getOrElse { false to tr("无障碍：${it.message}", "Accessibility: ${it.message}") }
+            val (ok, msg) = runCatching { Heal.accessibility(ctx) }.getOrElse { false to tr(S.a11y_heal_accessibility, it.message) }
             lastResult = msg
             if (ok) healedAt = SystemClock.elapsedRealtime()
-            else if (msg.contains(tr("没连上", "did not connect")) || msg.contains(tr("写系统设置失败", "writing system settings failed"))) p(ctx).edit().putBoolean("a11y_blocked", true).apply()
+            else if (msg.contains(tr(S.a11y_heal_did_not_connect)) || msg.contains(tr(S.a11y_heal_writing_system_settings_failed))) p(ctx).edit().putBoolean("a11y_blocked", true).apply()
             AppLogger.info("A11yHeal", "$why: $msg")
         }.apply { isDaemon = true; name = "a11y-heal" }.start()
     }

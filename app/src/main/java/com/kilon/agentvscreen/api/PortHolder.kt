@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import com.kilon.agentvscreen.core.VScreenShell
 import com.kilon.agentvscreen.tr
@@ -56,12 +57,12 @@ object PortHolder {
         val uid = uidIn(table, port) ?: return null
         if (isOwnGate(uid, port, currentGatePort())) return null
         val user = uid / 100_000
-        if (uid % 100_000 < 10_000) return tr("系统服务（uid $uid）", "a system service (uid $uid)")
+        if (uid % 100_000 < 10_000) return tr(S.port_holder_a_system_service_uid, uid)
         val pkg = firstPackageForUid(uid)
         val me = android.os.Process.myUid() / 100_000
-        if (pkg == ctx.packageName) return if (user != me) tr("分身或平行空间（用户 $user）里的 Agent-VScreen", "Agent-VScreen in a parallel space or clone (user $user)")
-            else tr("本 App 还没退出的旧进程", "an old process of this app that has not exited yet")
+        if (pkg == ctx.packageName) return if (user != me) tr(S.port_holder_agent_vscreen_in_a_parallel, user)
+            else tr(S.port_holder_an_old_process_of_this)
         val label = pkg?.let { p -> runCatching { ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(p, 0)).toString() }.getOrNull() ?: p }
-        return (label ?: "uid $uid") + if (user != me) tr("（用户 $user）", " (user $user)") else ""
+        return (label ?: "uid $uid") + if (user != me) tr(S.port_holder_user, user) else ""
     }
 }

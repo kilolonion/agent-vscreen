@@ -69,7 +69,7 @@ class AbilitiesTest {
     // ── generated files ──────────────────────────────────────────────
 
     private fun block(): String {
-        fun list(): String = Abilities.all.joinToString("\n") { "- **" + it.whenText + "**" + com.kilon.agentvscreen.tr("：", ": ") + it.can }
+        fun list(): String = Abilities.all.joinToString("\n") { "- **" + it.whenText + "**" + com.kilon.agentvscreen.trPair("：", ": ") + it.can }
         I18n.choice = I18n.Lang.ZH; val zh = list()
         I18n.choice = I18n.Lang.EN; val en = list()
         I18n.choice = I18n.Lang.ZH

@@ -106,8 +106,8 @@ jobs:
       - name: AOCI index covers all main Kotlin sources
         run: python3 tools/ci/check_aoci_coverage.py
 
-      - name: Japanese table matches the UI texts
-        run: python3 tools/i18n/build_ja.py --check
+      - name: Text table complete in every language
+        run: python3 tools/i18n/strings.py --check
 
       - name: Eval runner & compare unit tests
         run: python3 -m unittest discover -s tools/eval -p "test_*.py" -v

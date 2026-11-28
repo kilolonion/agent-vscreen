@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.content.Context
@@ -54,8 +55,8 @@ internal object VScreenShell {
     fun launch(displayId: Int, pkg: String, activity: String?, mode0: LaunchMode = LaunchMode.ROOT, intent: List<String>? = null): Outcome {
         Control.admitInput()
         val clean = pkg.trim()
-        if (clean.isEmpty()) return fail("INVALID_ARGS", tr("缺少包名", "Missing package name"))
-        if (!PackageNames.isValid(clean)) return fail("INVALID_ARGS", tr("无效的应用包名：$clean", "Invalid package name: $clean"))
+        if (clean.isEmpty()) return fail("INVALID_ARGS", tr(S.vscreen_display_service_missing_package_name))
+        if (!PackageNames.isValid(clean)) return fail("INVALID_ARGS", tr(S.vscreen_open_commands_invalid_package_name, clean))
         // v22 传送门: with an explicit intent (deep link / shortcut / learned page) the app is
         // always opened in a fresh task on the background screen (never "keep").
         val mode = if (intent != null && mode0 == LaunchMode.KEEP) LaunchMode.ROOT else mode0
@@ -63,21 +64,21 @@ internal object VScreenShell {
         if (mode == LaunchMode.KEEP) {
             val target = explicit?.substringBefore('/') ?: clean
             val tasks = VScreenHandoff.tasksOrNull(displayId) ?: return fail("LAUNCH_FAILED",
-                tr("无法读取副屏任务列表，不能安全切换 $target", "Cannot read the screen's task list to safely switch to $target"))
+                tr(S.vscreen_shell_cannot_read_the_screen_s, target))
             tasks.firstOrNull { it.pkg == target }?.let { task ->
                 return if (bringToFront(displayId, task.taskId))
-                    ok(tr("已切到副屏 $displayId 上的 $target（保持当前页面）", "Switched to $target on screen $displayId (current page kept)"))
-                else fail("LAUNCH_NOT_ON_TOP", tr("系统没有把 $target 的任务切到副屏前台", "The system did not bring $target's task to the front of the screen"))
+                    ok(tr(S.vscreen_shell_switched_to_on_screen_current, displayId, target))
+                else fail("LAUNCH_NOT_ON_TOP", tr(S.vscreen_shell_the_system_did_not_bring, target))
             }
         }
         val component: String = explicit ?: (if (intent != null) "" else resolveLauncher(clean))
-            ?: return fail("APP_NOT_FOUND", tr("找不到 $clean 的启动入口（未安装，或没有桌面图标）", "No launch entry for $clean (not installed, or no launcher icon)"))
+            ?: return fail("APP_NOT_FOUND", tr(S.vscreen_shell_no_launch_entry_for_not, clean))
         val targetPkg = if (component.isEmpty()) clean else component.substringBefore('/')
         val what = if (intent != null) intent.joinToString(" ") else component
         var prefix = ""
         if (mode == LaunchMode.RESTART) {
             val r = run(arrayOf("am", "force-stop", targetPkg), 8_000L)
-            prefix = if (r.exitCode == 0) tr("已结束 $targetPkg 并冷启动；", "Stopped $targetPkg and cold-started it; ") else tr("结束 $targetPkg 失败（${r.combined.take(80)}），仍尝试启动；", "Stopping $targetPkg failed (${r.combined.take(80)}), starting anyway; ")
+            prefix = if (r.exitCode == 0) tr(S.vscreen_shell_stopped_and_cold_started_it, targetPkg) else tr(S.vscreen_shell_stopping_failed_starting_anyway, targetPkg, r.combined.take(80))
             Thread.sleep(300)
         } else if (mode == LaunchMode.ROOT) {
             val taskId = taskIdOn(displayId, targetPkg)
@@ -86,8 +87,8 @@ internal object VScreenShell {
                 // (the app keeps running, the user's copy on the main screen is
                 // untouched), then start a fresh task below.
                 val removed = VScreenRemoteDisplay.removeTask(taskId, displayId)
-                prefix = if (removed.getOrNull() == true) { Thread.sleep(250); tr("已关闭副屏上的旧页面栈，", "Closed the old page stack on the screen, ") }
-                else tr("无法关闭旧页面栈（", "Could not close the old page stack (") + (removed.exceptionOrNull()?.message ?: tr("系统拒绝", "refused by the system")) + tr("），新开一个任务，", "), opening a new task, ")
+                prefix = if (removed.getOrNull() == true) { Thread.sleep(250); tr(S.vscreen_shell_closed_the_old_page_stack) }
+                else tr(S.vscreen_shell_could_not_close_the_old) + (removed.exceptionOrNull()?.message ?: tr(S.vscreen_shell_refused_by_the_system)) + tr(S.vscreen_shell_opening_a_new_task)
             }
         }
         // --windowingMode 1 = fullscreen on the target display. -W waits for the launch.
@@ -98,8 +99,7 @@ internal object VScreenShell {
         // 1.4.2-beta6: the start is a task of its own (MULTIPLE_TASK). When the user has the app open in front on the
         // main screen, the reply says that copy was not taken over (a tester read "launched" as "got the user's app").
         val userHasIt = runCatching { topPackage(0) == targetPkg }.getOrDefault(false)
-        val separate = if (userHasIt) tr("（用户主屏上开着的 $targetPkg 没有动：这是在副屏另开的一份，从它自己的首页开始，主屏那份的页面和进度不在这里）",
-            " (the $targetPkg open in front on the user's main screen was not touched: this is a separate copy on the background screen, starting from its own first page; the main screen's page and progress are not here)") else ""
+        val separate = if (userHasIt) tr(S.vscreen_shell_the_open_in_front_on, targetPkg) else ""
         val argv = arrayOf(
             "am", "start", "-W", "--display", displayId.toString(),
             "--windowingMode", "1", "-f", "0x18000000",
@@ -111,10 +111,10 @@ internal object VScreenShell {
         val out = r.combined.trim()
         if (r.exitCode != 0 || out.contains("Error") || out.contains("Status: error")) {
             if (intent != null && (out.contains("Permission Denial") || out.contains("not exported")))
-                return fail("PORTAL_DENIED", tr("系统不允许从外部直接打开这个页面（$what）：${out.take(200)}。它是应用内部页面，只能从应用里点进去", "The system does not allow opening this page from outside ($what): ${out.take(200)}. It is an internal page; reach it by tapping inside the app"))
+                return fail("PORTAL_DENIED", tr(S.vscreen_shell_the_system_does_not_allow, what, out.take(200)))
             if (intent != null && (out.contains("unable to resolve") || out.contains("Unable to resolve")))
-                return fail("PORTAL_UNRESOLVED", tr("$targetPkg 不接受这个入口（$what）：没有页面能处理它。换一个入口，或从首页点进去", "$targetPkg does not accept this entry ($what): no page handles it. Use another entry, or tap your way from its home page"))
-            return fail("LAUNCH_FAILED", tr("在副屏 $displayId 启动 $what 失败：", "Starting $what on screen $displayId failed: ") + out.ifBlank { "exit=${r.exitCode}" })
+                return fail("PORTAL_UNRESOLVED", tr(S.vscreen_shell_does_not_accept_this_entry, targetPkg, what))
+            return fail("LAUNCH_FAILED", tr(S.vscreen_shell_starting_on_screen_failed, displayId, what) + out.ifBlank { "exit=${r.exitCode}" })
         }
         // Verify where it actually landed: on an untrusted display the system
         // quietly redirects the launch to the main screen and still says OK.
@@ -122,17 +122,17 @@ internal object VScreenShell {
         for (i in 0 until 6) {
             Thread.sleep(300)
             top = topPackage(displayId)
-            if (top == targetPkg) return ok((if (intent != null) tr("${prefix}已在副屏 $displayId 直接打开 $what", "${prefix}opened $what directly on screen $displayId") else tr("${prefix}已在副屏 $displayId 启动 $component（首页）", "${prefix}started $component (home page) on screen $displayId")) + separate)
+            if (top == targetPkg) return ok((if (intent != null) tr(S.vscreen_shell_opened_directly_on_screen, prefix, displayId, what) else tr(S.vscreen_shell_started_home_page_on_screen, prefix, displayId, component)) + separate)
         }
         // Not when it was already there before this launch: then it says nothing about where this start went.
         val onMain = !userHasIt && topPackage(0) == targetPkg
         return if (onMain) {
-            val why = VScreenDisplay.lastRemoteError?.let { tr("（Shizuku 副屏服务不可用：$it，只能用 App 自建副屏，系统不允许 shell 往上启动应用）", " (Shizuku screen service unavailable: $it; only the app's own screen can be used, and the system does not let the shell start apps on it)") } ?: ""
-            fail("LAUNCHED_ON_MAIN_SCREEN", tr("系统把 $targetPkg 开到了主屏，而不是副屏 $displayId$why。不要在主屏上继续操作，请告诉用户。", "The system opened $targetPkg on the main screen instead of screen $displayId$why. Do not go on operating the main screen; tell the user."))
+            val why = VScreenDisplay.lastRemoteError?.let { tr(S.vscreen_shell_shizuku_screen_service_unavailable_only, it) } ?: ""
+            fail("LAUNCHED_ON_MAIN_SCREEN", tr(S.vscreen_shell_the_system_opened_on_the, targetPkg, displayId, why))
         } else if (top == null) {
-            ok(tr("已请求在副屏 $displayId 启动 $what（无法确认副屏顶部应用，请用 look 核实）", "Asked to start $what on screen $displayId (cannot confirm the top app on the screen; check with look)"))
+            ok(tr(S.vscreen_shell_asked_to_start_on_screen, displayId, what))
         } else {
-            fail("LAUNCH_NOT_ON_TOP", tr("副屏 $displayId 顶部是 $top，不是 $targetPkg；请用 look 看一眼副屏", "The top of screen $displayId is $top, not $targetPkg; look at the screen"))
+            fail("LAUNCH_NOT_ON_TOP", tr(S.vscreen_shell_the_top_of_screen_is, displayId, top, targetPkg))
         }
     }
 
@@ -202,16 +202,16 @@ internal object VScreenShell {
      * effect at the app's next start. Best effort; returns what each step said.
      */
     fun disableDownscale(pkg: String): String {
-        if (!PackageNames.isValid(pkg)) return tr("无效的应用包名：$pkg", "Invalid package name: $pkg")
+        if (!PackageNames.isValid(pkg)) return tr(S.vscreen_open_commands_invalid_package_name, pkg)
         fun step(label: String, argv: Array<String>): String {
             val r = run(argv, 8_000L)
             val msg = r.combined.trim().lines().firstOrNull { it.isNotBlank() }?.take(120)
-            return "$label: " + if (r.exitCode == 0) (msg ?: "ok") else tr("失败", "failed") + " (${msg ?: "exit ${r.exitCode}"})"
+            return "$label: " + if (r.exitCode == 0) (msg ?: "ok") else tr(S.fullscreen_activity_failed) + " (${msg ?: "exit ${r.exitCode}"})"
         }
         return listOf(
             step("am compat disable DOWNSCALED", arrayOf("am", "compat", "disable", "DOWNSCALED", pkg)),
             step("cmd game set --downscale disable", arrayOf("cmd", "game", "set", "--downscale", "disable", pkg)),
-        ).joinToString(tr("；", "; "))
+        ).joinToString(tr(S.agent_guide_sep))
     }
 
     /** Undo [disableDownscale]. */
@@ -252,12 +252,12 @@ internal object VScreenShell {
      * and any page of it on the main screen are left alone. Null when the task cannot be found.
      */
     fun closeOnDisplay(displayId: Int, pkg: String?): Outcome? {
-        val target = pkg?.trim()?.takeIf { it.isNotEmpty() } ?: topPackage(displayId) ?: return ok(tr("副屏 $displayId 上没有应用", "No app on screen $displayId"))
+        val target = pkg?.trim()?.takeIf { it.isNotEmpty() } ?: topPackage(displayId) ?: return ok(tr(S.vscreen_shell_no_app_on_screen, displayId))
         val task = taskIdOn(displayId, target) ?: return null
         // v27: never a task the main screen lists (the v26 field test closed Minis' own main task this way).
-        if (displayId == 0 || VScreenHandoff.tasksOn(0).any { it.taskId == task }) return fail("MAIN_SCREEN_TASK", tr("$target 的这个任务在主屏上，不在副屏，没有关闭", "This task of $target is on the main screen, not the background screen; not closed"))
+        if (displayId == 0 || VScreenHandoff.tasksOn(0).any { it.taskId == task }) return fail("MAIN_SCREEN_TASK", tr(S.vscreen_shell_this_task_of_is_on, target))
         val r = VScreenRemoteDisplay.removeTask(task, displayId)
-        return if (r.getOrNull() == true) ok(tr("已关闭副屏上的 $target（只移除副屏里的这个任务，应用进程和主屏上的页面不受影响）", "Closed $target on the screen (only this task on the screen was removed; the app process and its pages on the main screen are untouched)")) else null
+        return if (r.getOrNull() == true) ok(tr(S.vscreen_shell_closed_on_the_screen_only, target)) else null
     }
 
     /**
@@ -271,11 +271,11 @@ internal object VScreenShell {
     /** Force-stop [pkg] (default: the app on top of [displayId]). Note: this stops the app everywhere. */
     fun stop(displayId: Int, pkg: String?): Outcome {
         val target = pkg?.trim()?.takeIf { it.isNotEmpty() } ?: topPackage(displayId)
-            ?: return ok(tr("副屏 $displayId 上没有应用", "No app on screen $displayId"))
-        if (!PackageNames.isValid(target)) return fail("INVALID_ARGS", tr("无效的应用包名：$target", "Invalid package name: $target"))
-        if (isProtected(target)) return fail("PROTECTED_APP", tr("$target 是 Agent-VScreen 自己、桌面或系统界面，不能 force-stop（会中断任务或打断用户）", "$target is Agent-VScreen itself, the launcher or system UI and cannot be force-stopped (it would break the task or disturb the user)"))
+            ?: return ok(tr(S.vscreen_shell_no_app_on_screen, displayId))
+        if (!PackageNames.isValid(target)) return fail("INVALID_ARGS", tr(S.vscreen_open_commands_invalid_package_name, target))
+        if (isProtected(target)) return fail("PROTECTED_APP", tr(S.vscreen_shell_is_agent_vscreen_itself_the, target))
         val r = run(arrayOf("am", "force-stop", target), 8_000L)
-        return if (r.exitCode == 0) ok(tr("已结束 $target（force-stop 会结束该应用的所有页面，包括主屏上的）", "Stopped $target (force-stop ends all of the app's pages, including those on the main screen)"))
+        return if (r.exitCode == 0) ok(tr(S.vscreen_shell_stopped_force_stop_ends_all, target))
         else fail("OPERATION_FAILED", r.combined)
     }
 
@@ -285,21 +285,21 @@ internal object VScreenShell {
      * that would not close, and never for a protected package or one also shown on the main screen.
      */
     fun closeAllOnDisplay(displayId: Int): Outcome {
-        if (displayId == 0) return fail("MAIN_SCREEN", tr("不会关闭主屏上的任务", "Tasks on the main screen are never closed"))
+        if (displayId == 0) return fail("MAIN_SCREEN", tr(S.vscreen_shell_tasks_on_the_main_screen))
         val tasks = VScreenHandoff.tasksOn(displayId)
-        if (tasks.isEmpty()) return ok(tr("副屏 $displayId 上没有应用", "No app on screen $displayId"))
+        if (tasks.isEmpty()) return ok(tr(S.vscreen_shell_no_app_on_screen, displayId))
         val mainIds = VScreenHandoff.tasksOn(0).map { it.taskId }.toSet()
         val notes = ArrayList<String>()
         for (t in tasks) {
             // Belt and braces: a task the main screen lists is never closed from here.
-            if (t.taskId in mainIds) { notes += tr("${t.pkg} 的任务在主屏上，没有关闭", "${t.pkg}'s task is on the main screen; not closed"); continue }
-            if (VScreenRemoteDisplay.removeTask(t.taskId, displayId).getOrNull() == true) { notes += tr("已关闭 ${t.pkg}", "Closed ${t.pkg}"); continue }
-            if (isProtected(t.pkg)) { notes += tr("${t.pkg} 受保护，没有结束", "${t.pkg} is protected; not stopped"); continue }
-            if (taskIdOn(0, t.pkg) != null) { notes += tr("${t.pkg} 在主屏也有页面，没有结束", "${t.pkg} also has pages on the main screen; not stopped"); continue }
+            if (t.taskId in mainIds) { notes += tr(S.vscreen_shell_s_task_is_on_the, t.pkg); continue }
+            if (VScreenRemoteDisplay.removeTask(t.taskId, displayId).getOrNull() == true) { notes += tr(S.vscreen_shell_closed, t.pkg); continue }
+            if (isProtected(t.pkg)) { notes += tr(S.vscreen_shell_is_protected_not_stopped, t.pkg); continue }
+            if (taskIdOn(0, t.pkg) != null) { notes += tr(S.vscreen_shell_also_has_pages_on_the, t.pkg); continue }
             val r = run(arrayOf("am", "force-stop", t.pkg), 8_000L)
-            notes += if (r.exitCode == 0) tr("已结束 ${t.pkg}", "Stopped ${t.pkg}") else tr("结束 ${t.pkg} 失败", "Stopping ${t.pkg} failed")
+            notes += if (r.exitCode == 0) tr(S.vscreen_shell_stopped, t.pkg) else tr(S.vscreen_shell_stopping_failed, t.pkg)
         }
-        return ok(notes.joinToString(tr("；", "; ")))
+        return ok(notes.joinToString(tr(S.agent_guide_sep)))
     }
 
     /** What the input method is attached to right now (best effort, from dumpsys input_method). */
@@ -360,18 +360,18 @@ internal object VScreenShell {
     private fun injectedOutcome(what: String, displayId: Int, r: Result<Boolean>): Outcome = when {
         // 1.4.2-beta6: an input the screen service cut short because the user took over or stopped meanwhile (it ended
         // with a cancel) says so (USER_STOPPED / USER_TAKEOVER / CONTROL_CHANGED), not "the system refused".
-        r.getOrNull() == false && !Control.isUser() -> { Control.admitInput(); fail("INPUT_FAILED", tr("系统拒绝了副屏 $displayId 上的 $what 注入", "The system refused injecting $what on screen $displayId")) }
-        r.getOrNull() == true -> ok(tr("副屏 $displayId：$what 已注入", "screen $displayId: $what injected"))
+        r.getOrNull() == false && !Control.isUser() -> { Control.admitInput(); fail("INPUT_FAILED", tr(S.vscreen_shell_the_system_refused_injecting_on, displayId, what)) }
+        r.getOrNull() == true -> ok(tr(S.vscreen_shell_screen_injected, displayId, what))
         r.isFailure -> {
             val srcName = Privileged.name()
             val fixHint = if (Privileged.via == Privileged.Via.ROOT) {
-                tr("请用户在 Agent-VScreen 里重新启动 Root 服务", "ask the user to restart the Root service in Agent-VScreen")
+                tr(S.vscreen_shell_ask_the_user_to_restart)
             } else {
-                tr("多半是 $srcName 停了：请用户打开 $srcName 启动它", "Most likely $srcName stopped: ask the user to start it in $srcName")
+                tr(S.vscreen_shell_most_likely_stopped_ask_the, srcName)
             }
-            fail("NOT_CONNECTED", tr("副屏服务（$srcName）不可用，$what 没有做：${r.exceptionOrNull()?.message}。$fixHint", "The screen service ($srcName) is unavailable, $what was not done: ${r.exceptionOrNull()?.message}. $fixHint"))
+            fail("NOT_CONNECTED", tr(S.vscreen_shell_the_screen_service_is_unavailable, srcName, what, r.exceptionOrNull()?.message, fixHint))
         }
-        else -> fail("INPUT_FAILED", tr("系统拒绝了副屏 $displayId 上的 $what 注入", "The system refused injecting $what on screen $displayId"))
+        else -> fail("INPUT_FAILED", tr(S.vscreen_shell_the_system_refused_injecting_on, displayId, what))
     }
 
     fun tap(displayId: Int, x: Int, y: Int, holdMs: Int = TAP_MS): Outcome {
@@ -409,8 +409,8 @@ internal object VScreenShell {
         val (ix, iy) = if (x < 0 || y < 0) (-1 to -1) else mx(displayId, x, y)
         val r = injector.pointer(displayId, code, pointerId, ix.toFloat(), iy.toFloat())
         val srcName = Privileged.name()
-        val v = r.getOrNull() ?: return fail("NOT_CONNECTED", tr("副屏服务（$srcName）不可用：${r.exceptionOrNull()?.message}", "The screen service ($srcName) is unavailable: ${r.exceptionOrNull()?.message}")) to 0
-        return (if (v.first) ok(tr("手指 $pointerId $op ($x,$y)", "finger $pointerId $op ($x,$y)")) else fail("INPUT_FAILED", tr("手指 $pointerId $op 注入失败（这根手指可能没按下）", "finger $pointerId $op injection failed (this finger may not be down)"))) to v.second
+        val v = r.getOrNull() ?: return fail("NOT_CONNECTED", tr(S.vscreen_shell_the_screen_service_is_unavailable_2, srcName, r.exceptionOrNull()?.message)) to 0
+        return (if (v.first) ok(tr(S.vscreen_shell_finger, pointerId, op, x, y)) else fail("INPUT_FAILED", tr(S.vscreen_shell_finger_injection_failed_this_finger, pointerId, op))) to v.second
     }
 
     data class KeyResult(val outcome: Outcome, val method: String)
@@ -436,10 +436,10 @@ internal object VScreenShell {
         if (parts.size < 2 || parts.any { it.isEmpty() }) return null
         val bad = parts.dropLast(1).filter { it !in MODIFIERS }
         if (bad.isNotEmpty()) throw IllegalArgumentException(if (bad.any { it in setOf("meta", "win", "cmd", "super") })
-            tr("不支持 ${bad.first()} 组合键：它的快捷键属于系统（桌面、多任务），会作用在用户的主屏上", "${bad.first()} shortcuts are not supported: they belong to the system (home, recents) and act on the user's main screen")
-            else tr("不认识的修饰键 ${bad.joinToString()}（可用：ctrl shift alt）", "unknown modifier ${bad.joinToString()} (available: ctrl shift alt)"))
-        val code = keyCode(parts.last()) ?: throw IllegalArgumentException(tr("组合键里不认识的键 ${parts.last()}", "unknown key ${parts.last()} in the shortcut"))
-        if (parts.last() in setOf("tab", "esc", "escape") && "alt" in parts) throw IllegalArgumentException(tr("不支持 alt+${parts.last()}：这是系统切换应用的快捷键，会作用在主屏上", "alt+${parts.last()} is not supported: it is the system's app switcher and acts on the main screen"))
+            tr(S.vscreen_shell_shortcuts_are_not_supported_they, bad.first())
+            else tr(S.vscreen_shell_unknown_modifier_available_ctrl_shift, bad.joinToString()))
+        val code = keyCode(parts.last()) ?: throw IllegalArgumentException(tr(S.vscreen_shell_unknown_key_in_the_shortcut, parts.last()))
+        if (parts.last() in setOf("tab", "esc", "escape") && "alt" in parts) throw IllegalArgumentException(tr(S.vscreen_shell_alt_is_not_supported_it, parts.last()))
         return code to parts.dropLast(1).map { MODIFIERS.getValue(it) }.distinct()
     }
 
@@ -451,11 +451,11 @@ internal object VScreenShell {
         Control.admitInput()
         if (key.length > 1 && '+' in key) {
             val c = runCatching { combo(key) }.getOrElse { return KeyResult(fail("INVALID_ARGS", it.message ?: key), "none") }
-            if (c != null) return KeyResult(injected(tr("组合键 $key", "shortcut $key"), displayId, again { injector.combo(displayId, c.first, c.second) }), "inject")
+            if (c != null) return KeyResult(injected(tr(S.vscreen_shell_shortcut, key), displayId, again { injector.combo(displayId, c.first, c.second) }), "inject")
         }
         val code = keyCode(key)
-            ?: return KeyResult(fail("INVALID_ARGS", tr("未知按键 $key（可用：${KEYS.keys.joinToString(" ")} 或数字 keycode；没有 home / 多任务键）", "Unknown key $key (available: ${KEYS.keys.joinToString(" ")} or a numeric keycode; there is no home / recents key)")), "none")
-        return KeyResult(injected(tr("按键 $key", "key $key"), displayId, again { injector.key(displayId, code) }), "inject")
+            ?: return KeyResult(fail("INVALID_ARGS", tr(S.vscreen_shell_unknown_key_available_or_a, key, KEYS.keys.joinToString(" "))), "none")
+        return KeyResult(injected(tr(S.vscreen_shell_key, key), displayId, again { injector.key(displayId, code) }), "inject")
     }
 
     /**
@@ -474,8 +474,8 @@ internal object VScreenShell {
     /** Characters the virtual keyboard can produce (ASCII), typed as key events. Other text goes through accessibility or the clipboard. */
     fun typeKeys(displayId: Int, text: String): Outcome {
         Control.admitInput()
-        if (text.any { it.code > 126 || it.code < 32 }) return fail("NON_ASCII", tr("按键方式只能输入 ASCII 字符", "Key events can only type ASCII characters"))
-        return injected(tr("输入", "typing"), displayId, injector.text(displayId, text))
+        if (text.any { it.code > 126 || it.code < 32 }) return fail("NON_ASCII", tr(S.vscreen_shell_key_events_can_only_type))
+        return injected(tr(S.vscreen_shell_typing), displayId, injector.text(displayId, text))
     }
 
     // ── IME policy (via app_process helper) ───────────────────────────────
@@ -491,11 +491,11 @@ internal object VScreenShell {
      */
     fun hideImeOn(context: Context, displayId: Int): Outcome {
         if (displayId <= android.view.Display.DEFAULT_DISPLAY) {
-            return fail("IME_POLICY_FAILED", tr("拒绝修改主屏键盘策略", "Refused to modify main display IME policy"))
+            return fail("IME_POLICY_FAILED", tr(S.vscreen_shell_refused_to_modify_main_display))
         }
         val direct = runCatching { VScreenRemoteDisplay.hideIme(displayId) }.getOrNull()
         if (direct?.getOrNull() == true) {
-            return ok(tr("键盘策略：副屏不弹出键盘", "Keyboard policy: no keyboard on the screen"))
+            return ok(tr(S.vscreen_shell_keyboard_policy_no_keyboard_on))
         }
         val apk = context.applicationInfo.sourceDir
         val r = com.kilon.agentvscreen.host.Privileged.runProcess(
@@ -504,8 +504,8 @@ internal object VScreenShell {
             cwd = null,
             timeoutMs = 10_000L,
         )
-        return if (r.exitCode == 0 && r.stdout.contains("OK")) ok(tr("键盘策略：副屏不弹出键盘", "Keyboard policy: no keyboard on the screen"))
-        else fail("IME_POLICY_FAILED", tr("设置副屏键盘策略失败：${r.combined.take(300)}", "Setting the screen's keyboard policy failed: ${r.combined.take(300)}"))
+        return if (r.exitCode == 0 && r.stdout.contains("OK")) ok(tr(S.vscreen_shell_keyboard_policy_no_keyboard_on))
+        else fail("IME_POLICY_FAILED", tr(S.vscreen_shell_setting_the_screen_s_keyboard, r.combined.take(300)))
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 /**
@@ -20,7 +21,7 @@ object Agents {
     /** How the app names agent [id]. The first token keeps "main" until the user names it. */
     fun name(id: String?): String {
         // 1.4.2: the user's own turns (ManualScreen) are logged under "user".
-        if (id == com.kilon.agentvscreen.core.ManualScreen.TOKEN) return com.kilon.agentvscreen.tr("你", "You")
+        if (id == com.kilon.agentvscreen.core.ManualScreen.TOKEN) return tr(S.agents_you)
         val t = Tokens.list.value.firstOrNull { it.id == (id ?: Tokens.MAIN) }
         return when {
             t == null -> if (id == null || id == Tokens.MAIN) firstName() else id
@@ -44,7 +45,7 @@ object Agents {
         com.kilon.agentvscreen.host.quiet("forget-schedules") { com.kilon.agentvscreen.host.Wake.remove(ctx, null, id) }
         com.kilon.agentvscreen.host.quiet("forget-keeps") {
             com.kilon.agentvscreen.core.VScreenRules.running().filter { it.spec.agentId == id }
-                .forEach { com.kilon.agentvscreen.core.VScreenRules.stop(id, it.spec.name, tr("这个 agent 已被忘掉", "this agent was forgotten")) }
+                .forEach { com.kilon.agentvscreen.core.VScreenRules.stop(id, it.spec.name, tr(S.agents_this_agent_was_forgotten)) }
             com.kilon.agentvscreen.core.VScreenRules.clearEnded(id)
         }
     }
@@ -70,5 +71,5 @@ object Agents {
         com.kilon.agentvscreen.host.Audit.security("token_cleanup", "removed ${ids.size} never-used tokens made by the connect page loop")
     }
 
-    private fun firstName() = tr("最早接入的 agent", "First connected agent")
+    private fun firstName() = tr(S.agents_first_connected_agent)
 }

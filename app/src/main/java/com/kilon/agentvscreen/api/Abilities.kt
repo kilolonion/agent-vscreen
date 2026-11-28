@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.trPair
 import com.kilon.agentvscreen.cmd.CommandSpec
 import com.kilon.agentvscreen.tr
 
@@ -41,10 +42,10 @@ object Abilities {
         /** What changed for agents in [changed], one line (the update notice); empty = nothing to say beyond the new note. */
         val newsZh: String = "", val newsEn: String = "",
     ) {
-        val news: String get() = tr(newsZh, newsEn)
-        val whenText: String get() = tr(whenZh, whenEn)
-        val can: String get() = tr(canZh, canEn)
-        val how: String get() = tr(howZh, howEn)
+        val news: String get() = trPair(newsZh, newsEn)
+        val whenText: String get() = trPair(whenZh, whenEn)
+        val can: String get() = trPair(canZh, canEn)
+        val how: String get() = trPair(howZh, howEn)
     }
 
     // 1.4.0-beta1 (34): every line was rewritten as "when the user … → I …", so every ability counts as changed in 34.

@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.steps
 import com.kilon.agentvscreen.tr
 
@@ -133,7 +134,7 @@ import kotlin.math.roundToInt
  *  - top right: ⤢ full screen and × close. × is always there and always one tap: while the AI works it only hides the
  *    window for this turn (the AI goes on; the notification can bring it back); when nothing runs it closes the screen.
  *    Closing never stops or locks the AI.
- *  - bottom centre, only while the AI acts or waits: the red tr("停止 agent", "Stop agent") pill (its calls get USER_STOPPED until you allow
+ *  - bottom centre, only while the AI acts or waits: the red tr(S.fullscreen_activity_stop_agent) pill (its calls get USER_STOPPED until you allow
  *    it again: green 交还 AI pill here, the "已停止 AI" notification, or the app's home).
  * While our own full-screen page is in front, the window steps aside (the page already shows the same picture).
  */
@@ -307,7 +308,7 @@ object Overlay {
         val l = com.kilon.agentvscreen.cmd.Teach.lesson.value
         if (l is com.kilon.agentvscreen.cmd.Lesson.Ready || l is com.kilon.agentvscreen.cmd.Lesson.Recording) {
             dock(dockRight.value)
-            ctx?.let { android.widget.Toast.makeText(it, tr("已贴边收起为侧边标签，示教仍在进行", "Docked to the edge; teaching continues"), android.widget.Toast.LENGTH_SHORT).show() }
+            ctx?.let { android.widget.Toast.makeText(it, tr(S.overlay_docked_to_the_edge_teaching), android.widget.Toast.LENGTH_SHORT).show() }
             return
         }
         val msg = BackgroundOperation.closeWindow()
@@ -823,7 +824,7 @@ private class GestureFrame(ctx: Context) : FrameLayout(ctx) {
     override fun onWindowVisibilityChanged(visibility: Int) {
         super.onWindowVisibilityChanged(visibility)
         AppLogger.info("Overlay", "window visibility ${if (visibility == VISIBLE) "visible" else "hidden ($visibility)"}" +
-            if (!Overlay.hostedByA11y) tr("（app overlay：系统可能因副屏上的安全页面隐藏它；打开无障碍可避免）", "(app overlay: the system may hide it for a secure page on the screen; turning on accessibility prevents that)") else "")
+            if (!Overlay.hostedByA11y) tr(S.overlay_app_overlay_the_system_may) else "")
     }
 
     override fun onConfigurationChanged(newConfig: android.content.res.Configuration?) {
@@ -1044,19 +1045,19 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
     val givenAll by com.kilon.agentvscreen.core.VScreenOwnership.given.collectAsState()
     val mine = givenAll.values.firstOrNull { it.session == owner && !it.agentMovedOn }
     val mineLabel = remember(mine?.pkg) { mine?.let { com.kilon.agentvscreen.core.VScreenOwnership.label(octx, it.pkg) } }
-    val title = mineLabel?.let { tr("已交由你操作 · $it", "Handed to you · $it") } ?: teachN?.let { tr("示教录制中 · 已记 $it 步", "Recording a routine · ${steps(it)}") } ?: (if (lesson is com.kilon.agentvscreen.cmd.Lesson.Ready) tr("示教准备中", "Getting ready to show") else null) ?: s.agentTitle ?: when (mode) {
+    val title = mineLabel?.let { tr(S.overlay_handed_to_you, it) } ?: teachN?.let { tr(S.fullscreen_activity_recording_a_routine, it, steps(it)) } ?: (if (lesson is com.kilon.agentvscreen.cmd.Lesson.Ready) tr(S.overlay_getting_ready_to_show) else null) ?: s.agentTitle ?: when (mode) {
         Mode.ACTING -> s.action?.take(18) ?: Palette.word(mode)
-        Mode.STANDBY -> if (left >= 0) tr("agent 待机", "Agent standby") + " · ${left / 60000}:${"%02d".format((left / 1000) % 60)}" else Palette.word(mode)
-        Mode.IDLE -> if (s.powerSaving) tr("待机 · 已暂停（省电）", "Standby · paused (power saving)") else tr("空闲", "Idle")
+        Mode.STANDBY -> if (left >= 0) tr(S.look_agent_standby) + " · ${left / 60000}:${"%02d".format((left / 1000) % 60)}" else Palette.word(mode)
+        Mode.IDLE -> if (s.powerSaving) tr(S.overlay_standby_paused_power_saving) else tr(S.look_idle)
         else -> Palette.word(mode)
     }
     val chip = Color(0xCC12141C)
     val action: Triple<String, Color, () -> Unit>? = when {
-        mine != null -> Triple(tr("交还 agent", "Hand back to agent"), Palette.takeover) { val c = octx.applicationContext; val p = mine.pkg; Thread { com.kilon.agentvscreen.core.VScreenOwnership.handBack(c, p, "overlay") }.start() }
+        mine != null -> Triple(tr(S.fullscreen_activity_hand_back_to_agent), Palette.takeover) { val c = octx.applicationContext; val p = mine.pkg; Thread { com.kilon.agentvscreen.core.VScreenOwnership.handBack(c, p, "overlay") }.start() }
         showing -> null // the lesson strip under the window has 完成 / 不教
-        mode == Mode.TAKEOVER || mode == Mode.STOPPED -> Triple(tr("交还 agent", "Hand back to agent"), Palette.takeover) { BackgroundOperation.userResume() }
+        mode == Mode.TAKEOVER || mode == Mode.STOPPED -> Triple(tr(S.fullscreen_activity_hand_back_to_agent), Palette.takeover) { BackgroundOperation.userResume() }
         // 1.3.0-beta19 (rainbow): stop only while the AI acts or waits; idle shows nothing.
-        mode == Mode.ACTING || mode == Mode.STANDBY -> Triple(tr("停止 agent", "Stop agent"), Palette.stopped) { BackgroundOperation.userStop() }
+        mode == Mode.ACTING || mode == Mode.STANDBY -> Triple(tr(S.fullscreen_activity_stop_agent), Palette.stopped) { BackgroundOperation.userStop() }
         else -> null
     }
 
@@ -1086,8 +1087,8 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
                     Text(title, color = Color.White, fontSize = (10 * mk).sp, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Medium)
                 }
                 Row(Modifier.align(Alignment.TopEnd).padding(end = (5 * mk).dp, top = (5 * mk).dp), horizontalArrangement = Arrangement.spacedBy((4 * mk).dp)) {
-                    RoundBtn(Icons.Filled.Fullscreen, tr("全屏", "Full screen"), chip, mk) { Overlay.openFull() }
-                    RoundBtn(Icons.Filled.Close, if (mode == Mode.ACTING || mode == Mode.STANDBY || mode == Mode.TAKEOVER) tr("隐藏小窗", "Hide window") else tr("关闭副屏", "Close screen"), chip, mk) { Overlay.closeTapped() }
+                    RoundBtn(Icons.Filled.Fullscreen, tr(S.overlay_full_screen), chip, mk) { Overlay.openFull() }
+                    RoundBtn(Icons.Filled.Close, if (mode == Mode.ACTING || mode == Mode.STANDBY || mode == Mode.TAKEOVER) tr(S.overlay_hide_window) else tr(S.fullscreen_activity_close_screen), chip, mk) { Overlay.closeTapped() }
                 }
                 if (action != null) {
                     val dark = action.second == Palette.takeover
@@ -1129,15 +1130,15 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
                 ) {
                     Icon(Icons.Filled.PanTool, null, tint = Palette.takeover, modifier = Modifier.size((26 * k).dp))
                     Spacer(Modifier.height((6 * k).dp))
-                    Text(tr("$mineLabel 在主屏由你使用", "$mineLabel is on your main screen"), color = Color.White, fontSize = (12 * k).sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
-                    Text(tr("用完点“交回 agent”，它从你离开的页面接着做", "When done, tap Hand back; it carries on from where you left it"), color = Color(0xB3FFFFFF), fontSize = (10 * k).sp, textAlign = TextAlign.Center)
+                    Text(tr(S.overlay_is_on_your_main_screen, mineLabel), color = Color.White, fontSize = (12 * k).sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center)
+                    Text(tr(S.overlay_when_done_tap_hand_back), color = Color(0xB3FFFFFF), fontSize = (10 * k).sp, textAlign = TextAlign.Center)
                 }
                 // A soft scrim under the pill and buttons keeps them readable on white pages (draws only, no touch).
                 Box(Modifier.fillMaxWidth().height((40 * k).dp).background(Brush.verticalGradient(listOf(Color(0x80000000), Color.Transparent))))
                 // 2.0.0-beta8 (G.4): dragged into top-right corner: overlay only a compact text pill, keeping the preview un-dimmed.
                 if (Overlay.cornerHot.value) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                        tr("松开后缩为小窗", "Release to shrink to the mini window"),
+                        tr(S.overlay_release_to_shrink_to_the),
                         color = Color.White,
                         fontSize = (12 * k).sp,
                         fontWeight = FontWeight.SemiBold,
@@ -1175,8 +1176,8 @@ internal fun OverlayContent(fixed: BackgroundOperation.State? = null, picture: (
             // 1.3.0-beta18: the same height as the title pill, on the same line (rainbow).
             Row(Modifier.align(Alignment.TopEnd).padding(end = (7 * k).dp, top = (7 * k).dp), horizontalArrangement = Arrangement.spacedBy((5 * k).dp)) {
                 // 1.4.0-beta13 (test L2: the bare ↗ was not read as "full screen"): the standard full screen mark, named.
-                RoundBtn(Icons.Filled.Fullscreen, tr("全屏", "Full screen"), chip, k) { Overlay.openFull() }
-                RoundBtn(Icons.Filled.Close, if (mode == Mode.ACTING || mode == Mode.STANDBY || mode == Mode.TAKEOVER) tr("隐藏小窗", "Hide window") else tr("关闭副屏", "Close screen"),
+                RoundBtn(Icons.Filled.Fullscreen, tr(S.overlay_full_screen), chip, k) { Overlay.openFull() }
+                RoundBtn(Icons.Filled.Close, if (mode == Mode.ACTING || mode == Mode.STANDBY || mode == Mode.TAKEOVER) tr(S.overlay_hide_window) else tr(S.fullscreen_activity_close_screen),
                     chip, k) { Overlay.closeTapped() }
             }
 
@@ -1290,7 +1291,7 @@ private fun PictureLayer(owner: String, k: Float, picture: (@Composable (String)
         val showHint = Overlay.hintAt.longValue > 0 && now - Overlay.hintAt.longValue < 2500
         AnimatedVisibility(showHint, Modifier.align(Alignment.Center), enter = fadeIn(), exit = fadeOut()) {
             // 1.3.0-beta18: one gesture per line (rainbow: three lines, not one run-on line).
-            Text(tr("长按 0.5 秒接管\n拖动底部横条调整大小\n拖到右上角缩为小窗", "Hold 0.5 s to take over\nDrag the bottom bar to resize\nDrag to the top right for the mini window"), color = Color.White, fontSize = (11 * k).sp,
+            Text(tr(S.overlay_hold_0_5_s_to), color = Color.White, fontSize = (11 * k).sp,
                 lineHeight = (16 * k).sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 modifier = Modifier.padding(8.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xDD12141C)).padding(horizontal = 10.dp, vertical = 6.dp))
         }

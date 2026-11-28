@@ -51,7 +51,7 @@ class V120Test {
         // (AVS_REGEN=1) rewrites it. A test never writes the source tree otherwise.
         val f = java.io.File("../docs/REFERENCE.md")
         if (f.parentFile?.isDirectory != true) return
-        fun part(): String = "## " + com.kilon.agentvscreen.tr("命令", "Commands") + "\n\n" + CommandSpec.markdown() + "## " + com.kilon.agentvscreen.tr("结果代码", "Result codes") + "\n\n" + Codes.markdown() + "\n"
+        fun part(): String = "## " + com.kilon.agentvscreen.trPair("命令", "Commands") + "\n\n" + CommandSpec.markdown() + "## " + com.kilon.agentvscreen.trPair("结果代码", "Result codes") + "\n\n" + Codes.markdown() + "\n"
         I18n.choice = I18n.Lang.ZH; val zh = part()
         I18n.choice = I18n.Lang.EN; val en = part()
         I18n.choice = I18n.Lang.ZH

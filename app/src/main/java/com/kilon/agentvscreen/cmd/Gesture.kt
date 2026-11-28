@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -560,10 +561,10 @@ internal object Gesture {
     fun pickDragCells(displayId: Int, keyTimesMs: LongArray, maxSide: Int): List<Cell> {
         if (keyTimesMs.size < 4) return emptyList()
         val labels = listOf(
-            tr("按下前", "before down"),
-            tr("滑动中点", "drag midpoint"),
-            tr("松手前", "before release"),
-            tr("松手后 350ms", "350ms after release"),
+            tr(S.gesture_before_down),
+            tr(S.gesture_drag_midpoint),
+            tr(S.gesture_before_release),
+            tr(S.gesture_350ms_after_release),
         )
         val dragMark = VScreenRecorder.marks(displayId, keyTimesMs[0] - DRAG_MARK_MARGIN_MS, keyTimesMs[3] + DRAG_MARK_MARGIN_MS)
             .lastOrNull { it.kind == "action" && it.pts.size >= 2 }
@@ -592,7 +593,7 @@ internal object Gesture {
 
     internal fun checkLoopInterrupts(d: VScreenDisplay, call: Call?) {
         if (BackgroundOperation.state.value.takeoverSessionId != null) {
-            throw ActionError("USER_TAKEOVER", tr("用户接管了副屏，已抬起手指", "The user took over the screen; fingers lifted"))
+            throw ActionError("USER_TAKEOVER", tr(S.gesture_the_user_took_over_the))
         }
         checkInterrupts(d, call)
     }
@@ -612,21 +613,21 @@ internal data class GestureRecord(
     fun describe(omitUnknownWhenNotPicked: Boolean = false): String {
         val parts = ArrayList<String>(3)
         when (pickedUp) {
-            true -> parts += tr("拿起了", "picked up")
-            false -> parts += tr("未拿起", "not picked up")
+            true -> parts += tr(S.gesture_picked_up)
+            false -> parts += tr(S.gesture_not_picked_up)
             null -> {}
         }
         when (followed) {
-            true -> parts += tr("跟手", "followed")
-            false -> parts += tr("未跟手", "did not follow")
+            true -> parts += tr(S.gesture_followed)
+            false -> parts += tr(S.gesture_did_not_follow)
             null -> {}
         }
         val afterText = when (afterRelease) {
-            Gesture.AFTER_STAYED -> tr("松手后留在落点", "stayed at release")
-            Gesture.AFTER_SNAPPED_BACK -> tr("松手后弹回起点", "snapped back to start")
-            Gesture.AFTER_ELSEWHERE -> tr("松手后移到了别处", "moved elsewhere after release")
-            Gesture.AFTER_DISAPPEARED -> tr("松手后不见了（可能被划掉或删除）", "disappeared after release (may have been swiped away or deleted)")
-            else -> if (omitUnknownWhenNotPicked && pickedUp == null) null else tr("松手后位置不明", "position unknown after release")
+            Gesture.AFTER_STAYED -> tr(S.gesture_stayed_at_release)
+            Gesture.AFTER_SNAPPED_BACK -> tr(S.gesture_snapped_back_to_start)
+            Gesture.AFTER_ELSEWHERE -> tr(S.gesture_moved_elsewhere_after_release)
+            Gesture.AFTER_DISAPPEARED -> tr(S.gesture_disappeared_after_release_may_have)
+            else -> if (omitUnknownWhenNotPicked && pickedUp == null) null else tr(S.gesture_position_unknown_after_release)
         }
         if (afterText != null) parts += afterText
         return parts.joinToString(" · ")
@@ -634,7 +635,7 @@ internal data class GestureRecord(
 
     fun describeSuffix(omitUnknownWhenNotPicked: Boolean = false): String {
         val d = describe(omitUnknownWhenNotPicked)
-        return if (d.isEmpty()) "" else tr("：", ": ") + d
+        return if (d.isEmpty()) "" else tr(S.agent_guide_colon) + d
     }
 
     fun json(): JSONObject = JSONObject()
@@ -838,7 +839,7 @@ internal object SeekSearch {
                     bestText = bestText,
                     bestPt = bestPt,
                     notRead = true,
-                    missReason = tr("读数跟不上（连续 $consecTimeouts 次读屏超时）", "screen reading could not keep up ($consecTimeouts consecutive read timeouts)"),
+                    missReason = tr(S.gesture_screen_reading_could_not_keep, consecTimeouts),
                     stepsTaken = stepsTaken,
                     reversals = reversals,
                 )
@@ -952,15 +953,9 @@ internal object SeekSearch {
         }
 
         val miss = when {
-            consecTimeouts >= maxConsecTimeouts -> tr(
-                "读数跟不上（连续 $consecTimeouts 次读屏超时）",
-                "screen reading could not keep up ($consecTimeouts consecutive read timeouts)",
-            )
-            bestText != null && bestPt != null -> tr(
-                "最接近的是 $bestText，在 (${bestPt.first},${bestPt.second})",
-                "closest was $bestText at (${bestPt.first},${bestPt.second})",
-            )
-            consecTimeouts > 0 -> tr("读数跟不上", "screen reading could not keep up")
+            consecTimeouts >= maxConsecTimeouts -> tr(S.gesture_screen_reading_could_not_keep, consecTimeouts)
+            bestText != null && bestPt != null -> tr(S.gesture_closest_was_at, bestText, bestPt.first, bestPt.second)
+            consecTimeouts > 0 -> tr(S.gesture_screen_reading_could_not_keep_2)
             else -> null
         }
         return SeekResult(
@@ -993,12 +988,12 @@ private val SEEK_READ_POOL = Executors.newCachedThreadPool { r ->
 internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, step: Step, ctx: ActCtx): GestureOut {
     val hu = ctx.human
     val call = Call.current()
-    val conds = step.until ?: throw ActionError("GESTURE_NEEDS_UNTIL", tr("闭环手势必须带 until <条件>", "Closed-loop gesture requires until <condition>"))
+    val conds = step.until ?: throw ActionError("GESTURE_NEEDS_UNTIL", tr(S.gesture_closed_loop_gesture_requires_until))
     val maxMs = step.untilMs ?: if (step.loop == Loop.SEEK) Steps.SEEK_DEFAULT_MS else Steps.HOLD_DEFAULT_MS
     val pkg = runCatching { VScreenShell.topPackage(d.displayId) }.getOrNull()
 
-    fun there(t: Target) = (t.label?.let { tr("，那里是“${it.take(30)}”", ", which is \"${it.take(30)}\"") } ?: "") +
-        (t.moved?.let { tr("（$it）", " ($it)") } ?: "")
+    fun there(t: Target) = (t.label?.let { tr(S.gesture_which_is, it.take(30)) } ?: "") +
+        (t.moved?.let { tr(S.public_guide_text, it) } ?: "")
 
     var pressTarget: Target? = null
     val path: List<Pair<Int, Int>>
@@ -1062,7 +1057,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
                         val a11yHit = a11yTexts.firstOrNull { pat.hit(it) }
                         if (a11yHit != null) {
                             return@carry SeekSearch.SeekReading(
-                                hit = tr("${c.raw}：看到“${a11yHit.take(40)}”", "${c.raw}: saw \"${a11yHit.take(40)}\""),
+                                hit = tr(S.gesture_saw, c.raw, a11yHit.take(40)),
                                 metKind = CondKind.TEXT,
                                 text = a11yHit.take(40),
                             )
@@ -1088,7 +1083,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
                         val hitTxt = allTexts.firstOrNull { pat.hit(it) }?.take(40)
                         if (hitTxt != null) {
                             return@carry SeekSearch.SeekReading(
-                                hit = tr("${c.raw}：看到“$hitTxt”", "${c.raw}: saw \"$hitTxt\""),
+                                hit = tr(S.gesture_saw, c.raw, hitTxt),
                                 metKind = CondKind.TEXT,
                                 text = hitTxt,
                             )
@@ -1096,7 +1091,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
                     } else if (c.kind == CondKind.GONE && area != null && frame != null && !frame.isRecycled) {
                         if (allTexts.none { pat.hit(it) }) {
                             return@carry SeekSearch.SeekReading(
-                                hit = tr("${c.raw}：画面上没有“${c.text}”了", "${c.raw}: \"${c.text}\" is gone from the screen"),
+                                hit = tr(S.gesture_is_gone_from_the_screen, c.raw, c.text),
                                 metKind = CondKind.GONE,
                                 text = observedText,
                             )
@@ -1371,7 +1366,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
     val totalMs = (upElapsed - tStart).coerceAtLeast(0L)
     val stats = Gesture.pollStats(pollDurations)
     if (seekAlreadyAtStart) {
-        val valLabel = seekStartLabel ?: tr("目标值", "the target")
+        val valLabel = seekStartLabel ?: tr(S.gesture_the_target)
         return GestureOut(
             met = true,
             releasedAt = startPt,
@@ -1382,7 +1377,7 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
             pollMsP50 = stats?.first,
             pollMsMax = stats?.second,
             imgAgeMs = hitImgAgeMs,
-            actionFact = tr("开始时已经是 $valLabel，没有拖", "already $valLabel at start, did not drag"),
+            actionFact = tr(S.gesture_already_at_start_did_not, valLabel),
             points = emptyList(),
             alreadyAtStart = true,
         )
@@ -1414,15 +1409,15 @@ internal fun VScreenOffloadHandler.closedLoop(sid: String, d: VScreenDisplay, st
         listOf(intArrayOf(startPt.first, startPt.second))
     }
 
-    val viaSuffix = gestureVia?.let { tr("（via=$it）", " (via=$it)") }.orEmpty()
+    val viaSuffix = gestureVia?.let { tr(S.gesture_via, it) }.orEmpty()
     val actionFact = (if (isDrag) {
         val shownPath = if (step.loop == Loop.SEEK) listOf(startPt, curPt) else path
-        tr("按住拖过 ", "held and dragged through ") +
+        tr(S.gesture_held_and_dragged_through) +
             shownPath.joinToString(" → ") { "(${it.first},${it.second})" } +
-            tr("，${totalMs}ms", ", ${totalMs}ms") +
+            tr(S.gesture_ms, totalMs) +
             (record?.describeSuffix() ?: "")
     } else {
-        tr("按住 (${startPt.first},${startPt.second}) ${totalMs}ms", "held (${startPt.first},${startPt.second}) ${totalMs}ms") +
+        tr(S.gesture_held_ms, startPt.first, startPt.second, totalMs) +
             (pressTarget?.let { there(it) } ?: "")
     }) + viaSuffix
 

@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -146,70 +147,49 @@ internal object ThermalGuard {
     }
 
     internal fun thermalStatusName(code: Int?): String = when (code) {
-        0 -> tr("正常", "none")
-        1 -> tr("轻度", "light")
-        2 -> tr("中度", "moderate")
-        3 -> tr("严重", "severe")
-        4 -> tr("危急", "critical")
-        5 -> tr("紧急", "emergency")
-        6 -> tr("关机", "shutdown")
-        else -> tr("未知", "unknown")
+        0 -> tr(S.thermal_guard_none)
+        1 -> tr(S.thermal_guard_light)
+        2 -> tr(S.thermal_guard_moderate)
+        3 -> tr(S.thermal_guard_severe)
+        4 -> tr(S.thermal_guard_critical)
+        5 -> tr(S.thermal_guard_emergency)
+        6 -> tr(S.thermal_guard_shutdown)
+        else -> tr(S.thermal_guard_unknown)
     }
 
     private fun phaseLabel(phase: HeatPolicy.Phase): String = when (phase) {
-        HeatPolicy.Phase.NORMAL -> tr("正常", "normal")
-        HeatPolicy.Phase.LOCKED_HOT -> tr("过热锁定", "locked (hot)")
-        HeatPolicy.Phase.COOLING -> tr("冷却等待", "cooling")
-        HeatPolicy.Phase.READY -> tr("可手动恢复", "ready to resume")
+        HeatPolicy.Phase.NORMAL -> tr(S.thermal_guard_normal)
+        HeatPolicy.Phase.LOCKED_HOT -> tr(S.thermal_guard_locked_hot)
+        HeatPolicy.Phase.COOLING -> tr(S.thermal_guard_cooling)
+        HeatPolicy.Phase.READY -> tr(S.thermal_guard_ready_to_resume)
     }
 
     private fun fmtC(tenths: Int?): String =
-        if (tenths == null) tr("未知", "unknown") else String.format(Locale.ROOT, "%.1f°C", tenths / 10.0)
+        if (tenths == null) tr(S.thermal_guard_unknown) else String.format(Locale.ROOT, "%.1f°C", tenths / 10.0)
 
     internal fun formatReason(s: HeatPolicy.Snapshot): String {
         val tempStr = fmtC(s.tempTenths)
         val stStr = thermalStatusName(s.status)
         val unlockC = fmtC(s.unlockTempTenths)
-        val statusLimit = if (s.unlockMaxStatusExclusive <= HeatPolicy.MODERATE_STATUS) tr("中度", "moderate") else tr("严重", "severe")
-        val head = tr(
-            "过热保护（${phaseLabel(s.phase)}）：当前电池 $tempStr，系统热状态 $stStr。",
-            "Overheat protection (${phaseLabel(s.phase)}): battery $tempStr, thermal status $stStr. ",
-        )
+        val statusLimit = if (s.unlockMaxStatusExclusive <= HeatPolicy.MODERATE_STATUS) tr(S.thermal_guard_moderate) else tr(S.thermal_guard_severe)
+        val head = tr(S.thermal_guard_overheat_protection_battery_thermal_stat, phaseLabel(s.phase), tempStr, stStr)
         return when (s.phase) {
-            HeatPolicy.Phase.READY -> head + tr(
-                "已满足冷却条件，请在首页电源菜单手动恢复。",
-                "Cooling requirements met; resume manually in the Home power menu.",
-            )
-            HeatPolicy.Phase.LOCKED_HOT -> head + tr(
-                "仍处于危险区，无法恢复；请等待电池降到 $unlockC 以下且系统热状态低于$statusLimit。",
-                "Still in danger zone and cannot resume yet; wait for battery below $unlockC and thermal status below $statusLimit.",
-            )
+            HeatPolicy.Phase.READY -> head + tr(S.thermal_guard_cooling_requirements_met_resume_manually)
+            HeatPolicy.Phase.LOCKED_HOT -> head + tr(S.thermal_guard_still_in_danger_zone_and, unlockC, statusLimit)
             HeatPolicy.Phase.COOLING -> {
                 val missing = ArrayList<String>()
-                if (s.tempTenths == null) missing += tr("读取电池温度", "battery temperature reading")
-                else if (s.tempTenths >= s.unlockTempTenths) missing += tr("等待电池降到 $unlockC 以下", "wait for battery below $unlockC")
-                if (s.status == null) missing += tr("读取系统热状态", "system thermal status reading")
-                else if (s.status >= s.unlockMaxStatusExclusive) missing += tr("等待系统热状态降到${statusLimit}以下", "wait for thermal status below $statusLimit")
+                if (s.tempTenths == null) missing += tr(S.thermal_guard_battery_temperature_reading)
+                else if (s.tempTenths >= s.unlockTempTenths) missing += tr(S.thermal_guard_wait_for_battery_below, unlockC)
+                if (s.status == null) missing += tr(S.thermal_guard_system_thermal_status_reading)
+                else if (s.status >= s.unlockMaxStatusExclusive) missing += tr(S.thermal_guard_wait_for_thermal_status_below, statusLimit)
                 val rem = s.retryAfterS
                 when {
-                    missing.isNotEmpty() -> head + tr(
-                        "尚不满足恢复条件：${missing.joinToString("，")}（满足后需持续 ${s.holdMs / 1000} 秒，再在首页电源菜单手动恢复）。",
-                        "Not ready to resume: ${missing.joinToString(", ")} (then hold for ${s.holdMs / 1000} s before resuming in the Home power menu).",
-                    )
-                    rem != null && rem > 0 -> head + tr(
-                        "温度与状态已达标，预计还需持续冷却约 $rem 秒后可在首页电源菜单手动恢复。",
-                        "Temperature and status are safe; wait about $rem s more before resuming in the Home power menu.",
-                    )
-                    else -> head + tr(
-                        "已满足冷却条件，请在首页电源菜单手动恢复。",
-                        "Cooling requirements met; resume manually in the Home power menu.",
-                    )
+                    missing.isNotEmpty() -> head + tr(S.thermal_guard_not_ready_to_resume_then, missing.joinToString("，"), s.holdMs / 1000, missing.joinToString(", "))
+                    rem != null && rem > 0 -> head + tr(S.thermal_guard_temperature_and_status_are_safe, rem)
+                    else -> head + tr(S.thermal_guard_cooling_requirements_met_resume_manually)
                 }
             }
-            HeatPolicy.Phase.NORMAL -> tr(
-                "热保护正常：当前电池 $tempStr，系统热状态 $stStr。",
-                "Thermal protection normal: battery $tempStr, thermal status $stStr.",
-            )
+            HeatPolicy.Phase.NORMAL -> tr(S.thermal_guard_thermal_protection_normal_battery_therma, tempStr, stStr)
         }
     }
 
@@ -231,7 +211,7 @@ internal object ThermalGuard {
 
     private fun ensureChannel(nm: NotificationManager) {
         nm.createNotificationChannel(
-            NotificationChannel("heat_guard", tr("过热保护", "Thermal protection"), NotificationManager.IMPORTANCE_HIGH),
+            NotificationChannel("heat_guard", tr(S.settings_thermal_protection), NotificationManager.IMPORTANCE_HIGH),
         )
     }
 
@@ -241,16 +221,13 @@ internal object ThermalGuard {
             val nm = app.getSystemService(NotificationManager::class.java) ?: return@quiet
             ensureChannel(nm)
             val s = policy.snapshot(SystemClock.elapsedRealtime())
-            val msg = tr(
-                "当前电池 ${fmtC(s.tempTenths)}，系统热状态 ${thermalStatusName(s.status)}。因已关闭“过热自动停止”，后台任务不会被强制停止（仅保留降负载和系统自带保护）。",
-                "Battery ${fmtC(s.tempTenths)}, thermal status ${thermalStatusName(s.status)}. Auto-stop is off, so background work is not stopped (throttling and Android system protection remain active).",
-            )
+            val msg = tr(S.thermal_guard_battery_thermal_status_auto_stop, fmtC(s.tempTenths), thermalStatusName(s.status))
             val open = PendingIntent.getActivity(app, NOTE_ID_WARN, Intent(app, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
             nm.notify(
                 NOTE_ID_WARN,
                 NotificationCompat.Builder(app, "heat_guard")
                     .setSmallIcon(R.drawable.ic_stat)
-                    .setContentTitle(tr("手机温度过高提醒", "High phone temperature warning"))
+                    .setContentTitle(tr(S.thermal_guard_high_phone_temperature_warning))
                     .setContentText(msg)
                     .setStyle(NotificationCompat.BigTextStyle().bigText(msg))
                     .setContentIntent(open)
@@ -274,7 +251,7 @@ internal object ThermalGuard {
                 NOTE_ID_LOCK,
                 NotificationCompat.Builder(app, "heat_guard")
                     .setSmallIcon(R.drawable.ic_stat)
-                    .setContentTitle(tr("Agent-VScreen 已因过热停止", "Agent-VScreen stopped due to heat"))
+                    .setContentTitle(tr(S.thermal_guard_agent_vscreen_stopped_due_to))
                     .setContentText(why)
                     .setStyle(NotificationCompat.BigTextStyle().bigText(why))
                     .setContentIntent(open)

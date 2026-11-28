@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import androidx.compose.foundation.layout.offset
 import com.kilon.agentvscreen.steps
 import com.kilon.agentvscreen.tr
@@ -177,11 +178,11 @@ class FullscreenActivity : PageActivity() {
                         is com.kilon.agentvscreen.cmd.Lesson.Review -> Box(Modifier.fillMaxSize().backdrop()) {
                             ReviewPane(l.result, l.screenGone || !screenUp, onLeave = { back() }, onAgain = {
                                 if (Teach.again()) { pane.value = Pane.LIVE; Surface.report(Pane.LIVE) }
-                                else toast(tr("副屏已关闭，无法重新录制", "Background screen closed; cannot record again"))
+                                else toast(tr(S.fullscreen_activity_background_screen_closed_cannot_record))
                             })
                         }
                         else -> Box(Modifier.fillMaxSize().backdrop(), contentAlignment = Alignment.Center) {
-                            Text(tr("正在整理录下的步骤…", "Writing down the steps…"), fontSize = 15.sp)
+                            Text(tr(S.fullscreen_activity_writing_down_the_steps), fontSize = 15.sp)
                         }
                     }
                     session != null -> FullScreen(session)
@@ -368,14 +369,14 @@ class FullscreenActivity : PageActivity() {
             Column(Modifier.fillMaxWidth().statusBarsPadding()) {
             Row(Modifier.fillMaxWidth().onGloballyPositioned { topEdge = it.boundsInRoot().bottom }.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 // 1.4.0-beta11: 小窗 only leaves the page; a lesson goes on in the floating window (it never stops one).
-                Circle(Icons.Filled.CloseFullscreen, tr("小窗", "Small window"), Color(0x33FFFFFF)) { back() }
+                Circle(Icons.Filled.CloseFullscreen, tr(S.fullscreen_activity_small_window), Color(0x33FFFFFF)) { back() }
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(appLabel ?: tr("后台副屏", "Background screen"), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.scrollIfLong())
+                    Text(appLabel ?: tr(S.fullscreen_activity_background_screen), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.scrollIfLong())
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(7.dp).clip(CircleShape).background(if (mode == Mode.ACTING) Brush.sweepGradient(Palette.rainbow) else SolidColor(Palette.of(mode))))
                         Spacer(Modifier.width(5.dp))
-                        val word = if (recording) tr("示教录制中 · 已记 $teachN 步", "Recording a routine · ${steps(teachN)}") else if (prepId != null) tr("示教准备中：先走到起点", "Getting ready to show") else s.agentTitle ?: (Palette.word(mode) + if (mode == Mode.STANDBY && left >= 0) (" · " + tr("${left / 60000}:${"%02d".format((left / 1000) % 60)} 后省电", "power save in ${left / 60000}:${"%02d".format((left / 1000) % 60)}")) else "")
+                        val word = if (recording) tr(S.fullscreen_activity_recording_a_routine, teachN, steps(teachN)) else if (prepId != null) tr(S.fullscreen_activity_getting_ready_to_show) else s.agentTitle ?: (Palette.word(mode) + if (mode == Mode.STANDBY && left >= 0) (" · " + tr(S.fullscreen_activity_power_save_in, left / 60000, "%02d".format((left / 1000) % 60))) else "")
                         Text(word, color = Color(0xCCFFFFFF), fontSize = 12.sp, maxLines = 1, modifier = Modifier.scrollIfLong())
                     }
                 }
@@ -384,15 +385,15 @@ class FullscreenActivity : PageActivity() {
                 val wide = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
                 // 1.4.0-beta5: only when it helps: a landscape picture on an upright page, or the page already turned.
                 if (wide || s.screenWidth > s.screenHeight) {
-                    Circle(Icons.Filled.ScreenRotation, if (wide) tr("切换为竖屏", "Switch to portrait") else tr("切换为横屏", "Switch to landscape"), Color(0x33FFFFFF)) {
+                    Circle(Icons.Filled.ScreenRotation, if (wide) tr(S.fullscreen_activity_switch_to_portrait) else tr(S.fullscreen_activity_switch_to_landscape), Color(0x33FFFFFF)) {
                         requestedOrientation = if (wide) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
                     }
                     Spacer(Modifier.width(8.dp))
                 }
                 when {
                     recording || prepId != null -> {} // ended with 完成 / 不教 on the strip, not by closing the screen
-                    mode == Mode.ACTING || mode == Mode.STANDBY -> Pill(tr("停止 agent", "Stop agent"), Icons.Filled.Stop, Palette.stopped, Color.White) { BackgroundOperation.userStop() }
-                    else -> Circle(Icons.Filled.Close, tr("关闭副屏", "Close screen"), Color(0x33FFFFFF)) {
+                    mode == Mode.ACTING || mode == Mode.STANDBY -> Pill(tr(S.fullscreen_activity_stop_agent), Icons.Filled.Stop, Palette.stopped, Color.White) { BackgroundOperation.userStop() }
+                    else -> Circle(Icons.Filled.Close, tr(S.fullscreen_activity_close_screen), Color(0x33FFFFFF)) {
                         BackgroundOperation.userRelease(session); back()
                     }
                 }
@@ -419,7 +420,7 @@ class FullscreenActivity : PageActivity() {
             var now by remember { mutableLongStateOf(0L) }
             LaunchedEffect(hintAt) { now = SystemClock.uptimeMillis(); delay(2600); now = SystemClock.uptimeMillis() }
             AnimatedVisibility(now - hintAt < 2500 && hintAt > 0, Modifier.align(Alignment.Center), enter = fadeIn(), exit = fadeOut()) {
-                Text(tr("长按画面 0.5 秒接管，接管后点、长按、滑动都会落到副屏上", "Hold the picture 0.5 s to take over; then taps, long presses and swipes go to the screen"), color = Color.White, fontSize = 13.sp,
+                Text(tr(S.fullscreen_activity_hold_the_picture_0_5), color = Color.White, fontSize = 13.sp,
                     modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(Color(0xE612141C)).padding(horizontal = 14.dp, vertical = 8.dp))
             }
 
@@ -438,7 +439,7 @@ class FullscreenActivity : PageActivity() {
                         val v = view ?: return@LaunchedEffect
                         val f = withContext(Dispatchers.IO) { BackgroundOperation.state.value.displayId?.let { VScreenTyping.fieldNow(it) } }
                         mirror.adopt(f); v.secret = f?.password == true; v.reset(f?.text.orEmpty()); v.open()
-                        if (f == null) toast(tr("先在副屏上点一下要输入的框，再打字", "Tap the input box on the screen, then type"))
+                        if (f == null) toast(tr(S.fullscreen_activity_tap_the_input_box_on))
                         // Follow the field when it changes by itself (another box tapped, the app cleared or filled it).
                         while (true) {
                             delay(800)
@@ -460,26 +461,26 @@ class FullscreenActivity : PageActivity() {
                 Row(Modifier.onSizeChanged { rowH = it.height.toFloat() }.eatTouches().clip(RoundedCornerShape(30.dp)).background(Color(0xE612141C)).padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (takenOver) {
-                        Circle(Icons.AutoMirrored.Filled.ArrowBack, tr("返回", "Back"), Color(0x22FFFFFF)) { vscreenUserInput(session) { Teach.key("back"); VScreenShell.key(it, "back") } }
-                        Circle(Icons.Filled.Keyboard, tr("打字", "Type"), if (typing) Palette.brandA else Color(0x22FFFFFF)) { typing = !typing }
-                        if (!typing) Circle(Icons.AutoMirrored.Filled.Backspace, tr("删除", "Delete"), Color(0x22FFFFFF)) { vscreenUserInput(session) { Teach.key("del"); VScreenShell.key(it, "del") } }
-                        if (!typing) Circle(Icons.AutoMirrored.Filled.KeyboardReturn, tr("回车", "Enter"), Color(0x22FFFFFF)) { vscreenUserInput(session) { Teach.key("enter"); VScreenShell.key(it, "enter") } }
+                        Circle(Icons.AutoMirrored.Filled.ArrowBack, tr(S.app_back), Color(0x22FFFFFF)) { vscreenUserInput(session) { Teach.key("back"); VScreenShell.key(it, "back") } }
+                        Circle(Icons.Filled.Keyboard, tr(S.fullscreen_activity_type), if (typing) Palette.brandA else Color(0x22FFFFFF)) { typing = !typing }
+                        if (!typing) Circle(Icons.AutoMirrored.Filled.Backspace, tr(S.automation_delete), Color(0x22FFFFFF)) { vscreenUserInput(session) { Teach.key("del"); VScreenShell.key(it, "del") } }
+                        if (!typing) Circle(Icons.AutoMirrored.Filled.KeyboardReturn, tr(S.fullscreen_activity_enter), Color(0x22FFFFFF)) { vscreenUserInput(session) { Teach.key("enter"); VScreenShell.key(it, "enter") } }
                         // 示教: record what you do here as steps an agent can run again (its controls are on the card).
                         if (!recording && prepId == null && !mark.finding) {
-                            Circle(Icons.Filled.FiberManualRecord, tr("示教：录下接下来的操作", "Teach: record what you do next"), Color(0x22FFFFFF)) {
-                                if (Teach.start(session, null, null)) toast(if (Teach.recAskId() != null) tr("开始录制：照常操作，做完点“完成”", "Recording: do it as usual, then tap Done")
-                                    else tr("开始录制。没有 agent 在等待，将保存为你的示教", "Recording. No agent is waiting: it is saved as your own routine"))
+                            Circle(Icons.Filled.FiberManualRecord, tr(S.fullscreen_activity_teach_record_what_you_do), Color(0x22FFFFFF)) {
+                                if (Teach.start(session, null, null)) toast(if (Teach.recAskId() != null) tr(S.fullscreen_activity_recording_do_it_as_usual)
+                                    else tr(S.fullscreen_activity_recording_no_agent_is_waiting))
                             }
-                            Pill(tr("交还 agent", "Hand back to agent"), Icons.Filled.SmartToy, Palette.takeover, Color(0xFF052E1C)) { BackgroundOperation.userResume() }
+                            Pill(tr(S.fullscreen_activity_hand_back_to_agent), Icons.Filled.SmartToy, Palette.takeover, Color(0xFF052E1C)) { BackgroundOperation.userResume() }
                         }
                     } else {
-                        if (mode == Mode.STOPPED) Pill(tr("交还 agent", "Hand back to agent"), Icons.Filled.SmartToy, Palette.takeover, Color(0xFF052E1C)) { BackgroundOperation.userResume() }
-                        Pill(tr("接管", "Take over"), Icons.Filled.TouchApp, Color(0x22FFFFFF), Color.White) {
+                        if (mode == Mode.STOPPED) Pill(tr(S.fullscreen_activity_hand_back_to_agent), Icons.Filled.SmartToy, Palette.takeover, Color(0xFF052E1C)) { BackgroundOperation.userResume() }
+                        Pill(tr(S.fullscreen_activity_take_over), Icons.Filled.TouchApp, Color(0x22FFFFFF), Color.White) {
                             BackgroundOperation.beginTakeover(session)
                         }
-                        Pill(tr("移到主屏", "Move to main screen"), Icons.Filled.PhoneAndroid, Color(0x22FFFFFF), Color.White) {
+                        Pill(tr(S.fullscreen_activity_move_to_main_screen), Icons.Filled.PhoneAndroid, Color(0x22FFFFFF), Color.White) {
                             Thread {
-                                val (ok, msg) = runCatching { VScreenHandoff.userToMain(session) }.getOrElse { false to (it.message ?: tr("失败", "failed")) }
+                                val (ok, msg) = runCatching { VScreenHandoff.userToMain(session) }.getOrElse { false to (it.message ?: tr(S.fullscreen_activity_failed)) }
                                 toast(msg); if (ok) runOnUiThread { back() }
                             }.start()
                         }

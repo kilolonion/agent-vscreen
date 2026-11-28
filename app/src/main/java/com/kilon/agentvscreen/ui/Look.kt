@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -66,8 +67,8 @@ object Palette {
     }
 
     fun word(m: Mode): String = when (m) {
-        Mode.ACTING -> tr("agent 操作中", "Agent working"); Mode.STANDBY -> tr("agent 待机", "Agent standby"); Mode.IDLE -> tr("空闲", "Idle")
-        Mode.TAKEOVER -> tr("你正在操作", "You are in control"); Mode.STOPPED -> tr("已停止 agent", "Agent stopped")
+        Mode.ACTING -> tr(S.look_agent_working); Mode.STANDBY -> tr(S.look_agent_standby); Mode.IDLE -> tr(S.look_idle)
+        Mode.TAKEOVER -> tr(S.look_you_are_in_control); Mode.STOPPED -> tr(S.look_agent_stopped)
     }
 }
 

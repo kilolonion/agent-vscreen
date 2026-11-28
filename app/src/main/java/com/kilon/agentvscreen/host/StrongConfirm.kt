@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
+import com.kilon.agentvscreen.trPair
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -60,7 +62,7 @@ object StrongConfirm {
         TODAY("today", "今天内", "Today"),
         /** 2.0.0-beta11: an elevation the user makes permanent (the agent's table changes); never for payments. */
         ALWAYS("always", "永久", "Permanently");
-        val title: String get() = tr(zh, en)
+        val title: String get() = trPair(zh, en)
         companion object { fun of(k: String?): Range = entries.firstOrNull { it.key == k } ?: ONCE }
     }
 
@@ -529,11 +531,11 @@ object StrongConfirm {
                 risk = Risk.PUBLIC_ENABLE,
                 key = key,
                 tokenId = Tokens.MAIN,
-                tokenName = tr("本机设置", "Phone settings"),
+                tokenName = tr(S.strong_confirm_phone_settings),
                 tokenScope = "operate",
                 client = Risk.CLIENT_LOCAL,
-                commandName = tr("开启公网 MCP 接入", "Enable public MCP access"),
-                detail = tr("开启后将通过 ${PublicAccess.channel.title} 提供公网 HTTPS MCP 入口", "Enables a public HTTPS MCP endpoint via ${PublicAccess.channel.title}"),
+                commandName = tr(S.strong_confirm_enable_public_mcp_access),
+                detail = tr(S.strong_confirm_enables_a_public_https_mcp, PublicAccess.channel.title),
                 at = now,
                 validMs = VALID_MS,
                 reusable = false,
@@ -582,7 +584,7 @@ object StrongConfirm {
                 tokenName = clientName,
                 tokenScope = "look",
                 client = "public:$clientId",
-                commandName = tr("公网 MCP 客户端配对", "Public MCP client pairing"),
+                commandName = tr(S.strong_confirm_public_mcp_client_pairing),
                 detail = redirectHost,
                 at = now,
                 validMs = validMs,
@@ -744,10 +746,7 @@ object StrongConfirm {
                 synchronized(lock) { req.used = true; publishPendingLocked(clock()) }
                 throw ActionError(
                     "USER_DENIED",
-                    tr(
-                        "用户在手机上拒绝了确认（$zhNames）。这一步没有做。不要换一种方式再试，告诉用户你停在了这里",
-                        "The user denied confirmation on the phone ($enNames). This step was not done. Don't try another way; tell the user where you stopped",
-                    ),
+                    tr(S.strong_confirm_the_user_denied_confirmation_on, zhNames, enNames),
                 )
             }
             null -> {
@@ -766,10 +765,7 @@ object StrongConfirm {
                 )
                 throw ActionError(
                     "NEEDS_CONFIRM",
-                    tr(
-                        "需要用户在手机上的 Agent-VScreen 里确认（$zhNames）。已发通知。确认后把这条命令原样重发。这一步没有做。",
-                        "The user must confirm this in Agent-VScreen on the phone ($enNames). A notification was sent. Once confirmed, resend the exact same command. This step was not done.",
-                    ),
+                    tr(S.strong_confirm_the_user_must_confirm_this, zhNames, enNames),
                     data = data,
                 )
             }
@@ -845,10 +841,7 @@ object StrongConfirm {
                 synchronized(lock) { req.used = true; publishPendingLocked(clock()) }
                 throw ActionError(
                     "USER_DENIED",
-                    tr(
-                        "用户在手机上拒绝了：$title。没有做。不要换一种方式再试，告诉用户你停在了这里",
-                        "The user denied it on the phone: $title. Not done. Don't try another way; tell the user where you stopped",
-                    ),
+                    tr(S.strong_confirm_the_user_denied_it_on, title),
                 )
             }
             null -> {
@@ -863,10 +856,7 @@ object StrongConfirm {
                 )
                 throw ActionError(
                     "CONFIRM_PENDING",
-                    tr(
-                        "需要用户在手机上的 Agent-VScreen 强确认页里确认：$title（$detail）。已发通知，等了 ${waitMs / 1000} 秒没有答复，这一步没有做。请用户点通知打开强确认页完成验证；${validMs / 60_000} 分钟内确认后，把这条命令原样重发一次",
-                        "The user must confirm this in Agent-VScreen's strong confirmation page: $title ($detail). A notification was sent; no answer within ${waitMs / 1000} s, so this step was not done. Ask the user to tap the notification to open strong confirmation; once confirmed (within ${validMs / 60_000} minutes), send this command again as it is",
-                    ),
+                    tr(S.strong_confirm_the_user_must_confirm_this_2, title, detail, waitMs / 1000, validMs / 60_000),
                     data = data,
                 )
             }
@@ -1088,19 +1078,13 @@ object StrongConfirm {
         if (live.isEmpty()) return null
         val first = live.first()
         if (live.size == 1) {
-            val title = tr("需要确认：${first.risk.title}", "Confirm: ${first.risk.title}")
-            val body = tr(
-                "配对码 ${first.pairingCode} · ${first.publicClientName ?: first.tokenName}（${first.redirectHost ?: "-"}）。点此核对并确认。",
-                "Pairing code ${first.pairingCode} · ${first.publicClientName ?: first.tokenName} (${first.redirectHost ?: "-"}). Tap to verify and confirm.",
-            )
+            val title = tr(S.strong_confirm_confirm, first.risk.title)
+            val body = tr(S.strong_confirm_pairing_code_tap_to_verify, first.pairingCode, first.publicClientName ?: first.tokenName, first.redirectHost ?: "-")
             return Triple(title, body, first.id)
         }
         val names = live.joinToString("、") { it.publicClientName ?: it.tokenName }
-        val title = tr("有 ${live.size} 个配对请求", "${live.size} pairing requests pending")
-        val body = tr(
-            "$names 正在等待配对确认。点此逐个核对。",
-            "$names waiting for pairing confirmation. Tap to review.",
-        )
+        val title = tr(S.strong_confirm_pairing_requests_pending, live.size)
+        val body = tr(S.strong_confirm_waiting_for_pairing_confirmation_tap, names)
         return Triple(title, body, first.id)
     }
 
@@ -1117,7 +1101,7 @@ object StrongConfirm {
                 nm.createNotificationChannel(
                     NotificationChannel(
                         CHANNEL,
-                        tr("需要强确认的安全操作", "Security confirmations"),
+                        tr(S.strong_confirm_security_confirmations),
                         NotificationManager.IMPORTANCE_HIGH,
                     ),
                 )
@@ -1165,7 +1149,7 @@ object StrongConfirm {
                 nm.createNotificationChannel(
                     NotificationChannel(
                         CHANNEL,
-                        tr("需要强确认的安全操作", "Security confirmations"),
+                        tr(S.strong_confirm_security_confirmations),
                         NotificationManager.IMPORTANCE_HIGH,
                     ),
                 )
@@ -1181,18 +1165,15 @@ object StrongConfirm {
                 com.kilon.agentvscreen.ui.MainDisplay.options(),
             )
             val clientText = clientLabel(req.client)
-            val riskTitles = req.risks.joinToString(tr(" + ", " + ")) { it.title }
-            val body = tr(
-                "令牌「${req.tokenName}」· $clientText · ${req.commandName}。点此打开强确认页。",
-                "Token \"${req.tokenName}\" · $clientText · ${req.commandName}. Tap to open strong confirmation.",
-            )
+            val riskTitles = req.risks.joinToString(tr(S.strong_confirm_plus)) { it.title }
+            val body = tr(S.strong_confirm_token_tap_to_open_strong, req.tokenName, clientText, req.commandName)
             val n = NotificationCompat.Builder(ctx, CHANNEL)
                 .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .setAutoCancel(false)
                 .setTimeoutAfter(req.validMs)
-                .setContentTitle(tr("需要确认：$riskTitles", "Confirm: $riskTitles"))
+                .setContentTitle(tr(S.strong_confirm_confirm, riskTitles))
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                 .setContentIntent(pi)
@@ -1208,7 +1189,7 @@ object StrongConfirm {
     }
 
     fun clientLabel(client: String): String = when (client) {
-        Risk.CLIENT_LOCAL -> tr("本机", "This phone (local)")
+        Risk.CLIENT_LOCAL -> tr(S.strong_confirm_this_phone_local)
         else -> client
     }
 

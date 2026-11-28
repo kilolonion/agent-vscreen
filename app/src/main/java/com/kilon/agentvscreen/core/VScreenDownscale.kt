@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.content.Context
@@ -50,12 +51,12 @@ internal object VScreenDownscale {
      * cold start that will not happen (Honor APS writes are refused without the system permission).
      */
     fun fitHint(pkg: String): String {
-        deniedRc?.let { return tr("本机无法关闭它的降分辨率（荣耀 APS 无写权限，本次已试过）；launch $pkg --restart 会改用副屏逻辑尺寸适配（wmsize_fit，冷启动一次）。根治办法是用户手动：", "This phone cannot turn off its downscaling (no write permission to Honor APS, tried already); launch $pkg --restart uses the screen's logical size instead (wmsize_fit, one cold start). The real fix is manual, by the user: ") + Vendor.current.downscaleHint() }
+        deniedRc?.let { return tr(S.vscreen_downscale_this_phone_cannot_turn_off, pkg) + Vendor.current.downscaleHint() }
         val v = Vendor.device.vendor
         val aps = runCatching { apsRead(pkg).available }.getOrDefault(false)
         if ((v == "honor" || v == "huawei") && aps)
-            return tr("launch $pkg --restart 会先尝试改 APS 比例（这类机型通常没有写权限）；改不了就把副屏逻辑尺寸设成它的实际渲染尺寸并冷启动一次（wmsize_fit，画面整体等比缩放、不再裁边）。根治办法是用户手动：", "launch $pkg --restart first tries to change the APS ratio (such phones usually have no write permission); failing that it sets the screen's logical size to the real render size and cold-starts once (wmsize_fit: the picture scales evenly and is no longer cropped). The real fix is manual, by the user: ") + Vendor.current.downscaleHint()
-        return tr("launch $pkg --restart 会尝试关闭它的降分辨率；只有设置确实改成了才冷启动一次，改不了就不重启", "launch $pkg --restart tries to turn off its downscaling; it cold-starts once only if the setting really changed, otherwise it does not restart")
+            return tr(S.vscreen_downscale_launch_restart_first_tries_to, pkg) + Vendor.current.downscaleHint()
+        return tr(S.vscreen_downscale_launch_restart_tries_to_turn, pkg)
     }
 
     enum class Status { CHANGED, ALREADY_FULL, DENIED, UNSUPPORTED, FAILED }
@@ -66,40 +67,37 @@ internal object VScreenDownscale {
     /** Set once the system said no: the shell (Shizuku/ADB) uid lacks com.hihonor.aps.permission.UPDATE_APS_INFO. */
     @Volatile private var deniedRc: Int? = null
 
-    private fun deniedText(rc: Int) = tr("荣耀APS：系统拒绝写入（返回 $rc${if (rc == APS_NO_PERMISSION) " = APS_NO_PERMISSION" else ""}）。" +
-        "改这个设置需要系统签名权限 com.hihonor.aps.permission.UPDATE_APS_INFO，Shizuku（ADB 模式）拿不到；未改任何设置，也没有重启应用",
-        "Honor APS: the system refused the write (returned $rc${if (rc == APS_NO_PERMISSION) " = APS_NO_PERMISSION" else ""}). " +
-        "Changing this needs the system-signature permission com.hihonor.aps.permission.UPDATE_APS_INFO, which Shizuku (ADB mode) cannot get; nothing was changed and no app was restarted")
+    private fun deniedText(rc: Int) = tr(S.vscreen_downscale_honor_aps_the_system_refused, rc, if (rc == APS_NO_PERMISSION) " = APS_NO_PERMISSION" else "")
 
     /** Honor/Huawei APS: render [pkg] at full resolution (ratio 1.0), keeping the original to restore. */
     fun apsDisable(pkg: String): Outcome = synchronized(apsLock) {
         val a = apsRead(pkg)
-        if (!a.available) return Outcome(Status.UNSUPPORTED, tr("荣耀APS：不适用（${a.error ?: "本机没有该服务"}）", "Honor APS: not applicable (${a.error ?: "no such service on this phone"})"))
-        if (a.resolution >= 0.999f) return Outcome(Status.ALREADY_FULL, tr("荣耀APS：$pkg 的分辨率比例已是 ${fmt(a.resolution)}，缩放来自别的层", "Honor APS: $pkg's resolution ratio is already ${fmt(a.resolution)}; the scaling comes from another layer"))
+        if (!a.available) return Outcome(Status.UNSUPPORTED, tr(S.vscreen_downscale_honor_aps_not_applicable, a.error ?: "本机没有该服务", a.error ?: "no such service on this phone"))
+        if (a.resolution >= 0.999f) return Outcome(Status.ALREADY_FULL, tr(S.vscreen_downscale_honor_aps_s_resolution_ratio, pkg, fmt(a.resolution)))
         deniedRc?.let { return Outcome(Status.DENIED, deniedText(it)) }
-        val p = prefs() ?: return Outcome(Status.FAILED, tr("荣耀APS：未初始化，未改", "Honor APS: not initialized, nothing changed"))
+        val p = prefs() ?: return Outcome(Status.FAILED, tr(S.vscreen_downscale_honor_aps_not_initialized_nothing))
         val fresh = !p.contains(K_APS + pkg)
         // Keep the first snapshot: it is the user's original, a later one would only record our 1.0.
         if (fresh) {
             val j = JSONObject().put("res", a.resolution.toDouble()).put("dyn", a.dynamic.toDouble()).put("has_info", a.hasInfo)
                 .put("info", a.info?.let { Base64.encodeToString(it, Base64.NO_WRAP) } ?: JSONObject.NULL)
                 .put("at", System.currentTimeMillis())
-            if (!p.edit().putString(K_APS + pkg, j.toString()).commit()) return Outcome(Status.FAILED, tr("荣耀APS：保存原设置失败，未改", "Honor APS: saving the original setting failed, nothing changed"))
+            if (!p.edit().putString(K_APS + pkg, j.toString()).commit()) return Outcome(Status.FAILED, tr(S.vscreen_downscale_honor_aps_saving_the_original))
         }
         val res = VScreenRemoteDisplay.apsSet(pkg, 1.0f)
         val rc = res.getOrNull()?.first
         val rb = res.getOrNull()?.second
         if (rc == 0 && rb != null && rb >= 0.999f)
-            return Outcome(Status.CHANGED, tr("荣耀APS：$pkg 分辨率比例 ${fmt(a.resolution)} → ${fmt(rb)}（已读回确认；主屏上的同一应用也按全分辨率运行，释放副屏时恢复原设置）", "Honor APS: $pkg resolution ratio ${fmt(a.resolution)} → ${fmt(rb)} (read back; the same app on the main screen also runs at full resolution; the original is restored when the screen is released)"))
+            return Outcome(Status.CHANGED, tr(S.vscreen_downscale_honor_aps_resolution_ratio_read, pkg, fmt(a.resolution), fmt(rb)))
         // Not applied. If the state is exactly the original, nothing to undo: drop our snapshot.
         val now = apsRead(pkg)
         val untouched = now.available && kotlin.math.abs(now.resolution - a.resolution) < 0.002f && now.hasInfo == a.hasInfo
-        val undo = if (untouched) { if (fresh) p.edit().remove(K_APS + pkg).commit(); tr("设置未被改动", "setting unchanged") } else (apsRestoreLocked(pkg) ?: tr("已尝试还原", "tried to restore"))
+        val undo = if (untouched) { if (fresh) p.edit().remove(K_APS + pkg).commit(); tr(S.vscreen_downscale_setting_unchanged) } else (apsRestoreLocked(pkg) ?: tr(S.vscreen_downscale_tried_to_restore))
         if (rc != null && rc != 0 && (rb == null || kotlin.math.abs(rb - a.resolution) < 0.002f)) {
             if (rc == APS_NO_PERMISSION) deniedRc = rc
-            return Outcome(Status.DENIED, deniedText(rc) + tr("（$undo）", " ($undo)"))
+            return Outcome(Status.DENIED, deniedText(rc) + tr(S.public_guide_text, undo))
         }
-        return Outcome(Status.FAILED, tr("荣耀APS：写入没有生效（返回 ${rc ?: res.exceptionOrNull()?.message}，读回 ${rb?.let { fmt(it) } ?: "?"}）；$undo", "Honor APS: the write did not take effect (returned ${rc ?: res.exceptionOrNull()?.message}, read back ${rb?.let { fmt(it) } ?: "?"}); $undo"))
+        return Outcome(Status.FAILED, tr(S.vscreen_downscale_honor_aps_the_write_did, rc ?: res.exceptionOrNull()?.message, rb?.let { fmt(it) } ?: "?", undo))
     }
 
     /** Put back the snapshot for [pkg]; null when there was nothing to restore. */
@@ -108,7 +106,7 @@ internal object VScreenDownscale {
     private fun apsRestoreLocked(pkg: String): String? {
         val p = prefs() ?: return null
         val s = p.getString(K_APS + pkg, null) ?: return null
-        val j = runCatching { JSONObject(s) }.getOrNull() ?: return tr("荣耀APS：$pkg 的原设置快照损坏，保留不动，未写入", "Honor APS: the saved original for $pkg is damaged; left alone, nothing written")
+        val j = runCatching { JSONObject(s) }.getOrNull() ?: return tr(S.vscreen_downscale_honor_aps_the_saved_original, pkg)
         val orig = j.optDouble("res", 1.0).toFloat()
         val has = j.optBoolean("has_info", false)
         val info = if (j.isNull("info")) null else runCatching { Base64.decode(j.getString("info"), Base64.NO_WRAP) }.getOrNull()
@@ -117,13 +115,10 @@ internal object VScreenDownscale {
                 // Restored = same ratio AND the same "explicit per-app entry exists or not" as before.
                 if (kotlin.math.abs(r.readBack - orig) < 0.002f && r.hasEntry == has) {
                     p.edit().remove(K_APS + pkg).commit()
-                    tr("荣耀APS：$pkg 已恢复为 ${fmt(r.readBack)}", "Honor APS: $pkg restored to ${fmt(r.readBack)}") + if (has) tr("（原应用配置）", " (its own setting)") else tr("（无单独配置，系统默认）", " (no separate setting, system default)")
-                } else tr("荣耀APS：$pkg 恢复后读回 ${fmt(r.readBack)}、单独配置${if (r.hasEntry) "存在" else "不存在"}，" +
-                    "原来是 ${fmt(orig)}、${if (has) "存在" else "不存在"}（${r.detail}）；保留快照，下次释放副屏时再试",
-                    "Honor APS: after restoring $pkg it reads ${fmt(r.readBack)}, separate setting ${if (r.hasEntry) "present" else "absent"}; " +
-                    "it was ${fmt(orig)}, ${if (has) "present" else "absent"} (${r.detail}); snapshot kept, retried on the next release")
+                    tr(S.vscreen_downscale_honor_aps_restored_to, pkg, fmt(r.readBack)) + if (has) tr(S.vscreen_downscale_its_own_setting) else tr(S.vscreen_downscale_no_separate_setting_system_default)
+                } else tr(S.vscreen_downscale_honor_aps_after_restoring_it, pkg, fmt(r.readBack), if (r.hasEntry) "存在" else "不存在", fmt(orig), if (has) "存在" else "不存在", r.detail, if (r.hasEntry) "present" else "absent", if (has) "present" else "absent")
             },
-            { tr("荣耀APS：$pkg 恢复失败（${it.message}），保留快照，下次释放副屏时再试", "Honor APS: restoring $pkg failed (${it.message}); snapshot kept, retried on the next release") })
+            { tr(S.vscreen_downscale_honor_aps_restoring_failed_snapshot, pkg, it.message) })
             .also { AppLogger.info(TAG, it) }
     }
 
@@ -152,9 +147,9 @@ internal object VScreenDownscale {
             val fx = srcW / refW; val fy = srcH / refH
             return srcL <= 2.0 && srcT <= 2.0 && fx < 0.97 && fy < 0.97 && kotlin.math.abs(fx - fy) < 0.03
         }
-        fun describe(): String = tr("图层 #$layerId：内容 ${refW}x$refH，合成采样 ${srcW.toInt()}x${srcH.toInt()}", "layer #$layerId: content ${refW}x$refH, composited from ${srcW.toInt()}x${srcH.toInt()}") +
-            (if (srcL > 2 || srcT > 2) tr(" 自 (${srcL.toInt()},${srcT.toInt()})", " at (${srcL.toInt()},${srcT.toInt()})") else "") + tr(" → 显示 ${dispW}x$dispH", " → shown ${dispW}x$dispH") +
-            if (cropped) tr("（右侧 ${refW - srcW.toInt()}px、下方 ${refH - srcH.toInt()}px 没显示）", " (${refW - srcW.toInt()}px on the right and ${refH - srcH.toInt()}px at the bottom not shown)") else tr("（未见左上锚定裁切）", " (no top-left anchored crop seen)")
+        fun describe(): String = tr(S.vscreen_downscale_layer_content_x_composited_from, layerId, refW, refH, srcW.toInt(), srcH.toInt()) +
+            (if (srcL > 2 || srcT > 2) tr(S.vscreen_downscale_at, srcL.toInt(), srcT.toInt()) else "") + tr(S.vscreen_downscale_shown_x, dispW, dispH) +
+            if (cropped) tr(S.vscreen_downscale_px_on_the_right_and, refW - srcW.toInt(), refH - srcH.toInt()) else tr(S.vscreen_downscale_no_top_left_anchored_crop)
     }
 
     private val hdrLayer = Regex("^\\s*(?:\\*\\s*)?Layer \\[(\\d+)]\\s*(.*)$")
@@ -266,7 +261,7 @@ internal object VScreenDownscale {
                 if (!((gs != null && gs > 1.02) || crop?.cropped == true)) continue
                 synchronized(lateScaled) { lateScaled += pkg }
                 val what = "compat ${gs?.let { "%.2f".format(it) } ?: "?"}x" + (crop?.let { ", ${it.describe()}" } ?: "")
-                note(d.displayId, tr("$pkg 启动约 ${at / 1000} 秒后被系统缩放（$what），副屏右侧/下方会被裁。", "$pkg was scaled by the system about ${at / 1000} s after start ($what); the right / bottom of the screen gets cropped. ") + fitHint(pkg))
+                note(d.displayId, tr(S.vscreen_downscale_was_scaled_by_the_system, pkg, at / 1000, what) + fitHint(pkg))
                 return@Thread
             }
         }.apply { isDaemon = true; name = "vscreen-scale-watch" }.start()

@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.app.Application
 import android.content.Context
 import com.kilon.agentvscreen.tr
@@ -91,13 +92,13 @@ object Privileged {
     /** Why it is not ready and what the user does, in one sentence. */
     fun notReadyHint(): String = when (via) {
         Via.ROOT -> when (RootBackend.phase) {
-            RootBackend.Phase.STARTING -> tr("正在用 root 启动副屏服务…（第一次会弹 root 授权框）", "Starting the screen service with root… (the first time, the root manager asks)")
-            else -> RootBackend.lastError ?: tr("还没用 root 启动：在 Agent-VScreen 首页的配置里点“用 Root 启动”", "Not started with root yet: tap \"Start with root\" in Agent-VScreen's setup")
+            RootBackend.Phase.STARTING -> tr(S.privileged_starting_the_screen_service_with)
+            else -> RootBackend.lastError ?: tr(S.privileged_not_started_with_root_yet)
         }
         Via.SHIZUKU -> when (ShizukuManager.snapshot.value.state) {
-            ShizukuManager.State.NOT_INSTALLED -> tr("没装 Shizuku（或其兼容分支 / Sui）：请用户安装并启动 Shizuku，或在 App 里改用 Root", "Shizuku (or a compatible fork / Sui) is not installed: ask the user to install and start Shizuku, or switch to root in the app")
+            ShizukuManager.State.NOT_INSTALLED -> tr(S.privileged_shizuku_or_a_compatible_fork)
             ShizukuManager.State.NOT_RUNNING -> ShizukuManager.missingBinderHint()
-            ShizukuManager.State.NEED_PERMISSION -> tr("Agent-VScreen 尚未获得 ${name()} 授权", "Agent-VScreen has no ${name()} permission yet")
+            ShizukuManager.State.NEED_PERMISSION -> tr(S.privileged_agent_vscreen_has_no_permission, name())
             ShizukuManager.State.READY -> ""
         }
     }
@@ -122,7 +123,7 @@ object Privileged {
                 Snapshot(via, s.state, label)
             }
             Via.ROOT -> Snapshot(via, rootState(RootBackend.phase, RootBackend.binder?.isBinderAlive == true),
-                if (RootBackend.binder != null) "Root" + if (RootBackend.uid == 2000) tr("（shell 身份）", " (as shell)") else "" else "")
+                if (RootBackend.binder != null) "Root" + if (RootBackend.uid == 2000) tr(S.privileged_as_shell) else "" else "")
         }
         val prev = _snapshot.value
         _snapshot.value = next

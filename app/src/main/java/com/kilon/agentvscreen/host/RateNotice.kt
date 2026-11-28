@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -23,18 +24,18 @@ object RateNotice {
         val c = ctx ?: return
         val nm = c.getSystemService(NotificationManager::class.java) ?: return
         if (nm.getNotificationChannel(CHANNEL) == null) {
-            nm.createNotificationChannel(NotificationChannel(CHANNEL, tr("agent 的动静", "What agents are doing"), NotificationManager.IMPORTANCE_LOW))
+            nm.createNotificationChannel(NotificationChannel(CHANNEL, tr(S.rate_notice_what_agents_are_doing), NotificationManager.IMPORTANCE_LOW))
         }
         val open = c.packageManager.getLaunchIntentForPackage(c.packageName)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) ?: return
         val pi = PendingIntent.getActivity(c, ID, open, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-        val text = tr("$agent 在一分钟内执行了 $perMin 次操作。如需停止，可在悬浮窗或 App 中操作。", "$agent performed $perMin actions in one minute. To stop it, use the floating window or the app.")
+        val text = tr(S.rate_notice_performed_actions_in_one_minute, agent, perMin)
         val n = NotificationCompat.Builder(c, CHANNEL)
             .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOnlyAlertOnce(true)
             .setAutoCancel(true)
             .setTimeoutAfter(10 * 60_000L)
-            .setContentTitle(tr("高频操作", "High action rate"))
+            .setContentTitle(tr(S.connect_high_action_rate))
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(pi)

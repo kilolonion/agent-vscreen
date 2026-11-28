@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import androidx.compose.material.icons.outlined.School
 
 import androidx.compose.material.icons.outlined.Alarm
@@ -78,7 +79,7 @@ import java.time.LocalDate
 private fun hm(m: Int) = "%02d:%02d".format(java.util.Locale.ROOT, m / 60, m % 60)
 
 private val DAY_KEYS = listOf("mon", "tue", "wed", "thu", "fri", "sat", "sun")
-private fun dayLabels() = listOf(tr("一", "M"), tr("二", "T"), tr("三", "W"), tr("四", "T"), tr("五", "F"), tr("六", "S"), tr("日", "S"))
+private fun dayLabels() = listOf(tr(S.automation_day_mon), tr(S.automation_day_tue), tr(S.automation_day_wed), tr(S.automation_day_thu), tr(S.automation_day_fri), tr(S.automation_day_sat), tr(S.automation_day_sun))
 
 /** What the editor holds; [text] is the same words an agent would book with (`Wake.parse` reads it). */
 private data class Draft(
@@ -115,14 +116,14 @@ internal fun SchedulesCards(tick: Int, showEmpty: Boolean = true) {
     var editing by remember { mutableStateOf<Wake.Entry?>(null) }
     LaunchedEffect(tick, again) { list = withContext(Dispatchers.IO) { Wake.arm(ctx); Wake.list(ctx) } }
     if (list.isEmpty()) {
-        if (showEmpty) EmptyState(androidx.compose.material.icons.Icons.Outlined.Alarm, tr("还没有预约或监视", "No schedules or watches yet"),
-            tr("agent 要定时用手机，或要等一件事发生时，会出现在这里", "When an agent books a time on the phone, or waits for something to happen, it shows up here"))
+        if (showEmpty) EmptyState(androidx.compose.material.icons.Icons.Outlined.Alarm, tr(S.automation_no_schedules_or_watches_yet),
+            tr(S.automation_when_an_agent_books_a))
         return
     }
     list.forEach { e ->
         val j = e.json()
         val big = when {
-            e.spec.everyMin > 0 -> tr("每 ${e.spec.everyMin} 分钟", "Every ${e.spec.everyMin} min")
+            e.spec.everyMin > 0 -> tr(S.automation_every_min, e.spec.everyMin)
             else -> e.spec.times.joinToString("  ") { hm(it) }
         }
         Row(
@@ -132,8 +133,8 @@ internal fun SchedulesCards(tick: Int, showEmpty: Boolean = true) {
         ) {
             Column(Modifier.weight(1f).alpha(if (e.on) 1f else 0.45f)) {
                 Text(big, fontSize = 28.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(e.spec.describe() + tr(" · 保持 ${e.forMin} 分钟", " · ${e.forMin} min"), fontSize = 12.5.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text((if (e.on) tr("下次 ${j.optString("next_local", "—")}", "Next ${j.optString("next_local", "—")}") else tr("已关闭", "Off")) + " · ${e.name} · ${e.by}",
+                Text(e.spec.describe() + tr(S.automation_min, e.forMin), fontSize = 12.5.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text((if (e.on) tr(S.automation_next, j.optString("next_local", "—")) else tr(S.automation_off)) + " · ${e.name} · ${e.by}",
                     fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Switch(checked = e.on, onCheckedChange = { v ->
@@ -160,19 +161,19 @@ private fun ScheduleEditor(e: Wake.Entry, onClose: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(tr("调整预约", "Edit schedule"), fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(tr(S.automation_edit_schedule), fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
                 Text(e.name, fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
 
             // How it repeats.
-            Segmented(listOf(tr("按时间", "At times"), tr("按间隔", "Interval"), tr("仅一次", "Once")), d.kind) { d = d.copy(kind = it); error = null }
+            Segmented(listOf(tr(S.automation_at_times), tr(S.automation_interval), tr(S.automation_once)), d.kind) { d = d.copy(kind = it); error = null }
 
             when (d.kind) {
                 1 -> {
-                    EditGroup(tr("间隔", "Every")) {
-                        Stepper("${d.every} " + tr("分钟", "min"), { d = d.copy(every = (d.every - 30).coerceAtLeast(Wake.MIN_EVERY_MIN)) }, { d = d.copy(every = (d.every + 30).coerceAtMost(24 * 60)) })
+                    EditGroup(tr(S.automation_every)) {
+                        Stepper("${d.every} " + tr(S.automation_min_2), { d = d.copy(every = (d.every - 30).coerceAtLeast(Wake.MIN_EVERY_MIN)) }, { d = d.copy(every = (d.every + 30).coerceAtMost(24 * 60)) })
                     }
-                    EditGroup(tr("时段", "Between")) {
+                    EditGroup(tr(S.automation_between)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                             TimeChip(hm(d.from)) { pickTime(ctx, d.from) { d = d.copy(from = it) } }
                             Text("–", fontSize = 18.sp)
@@ -180,7 +181,7 @@ private fun ScheduleEditor(e: Wake.Entry, onClose: () -> Unit) {
                         }
                     }
                 }
-                else -> EditGroup(tr("时间", "Times")) {
+                else -> EditGroup(tr(S.automation_times)) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         d.times.forEachIndexed { i, t ->
                             TimeChip(hm(t), onRemove = if (d.times.size > 1) ({ d = d.copy(times = d.times.filterIndexed { k, _ -> k != i }) }) else null) {
@@ -191,17 +192,17 @@ private fun ScheduleEditor(e: Wake.Entry, onClose: () -> Unit) {
                             Modifier.clip(RoundedCornerShape(50)).border(1.dp, MiuixTheme.colorScheme.primary.copy(alpha = 0.4f), RoundedCornerShape(50))
                                 .clickable { pickTime(ctx, (d.times.lastOrNull() ?: 480) + 60) { n -> d = d.copy(times = (d.times + n).distinct().sorted()) } }
                                 .padding(horizontal = 14.dp, vertical = 10.dp),
-                        ) { Icon(Icons.Filled.Add, tr("加一个时间", "Add a time"), tint = MiuixTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) }
+                        ) { Icon(Icons.Filled.Add, tr(S.automation_add_a_time), tint = MiuixTheme.colorScheme.primary, modifier = Modifier.size(20.dp)) }
                     }
                 }
             }
 
-            if (d.kind == 2) EditGroup(tr("日期", "Day")) {
+            if (d.kind == 2) EditGroup(tr(S.automation_day)) {
                 TimeChip("${d.date.monthValue}-${d.date.dayOfMonth}") {
                     DatePickerDialog(ctx, { _, y, m, day -> d = d.copy(date = LocalDate.of(y, m + 1, day)) }, d.date.year, d.date.monthValue - 1, d.date.dayOfMonth)
                         .apply { datePicker.minDate = System.currentTimeMillis() - 1000 }.show()
                 }
-            } else EditGroup(tr("重复", "Repeat")) {
+            } else EditGroup(tr(S.automation_repeat)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     dayLabels().forEachIndexed { i, l ->
                         val on = d.days and (1 shl i) != 0
@@ -214,7 +215,7 @@ private fun ScheduleEditor(e: Wake.Entry, onClose: () -> Unit) {
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(tr("每天", "Daily") to 0x7F, tr("工作日", "Weekdays") to 0x1F, tr("周末", "Weekends") to 0x60).forEach { (w, m) ->
+                    listOf(tr(S.automation_daily) to 0x7F, tr(S.automation_weekdays) to 0x1F, tr(S.automation_weekends) to 0x60).forEach { (w, m) ->
                         Text(w, fontSize = 12.sp, color = if (d.days == m) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             fontWeight = if (d.days == m) FontWeight.SemiBold else FontWeight.Normal,
                             modifier = Modifier.clip(RoundedCornerShape(50)).clickable { d = d.copy(days = m) }.padding(horizontal = 8.dp, vertical = 4.dp))
@@ -222,32 +223,32 @@ private fun ScheduleEditor(e: Wake.Entry, onClose: () -> Unit) {
                 }
             }
 
-            EditGroup(tr("每次保持", "Keep ready for")) {
-                Stepper("${d.forMin} " + tr("分钟", "min"), { d = d.copy(forMin = (d.forMin - 1).coerceAtLeast(1)) }, { d = d.copy(forMin = (d.forMin + 1).coerceAtMost(Wake.MAX_FOR_MIN)) })
+            EditGroup(tr(S.automation_keep_ready_for)) {
+                Stepper("${d.forMin} " + tr(S.automation_min_2), { d = d.copy(forMin = (d.forMin - 1).coerceAtLeast(1)) }, { d = d.copy(forMin = (d.forMin + 1).coerceAtMost(Wake.MAX_FOR_MIN)) })
             }
 
-            SwitchRow(tr("启用", "On"), checked = d.on) { d = d.copy(on = it) }
+            SwitchRow(tr(S.automation_on), checked = d.on) { d = d.copy(on = it) }
 
             error?.let { Text(it, fontSize = 13.sp, color = Palette.stopped) }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                LinkButton(onClick = { askDelete = true }) { Text(tr("删除", "Delete"), color = Palette.stopped) }
+                LinkButton(onClick = { askDelete = true }) { Text(tr(S.automation_delete), color = Palette.stopped) }
                 Spacer(Modifier.weight(1f))
-                LinkButton(onClick = onClose) { Text(tr("取消", "Cancel")) }
+                LinkButton(onClick = onClose) { Text(tr(S.app_picker_cancel)) }
                 Spacer(Modifier.width(6.dp))
                 PrimaryButton(onClick = {
                     try { Wake.edit(ctx, e.agentId, e.name, d.text(), d.forMin, d.on); onClose() }
                     catch (x: Wake.BadSpec) { error = x.message }
-                }) { Text(tr("保存", "Save"), color = MiuixTheme.colorScheme.onPrimary, fontWeight = FontWeight.SemiBold) }
+                }) { Text(tr(S.automation_save), color = MiuixTheme.colorScheme.onPrimary, fontWeight = FontWeight.SemiBold) }
             }
         }
     }
     if (askDelete) GlassDialog(
         onDismissRequest = { askDelete = false },
-        title = { Text(tr("删除这个预约？", "Delete this schedule?")) },
-        text = { Text(tr("将删除 ${e.by} 预约的「${e.name}」，之后不会再为它启动服务。", "\"${e.name}\" scheduled by ${e.by} will be deleted; the service will no longer start for it.")) },
-        confirmButton = { LinkButton(onClick = { Wake.remove(ctx, e.name, e.agentId); askDelete = false; onClose() }) { Text(tr("删除", "Delete"), color = Palette.stopped) } },
-        dismissButton = { LinkButton(onClick = { askDelete = false }) { Text(tr("取消", "Cancel")) } },
+        title = { Text(tr(S.automation_delete_this_schedule)) },
+        text = { Text(tr(S.automation_scheduled_by_will_be_deleted, e.by, e.name)) },
+        confirmButton = { LinkButton(onClick = { Wake.remove(ctx, e.name, e.agentId); askDelete = false; onClose() }) { Text(tr(S.automation_delete), color = Palette.stopped) } },
+        dismissButton = { LinkButton(onClick = { askDelete = false }) { Text(tr(S.app_picker_cancel)) } },
     )
 }
 
@@ -281,7 +282,7 @@ private fun TimeChip(label: String, onRemove: (() -> Unit)? = null, onClick: () 
     ) {
         Text(label, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
         if (onRemove != null) Box(Modifier.padding(start = 4.dp).size(28.dp).clip(CircleShape).clickable(onClick = onRemove), contentAlignment = Alignment.Center) {
-            Icon(Icons.Filled.Close, tr("去掉", "Remove"), modifier = Modifier.size(16.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            Icon(Icons.Filled.Close, tr(S.automation_remove), modifier = Modifier.size(16.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
         }
     }
 }
@@ -289,9 +290,9 @@ private fun TimeChip(label: String, onRemove: (() -> Unit)? = null, onClick: () 
 @Composable
 private fun Stepper(value: String, minus: () -> Unit, plus: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        RoundIcon(Icons.Filled.Remove, tr("减少", "Less"), minus)
+        RoundIcon(Icons.Filled.Remove, tr(S.automation_less), minus)
         Text(value, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.heightIn(min = 28.dp))
-        RoundIcon(Icons.Filled.Add, tr("增加", "More"), plus)
+        RoundIcon(Icons.Filled.Add, tr(S.automation_more), plus)
     }
 }
 
@@ -315,8 +316,8 @@ internal fun LessonsList(tick: Int) {
     var query by remember { mutableStateOf("") }
     var picking by remember { mutableStateOf(false) }
     var picked by remember { mutableStateOf(setOf<String>()) }
-    if (kept.isEmpty()) { EmptyState(androidx.compose.material.icons.Icons.Outlined.School, tr("还没有示教", "No routines yet"),
-        tr("你录制的示教和 agent 保存的示教，按应用归类显示在这里", "Routines you recorded and routines agents saved are listed here by app")); return }
+    if (kept.isEmpty()) { EmptyState(androidx.compose.material.icons.Icons.Outlined.School, tr(S.automation_no_routines_yet),
+        tr(S.automation_routines_you_recorded_and_routines)); return }
     val labels = remember(kept) { kept.map { it.pkg }.distinct().associateWith { pkg -> runCatching { ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg) } }
     val q = query.trim()
     val shown = if (q.isEmpty()) all else all.filter { (p, s) -> lessonMatches(q, s.name, labels[p] ?: p, p, s.steps) }
@@ -328,16 +329,16 @@ internal fun LessonsList(tick: Int) {
             verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Filled.Search, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             Box(Modifier.weight(1f).padding(start = 8.dp), contentAlignment = Alignment.CenterStart) {
-                if (query.isEmpty()) Text(tr("搜索名字、应用或步骤", "Search name, app or steps"), fontSize = 14.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                if (query.isEmpty()) Text(tr(S.automation_search_name_app_or_steps), fontSize = 14.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                 androidx.compose.foundation.text.BasicTextField(value = query, onValueChange = { query = it.take(40) }, singleLine = true,
                     textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp, color = MiuixTheme.colorScheme.onSurface),
                     cursorBrush = androidx.compose.ui.graphics.SolidColor(MiuixTheme.colorScheme.primary), modifier = Modifier.fillMaxWidth())
             }
-            if (query.isNotEmpty()) Icon(Icons.Filled.Close, tr("清空", "Clear"), Modifier.size(18.dp).clip(CircleShape).clickable { query = "" }, tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            if (query.isNotEmpty()) Icon(Icons.Filled.Close, tr(S.automation_clear), Modifier.size(18.dp).clip(CircleShape).clickable { query = "" }, tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
         }
         Box(Modifier.size(42.dp).clip(CircleShape).background(if (picking) MiuixTheme.colorScheme.primary.copy(alpha = 0.16f) else MiuixTheme.colorScheme.surfaceContainer)
             .clickable { picking = !picking; picked = emptySet() }, contentAlignment = Alignment.Center) {
-            Icon(if (picking) Icons.Filled.Close else Icons.Filled.Checklist, if (picking) tr("取消选择", "Cancel") else tr("选择", "Select"), Modifier.size(20.dp),
+            Icon(if (picking) Icons.Filled.Close else Icons.Filled.Checklist, if (picking) tr(S.automation_cancel) else tr(S.automation_select), Modifier.size(20.dp),
                 tint = if (picking) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary)
         }
     }
@@ -345,10 +346,10 @@ internal fun LessonsList(tick: Int) {
         val keys = shown.map { keyOf(it.first, it.second) }.toSet()
         val allOn = keys.isNotEmpty() && picked.containsAll(keys)
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(tr("已选 ${picked.size} 个", "${picked.size} selected"), fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
-            LinkButton(onClick = { picked = if (allOn) picked - keys else picked + keys }) { Text(if (allOn) tr("全不选", "Select none") else tr("全选", "Select all")) }
+            Text(tr(S.automation_selected, picked.size), fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
+            LinkButton(onClick = { picked = if (allOn) picked - keys else picked + keys }) { Text(if (allOn) tr(S.automation_select_none) else tr(S.automation_select_all)) }
             LinkButton(enabled = picked.isNotEmpty(), onClick = { askDelete = all.filter { keyOf(it.first, it.second) in picked } }) {
-                Text(tr("删除", "Delete"), color = if (picked.isNotEmpty()) Palette.stopped else MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                Text(tr(S.automation_delete), color = if (picked.isNotEmpty()) Palette.stopped else MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
         }
     }
@@ -357,7 +358,7 @@ internal fun LessonsList(tick: Int) {
     val keptOf = remember(kept) { kept.associateBy { it.pkg } }
     fun noteHits(k: VScreenMap.Kept?) = k?.notes.orEmpty().filter { q.isEmpty() || lessonMatches(q, it.text, labels[k!!.pkg] ?: k.pkg) }
     val pkgs = (shown.map { it.first } + kept.map { it.pkg }.filter { p -> noteHits(keptOf[p]).isNotEmpty() || (q.isEmpty() && keptOf[p]?.habits?.isNotEmpty() == true) }).distinct()
-    if (pkgs.isEmpty()) Note(tr("没有匹配“$q”的示教", "No routines match \"$q\""))
+    if (pkgs.isEmpty()) Note(tr(S.automation_no_routines_match, q))
     pkgs.forEach { pkg ->
         val list = shown.filter { it.first == pkg }
         Text(labels[pkg] ?: pkg, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
@@ -383,7 +384,7 @@ internal fun LessonsList(tick: Int) {
                     }
                     Column(Modifier.weight(1f)) {
                         Text(s.name, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(steps(count) + (if (s.uses > 0) tr(" · 用过 ${s.uses} 次", " · used ${s.uses}×") else "") +
+                        Text(steps(count) + (if (s.uses > 0) tr(S.automation_used, s.uses) else "") +
                             " · " + java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.ROOT).format(java.util.Date(s.at)) + " · " + segmentSource(p, s),
                             fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     }
@@ -405,8 +406,8 @@ internal fun LessonsList(tick: Int) {
                         }
                     }
                     Row {
-                        Text(tr("agent 用：act \"use ${s.name}\"", "Agents run it with: act \"use ${s.name}\""), fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f).align(Alignment.CenterVertically))
-                        LinkButton(onClick = { askDelete = listOf(p to s) }) { Text(tr("删除", "Delete"), color = Palette.stopped) }
+                        Text(tr(S.automation_agents_run_it_with_act, s.name), fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f).align(Alignment.CenterVertically))
+                        LinkButton(onClick = { askDelete = listOf(p to s) }) { Text(tr(S.automation_delete), color = Palette.stopped) }
                     }
                 }
             }
@@ -416,15 +417,15 @@ internal fun LessonsList(tick: Int) {
         val one = list.singleOrNull()?.second
         GlassDialog(
             onDismissRequest = { askDelete = null },
-            title = { Text(if (one != null) tr("删除示教「${one.name}」？", "Delete routine \"${one.name}\"?") else tr("删除这 ${list.size} 个示教？", "Delete these ${list.size} routines?")) },
-            text = { Text(if (one != null) tr("agent 以后不能再用 use ${one.name} 重放它。", "Agents can no longer replay it with use ${one.name}.")
-                else list.joinToString(tr("、", ", ")) { it.second.name }.take(200) + tr("\nagent 以后不能再用 use 重放它们。", "\nAgents can no longer replay them with use.")) },
+            title = { Text(if (one != null) tr(S.automation_delete_routine, one.name) else tr(S.automation_delete_these_routines, list.size)) },
+            text = { Text(if (one != null) tr(S.automation_agents_can_no_longer_replay, one.name)
+                else list.joinToString(tr(S.automation_list_sep)) { it.second.name }.take(200) + tr(S.automation_agents_can_no_longer_replay_2)) },
             confirmButton = { LinkButton(onClick = {
                 list.forEach { (p, s) -> VScreenMap.deleteSegment(p, s.name) }
                 picked = picked - list.map { keyOf(it.first, it.second) }.toSet(); if (picked.isEmpty()) picking = false
                 askDelete = null; again++
-            }) { Text(tr("删除", "Delete"), color = Palette.stopped) } },
-            dismissButton = { LinkButton(onClick = { askDelete = null }) { Text(tr("取消", "Cancel")) } },
+            }) { Text(tr(S.automation_delete), color = Palette.stopped) } },
+            dismissButton = { LinkButton(onClick = { askDelete = null }) { Text(tr(S.app_picker_cancel)) } },
         )
     }
 }
@@ -432,8 +433,8 @@ internal fun LessonsList(tick: Int) {
 /** Who a segment came from: the user's lesson (it has a contact sheet) for an agent, or an agent's own. */
 internal fun segmentSource(pkg: String, s: VScreenMap.Segment): String {
     val who = s.by?.let { com.kilon.agentvscreen.api.Agents.name(it) }
-    return if (VScreenMap.isTaught(pkg, s)) tr("你示教的", "taught by you") + (who?.let { tr("（为 $it）", " (for $it)") } ?: "")
-    else (who?.let { tr("$it 存的", "saved by $it") } ?: tr("agent 存的", "saved by an agent"))
+    return if (VScreenMap.isTaught(pkg, s)) tr(S.automation_taught_by_you) + (who?.let { tr(S.automation_for, it) } ?: "")
+    else (who?.let { tr(S.automation_saved_by, it) } ?: tr(S.automation_saved_by_an_agent))
 }
 
 /** An app's notes (what agents learned about it) and habits (steps before / after every act, human pacing). */
@@ -447,14 +448,14 @@ private fun KeptExtras(pkg: String, notes: List<VScreenMap.Note>, habits: Map<St
                     Text(title, fontSize = 14.sp, lineHeight = 20.sp)
                     Text(sub, fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                 }
-                LinkButton(onClick = remove) { Text(tr("删除", "Delete"), color = Palette.stopped) }
+                LinkButton(onClick = remove) { Text(tr(S.automation_delete), color = Palette.stopped) }
             }
         }
-        habits["before"]?.let { line(tr("每次先做：$it", "Before every act: $it"), tr("这个应用的习惯", "A habit of this app")) { VScreenMap.setProfile(pkg, mapOf("before" to "")); changed() }() }
-        habits["after"]?.let { line(tr("每次最后做：$it", "After every act: $it"), tr("这个应用的习惯", "A habit of this app")) { VScreenMap.setProfile(pkg, mapOf("after" to "")); changed() }() }
-        habits["human"]?.takeIf { it == "true" }?.let { line(tr("用仿人节奏", "Human pacing"), tr("这个应用的习惯", "A habit of this app")) { VScreenMap.setProfile(pkg, mapOf("human" to "")); changed() }() }
+        habits["before"]?.let { line(tr(S.automation_before_every_act, it), tr(S.automation_a_habit_of_this_app)) { VScreenMap.setProfile(pkg, mapOf("before" to "")); changed() }() }
+        habits["after"]?.let { line(tr(S.automation_after_every_act, it), tr(S.automation_a_habit_of_this_app)) { VScreenMap.setProfile(pkg, mapOf("after" to "")); changed() }() }
+        habits["human"]?.takeIf { it == "true" }?.let { line(tr(S.automation_human_pacing), tr(S.automation_a_habit_of_this_app)) { VScreenMap.setProfile(pkg, mapOf("human" to "")); changed() }() }
         notes.forEach { n ->
-            line(n.text, (n.by?.let { tr("${com.kilon.agentvscreen.api.Agents.name(it)} 记的", "noted by ${com.kilon.agentvscreen.api.Agents.name(it)}") } ?: tr("agent 记的", "noted by an agent")) +
+            line(n.text, (n.by?.let { tr(S.automation_noted_by, com.kilon.agentvscreen.api.Agents.name(it)) } ?: tr(S.automation_noted_by_an_agent)) +
                 " · " + java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.ROOT).format(java.util.Date(n.at))) { VScreenMap.deleteNote(pkg, n.id); changed() }()
         }
     }

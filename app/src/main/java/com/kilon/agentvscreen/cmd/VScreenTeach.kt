@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
+import com.kilon.agentvscreen.trPair
 import android.content.Context
 import com.kilon.agentvscreen.core.BackgroundOperation
 import com.kilon.agentvscreen.core.BackgroundOperation.ActionError
@@ -204,7 +206,7 @@ internal object Teach {
      */
     fun askEnded(id: Int, why: String? = null) {
         if (prepId == id) { cancelPrep(); return }
-        synchronized(this) { rec?.takeIf { it.askId == id }?.let { it.askEnded = why ?: tr("请求已结束", "the request ended"); recState(it) } }
+        synchronized(this) { rec?.takeIf { it.askId == id }?.let { it.askEnded = why ?: tr(S.vscreen_teach_the_request_ended); recState(it) } }
     }
 
     /**
@@ -222,7 +224,7 @@ internal object Teach {
     }
 
     /** What a check marked while recording asks the agent by default (the review page lets the user say it better). */
-    val CHECK_DEFAULT: String get() = tr("看一下这一步之后对不对", "check that this step went right")
+    val CHECK_DEFAULT: String get() = tr(S.vscreen_teach_check_that_this_step_went)
 
     /** 1.4.0-beta11: "让 agent 看一下": after the step just recorded, the agent will check before the lesson goes on. */
     fun markCheck() = synchronized(this) {
@@ -276,7 +278,7 @@ internal object Teach {
         val steps = r.lines.withIndex().filter { it.index in keep }.mapIndexed { n, l -> Triple(n + 1, l.value, l.value.pic) }.filter { it.third != null }
         val picked = spread(steps, SHEET_MAX - (if (r.endPic != null) 1 else 0))
         val cells = picked.map { (n, l, p) -> Triple("$n " + (if (l.kind == "type") "type " + (if (l.secret) "***" else l.typed.orEmpty().take(10)) else l.head).take(24), p!!, l.at) } +
-            listOfNotNull(r.endPic?.let { Triple(tr("结束时", "at the end"), it, null as Pair<Int, Int>?) })
+            listOfNotNull(r.endPic?.let { Triple(tr(S.vscreen_teach_at_the_end), it, null as Pair<Int, Int>?) })
         if (cells.isEmpty()) return null
         val cw = TeachPic.W; val ch = cells.maxOf { it.second.bmp.height }; val label = 26; val gap = 6
         val cols = minOf(4, cells.size); val rows = (cells.size + cols - 1) / cols
@@ -315,7 +317,7 @@ internal object Teach {
         (_lesson.value as? Lesson.Review)?.let { v -> if (!v.screenGone) _lesson.value = v.copy(screenGone = true); return }
         val p = prepId ?: return
         cancelPrep()
-        ctx?.let { UserAsk.answer(it, p, false, org.json.JSONObject().put("ended", tr("副屏关了", "the screen closed"))) }
+        ctx?.let { UserAsk.answer(it, p, false, org.json.JSONObject().put("ended", tr(S.vscreen_teach_the_screen_closed))) }
     }
 
     /** While recording an agent's request: who asked and what (the full screen page shows it in full). */
@@ -473,8 +475,8 @@ internal object Teach {
     private fun waitingNote(c: Context, res: Result) {
         val tap = android.app.PendingIntent.getActivity(c, 7790, com.kilon.agentvscreen.ui.Surface.reviewIntent(c),
             android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT, com.kilon.agentvscreen.ui.MainDisplay.options())
-        com.kilon.agentvscreen.core.VScreenHandoff.alert(c, NOTE_ID, tr("录好了 ${res.lines.size} 步，等你保存", "${steps(res.lines.size)} recorded, waiting to be saved"),
-            tr("示教停在这里了，录下的步骤都在。点这里看一遍再保存。", "The lesson stopped here; the steps are kept. Tap to check them and save."), tap)
+        com.kilon.agentvscreen.core.VScreenHandoff.alert(c, NOTE_ID, tr(S.asks_recorded_waiting_to_be_saved, res.lines.size, steps(res.lines.size)),
+            tr(S.vscreen_teach_the_lesson_stopped_here_the), tap)
     }
     private const val NOTE_ID = 7791
 
@@ -538,7 +540,7 @@ internal object Teach {
         val hits = words.count(shown)
         val ok = sameApp && (words.isEmpty() || hits * 2 >= words.size || (sact != null && act == sact && hits > 0))
         if (ok) return null
-        return tr("起点是 ${app ?: "某个应用"}" + (sact?.let { " 的 ${it.substringAfterLast('.')}" } ?: "") + (if (words.isNotEmpty()) "，页面上有「${words.joinToString("」「")}」" else ""),
+        return trPair("起点是 ${app ?: "某个应用"}" + (sact?.let { " 的 ${it.substringAfterLast('.')}" } ?: "") + (if (words.isNotEmpty()) "，页面上有「${words.joinToString("」「")}」" else ""),
             "The start is ${app ?: "an app"}" + (sact?.let { " at ${it.substringAfterLast('.')}" } ?: "") + (if (words.isNotEmpty()) ", a page showing \"${words.joinToString("\", \"")}\"" else ""))
     }
 
@@ -601,11 +603,11 @@ internal object Teach {
         fun ok(t: String) = sign(t) && skipN.none { s -> s.isNotEmpty() && (VScreenOcr.norm(t).contains(s) || s.contains(VScreenOcr.norm(t))) }
         val fresh = texts(b).filter { counts(it.box, priorAt(it.text), null, newPage).ok && (newPage || VScreenOcr.norm(it.text) !in before) && ok(it.text.trim()) && unique(b, it.text.trim()) }
             .sortedWith(compareBy({ it.box.top }, { it.box.left }))
-        fresh.firstOrNull()?.let { return "text:${it.text.trim()}" to tr("之后出现了「${it.text.trim()}」", "then \"${it.text.trim()}\" appeared") }
-        if (a.pkg != null && b.pkg != null && a.pkg != b.pkg) return "app:${b.pkg}" to tr("之后换到了 ${b.pkg}", "then ${b.pkg} came to the front")
+        fresh.firstOrNull()?.let { return "text:${it.text.trim()}" to tr(S.vscreen_teach_then_appeared, it.text.trim()) }
+        if (a.pkg != null && b.pkg != null && a.pkg != b.pkg) return "app:${b.pkg}" to tr(S.vscreen_teach_then_came_to_the_front, b.pkg)
         val gone = texts(a).filter { VScreenOcr.norm(it.text) !in after && ok(it.text.trim()) && unique(a, it.text.trim()) }
             .sortedWith(compareBy({ it.box.top }, { it.box.left }))
-        gone.firstOrNull()?.let { return "gone:${it.text.trim()}" to tr("之后「${it.text.trim()}」不见了", "then \"${it.text.trim()}\" went away") }
+        gone.firstOrNull()?.let { return "gone:${it.text.trim()}" to tr(S.vscreen_teach_then_went_away, it.text.trim()) }
         return null
     }
 
@@ -654,7 +656,7 @@ internal object Teach {
                 val sb = StringBuilder(e.text)
                 while (i + 1 < evs.size && evs[i + 1] is TeachEv.Typed) { i++; val n = evs[i] as TeachEv.Typed; if (n.whole) sb.setLength(0); sb.append(n.text) }
                 val secret = e.before?.els.orEmpty().any { it.focused && it.password }
-                out += TeachLine("type", null, pic = e.pic, why = if (secret) tr("在密码框里输入（原文不保存）", "typed into a password box (not kept)") else tr("输入「${sb.toString().take(30)}」", "typed \"${sb.toString().take(30)}\""),
+                out += TeachLine("type", null, pic = e.pic, why = if (secret) tr(S.vscreen_teach_typed_into_a_password_box) else tr(S.vscreen_teach_typed, sb.toString().take(30)),
                     kind = "type", typed = sb.toString(), secret = secret)
                 i++; continue
             }
@@ -664,8 +666,8 @@ internal object Teach {
             when (e) {
                 is TeachEv.Key -> {
                     val c = changeCond(e.before, next)
-                    out += TeachLine("key ${e.name}", c?.first, tr("按了 ${e.name}", "pressed ${e.name}") + (c?.let { "，" + it.second } ?: ""), "key", pic = e.pic,
-                        warn = if (next != null && e.before != null && sameScreen(e.before!!, next)) tr("之后画面上没读到变化", "no change was read afterwards") else null)
+                    out += TeachLine("key ${e.name}", c?.first, tr(S.vscreen_act_pressed, e.name) + (c?.let { "，" + it.second } ?: ""), "key", pic = e.pic,
+                        warn = if (next != null && e.before != null && sameScreen(e.before!!, next)) tr(S.vscreen_teach_no_change_was_read_afterwards) else null)
                 }
                 is TeachEv.Touch -> {
                     // 1.4.0-beta4: swipes are written down by what they were for, not by how far the finger went.
@@ -712,7 +714,7 @@ internal object Teach {
             if (w != null && texts(before).none { VScreenOcr.norm(it.text) == VScreenOcr.norm(w) }) {
                 val len = 0.4 * (if (vertical) (end.els.maxOfOrNull { it.box.bottom } ?: 1600) else (end.els.maxOfOrNull { it.box.right } ?: 1000))
                 val sw = swipe(cx, cy, vertical, dir, len.toInt())
-                return TeachLine("repeat 20 { $sw }", "text:${quote(w)}", tr("往${dirWord(vertical, dir)}滑，直到出现「$w」（这次滑了 ${run.size} 下）", "swiped ${dirWord(vertical, dir)} until \"$w\" showed (${run.size} swipes this time)"), "seek")
+                return TeachLine("repeat 20 { $sw }", "text:${quote(w)}", tr(S.vscreen_teach_swiped_until_showed_swipes_this, dirWord(vertical, dir), w, run.size), "seek")
             }
         }
         // 2) Set a value: only the words near the finger changed.
@@ -734,10 +736,10 @@ internal object Teach {
         val value = v.text.trim()
         val sw = swipe(v.box.centerX(), v.box.centerY(), vertical, dir, (step * 1.2).toInt())
         return TeachLine("repeat 40 { $sw }", "text:$value in ${area(row)}",
-            tr("把这一列拨到「$value」（重放时拨到结果为止，不按距离）", "set this column to \"$value\" (replayed until it reads so, not by distance)"), "value", typed = value)
+            tr(S.vscreen_teach_set_this_column_to_replayed, value), "value", typed = value)
     }
 
-    private fun dirWord(vertical: Boolean, dir: Int) = if (vertical) (if (dir > 0) tr("下", "down") else tr("上", "up")) else (if (dir > 0) tr("右", "right") else tr("左", "left"))
+    private fun dirWord(vertical: Boolean, dir: Int) = if (vertical) (if (dir > 0) tr(S.vscreen_teach_down) else tr(S.vscreen_teach_up)) else (if (dir > 0) tr(S.vscreen_teach_right) else tr(S.vscreen_teach_left))
 
     /** A slow swipe of [len] px from (x, y) along the user's direction (no fling). */
     private fun swipe(x: Int, y: Int, vertical: Boolean, dir: Int, len: Int): String {
@@ -758,14 +760,14 @@ internal object Teach {
             val verb = if (press) "press" else "tap"
             val head = if (press) "$verb $target ${((ms + 50) / 100 * 100).coerceIn(100, 10_000)}ms" else "$verb $target"
             val c = changeCond(e.before, next, listOfNotNull(words, anchor?.first).toSet())
-            val what = (if (press) tr("长按", "held") else tr("点了", "tapped")) + (words?.let { tr("「$it」", " \"$it\"") }
-                ?: anchor?.let { tr("「${it.first}」旁边", " beside \"${it.first}\"") } ?: " (${e.x}, ${e.y})")
+            val what = (if (press) tr(S.vscreen_teach_held) else tr(S.vscreen_teach_tapped)) + (words?.let { tr(S.vscreen_teach_text, it) }
+                ?: anchor?.let { tr(S.vscreen_teach_beside, it.first) } ?: " (${e.x}, ${e.y})")
             val warn = when {
                 // 1.4.0-beta11: only when the screen really read the same. A change with no word fit to wait for (a
                 // number growing, a symbol added) is a change: the step simply has no `until`.
-                next != null && e.before != null && sameScreen(e.before!!, next) -> tr("之后画面上没读到变化：可能点空了，可以不勾这一步", "no change was read afterwards: it may have missed; you can untick it")
+                next != null && e.before != null && sameScreen(e.before!!, next) -> tr(S.vscreen_teach_no_change_was_read_afterwards_2)
                 words == null && anchor != null -> null
-                words == null -> tr("那里和附近都没有能叫出名字的字，按屏幕比例的位置记", "no words name that place or its neighbours: kept as a point (share of the screen)")
+                words == null -> tr(S.vscreen_teach_no_words_name_that_place)
                 else -> null
             }
             return TeachLine(head, c?.first, what + (c?.let { "，" + it.second } ?: ""), verb, warn = warn, at = e.x to e.y, words = words, snap = e.before, pos = pt(e.x, e.y))
@@ -777,14 +779,14 @@ internal object Teach {
         val len = max(1.0, hypot(dx, dy))
         val bend = pts.maxOf { abs((it[0] - e.x) * dy - (it[1] - e.y) * dx) / len }
         if (bend < 48 || pts.size < 4) {
-            return TeachLine("swipe ${pt(e.x, e.y)} ${pt(last[0], last[1])} ${dur}ms", null, tr("从 (${e.x}, ${e.y}) 滑到 (${last[0]}, ${last[1]})", "swiped from (${e.x}, ${e.y}) to (${last[0]}, ${last[1]})"), "swipe",
-                warn = tr("机械重放：读不出这一下滑动的结果，重放时按原样滑", "replayed as is: what this swipe did could not be read, so it is repeated by distance"))
+            return TeachLine("swipe ${pt(e.x, e.y)} ${pt(last[0], last[1])} ${dur}ms", null, tr(S.vscreen_teach_swiped_from_to, e.x, e.y, last[0], last[1]), "swipe",
+                warn = tr(S.vscreen_teach_replayed_as_is_what_this))
         }
         val n = 6
         val picked = (0 until n).map { k -> pts[(k * (pts.size - 1)) / (n - 1)] }.distinctBy { it[0] to it[1] }
         return TeachLine("drag " + picked.joinToString(" ") { pt(it[0], it[1]) } + " ${dur}ms", null,
-            tr("拖动，经过 ${picked.size} 个点", "dragged through ${picked.size} points"), "drag",
-            warn = tr("机械重放：读不出这次拖动的结果，重放时按原样拖", "replayed as is: what this drag did could not be read, so it is repeated by distance"))
+            tr(S.vscreen_teach_dragged_through_points, picked.size), "drag",
+            warn = tr(S.vscreen_teach_replayed_as_is_what_this_2))
     }
 
     /**
@@ -860,8 +862,8 @@ internal object Teach {
 internal fun VScreenOffloadHandler.teachCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {
     val session = sid ?: VScreenOffloadHandler.DEFAULT_SESSION
     val what = args.positional.joinToString(" ").trim()
-    if (what.isEmpty()) throw ActionError("INVALID_ARGS", tr("teach \"要演示什么\" [--name 名字]", "teach \"what to show\" [--name name]"))
-    if (what.length > 200) throw ActionError("INVALID_ARGS", tr("最多 200 字", "at most 200 characters"))
+    if (what.isEmpty()) throw ActionError("INVALID_ARGS", tr(S.vscreen_teach_teach_what_to_show_name))
+    if (what.length > 200) throw ActionError("INVALID_ARGS", tr(S.vscreen_teach_at_most_200_characters))
     val name = args.get("name")?.trim()?.replace(Regex("\\s+"), "-")?.take(32)?.takeIf { it.isNotEmpty() }
     val call = Call.current()
     val inTask = call?.taskId != null
@@ -890,32 +892,31 @@ internal fun VScreenOffloadHandler.teachCmd(sid: String?, args: OffloadArgs): Na
             .put("params", Regex("\\{([1-9]\\d*)\\}").findAll(sg.steps).maxOfOrNull { it.groupValues[1].toInt() } ?: 0)
     } else {
     val ask = if (old != null && (old.answer != null || old.live)) old else {
-        BackgroundOperation.previewDisplayFor(session) ?: throw ActionError("NO_SCREEN", tr("示教在副屏上做，现在没有副屏：先 launch 要演示的应用", "The lesson is done on the background screen and there is none: launch the app to show first"))
-        UserAsk.create(context, UserAsk.Kind.TEACH, key, what, tr("在副屏上做一遍，做完点“完成”，看一下再保存", "Do it once on the background screen, tap Done, check it and save"),
+        BackgroundOperation.previewDisplayFor(session) ?: throw ActionError("NO_SCREEN", tr(S.vscreen_teach_the_lesson_is_done_on))
+        UserAsk.create(context, UserAsk.Kind.TEACH, key, what, tr(S.vscreen_teach_do_it_once_on_the),
             options = listOfNotNull(name), validMs = valid, reusable = true)
     }
     if (ask.answer == null) {
-        call?.report(tr("请求已显示在手机上，等用户演示", "The request is on the phone; waiting for the user to show it"))
+        call?.report(tr(S.vscreen_teach_the_request_is_on_the))
         UserAsk.await(ask, wait)
     }
     if (call?.cancelled == true && ask.answer == null) {
-        if (UserAsk.taken(ask)) throw ActionError("CANCELLED", tr("调用方断开了；用户已经在演示，请求留着。之后把同一条 teach 原样再发一次取结果", "The caller went away; the user is already showing it, so the request stays. Send the same teach again later for the result"))
-        UserAsk.withdraw(context, ask); throw ActionError("CANCELLED", tr("调用方断开了，请求已从手机上撤下", "The caller went away; the request was taken off the phone"))
+        if (UserAsk.taken(ask)) throw ActionError("CANCELLED", tr(S.vscreen_teach_the_caller_went_away_the))
+        UserAsk.withdraw(context, ask); throw ActionError("CANCELLED", tr(S.vscreen_teach_the_caller_went_away_the_2))
     }
     // 1.4.0-beta12: what the user said while showing it, not yet told to this agent.
     val heard = ask.said.drop(ask.saidSeen).also { ask.saidSeen = ask.said.size }
     said = ask.said.toList()
-    heardLine = if (heard.isEmpty()) "" else tr("用户在示教中说：「${heard.joinToString("」「")}」。", "While showing it the user said: \"${heard.joinToString("\", \"")}\". ")
+    heardLine = if (heard.isEmpty()) "" else tr(S.vscreen_teach_while_showing_it_the_user, heard.joinToString("」「"), heard.joinToString("\", \""))
     when (ask.answer) {
         null -> if (UserAsk.taken(ask)) throw ActionError("ASK_PENDING", heardLine + when {
-            Teach.result?.askId == ask.id -> tr("用户已经录好，正在看一遍再保存。过一会儿把同一条 teach 原样再发一次取结果（等待时不会过期）", "The user has recorded it and is checking it before saving. Send the same teach again in a while for the result (it does not expire while they work)")
-            Teach.recAskId() == ask.id -> tr("用户正在演示（已记 ${Teach.steps ?: 0} 步）。过一会儿把同一条 teach 原样再发一次取结果（等待时不会过期）", "The user is showing it (${Teach.steps ?: 0} steps so far). Send the same teach again in a while for the result (it does not expire while they work)")
-            else -> tr("用户正在副屏上走到起点，还没开始演示。过一会儿把同一条 teach 原样再发一次（等待时不会过期）", "The user is getting to the start on the screen. Send the same teach again in a while (it does not expire while they work)")
-        }) else throw ActionError("ASK_PENDING", tr("请求已显示在手机上（通知、副屏小窗和 App 首页），用户 ${wait / 1000} 秒内还没做完。告诉用户去手机上演示；之后把同一条 teach 原样再发一次就能拿到结果（${ask.validMs / 60_000} 分钟内有效）",
-            "The request is on the phone (notification, the floating window and the app's home page); the user has not finished within ${wait / 1000} s. Tell the user to show it on the phone; then send the same teach again for the result (valid for ${ask.validMs / 60_000} minutes)"))
-        false -> { UserAsk.markUsed(ask); UserAsk.endedWhy(ask)?.let { why -> throw ActionError("ASK_DECLINED", tr("副屏关了，没有示范：$what（$why）。要示范先 launch 应用，再发 teach", "The screen closed, so nothing was shown: $what ($why). launch the app first, then send teach")) }
-            if (ask.reply?.optString("kind") == "handed_back") throw ActionError("ASK_DECLINED", tr("用户没开始示范就把副屏交还给你了，这次不示范：$what。看一眼现在的画面，问用户想怎么办，不要原样再发", "The user handed the screen back before showing anything, so no lesson this time: $what. Look at the screen and ask the user what they want; don't send the same again"))
-            throw ActionError("ASK_DECLINED", tr("用户没有演示（或丢弃了录下的步骤）：$what", "The user did not show it (or discarded the recording): $what")) }
+            Teach.result?.askId == ask.id -> tr(S.vscreen_teach_the_user_has_recorded_it)
+            Teach.recAskId() == ask.id -> tr(S.vscreen_teach_the_user_is_showing_it, Teach.steps ?: 0)
+            else -> tr(S.vscreen_teach_the_user_is_getting_to)
+        }) else throw ActionError("ASK_PENDING", tr(S.vscreen_teach_the_request_is_on_the_2, wait / 1000, ask.validMs / 60_000))
+        false -> { UserAsk.markUsed(ask); UserAsk.endedWhy(ask)?.let { why -> throw ActionError("ASK_DECLINED", tr(S.vscreen_teach_the_screen_closed_so_nothing, what, why)) }
+            if (ask.reply?.optString("kind") == "handed_back") throw ActionError("ASK_DECLINED", tr(S.vscreen_teach_the_user_handed_the_screen, what))
+            throw ActionError("ASK_DECLINED", tr(S.vscreen_teach_the_user_did_not_show, what)) }
         true -> UserAsk.markUsed(ask)
     }
     ask.reply ?: org.json.JSONObject()
@@ -934,18 +935,18 @@ internal fun VScreenOffloadHandler.teachCmd(sid: String?, args: OffloadArgs): Na
     val startSeen = VScreenMap.segment(r.optString("app"), seg)?.start?.let { st ->
         val words = st.optJSONArray("words")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
         (st.optString("activity").takeIf { it.isNotEmpty() && it != "null" }?.substringAfterLast('.') ?: r.optString("app")) +
-            (if (words.isNotEmpty()) tr("，页面上有「${words.joinToString("」「")}」", ", a page showing \"${words.joinToString("\", \"")}\"") else "")
+            (if (words.isNotEmpty()) tr(S.vscreen_notes_a_page_showing, words.joinToString("」「"), words.joinToString("\", \"")) else "")
     }
-    val next = tr("先试一遍再交差：回到起点" + (startSeen?.let { "（$it）" } ?: "") + "，act \"$use\" 跑一次，看结果对不对。" +
+    val next = trPair("先试一遍再交差：回到起点" + (startSeen?.let { "（$it）" } ?: "") + "，act \"$use\" 跑一次，看结果对不对。" +
             "然后把只对这一次成立的地方改通用：这次的具体值换成参数（tap {1}）或通配（tap *关键字*、text:结果*）；要等的画面加 until；有时才弹的窗用 try 或 if 包住。" +
             "改好用 note save $seg \"整段步骤\" 存回（起点核对保留），再跑一遍确认。note show $seg 看现在的步骤。",
         "Try it once before you report back: go to the start" + (startSeen?.let { " ($it)" } ?: "") + ", run act \"$use\" and check the result. " +
             "Then make what only held this time general: this run's values become blanks (tap {1}) or wildcards (tap *keyword*, text:Result*); add until where a screen must come; wrap popups that only sometimes show in try or if. " +
             "Save it back with note save $seg \"<all steps>\" (the start check is kept) and run it again. note show $seg shows the steps now.")
     data.put("next", next)
-    if (repeat) data.put("again", false).put("note", tr("这一段之前已经交给过你，这次没有再请用户演示。要用户重新演示一遍，加 --again。", "This segment was already given to you; the user was not asked again. To have the user show it again, add --again."))
+    if (repeat) data.put("again", false).put("note", tr(S.vscreen_teach_this_segment_was_already_given))
     if (said.isNotEmpty()) data.put("said", org.json.JSONArray(said))
-    data.put("message", heardLine + (if (repeat) tr("（同一条 teach 已有结果，原样返回）", "(This teach already has its result; returned as is) ") else "") + tr("用户演示完并存成了段「$seg」（${r.optString("app")}）。照做：act \"$use\"" + (if (n > 0) "（按顺序填 $n 个参数，是用户当时输入的字的位置）" else "") + "。步骤：${r.optString("steps")}" + (pic?.let { "。示教关键步骤缩略图（数字是步骤序号，红圈是点的位置）：$it" } ?: ""),
+    data.put("message", heardLine + (if (repeat) tr(S.vscreen_teach_this_teach_already_has_its) else "") + trPair("用户演示完并存成了段「$seg」（${r.optString("app")}）。照做：act \"$use\"" + (if (n > 0) "（按顺序填 $n 个参数，是用户当时输入的字的位置）" else "") + "。步骤：${r.optString("steps")}" + (pic?.let { "。示教关键步骤缩略图（数字是步骤序号，红圈是点的位置）：$it" } ?: ""),
         "The user showed it and saved it as segment \"$seg\" (${r.optString("app")}). Run it: act \"$use\"" + (if (n > 0) " (fill $n values in order: where the user typed)" else "") + ". Steps: ${r.optString("steps")}" + (pic?.let { ". Thumbnails of the key steps (numbers are step numbers, red rings are taps): $it" } ?: "")) + "\n" + next)
     return ok(args, data)
 }

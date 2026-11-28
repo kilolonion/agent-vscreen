@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.os.Build
@@ -108,7 +109,7 @@ internal object ActHold {
     ) {
         fun line(): String {
             val sec = "${(pausedMs.coerceAtLeast(0L) / 100) / 10.0}s"
-            return tr("已恢复（暂停了 $sec）", "Resumed (paused for $sec)")
+            return tr(S.act_hold_resumed_paused_for, sec)
         }
     }
 
@@ -406,19 +407,19 @@ internal object ActHold {
         protectedManagers: Collection<String> = emptyList(),
     ): String? {
         if (pkg in protectedManagers) {
-            return tr("特权管理应用，不允许暂停", "privilege manager app; refusing to pause")
+            return tr(S.act_hold_privilege_manager_app_refusing_to)
         }
         if (appInfo != null && appInfo.uid < FIRST_APP_UID) {
-            return tr("系统进程（uid ${appInfo.uid}），不允许暂停", "system process (uid ${appInfo.uid}); refusing to pause")
+            return tr(S.act_hold_system_process_uid_refusing_to, appInfo.uid)
         }
         if (appInfo != null && appInfo.persistent) {
-            return tr("常驻系统应用（persistent），不允许暂停", "persistent system app; refusing to pause")
+            return tr(S.act_hold_persistent_system_app_refusing_to)
         }
         if (!currentImePkg.isNullOrBlank() && currentImePkg == pkg) {
-            return tr("当前输入法，不允许暂停", "current input method (IME); refusing to pause")
+            return tr(S.act_hold_current_input_method_ime_refusing)
         }
         if (hasActiveSystemMediaSession(dumpsysMedia, pkg)) {
-            return tr("正在播放的系统媒体会话，不允许暂停", "active system media session; refusing to pause")
+            return tr(S.act_hold_active_system_media_session_refusing)
         }
         return null
     }
@@ -463,26 +464,17 @@ internal object ActHold {
         val sdk = sdkIntFn()
         if (sdk < Gate.MIN_UNFREEZE_SDK) {
             return HoldOutcome.Unsupported(
-                tr(
-                    "当前系统为 Android API $sdk（--hold 仅支持 Android 14 / API 34 及以上），本次未暂停应用",
-                    "This device is Android API $sdk (--hold requires Android 14 / API 34+); the app was not paused",
-                )
+                tr(S.act_hold_this_device_is_android_api, sdk)
             )
         }
         if (!gateReadyFn()) {
             return HoldOutcome.Unsupported(
-                tr(
-                    "守门人特权服务未连接，本次未暂停应用",
-                    "Privileged Gate service is not connected; the app was not paused",
-                )
+                tr(S.act_hold_privileged_gate_service_is_not)
             )
         }
         if (deviceFreezeUnsupported) {
             return HoldOutcome.Unsupported(
-                tr(
-                    "当前设备不支持 am freeze 命令，本次未暂停应用",
-                    "This device does not support the am freeze command; the app was not paused",
-                )
+                tr(S.act_hold_this_device_does_not_support)
             )
         }
         val busy = isDisplayBusyFn(sid)
@@ -501,7 +493,7 @@ internal object ActHold {
         // Per-app circuit breaker within this session.
         val prevRefusal = synchronized(holdLock) { refusedBySession[sid]?.get(pkg) }
         if (prevRefusal != null) {
-            val msg = tr("本会话不再暂停 $appName（$prevRefusal）", "Skipping pause for $appName in this session ($prevRefusal)")
+            val msg = tr(S.act_hold_skipping_pause_for_in_this, appName, prevRefusal)
             recordDiag(pkg, -1, "REFUSED_BREAKER", prevRefusal, emptyList())
             return HoldOutcome.Refused(msg)
         }
@@ -513,7 +505,7 @@ internal object ActHold {
         val managers = runCatching { com.kilon.agentvscreen.host.ShizukuManager.discoveredManagerPackages() }.getOrDefault(emptyList())
         val upfront = upfrontRefusalReason(pkg, info, imePkg, mediaDump, managers)
         if (upfront != null) {
-            val msg = tr("拒绝暂停 $appName：$upfront", "Refused to pause $appName: $upfront")
+            val msg = tr(S.act_hold_refused_to_pause, appName, upfront)
             recordDiag(pkg, info?.uid ?: -1, "REFUSED_UPFRONT", upfront, emptyList())
             return HoldOutcome.Refused(msg)
         }
@@ -545,13 +537,13 @@ internal object ActHold {
                 val cmdSupported = runCatching { checkFreezeCommandSupportedFn() }.getOrDefault(true)
                 if (!cmdSupported) {
                     deviceFreezeUnsupported = true
-                    val msg = tr("当前设备不支持 am freeze 命令，本次未暂停应用", "This device does not support the am freeze command; the app was not paused")
+                    val msg = tr(S.act_hold_this_device_does_not_support)
                     recordDiag(pkg, uid, "UNSUPPORTED", "am freeze command unavailable", emptyList())
                     return@synchronized HoldOutcome.Unsupported(msg)
                 }
-                val reason = tr("am freeze 返回失败", "am freeze returned failure")
+                val reason = tr(S.act_hold_am_freeze_returned_failure)
                 tripAppBreakerLocked(sid, pkg, reason)
-                val msg = tr("没能暂停 $appName（$reason）", "Could not pause $appName ($reason)")
+                val msg = tr(S.act_hold_could_not_pause, appName, reason)
                 recordDiag(pkg, uid, "FAILED_RC", "gateHold=$frozenReported procs=$procNames", emptyList())
                 return@synchronized HoldOutcome.Refused(msg)
             }
@@ -568,12 +560,9 @@ internal object ActHold {
             when (screenRes?.state) {
                 ProcFreezeState.DIED -> {
                     runCatching { gateUnholdFn() }
-                    val reason = tr("上次暂停时被系统结束", "killed by the system on previous hold")
+                    val reason = tr(S.act_hold_killed_by_the_system_on)
                     tripAppBreakerLocked(sid, pkg, reason)
-                    val msg = tr(
-                        "$appName 在暂停时被系统结束了，需要重新打开",
-                        "$appName was killed by the system while pausing and needs to be reopened",
-                    )
+                    val msg = tr(S.act_hold_was_killed_by_the_system, appName)
                     recordDiag(pkg, uid, "DIED", "display proc ${screenRes.name}(${screenRes.pid}) vanished after freeze", verified)
                     HoldOutcome.Refused(msg, appKilled = true)
                 }
@@ -582,17 +571,11 @@ internal object ActHold {
                     val secs = effMaxMs / 1000L
                     val unfrozenOthers = verified.filter { !it.isDisplayProc && it.state != ProcFreezeState.FROZEN }
                     val footer = if (unfrozenOthers.isEmpty()) {
-                        tr(
-                            "已暂停 $appName，下一条命令时恢复（最长 $secs 秒）",
-                            "Paused $appName; will resume on the next command (max ${secs}s)",
-                        )
+                        tr(S.act_hold_paused_will_resume_on_the, appName, secs)
                     } else {
                         val names = unfrozenOthers.joinToString("、") { it.name }
                         val namesEn = unfrozenOthers.joinToString(", ") { it.name }
-                        tr(
-                            "已暂停 $appName（画面所在进程）；后台进程 $names 这个系统版本冻不了，仍在运行；下一条命令时恢复（最长 $secs 秒）",
-                            "Paused $appName (display process); background process $namesEn could not be frozen on this Android version and is still running; will resume on the next command (max ${secs}s)",
-                        )
+                        tr(S.act_hold_paused_display_process_background_proces, appName, names, secs, namesEn)
                     }
                     recordDiag(pkg, uid, if (unfrozenOthers.isEmpty()) "HELD" else "HELD_PARTIAL", "verified via ${screenRes.source}", verified)
                     HoldOutcome.Held(pkg, appName, effMaxMs, footer, verified)
@@ -602,24 +585,20 @@ internal object ActHold {
                     val playing = isPlayingMedia(mediaDump ?: runCatching { mediaSessionDumpFn() }.getOrNull(), pkg)
                     val msg = if (playing) {
                         // Not a fault of this app or this phone, and it can change (playback paused): no breaker.
-                        tr("没能暂停 $appName：它正在播放视频或声音，系统让正在播放的应用一直运行，冻不住。要它停下，先在应用里点暂停播放",
-                            "Could not pause $appName: it is playing video or sound, and Android keeps a playing app running, so it cannot be frozen. To stop it, pause the playback in the app first")
+                        tr(S.act_hold_could_not_pause_it_is, appName)
                     } else {
-                        val reason = tr("进程仍处于未冻结状态", "process remained unfrozen")
+                        val reason = tr(S.act_hold_process_remained_unfrozen)
                         tripAppBreakerLocked(sid, pkg, reason)
-                        tr("没能暂停 $appName（$reason）", "Could not pause $appName ($reason)")
+                        tr(S.act_hold_could_not_pause, appName, reason)
                     }
                     recordDiag(pkg, uid, if (playing) "NOT_FROZEN_PLAYING" else "NOT_FROZEN", "display proc ${screenRes.name}(${screenRes.pid}) stayed frozen 0", verified)
                     HoldOutcome.Refused(msg)
                 }
                 ProcFreezeState.UNVERIFIABLE, null -> {
                     runCatching { gateUnholdFn() }
-                    val reason = tr("核实不到冻结状态", "could not verify frozen state")
+                    val reason = tr(S.act_hold_could_not_verify_frozen_state)
                     tripAppBreakerLocked(sid, pkg, reason)
-                    val msg = tr(
-                        "已发出暂停，但核实不到 $appName 是否生效，已取消暂停",
-                        "Sent pause for $appName, but could not verify it took effect; resumed",
-                    )
+                    val msg = tr(S.act_hold_sent_pause_for_but_could, appName)
                     recordDiag(pkg, uid, "UNVERIFIABLE", "targets=${targets.size} verified=${verified.size}", verified)
                     HoldOutcome.Refused(msg)
                 }

@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
+import com.kilon.agentvscreen.trPair
 import com.kilon.agentvscreen.tr
 
 import android.content.Context
@@ -144,8 +146,7 @@ class ApiServer(private val ctx: Context) {
                         if (gp > 0) {
                             boundPort = gp
                             lastError = null; portBusy = false; bindFailures = 0
-                            portNote = if (gp == port) null else tr("端口 $port 被占着，已改用 $gp；agent 会自己找到，不用重新接入",
-                                "Port $port is held, so $gp is used; agents find it by themselves, nothing to set up again")
+                            portNote = if (gp == port) null else tr(S.api_server_port_is_held_so_is, port, gp)
                             com.kilon.agentvscreen.host.Tailnet.retarget(ctx, gp)
                             onChange?.invoke()
                             AppLogger.info(TAG, "gate rebound on 127.0.0.1:$gp -> internal 127.0.0.1:$internalPort")
@@ -220,8 +221,7 @@ class ApiServer(private val ctx: Context) {
             return false
         }
         boundPort = gp; usingGate = true; lastError = null; portBusy = false; bindFailures = 0
-        portNote = if (gp == port) null else tr("端口 $port 被占着，已改用 $gp；agent 会自己找到，不用重新接入",
-            "Port $port is held, so $gp is used; agents find it by themselves, nothing to set up again")
+        portNote = if (gp == port) null else tr(S.api_server_port_is_held_so_is, port, gp)
         com.kilon.agentvscreen.host.Tailnet.retarget(ctx, gp)
         onChange?.invoke()
         AppLogger.info(TAG, "gate listening on 127.0.0.1:$gp -> internal 127.0.0.1:$intPort")
@@ -244,8 +244,7 @@ class ApiServer(private val ctx: Context) {
         for (p in port until port + ApiConfig.PORT_SPAN) {
             if (p > 65535) break
             if (bindLocal(p)) {
-                portNote = if (p == port || taken.isEmpty()) null else tr("端口 $port 被${taken.firstOrNull() ?: "别的程序"}占着，已改用 $p；agent 会自己找到，不用重新接入",
-                    "Port $port is held by ${taken.firstOrNull() ?: "another program"}, so $p is used; agents find it by themselves, nothing to set up again")
+                portNote = if (p == port || taken.isEmpty()) null else tr(S.api_server_port_is_held_by_so, port, taken.firstOrNull() ?: "别的程序", p, taken.firstOrNull() ?: "another program")
                 if (p != port && taken.isNotEmpty()) AppLogger.warning(TAG, "port $port taken (${taken.joinToString()}), listening on $p")
                 com.kilon.agentvscreen.host.Tailnet.retarget(ctx, p)
                 onChange?.invoke()
@@ -260,8 +259,7 @@ class ApiServer(private val ctx: Context) {
         bindFailures++
         if (taken.isNotEmpty() || !sawOwnGate) {
             portBusy = true
-            lastError = tr("端口 $port 到 ${port + ApiConfig.PORT_SPAN - 1} 都被占着（${taken.distinct().joinToString("、")}）：在“接入”里换一组端口，或关掉占着它们的应用；每 30 秒会自己再试",
-                "Ports $port to ${port + ApiConfig.PORT_SPAN - 1} are all taken (${taken.distinct().joinToString(", ")}): pick other ports under Connect, or close the apps holding them; tried again every 30 s")
+            lastError = tr(S.api_server_ports_to_are_all_taken, port, port + ApiConfig.PORT_SPAN - 1, taken.distinct().joinToString("、"), taken.distinct().joinToString(", "))
         }
         onChange?.invoke()
         return false
@@ -322,13 +320,13 @@ class ApiServer(private val ctx: Context) {
             val txt = String(buf, 0, n, Charsets.UTF_8)
             if ("agent-vscreen" in txt) {
                 val pid = Regex("\"pid\":(\\d+)").find(txt)?.groupValues?.get(1)
-                tr("另一个 Agent-VScreen 进程${pid?.let { "（pid $it）" } ?: ""}还占着它，旧进程退出后就会接上", "Another Agent-VScreen process${pid?.let { " (pid $it)" } ?: ""} still holds it; we take over once it exits")
-            } else { portBusy = true; tr("别的程序在用这个端口：可以在“接入 agent”里换一个端口，再重新复制接入命令", "Another program is using this port: change the port under \"Connect an agent\" and copy the connect message again") }
+                tr(S.api_server_another_agent_vscreen_process_still, pid?.let { "（pid $it）" } ?: "", pid?.let { " (pid $it)" } ?: "")
+            } else { portBusy = true; tr(S.api_server_another_program_is_using_this) }
         }
     } catch (e: java.net.SocketTimeoutException) {
-        tr("占着它的进程没有响应，多半是被系统冻结、还没退出的旧 Agent-VScreen 进程", "The process holding it does not answer: most likely an old Agent-VScreen process frozen by the system and not yet gone")
+        tr(S.api_server_the_process_holding_it_does)
     } catch (e: Exception) {
-        tr("端口刚刚被放开", "The port was just released")
+        tr(S.api_server_the_port_was_just_released)
     }
 
     /**
@@ -465,7 +463,7 @@ class ApiServer(private val ctx: Context) {
             }
             if (!placed) {
                 refused++
-                quiet("http-busy") { s.soTimeout = 500; write(s.getOutputStream(), Resp.err(503, "SERVER_BUSY", tr("同时进来的连接太多（上限 $MAX_CONN），这个请求没有处理：稍后重试", "Too many connections at once (limit $MAX_CONN); this request was not handled: retry shortly"))) }
+                quiet("http-busy") { s.soTimeout = 500; write(s.getOutputStream(), Resp.err(503, "SERVER_BUSY", tr(S.api_server_too_many_connections_at_once, MAX_CONN))) }
                 quiet("http-busy-close") { s.close() }
             }
         }
@@ -503,8 +501,8 @@ class ApiServer(private val ctx: Context) {
         }
         /** Who is calling, for the app's "last caller" line. */
         val caller: String get() = when {
-            viaPublic -> tr("公网", "Public") + (auth?.token?.let { " · ${it.name}" } ?: "")
-            else -> (peerName?.let { "Tailscale: $it" } ?: tr("本机", "This phone")) + (auth?.token?.takeIf { it.id != Tokens.MAIN }?.let { " · ${it.name}" } ?: "")
+            viaPublic -> tr(S.api_server_public) + (auth?.token?.let { " · ${it.name}" } ?: "")
+            else -> (peerName?.let { "Tailscale: $it" } ?: tr(S.api_server_this_phone)) + (auth?.token?.takeIf { it.id != Tokens.MAIN }?.let { " · ${it.name}" } ?: "")
         }
         fun q(k: String) = query[k]?.firstOrNull()
         val bodyText: String get() = String(body, Charsets.UTF_8)
@@ -605,21 +603,21 @@ class ApiServer(private val ctx: Context) {
             // identified and encrypted by Tailscale. 1.3: its Host is not checked any more. A caller that reaches us
             // through a local forwarder or a proxy names us by whatever it uses (127.0.0.1, a proxy's target); the
             // rebinding a Host check guards against needs a browser, and browsers are refused below, tokens required.
-            if (!com.kilon.agentvscreen.host.Tailnet.status.value.loggedIn) return Resp.err(403, "NOT_ALLOWED", tr("内置 Tailscale 没有登录", "Built-in Tailscale is not logged in"))
+            if (!com.kilon.agentvscreen.host.Tailnet.status.value.loggedIn) return Resp.err(403, "NOT_ALLOWED", tr(S.api_server_built_in_tailscale_is_not))
         } else if (remote) {
             // Only a tailnet peer reaches this (the socket is bound to the Tailscale address); it must still name us by
             // that address or a tailnet name, so a web page cannot rebind a hostname onto us.
-            if (!ApiConfig.tailnet || !isTailnet(r.peer)) return Resp.err(403, "NOT_ALLOWED", tr("其它设备访问没有打开", "Access from other devices is off"))
-            if (host != null && host != tailAddress && !ApiConfig.tailnetHostOk(host)) return Resp.err(403, "BAD_HOST", tr("用本机的 Tailscale 地址访问", "Use this phone's Tailscale address"))
-        } else if (host != null && host !in setOf("127.0.0.1", "localhost", "[::1]")) return Resp.err(403, "BAD_HOST", tr("只接受 127.0.0.1 / localhost", "Only 127.0.0.1 / localhost are accepted"))
+            if (!ApiConfig.tailnet || !isTailnet(r.peer)) return Resp.err(403, "NOT_ALLOWED", tr(S.api_server_access_from_other_devices_is))
+            if (host != null && host != tailAddress && !ApiConfig.tailnetHostOk(host)) return Resp.err(403, "BAD_HOST", tr(S.api_server_use_this_phone_s_tailscale))
+        } else if (host != null && host !in setOf("127.0.0.1", "localhost", "[::1]")) return Resp.err(403, "BAD_HOST", tr(S.api_server_only_127_0_0_1))
         if (r.headers["origin"].let { it != null && it != "null" } || r.headers["sec-fetch-site"].let { it != null && it != "none" })
-            return Resp.err(403, "BROWSER_REFUSED", tr("不接受网页发起的请求", "Requests from web pages are not accepted"))
+            return Resp.err(403, "BROWSER_REFUSED", tr(S.api_server_requests_from_web_pages_are))
         // 1.2: the user may name the tailnet devices that are let in; every other peer of the tailnet is refused.
         if (r.remote) ApiConfig.tailnetPeers.takeIf { it.isNotEmpty() }?.let { allow ->
             val who = r.peerName.orEmpty().lowercase()
             if (allow.none { who == it || who.split(" @ ", " ").any { part -> part == it } }) {
                 Audit.security("peer_denied", who)
-                return Resp.err(403, "PEER_DENIED", tr("这台设备（$who）不在允许名单里：名单在 Agent-VScreen › 其它设备", "This device ($who) is not on the allow list: the list is under Other devices in Agent-VScreen"))
+                return Resp.err(403, "PEER_DENIED", tr(S.api_server_this_device_is_not_on, who))
             }
         }
         requests++
@@ -687,7 +685,7 @@ class ApiServer(private val ctx: Context) {
             return Resp.err(
                 400,
                 "BAD_REQUEST",
-                tr("接入码必须放在 JSON 请求体中，不能放在网址参数里", "Send the onboarding code in the JSON request body, not in the URL query"),
+                tr(S.api_server_send_the_onboarding_code_in),
             )
         }
         val who = r.peerName ?: "local"
@@ -696,22 +694,22 @@ class ApiServer(private val ctx: Context) {
             return Resp.err(503, "THERMAL_STOP", com.kilon.agentvscreen.host.ThermalGuard.reason(), com.kilon.agentvscreen.host.ThermalGuard.thermalErrorData())
         }
         val json = runCatching { JSONObject(r.bodyText) }.getOrNull()
-            ?: return Resp.err(400, "BAD_JSON", tr("请求体必须是合法 JSON", "Request body must be valid JSON"))
+            ?: return Resp.err(400, "BAD_JSON", tr(S.api_server_request_body_must_be_valid))
         val rawCode = json.optString("code", "").trim()
         if (rawCode.isEmpty()) {
-            return Resp.err(400, "BAD_REQUEST", tr("缺少 code 字段", "Missing code field"))
+            return Resp.err(400, "BAD_REQUEST", tr(S.api_server_missing_code_field))
         }
         val tokenId = OnboardingCodes.consume(rawCode)
             ?: return failed(
                 r,
                 "CODE_INVALID_OR_EXPIRED",
-                tr("一次性接入码无效、已过期或已使用过", "Onboarding code is invalid, expired, or already used"),
+                tr(S.api_server_onboarding_code_is_invalid_expired),
             )
         val activated = Tokens.activateWithSecret(tokenId)
             ?: return failed(
                 r,
                 "CODE_INVALID_OR_EXPIRED",
-                tr("接入码对应的接入项不可用或已兑换", "The onboarding target is unavailable or already redeemed"),
+                tr(S.api_server_the_onboarding_target_is_unavailable),
             )
         val (tok, rawToken) = activated
         Audit.security("onboard_code_exchanged", "${tok.name} ${tok.id} ${if (r.remote) r.peerName ?: "remote" else "local"}")
@@ -753,29 +751,28 @@ class ApiServer(private val ctx: Context) {
         val kid = r.headers["x-vscreen-key"]
         if (kid != null) {
             val t = Tokens.byId(kid)?.takeIf { !it.publicOnly && it.key.isNotEmpty() }
-                ?: return failed(r, "BAD_TOKEN", tr("没有这个令牌（可能已被用户撤销或已到期）：请用户在 Agent-VScreen 里重新复制接入命令", "No such token (revoked by the user or expired): ask the user to copy the connect message in Agent-VScreen again"))
+                ?: return failed(r, "BAD_TOKEN", tr(S.api_server_no_such_token_revoked_by))
             val ts = r.headers["x-vscreen-time"]?.toLongOrNull() ?: return failed(r, "BAD_SIGNATURE", "X-VScreen-Time missing")
             val nonce = r.headers["x-vscreen-nonce"]?.takeIf { it.length in 8..64 && it.all { c -> c.isLetterOrDigit() } } ?: return failed(r, "BAD_SIGNATURE", "X-VScreen-Nonce missing (8-64 letters/digits)")
             val sign = r.headers["x-vscreen-sign"]?.lowercase() ?: return failed(r, "BAD_SIGNATURE", "X-VScreen-Sign missing")
             val now = System.currentTimeMillis() / 1000
-            if (kotlin.math.abs(now - ts) > SKEW_S) return failed(r, "TIME_SKEW", tr("请求的时间比手机${if (ts > now) "快" else "慢"} ${kotlin.math.abs(now - ts)} 秒（最多差 $SKEW_S 秒）：校准调用方的时钟。手机时间（unix 秒）：$now", "The request's time is ${kotlin.math.abs(now - ts)} s ${if (ts > now) "ahead of" else "behind"} the phone's (at most $SKEW_S s apart): fix the caller's clock. Phone time (unix seconds): $now"))
-            if (!constTimeEq(sign, signature(t.key, ts.toString(), nonce, r.method, r.target, r.body))) return failed(r, "BAD_SIGNATURE", tr("签名不对：令牌不匹配，或请求在路上被改过", "Wrong signature: the token does not match, or the request was changed on the way"))
+            if (kotlin.math.abs(now - ts) > SKEW_S) return failed(r, "TIME_SKEW", tr(S.api_server_the_request_s_time_is, if (ts > now) "快" else "慢", kotlin.math.abs(now - ts), SKEW_S, now, if (ts > now) "ahead of" else "behind"))
+            if (!constTimeEq(sign, signature(t.key, ts.toString(), nonce, r.method, r.target, r.body))) return failed(r, "BAD_SIGNATURE", tr(S.api_server_wrong_signature_the_token_does))
             synchronized(nonces) {
                 val cut = System.currentTimeMillis() - 2 * SKEW_S * 1000
                 nonces.entries.removeAll { it.value < cut }
-                if (nonces.put("$kid:$nonce", System.currentTimeMillis()) != null) return failed(r, "REPLAYED", tr("这个请求已经收到过一次（重放）", "This request was already received once (replay)"))
+                if (nonces.put("$kid:$nonce", System.currentTimeMillis()) != null) return failed(r, "REPLAYED", tr(S.api_server_this_request_was_already_received))
             }
             return Auth(t, true, nonce)
         }
         val given = r.headers["authorization"]?.removePrefix("Bearer ")?.trim() ?: r.headers["x-vscreen-token"]
-            ?: return failed(r, "BAD_TOKEN", tr("缺少令牌：在 Agent-VScreen 里复制接入命令（Authorization: Bearer <令牌>，或签名请求）" + if (r.q("token") != null) "。1.2 起不再接受网址里的 ?token=" else "",
+            ?: return failed(r, "BAD_TOKEN", trPair("缺少令牌：在 Agent-VScreen 里复制接入命令（Authorization: Bearer <令牌>，或签名请求）" + if (r.q("token") != null) "。1.2 起不再接受网址里的 ?token=" else "",
                 "Missing token: copy the connect message in Agent-VScreen (Authorization: Bearer <token>, or a signed request)" + if (r.q("token") != null) ". Since 1.2 ?token= in the URL is no longer accepted" else ""))
-        val t = Tokens.byBearer(given) ?: return failed(r, "BAD_TOKEN", tr("令牌不对、已被撤销或已到期：在 Agent-VScreen 里重新复制接入命令", "Wrong, revoked or expired token: copy the connect message in Agent-VScreen again"))
+        val t = Tokens.byBearer(given) ?: return failed(r, "BAD_TOKEN", tr(S.api_server_wrong_revoked_or_expired_token))
         // 1.3: through the built-in node the peer is a known tailnet device (WhoIs) on an encrypted tunnel: a token is
         // enough (MCP clients cannot sign). Signing stays required for the other remote way in, when the user wants it.
         val knownPeer = r.viaBuiltinTailnet && r.headers["x-vscreen-peer"].let { !it.isNullOrBlank() && it != "?" }
-        if (r.remote && ApiConfig.remoteSigned && !knownPeer) return failed(r, "SIGNATURE_REQUIRED", tr("从其它设备来的请求必须签名（令牌不在网络上传）：用最新的 vscreen 命令（它会签名），或请用户在 Agent-VScreen › 其它设备 里关掉“只接受签名请求”",
-            "Requests from other devices must be signed (the token is not sent over the network): use the current vscreen command (it signs), or ask the user to turn off \"signed requests only\" under Other devices in Agent-VScreen"))
+        if (r.remote && ApiConfig.remoteSigned && !knownPeer) return failed(r, "SIGNATURE_REQUIRED", tr(S.api_server_requests_from_other_devices_must))
         return Auth(t, false, null)
     }
 
@@ -815,7 +812,7 @@ class ApiServer(private val ctx: Context) {
                     val avail = AgentGuide.TOPICS.joinToString(", ")
                     return NativeOffloadResult(
                         2,
-                        tr("未知主题“$topicArg”。可用主题：$avail\n", "Unknown topic \"$topicArg\". Available topics: $avail\n"),
+                        tr(S.api_server_unknown_topic_available_topics, topicArg, avail),
                         "INVALID_ARGS",
                     )
                 }
@@ -823,16 +820,16 @@ class ApiServer(private val ctx: Context) {
                 val tid = com.kilon.agentvscreen.cmd.Call.current()?.tokenId ?: "main"
                 val ack = AgentLedger.ackVersion(tid)
                 val head = "Agent-VScreen ${com.kilon.agentvscreen.BuildConfig.VERSION_NAME}" +
-                    (if (ack < com.kilon.agentvscreen.BuildConfig.VERSION_CODE) tr("（你的说明还没按这一版确认：更新后执行 remembered \"<存在哪里>\"）", " (your note is not confirmed for this version yet: refresh it, then run remembered \"<where>\")") else "") + "\n\n"
+                    (if (ack < com.kilon.agentvscreen.BuildConfig.VERSION_CODE) tr(S.api_server_your_note_is_not_confirmed) else "") + "\n\n"
                 Turns.bumpTurn(session)
                 return NativeOffloadResult(0, head + AgentGuide.guide())
             }
             "remembered" -> {
                 val where = argv.drop(1).joinToString(" ").trim()
-                if (where.isEmpty()) return NativeOffloadResult(2, tr("用法：vscreen remembered \"<你把说明存在了哪里>\"（例如：长期记忆 / skills/agent-vscreen）\n", "Usage: vscreen remembered \"<where you saved the note>\" (e.g. long-term memory / skills/agent-vscreen)\n"))
+                if (where.isEmpty()) return NativeOffloadResult(2, tr(S.api_server_usage_vscreen_remembered_where_you))
                 AgentLedger.remembered(where)
                 Turns.bumpTurn(session)
-                return NativeOffloadResult(0, tr("已记录（版本 ${com.kilon.agentvscreen.BuildConfig.VERSION_NAME}）：你说把 Agent-VScreen 的说明存在了「${where.take(80)}」。App 首页会显示给用户。以后的新对话里，要操作手机应用时用 vscreen（不知道怎么用就先 vscreen guide）。\n", "Recorded: you saved the Agent-VScreen note in \"${where.take(80)}\". The app shows this to the user. In future conversations, use vscreen to operate apps on the phone (run vscreen guide first if unsure how).\n"))
+                return NativeOffloadResult(0, tr(S.api_server_recorded_you_saved_the_agent, com.kilon.agentvscreen.BuildConfig.VERSION_NAME, where.take(80)))
             }
         }
         com.kilon.agentvscreen.host.A11yHeal.maybeHeal(ctx, "command")
@@ -847,7 +844,7 @@ class ApiServer(private val ctx: Context) {
             val permNote = com.kilon.agentvscreen.host.Permissions.changeNotice(com.kilon.agentvscreen.cmd.Call.current())
             // First call after a long silence (likely a new conversation): one line pointing at the short usage.
             val hint = if (notice == null && fresh && argv.first() != "help")
-                tr("（Agent-VScreen：用法速查 `vscreen guide`；完整说明 `vscreen help all`。）", "(Agent-VScreen: quick usage `vscreen guide`; full reference `vscreen help all`.)") else null
+                tr(S.api_server_agent_vscreen_quick_usage_vscreen) else null
             return res0.copy(output = withNotices(res0.output, listOfNotNull(notice, permNote), hint))
         }
         finally { Turns.endCommand(session, joinedTurn) }
@@ -866,7 +863,7 @@ class ApiServer(private val ctx: Context) {
         onCallCreated: ((Call) -> Unit)? = null,
     ): Pair<NativeOffloadResult, Boolean> {
         val auth = r.auth ?: return NativeOffloadResult(1, "", "BAD_TOKEN") to false
-        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return NativeOffloadResult(1, tr("设备过热已暂停：", "Thermal stop: ") + com.kilon.agentvscreen.host.ThermalGuard.reason(), "THERMAL_STOP", data = com.kilon.agentvscreen.host.ThermalGuard.thermalErrorData()) to false
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked) return NativeOffloadResult(1, tr(S.api_server_thermal_stop) + com.kilon.agentvscreen.host.ThermalGuard.reason(), "THERMAL_STOP", data = com.kilon.agentvscreen.host.ThermalGuard.thermalErrorData()) to false
         val t = Tokens.byId(auth.token.id) ?: auth.token
         val via = when {
             r.path.startsWith("/mcp") -> Abilities.Via.MCP
@@ -1031,7 +1028,7 @@ class ApiServer(private val ctx: Context) {
     }
 
     private fun shot(name: String): Resp {
-        val f = ShotStore.file(ctx, name) ?: return Resp.err(404, "NO_SHOT", tr("没有这张图（只保留最近 300 张，副屏释放后会清掉）：$name", "No such picture (only the last 300 are kept, and they are cleared when the screen is released): $name"))
+        val f = ShotStore.file(ctx, name) ?: return Resp.err(404, "NO_SHOT", tr(S.api_server_no_such_picture_only_the, name))
         return Resp(200, "image/jpeg", f.readBytes())
     }
 

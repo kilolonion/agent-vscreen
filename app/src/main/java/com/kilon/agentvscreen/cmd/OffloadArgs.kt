@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 /**
@@ -95,6 +96,6 @@ internal class OffloadArgs(
     /** Lenient mode: a non-number reads as absent (the default applies). Strict: refused. */
     private fun <T> num(names: Array<out String>, conv: (String) -> T?): T? {
         val raw = get(*names) ?: return null
-        return conv(raw) ?: if (strict) throw BadOption(tr("--${names.first()} 要一个数字（收到 “$raw”）", "--${names.first()} needs a number (got \"$raw\")")) else null
+        return conv(raw) ?: if (strict) throw BadOption(tr(S.offload_args_needs_a_number_got, names.first(), raw)) else null
     }
 }

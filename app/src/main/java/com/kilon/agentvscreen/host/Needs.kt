@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
+import com.kilon.agentvscreen.tr
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
@@ -40,14 +42,13 @@ object Needs {
         val at = System.currentTimeMillis()
         val agent = com.kilon.agentvscreen.api.Agents.ofSession(session)
         quiet("checkpoint-event") { com.kilon.agentvscreen.api.EventHub.post(ctx, session, "checkpoint", what.take(60),
-            com.kilon.agentvscreen.tr("流程停在检查点：$what。先看画面（act 不带步骤），再按上次回执里的命令接着跑", "The run stopped at a checkpoint: $what. Look at the screen (act with no steps), then go on with the command from that reply")) }
+            tr(S.needs_the_run_stopped_at_a, what)) }
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             if (com.kilon.agentvscreen.api.AgentLedger.of(agent).lastCallAt > at) return@postDelayed
             val who = com.kilon.agentvscreen.api.Agents.name(agent)
             com.kilon.agentvscreen.core.VScreenHandoff.alert(ctx, 8400 + (agent.hashCode() and 0x3f),
-                com.kilon.agentvscreen.tr("「$who」的流程停在检查点", "\"$who\"'s run stopped at a checkpoint"),
-                com.kilon.agentvscreen.tr("要它看的是：$what。它还没回来看，手机不会自己往下做。可以让它来接着，或者你自己在副屏上看一下。",
-                    "It was to look at: $what. It has not come back yet, and the phone does not go on by itself. Ask it to carry on, or look at the screen yourself."),
+                tr(S.needs_s_run_stopped_at_a, who),
+                tr(S.needs_it_was_to_look_at, what),
                 open(ctx, Page.HOME, 8))
         }, CHECK_NUDGE_MS)
     }

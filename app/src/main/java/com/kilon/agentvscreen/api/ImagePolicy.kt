@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import android.graphics.BitmapFactory
 import com.kilon.agentvscreen.cmd.NativeOffloadResult
@@ -57,7 +58,7 @@ object ImagePolicy {
     }
 
     /** The line that stands where a left-out picture was. */
-    fun leftOut(): String = tr("[没附图：画面和你上一张收到的图内容一样；要再看用 look]", "[no picture attached: the screen shows the same as the last picture you got; look shows it again]")
+    fun leftOut(): String = tr(S.image_policy_no_picture_attached_the_screen)
 
     /** The compact copy of picture [name] (written beside it when it was saved; made here only for an older picture). */
     fun compact(ctx: Context, name: String): String {

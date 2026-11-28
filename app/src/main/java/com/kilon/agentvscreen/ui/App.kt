@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import androidx.compose.material.icons.outlined.AddLink
 import top.yukonga.miuix.kmp.basic.Icon
 import androidx.compose.foundation.background
@@ -329,7 +330,7 @@ private fun ChangesBottomSheet(
                     val improvedItems = rel.items.filter { it.kind == com.kilon.agentvscreen.Changes.Kind.IMPROVED }
                     if (newItems.isNotEmpty()) {
                         Text(
-                            tr("新功能", "New"),
+                            tr(S.app_new),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = MiuixTheme.colorScheme.primary,
@@ -340,7 +341,7 @@ private fun ChangesBottomSheet(
                     }
                     if (improvedItems.isNotEmpty()) {
                         Text(
-                            tr("改进", "Improved"),
+                            tr(S.app_improved),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -357,7 +358,7 @@ private fun ChangesBottomSheet(
                 modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                 color = MiuixTheme.colorScheme.primary,
             ) {
-                Text(tr("知道了", "OK"), color = MiuixTheme.colorScheme.onPrimary)
+                Text(tr(S.app_ok), color = MiuixTheme.colorScheme.onPrimary)
             }
         }
     }
@@ -408,10 +409,10 @@ private fun MainTabs(pager: androidx.compose.foundation.pager.PagerState) {
     val backdrop = if (Glass.blurOk) rememberLayerBackdrop { drawRect(surface); drawContent() } else null
     val app = LocalApp.current
     val tabs = listOf(
-        Triple(tr("现在", "Now"), MiuixIcons.Home, 0),
-        Triple(tr("接入", "Connect"), androidx.compose.material.icons.Icons.Outlined.AddLink, TAB_CONNECT),
-        Triple(tr("记录", "Records"), MiuixIcons.Recent, TAB_RECORDS),
-        Triple(tr("设置", "Settings"), MiuixIcons.Settings, 3),
+        Triple(tr(S.app_now), MiuixIcons.Home, 0),
+        Triple(tr(S.app_connect), androidx.compose.material.icons.Icons.Outlined.AddLink, TAB_CONNECT),
+        Triple(tr(S.app_records), MiuixIcons.Recent, TAB_RECORDS),
+        Triple(tr(S.app_settings), MiuixIcons.Settings, 3),
     )
     Scaffold(
         bottomBar = {
@@ -510,7 +511,7 @@ fun MiuixPage(
                 colors = BlurDefaults.blurColors(blendColors = listOf(BlendColorEntry(color = surface.copy(0.8f))))) else Modifier) {
                 val navigation: @Composable () -> Unit = {
                     if (back) IconButton(onClick = { nav.back() }, modifier = Modifier.padding(start = 16.dp)) {
-                        Icon(MiuixIcons.Back, tr("返回", "Back"))
+                        Icon(MiuixIcons.Back, tr(S.app_back))
                     } else lead?.invoke { bar.state.collapsedFraction }
                 }
                 val barColor = if (blurNow) Color.Transparent else surface
@@ -555,7 +556,7 @@ fun MiuixLazyPage(
                 colors = BlurDefaults.blurColors(blendColors = listOf(BlendColorEntry(color = surface.copy(0.8f))))) else Modifier) {
                 TopAppBar(title = title, scrollBehavior = bar, color = if (blurNow) Color.Transparent else surface,
                     navigationIcon = {
-                        if (back) IconButton(onClick = { nav.back() }, modifier = Modifier.padding(start = 16.dp)) { Icon(MiuixIcons.Back, tr("返回", "Back")) }
+                        if (back) IconButton(onClick = { nav.back() }, modifier = Modifier.padding(start = 16.dp)) { Icon(MiuixIcons.Back, tr(S.app_back)) }
                     }, actions = actions)
             }
         },
@@ -615,7 +616,7 @@ fun rememberFold(keep: Int = 4): Fold = Fold(keep, androidx.compose.runtime.save
 fun FoldToggle(fold: Fold, size: Int) {
     Row(Modifier.fillMaxWidth().clickable { fold.open.value = !fold.open.value }.padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Text(if (fold.open.value) tr("收起", "Collapse") else tr("还有 ${size - fold.keep} 个", "${size - fold.keep} more"),
+        Text(if (fold.open.value) tr(S.app_collapse) else tr(S.app_more, size - fold.keep),
             modifier = Modifier.weight(1f), fontSize = 15.sp, color = MiuixTheme.colorScheme.primary)
         top.yukonga.miuix.kmp.basic.Icon(
             if (fold.open.value) androidx.compose.material.icons.Icons.Outlined.KeyboardArrowUp else androidx.compose.material.icons.Icons.Outlined.KeyboardArrowDown,

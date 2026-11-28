@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import androidx.compose.ui.Alignment
 
@@ -97,8 +98,8 @@ private fun dayOf(at: Long): String {
     fun key(t: Long) = c.apply { timeInMillis = t }.let { it.get(java.util.Calendar.YEAR) * 400 + it.get(java.util.Calendar.DAY_OF_YEAR) }
     val now = System.currentTimeMillis()
     return when (key(at)) {
-        key(now) -> tr("今天", "Today")
-        key(now - 86_400_000L) -> tr("昨天", "Yesterday")
+        key(now) -> tr(S.records_today)
+        key(now - 86_400_000L) -> tr(S.records_yesterday)
         else -> if (!com.kilon.agentvscreen.I18n.en) dayFmt.format(Date(at)) else SimpleDateFormat("MMM d", Locale.ENGLISH).format(Date(at))
     }
 }
@@ -134,10 +135,10 @@ fun RecordsTab(bottom: Dp) {
     }
     val now = remember(shown) { shown.filter { it is Line.T && it.t.running } }
     val past = remember(shown, now) { (shown - now.toSet()) }
-    MiuixLazyPage(tr("记录", "Records"), back = false, bottom = bottom, actions = {
+    MiuixLazyPage(tr(S.app_records), back = false, bottom = bottom, actions = {
         if (whoList.size > 1) Row(Modifier.padding(end = Edge.text - Edge.slot).clip(RoundedCornerShape(50)).background(if (who != null) MiuixTheme.colorScheme.primary.copy(alpha = 0.14f) else MiuixTheme.colorScheme.surfaceContainer)
             .clickable { picking = true }.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(who?.let { com.kilon.agentvscreen.api.Agents.name(it) } ?: tr("所有 agent", "Every agent"), fontSize = 13.sp,
+            Text(who?.let { com.kilon.agentvscreen.api.Agents.name(it) } ?: tr(S.records_every_agent), fontSize = 13.sp,
                 color = if (who != null) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface, maxLines = 1, softWrap = false,
                 modifier = Modifier.widthIn(max = 200.dp).scrollIfLong())
             Text(" ▾", fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
@@ -145,8 +146,8 @@ fun RecordsTab(bottom: Dp) {
     }) {
         item(key = "chips") {
             Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = Edge.text, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(Filter.ALL to tr("全部", "All"), Filter.TASKS to tr("任务", "Tasks"), Filter.ASKS to tr("提问", "Questions"),
-                    Filter.PLANS to tr("预约与监视", "Schedules and watches"), Filter.LESSONS to tr("示教", "Routines")).forEach { (f, label) ->
+                listOf(Filter.ALL to tr(S.records_all), Filter.TASKS to tr(S.records_tasks), Filter.ASKS to tr(S.records_questions),
+                    Filter.PLANS to tr(S.records_schedules_and_watches), Filter.LESSONS to tr(S.records_routines)).forEach { (f, label) ->
                     FilterChip(label, filter == f) { filter = f }
                 }
             }
@@ -157,14 +158,14 @@ fun RecordsTab(bottom: Dp) {
             else -> {
                 if (shown.isEmpty()) item(key = "empty") {
                     Column(Modifier.padding(horizontal = 12.dp)) {
-                        if (filter == Filter.ASKS) EmptyState(androidx.compose.material.icons.Icons.Outlined.QuestionAnswer, tr("还没有提问", "No questions yet"),
-                            tr("agent 需要确认时会在手机上向你提问，你的回答会保存在这里", "When an agent needs input it asks you on the phone; your answers are kept here"))
-                        else EmptyState(androidx.compose.material.icons.Icons.Outlined.History, tr("还没有任务", "No tasks yet"),
-                            tr("agent 每次用副屏做了什么，会按时间排在这里", "What an agent did on the screen each time appears here, newest first"))
+                        if (filter == Filter.ASKS) EmptyState(androidx.compose.material.icons.Icons.Outlined.QuestionAnswer, tr(S.records_no_questions_yet),
+                            tr(S.records_when_an_agent_needs_input))
+                        else EmptyState(androidx.compose.material.icons.Icons.Outlined.History, tr(S.records_no_tasks_yet),
+                            tr(S.records_what_an_agent_did_on))
                     }
                 }
                 if (now.isNotEmpty()) {
-                    item(key = "now") { SmallTitle(tr("进行中", "Under way")) }
+                    item(key = "now") { SmallTitle(tr(S.records_under_way)) }
                     items(now.size, key = { i -> "now:" + lineKey(now[i]) }) { i -> val l = now[i] as Line.T
                         Box(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) { TaskCard(l.t) { nav.go(Route.Task(l.t.id)) } } }
                 }
@@ -186,10 +187,10 @@ fun RecordsTab(bottom: Dp) {
             }
         }
     }
-    if (picking) GlassDialog(onDismissRequest = { picking = false }, title = { Text(tr("看谁的记录", "Whose records")) }, text = {
+    if (picking) GlassDialog(onDismissRequest = { picking = false }, title = { Text(tr(S.records_whose_records)) }, text = {
         androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 420.dp)) {
             items((listOf<String?>(null) + whoList).size) { i -> val id = (listOf<String?>(null) + whoList)[i]
-                Text((if (who == id) "✓  " else "    ") + (id?.let { com.kilon.agentvscreen.api.Agents.name(it) } ?: tr("所有 agent", "Every agent")), fontSize = 15.sp,
+                Text((if (who == id) "✓  " else "    ") + (id?.let { com.kilon.agentvscreen.api.Agents.name(it) } ?: tr(S.records_every_agent)), fontSize = 15.sp,
                     color = if (who == id) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface,
                     modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { who = id; picking = false }.padding(vertical = 10.dp))
             }
@@ -201,14 +202,14 @@ private fun lineKey(l: Line): String = when (l) { is Line.T -> "t:" + l.t.id; is
 
 /** What the user did with a question, in their words; null for answers the app gave itself (pre-authorized, automatic). */
 private fun answerWord(a: String): String? = when {
-    a == "allowed" || a.startsWith("allowed (") -> tr("你允许了", "you allowed")
-    a == "covered" -> tr("沿用此前的许可", "allowed by an earlier permission")
-    a == "not allowed" -> tr("你定的规则不允许", "not allowed by your rules")
-    a == "denied" -> tr("你拒绝了", "you refused")
-    a.startsWith("answered") -> tr("你回答了", "you answered")
-    a == "declined" -> tr("你没有回答", "you declined")
-    a == "feedback" -> tr("你说了一句", "you said something")
-    a.startsWith("ended") -> tr("没等到回答", "not answered in time")
+    a == "allowed" || a.startsWith("allowed (") -> tr(S.records_you_allowed)
+    a == "covered" -> tr(S.records_allowed_by_an_earlier_permission)
+    a == "not allowed" -> tr(S.records_not_allowed_by_your_rules)
+    a == "denied" -> tr(S.records_you_refused)
+    a.startsWith("answered") -> tr(S.records_you_answered)
+    a == "declined" -> tr(S.records_you_declined)
+    a == "feedback" -> tr(S.records_you_said_something)
+    a.startsWith("ended") -> tr(S.records_not_answered_in_time)
     else -> null
 }
 
@@ -249,11 +250,11 @@ private fun Plans(beat: Int) {
             val running = !l.stopped
             val who = if (tokens.size > 1) " · " + com.kilon.agentvscreen.api.Agents.name(l.spec.agentId) else ""
             BasicComponent(
-                title = tr("监视 · ", "Watch · ") + l.spec.name + who,
-                summary = l.spec.describe() + " · " + (if (running) l.status + tr(" · 还剩 ${l.json().opt("ends_in_min")} 分钟", " · ${l.json().opt("ends_in_min")} min left") else (l.endReason ?: tr("已结束", "ended"))),
+                title = tr(S.records_watch) + l.spec.name + who,
+                summary = l.spec.describe() + " · " + (if (running) l.status + tr(S.records_min_left, l.json().opt("ends_in_min")) else (l.endReason ?: tr(S.records_ended))),
                 endActions = {
                     LinkButton(onClick = { if (running) VScreenRules.stop(l.spec.agentId, l.spec.name) else VScreenRules.clearEnded(l.spec.agentId, l.spec.name); app.bump() }) {
-                        Text(if (running) tr("停止", "Stop") else tr("清掉", "Clear"))
+                        Text(if (running) tr(S.connect_stop) else tr(S.records_clear))
                     }
                 },
             )
@@ -265,7 +266,7 @@ private val logTime = SimpleDateFormat("MM-dd HH:mm:ss", Locale.ROOT)
 
 private fun logWhat(o: JSONObject): String = when (o.optString("kind")) {
     "command" -> o.optString("cmd")
-    "consent" -> tr("确认：", "Confirm: ") + o.optString("what")
+    "consent" -> tr(S.records_confirm) + o.optString("what")
     else -> (o.optString("what") + " " + o.optString("detail")).trim()
 }
 
@@ -286,9 +287,9 @@ private fun LogRow(o: JSONObject) = BasicComponent(title = logWhat(o).take(120),
 @Composable
 fun SchedulesPage() {
     val app = LocalApp.current
-    MiuixPage(tr("定时预约", "Schedules")) {
+    MiuixPage(tr(S.records_schedules)) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { SchedulesCards(app.tick) }
-        Text(tr("预约时间前 3 分钟会启动服务并自检，未就绪时通知你。点开可修改；关闭开关会保留预约但不执行。", "3 minutes before, the service starts and self-checks; you are notified if it is not ready. Open an item to edit it; switching it off keeps it but it will not run."),
+        Text(tr(S.records_3_minutes_before_the_service),
             fontSize = 12.sp, color = top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
     }
 }
@@ -297,7 +298,7 @@ fun SchedulesPage() {
 @Composable
 fun LessonsPage() {
     val app = LocalApp.current
-    MiuixPage(tr("示教", "Routines")) {
+    MiuixPage(tr(S.records_routines)) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { LessonsList(app.tick) }
     }
 }
@@ -310,25 +311,25 @@ fun LogPage() {
     var rows by remember { mutableStateOf(emptyList<JSONObject>()) }
     var askClear by remember { mutableStateOf(false) }
     LaunchedEffect(n) { rows = withContext(Dispatchers.IO) { Audit.tail(200) } }
-    MiuixLazyPage(tr("操作日志", "Activity log"), actions = {
-        IconButton(onClick = { n++ }) { Icon(MiuixIcons.Refresh, tr("刷新", "Refresh")) }
-        IconButton(onClick = { host.copy(tr("操作日志", "Activity log"), rows.joinToString("\n") { logLine(it) }) }) { Icon(MiuixIcons.Copy, tr("复制", "Copy")) }
-        IconButton(onClick = { askClear = true }, modifier = Modifier.padding(end = 12.dp)) { Icon(MiuixIcons.Delete, tr("清空", "Clear")) }
+    MiuixLazyPage(tr(S.records_activity_log), actions = {
+        IconButton(onClick = { n++ }) { Icon(MiuixIcons.Refresh, tr(S.records_refresh)) }
+        IconButton(onClick = { host.copy(tr(S.records_activity_log), rows.joinToString("\n") { logLine(it) }) }) { Icon(MiuixIcons.Copy, tr(S.connect_copy)) }
+        IconButton(onClick = { askClear = true }, modifier = Modifier.padding(end = 12.dp)) { Icon(MiuixIcons.Delete, tr(S.automation_clear)) }
     }) {
         // 2.0.0-beta9 (feedback 6): lazy rows.
-        if (rows.isEmpty()) item(key = "none") { Group { BasicComponent(title = tr("暂无记录", "Nothing recorded yet")) } }
+        if (rows.isEmpty()) item(key = "none") { Group { BasicComponent(title = tr(S.records_nothing_recorded_yet)) } }
         else cardItems(null, rows.mapIndexed { i, o -> i to o }, key = { it.first }) { LogRow(it.second) }
         item(key = "foot") {
-            Text(tr("谁（哪个令牌、哪台设备）、什么时候、做了什么、结果；输入的文字只记字数。", "Who (token, device), when, what and the result; typed text is recorded as a length only."),
+            Text(tr(S.records_who_token_device_when_what),
                 fontSize = 12.sp, color = top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp))
         }
     }
     if (askClear) GlassDialog(
         onDismissRequest = { askClear = false },
-        title = { DialogTitle(tr("清空操作日志？", "Clear the activity log?")) },
-        text = { Text(tr("清掉后无法找回。", "This cannot be undone.")) },
-        confirmButton = { LinkButton(onClick = { Audit.clear(); askClear = false; n++ }) { Text(tr("清空", "Clear"), color = Palette.stopped) } },
-        dismissButton = { LinkButton(onClick = { askClear = false }) { Text(tr("取消", "Cancel")) } },
+        title = { DialogTitle(tr(S.records_clear_the_activity_log)) },
+        text = { Text(tr(S.records_this_cannot_be_undone)) },
+        confirmButton = { LinkButton(onClick = { Audit.clear(); askClear = false; n++ }) { Text(tr(S.automation_clear), color = Palette.stopped) } },
+        dismissButton = { LinkButton(onClick = { askClear = false }) { Text(tr(S.app_picker_cancel)) } },
     )
 }
 
@@ -353,41 +354,40 @@ fun DiagPage() {
             }
         }
     }
-    MiuixPage(tr("诊断与反馈", "Diagnostics and feedback")) {
+    MiuixPage(tr(S.records_diagnostics_and_feedback)) {
         Group {
-            ArrowPreference(title = tr("复制诊断信息", "Copy diagnostics"), summary = tr("版本、配置状态和最近日志；不含令牌和输入内容", "Version, setup state and recent log; no token, nothing you typed"),
-                onClick = { collectDiagnostics { host.copy(tr("诊断信息", "Diagnostics"), it) } })
-            ArrowPreference(title = tr("分享诊断信息", "Share diagnostics"), onClick = { collectDiagnostics { report ->
+            ArrowPreference(title = tr(S.records_copy_diagnostics), summary = tr(S.records_version_setup_state_and_recent),
+                onClick = { collectDiagnostics { host.copy(tr(S.records_diagnostics), it) } })
+            ArrowPreference(title = tr(S.records_share_diagnostics), onClick = { collectDiagnostics { report ->
                 runCatching {
                     ctx.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
-                        .putExtra(android.content.Intent.EXTRA_SUBJECT, tr("Agent-VScreen 诊断", "Agent-VScreen diagnostics"))
-                        .putExtra(android.content.Intent.EXTRA_TEXT, com.kilon.agentvscreen.host.Feedback.redact(report, com.kilon.agentvscreen.host.Feedback.userHosts())), tr("发送诊断", "Send diagnostics")))
+                        .putExtra(android.content.Intent.EXTRA_SUBJECT, tr(S.records_agent_vscreen_diagnostics))
+                        .putExtra(android.content.Intent.EXTRA_TEXT, com.kilon.agentvscreen.host.Feedback.redact(report, com.kilon.agentvscreen.host.Feedback.userHosts())), tr(S.records_send_diagnostics)))
                 }
             } })
-            SwitchPreference(checked = open, onCheckedChange = { open = it }, title = tr("显示最近日志", "Show the recent log"))
+            SwitchPreference(checked = open, onCheckedChange = { open = it }, title = tr(S.records_show_the_recent_log))
         }
         // 2.0.1 (rainbow): feedback in one tap, with the report redacted once more (a GitHub issue is public).
-        Group(tr("反馈问题", "Report a problem")) {
+        Group(tr(S.records_report_a_problem)) {
             fun redacted(report: String) = com.kilon.agentvscreen.host.Feedback.redact(report, com.kilon.agentvscreen.host.Feedback.userHosts())
-            ArrowPreference(title = tr("去 GitHub 反馈", "Report on GitHub"),
-                summary = tr("打开新建 issue，附脱敏后的摘要；完整诊断已复制，可粘贴", "Opens a new issue with a redacted summary; the full report is copied for pasting"),
+            ArrowPreference(title = tr(S.records_report_on_github),
+                summary = tr(S.records_opens_a_new_issue_with),
                 onClick = { collectDiagnostics { report ->
                     val r = redacted(report)
-                    host.copy(tr("诊断信息", "Diagnostics"), r)
+                    host.copy(tr(S.records_diagnostics), r)
                     val url = com.kilon.agentvscreen.host.Feedback.issueUrl(
                         title = "[${com.kilon.agentvscreen.BuildConfig.VERSION_NAME}] ",
-                        intro = tr("**问题：**\n\n**怎么出现的：**\n\n**诊断摘要（已脱敏；完整诊断已复制到剪贴板，可粘贴在下面）：**",
-                            "**What happened:**\n\n**Steps:**\n\n**Diagnostics summary (redacted; the full report is on the clipboard, paste it below):**"),
+                        intro = tr(S.records_what_happened_steps_diagnostics_summary),
                         redacted = r)
                     runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 } })
             com.kilon.agentvscreen.host.Feedback.EMAIL?.let { mail ->
-                ArrowPreference(title = tr("发邮件反馈", "Report by email"), summary = tr("正文是脱敏后的完整诊断", "The body is the full redacted report"),
+                ArrowPreference(title = tr(S.records_report_by_email), summary = tr(S.records_the_body_is_the_full),
                     onClick = { collectDiagnostics { report ->
                         runCatching {
                             ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:"))
                                 .putExtra(android.content.Intent.EXTRA_EMAIL, arrayOf(mail))
-                                .putExtra(android.content.Intent.EXTRA_SUBJECT, "Agent-VScreen ${com.kilon.agentvscreen.BuildConfig.VERSION_NAME} " + tr("反馈", "feedback"))
+                                .putExtra(android.content.Intent.EXTRA_SUBJECT, "Agent-VScreen ${com.kilon.agentvscreen.BuildConfig.VERSION_NAME} " + tr(S.records_feedback))
                                 .putExtra(android.content.Intent.EXTRA_TEXT, redacted(report))
                                 .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
                         }

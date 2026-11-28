@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import android.app.admin.DevicePolicyManager
 import android.content.Intent
 import android.net.Uri
@@ -81,35 +82,32 @@ fun PublicAccessPage() {
     val mcpUrl = remember(ts.dnsName, channel, cfCfg, ngCfg) { PublicAccess.mcpUrl() }
 
     MiuixPage(
-        title = tr("云端（公网 MCP · 实验性）", "Cloud (Public MCP · Experimental)"),
-        subtitle = tr("实验性功能 · 供云端 MCP 客户端连接 · ${channel.title}", "Experimental · For cloud MCP clients · ${channel.title}"),
+        title = tr(S.connect_cloud_public_mcp_experimental),
+        subtitle = tr(S.public_access_experimental_for_cloud_mcp_clients, channel.title),
         resetScrollKey = enabled,
     ) {
         PublicChannelPicker()
-        if (enabled) Footnote(tr("切换通道会先关闭当前的公网接入；已授权的客户端需要用新地址重新配对。", "Switching channel turns the current public access off; authorized clients need to pair again with the new address."))
+        if (enabled) Footnote(tr(S.public_access_switching_channel_turns_the_current))
         if (enabled) {
             PublicRunningSection(
                 ts = ts,
                 mcpUrl = mcpUrl,
                 onDisable = {
                     PublicAccess.disable(actx, "user")
-                    host.say(tr("已关闭公网接入", "Public access turned off"))
+                    host.say(tr(S.public_access_public_access_turned_off))
                 },
             )
             Footnote(
-                tr(
-                    "关闭公网接入不会撤销已授权的客户端；要彻底断开请在下方撤销全部公网客户端。",
-                    "Turning off public access does not revoke authorized clients; revoke them below if needed.",
-                ),
+                tr(S.public_access_turning_off_public_access_does),
             )
         } else {
             PublicChecklistSection(showEnableButton = true)
         }
 
-        Group(tr("已授权的公网客户端 · ${publicClients.size}", "Authorized public clients · ${publicClients.size}"), padded = true) {
+        Group(tr(S.public_access_authorized_public_clients, publicClients.size), padded = true) {
             if (publicClients.isEmpty()) {
                 Text(
-                    tr("还没有已授权的公网客户端。", "No authorized public clients yet."),
+                    tr(S.public_access_no_authorized_public_clients_yet),
                     fontSize = 13.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
@@ -117,7 +115,7 @@ fun PublicAccessPage() {
                 publicClients.forEach { t ->
                     ArrowPreference(
                         title = t.name,
-                        summary = if (t.scope == "operate") tr("看和操作", "Look & operate") else tr("只看", "Look only"),
+                        summary = if (t.scope == "operate") tr(S.public_access_look_operate) else tr(S.public_access_look_only),
                         onClick = { nav.go(Route.Agent(t.id)) },
                     )
                 }
@@ -129,15 +127,15 @@ fun PublicAccessPage() {
                     } else {
                         revokeConfirm = false
                         val n = PublicAccess.revokeAllPublicClients(actx)
-                        host.say(tr("已撤销 $n 个公网客户端", "Revoked $n public clients"))
+                        host.say(tr(S.public_access_revoked_public_clients, n))
                     }
                 },
                 enabled = publicClients.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    if (revokeConfirm) tr("再点一次确认撤销全部公网客户端", "Tap again to revoke all public clients")
-                    else tr("撤销全部公网客户端", "Revoke all public clients"),
+                    if (revokeConfirm) tr(S.public_access_tap_again_to_revoke_all)
+                    else tr(S.public_access_revoke_all_public_clients),
                     color = MiuixTheme.colorScheme.error,
                 )
             }
@@ -151,26 +149,26 @@ fun PublicChannelPicker() {
     val actx = LocalContext.current.applicationContext
     val nav = LocalNav.current
     val channel by PublicAccess.channelFlow.collectAsState()
-    Group(tr("公网通道", "Public channel")) {
+    Group(tr(S.public_access_public_channel)) {
         top.yukonga.miuix.kmp.preference.RadioButtonPreference(
             title = PublicAccess.Channel.TAILSCALE.title,
-            summary = tr("无需域名；地址为 *.ts.net；需要官方 Tailscale 账号", "No domain needed; a *.ts.net address; needs an official Tailscale account"),
+            summary = tr(S.public_access_no_domain_needed_a_ts),
             selected = channel == PublicAccess.Channel.TAILSCALE,
             onClick = { PublicAccess.setChannel(actx, PublicAccess.Channel.TAILSCALE) },
         )
         top.yukonga.miuix.kmp.preference.RadioButtonPreference(
             title = PublicAccess.Channel.CLOUDFLARE.title,
-            summary = tr("使用你自己的域名；需要 Cloudflare 账号；也适用于 Headscale", "Uses your own domain; needs a Cloudflare account; also works with Headscale"),
+            summary = tr(S.public_access_uses_your_own_domain_needs),
             selected = channel == PublicAccess.Channel.CLOUDFLARE,
             onClick = { PublicAccess.setChannel(actx, PublicAccess.Channel.CLOUDFLARE) },
         )
         top.yukonga.miuix.kmp.preference.RadioButtonPreference(
             title = PublicAccess.Channel.NGROK.title,
-            summary = tr("无需域名；免费账号送一个固定域名；需要 ngrok 账号；也适用于 Headscale", "No domain needed; free accounts get one static domain; needs an ngrok account; also works with Headscale"),
+            summary = tr(S.public_access_no_domain_needed_free_accounts),
             selected = channel == PublicAccess.Channel.NGROK,
             onClick = { PublicAccess.setChannel(actx, PublicAccess.Channel.NGROK) },
         )
-        ArrowPreference(title = tr("适合谁和常见问题", "Who it suits and common problems"), summary = tr("${channel.title}：开通步骤就在下面", "${channel.title}: the setup steps are right below"),
+        ArrowPreference(title = tr(S.public_access_who_it_suits_and_common), summary = tr(S.public_access_the_setup_steps_are_right, channel.title),
             onClick = { nav.go(Route.PublicGuide(channel.key)) })
     }
 }
@@ -199,7 +197,7 @@ fun WrappableCode(text: String, onCopy: () -> Unit) {
             )
         }
         IconButton(onClick = onCopy) {
-            Icon(MiuixIcons.Copy, tr("复制", "Copy"), tint = Color(0xFFE8E4F2))
+            Icon(MiuixIcons.Copy, tr(S.connect_copy), tint = Color(0xFFE8E4F2))
         }
     }
 }
@@ -226,36 +224,36 @@ fun PublicPairingCodeCard() {
                 errorMsg = null
             }
             PublicOAuth.ClaimResult.InvalidFormat -> {
-                errorMsg = tr("配对码应为 8 位字母或数字（如 ABCD-EFGH，不含 0/O/1/I）。", "Pairing code must be 8 letters/digits (e.g. ABCD-EFGH, without 0/O/1/I).")
+                errorMsg = tr(S.public_access_pairing_code_must_be_8)
             }
             PublicOAuth.ClaimResult.NotFound -> {
-                errorMsg = tr("没有找到对应的待配对请求，请核对配对码是否输错。", "No waiting pairing request matches this code. Please double-check it.")
+                errorMsg = tr(S.public_access_no_waiting_pairing_request_matches)
             }
             PublicOAuth.ClaimResult.Expired -> {
-                errorMsg = tr("这条配对请求已过期或已处理，请在客户端重新发起连接。", "This pairing request expired or was already handled. Start pairing again from the client.")
+                errorMsg = tr(S.public_access_this_pairing_request_expired_or)
             }
             PublicOAuth.ClaimResult.TooManyActive -> {
-                errorMsg = tr("待确认的配对请求过多，请先处理“待处理”中的请求。", "Too many pairing requests are waiting. Handle the requests under Pending first.")
+                errorMsg = tr(S.public_access_too_many_pairing_requests_are)
             }
             PublicOAuth.ClaimResult.NoLockscreen -> {
-                errorMsg = tr("手机未设置锁屏密码或生物识别，无法批准公网配对。", "Set a screen lock PIN or biometric on the phone before approving public pairings.")
+                errorMsg = tr(S.public_access_set_a_screen_lock_pin)
             }
         }
     }
 
     var byCode by remember { mutableStateOf(false) }
-    Group(tr("配对", "Pairing"), padded = true) {
+    Group(tr(S.public_access_pairing), padded = true) {
         // New clients pop up a confirmation card on their own; entering a code is only a fallback for a request that
         // stayed queued because several cards were already open.
         ArrowPreference(
-            title = tr("用配对码找回请求", "Find a request by its code"),
-            endActions = { Value(if (byCode) tr("收起", "Hide") else tr("展开", "Show")) },
+            title = tr(S.public_access_find_a_request_by_its),
+            endActions = { Value(if (byCode) tr(S.connect_hide) else tr(S.connect_show)) },
             onClick = { byCode = !byCode },
         )
         if (byCode) AvsField(
             value = codeInput,
             onValueChange = { codeInput = it; errorMsg = null },
-            placeholder = tr("8 位配对码，如 ABCD-EFGH", "8-character code, e.g. ABCD-EFGH"),
+            placeholder = tr(S.public_access_8_character_code_e_g),
         )
         if (byCode) errorMsg?.let { err ->
             Text(err, fontSize = 12.5.sp, lineHeight = 18.sp, color = MiuixTheme.colorScheme.error)
@@ -271,14 +269,14 @@ fun PublicPairingCodeCard() {
                             ?.primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString()
                     }.getOrNull()
                     if (clip.isNullOrBlank()) {
-                        host.say(tr("剪贴板是空的", "Clipboard is empty"))
+                        host.say(tr(S.public_access_clipboard_is_empty))
                     } else {
                         codeInput = clip.trim()
                         errorMsg = null
                     }
                 },
             ) {
-                Text(tr("粘贴", "Paste"), color = MiuixTheme.colorScheme.primary)
+                Text(tr(S.public_access_paste), color = MiuixTheme.colorScheme.primary)
             }
             PrimaryButton(
                 onClick = { submit(codeInput) },
@@ -286,12 +284,12 @@ fun PublicPairingCodeCard() {
                 modifier = Modifier.weight(1f),
                 color = MiuixTheme.colorScheme.primary,
             ) {
-                Text(tr("核对并确认", "Verify & confirm"), color = MiuixTheme.colorScheme.onPrimary)
+                Text(tr(S.public_access_verify_confirm), color = MiuixTheme.colorScheme.onPrimary)
             }
         }
         SwitchRow(
-            title = tr("仅在手动开启窗口时允许新配对", "Only allow new pairings during a manual window"),
-            sub = tr("已授权的客户端不受影响", "Authorized clients are not affected"),
+            title = tr(S.public_access_only_allow_new_pairings_during),
+            sub = tr(S.public_access_authorized_clients_are_not_affected),
             checked = strictWindow,
             onChange = { PublicAccess.setStrictPairingWindow(actx, it) },
         )
@@ -302,21 +300,21 @@ fun PublicPairingCodeCard() {
                 val fmt = "%d:%02d".format(java.util.Locale.ROOT, sec / 60, sec % 60)
                 InfoCard(
                     Palette.takeover,
-                    tr("配对窗口已开启 · 剩余 $fmt", "Pairing window open · $fmt left"),
-                    tr("现在可以发起新客户端配对；批准后会自动关闭。", "New clients can initiate pairing now; the window closes automatically after approval."),
+                    tr(S.public_access_pairing_window_open_left, fmt),
+                    tr(S.public_access_new_clients_can_initiate_pairing),
                 )
                 SoftButton(
                     onClick = { PublicAccess.closePairingWindow() },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(tr("立即关闭窗口", "Close window now"), color = MiuixTheme.colorScheme.error)
+                    Text(tr(S.public_access_close_window_now), color = MiuixTheme.colorScheme.error)
                 }
             } else {
                 SoftButton(
                     onClick = { PublicAccess.openPairingWindow() },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(tr("开启配对窗口（3 分钟）", "Open pairing window (3 min)"), color = MiuixTheme.colorScheme.primary)
+                    Text(tr(S.public_access_open_pairing_window_3_min), color = MiuixTheme.colorScheme.primary)
                 }
             }
         }
@@ -337,27 +335,24 @@ fun PublicRunningSection(
     }
 
     val channel by PublicAccess.channelFlow.collectAsState()
-    Group(tr("运行状态", "Status")) {
+    Group(tr(S.public_access_status)) {
         val tunnel = channel.tunnel
         if (tunnel != null) TunnelRunning(tunnel, mcpUrl) else when (ts.funnel) {
             "on" -> {
                 InfoCard(
                     Palette.takeover,
-                    tr("公网接入已开启", "Public access is on"),
-                    tr(
-                        "HTTPS 证书已就绪，云端 MCP 客户端可连接下方地址。24 小时无已认证请求自动关闭，App 更新后恢复关闭。",
-                        "HTTPS certificate is ready. Cloud MCP clients can connect below. Auto-closes after 24 h with no authenticated requests and resets to off after app updates.",
-                    ),
+                    tr(S.public_access_public_access_is_on),
+                    tr(S.public_access_https_certificate_is_ready_cloud),
                 )
                 if (mcpUrl != null) {
-                    WrappableCode(mcpUrl) { host.copy(tr("MCP 地址", "MCP URL"), mcpUrl) }
+                    WrappableCode(mcpUrl) { host.copy(tr(S.public_access_mcp_url), mcpUrl) }
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
                         PrimaryButton(
-                            onClick = { host.copy(tr("MCP 地址", "MCP URL"), mcpUrl) },
+                            onClick = { host.copy(tr(S.public_access_mcp_url), mcpUrl) },
                             modifier = Modifier.fillMaxWidth(),
                             color = MiuixTheme.colorScheme.primary,
                         ) {
-                            Text(tr("复制 MCP 地址", "Copy MCP URL"), color = MiuixTheme.colorScheme.onPrimary)
+                            Text(tr(S.public_access_copy_mcp_url), color = MiuixTheme.colorScheme.onPrimary)
                         }
                     }
                 }
@@ -365,18 +360,15 @@ fun PublicRunningSection(
             "cert" -> {
                 InfoCard(
                     Palette.standby,
-                    tr("正在申请 HTTPS 证书", "Requesting HTTPS certificate"),
-                    tr(
-                        "正在申请 HTTPS 证书，首次约 30–60 秒。",
-                        "Requesting HTTPS certificate; first time takes ~30–60 seconds.",
-                    ) + (mcpUrl?.let { "\n$it" } ?: ""),
+                    tr(S.public_access_requesting_https_certificate),
+                    tr(S.public_access_requesting_https_certificate_first_time) + (mcpUrl?.let { "\n$it" } ?: ""),
                 )
             }
             "error" -> {
                 val msg = PublicAccess.translateFunnelError(ts.funnelReason)
                 InfoCard(
                     Palette.stopped,
-                    msg?.title ?: tr("Funnel 启动失败", "Funnel failed to start"),
+                    msg?.title ?: tr(S.public_access_funnel_failed_to_start),
                     msg?.fix ?: ts.funnelReason.orEmpty(),
                 )
                 val raw = ts.funnelReason.orEmpty()
@@ -388,7 +380,7 @@ fun PublicRunningSection(
                 if (helpUrl != null) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                         SoftButton(onClick = { openUrl(helpUrl) }, modifier = Modifier.fillMaxWidth()) {
-                            Text(tr("打开 Tailscale 管理页", "Open Tailscale Admin"), color = MiuixTheme.colorScheme.primary)
+                            Text(tr(S.public_access_open_tailscale_admin), color = MiuixTheme.colorScheme.primary)
                         }
                     }
                 }
@@ -396,18 +388,15 @@ fun PublicRunningSection(
             else -> {
                 InfoCard(
                     Palette.standby,
-                    tr("正在启动 Tailscale Funnel…", "Starting Tailscale Funnel…"),
-                    (mcpUrl?.let { "$it\n" } ?: "") + tr(
-                        "正在等待 Funnel 启动并申请 HTTPS 证书。",
-                        "Waiting for Funnel startup and HTTPS certificate.",
-                    ),
+                    tr(S.public_access_starting_tailscale_funnel),
+                    (mcpUrl?.let { "$it\n" } ?: "") + tr(S.public_access_waiting_for_funnel_startup_and),
                 )
             }
         }
         if (onDisable != null) {
             Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                 SoftButton(onClick = onDisable, modifier = Modifier.fillMaxWidth()) {
-                    Text(tr("关闭公网接入", "Turn off public access"), color = MiuixTheme.colorScheme.error)
+                    Text(tr(S.public_access_turn_off_public_access), color = MiuixTheme.colorScheme.error)
                 }
             }
         }
@@ -515,7 +504,7 @@ fun PublicChecklistSection(
     }
 
     PublicChannelSteps(channel, here = true)
-    Group(tr("开启前提清单", "Prerequisites")) {
+    Group(tr(S.public_access_prerequisites)) {
         checklist.items.forEach { item ->
             ChecklistRow(
                 item = item,
@@ -534,14 +523,14 @@ fun PublicChecklistSection(
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             SoftButton(onClick = { triggerRecheck() }, modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    if (checklist.checking) tr("正在检查…", "Checking…") else tr("重新检查", "Recheck"),
+                    if (checklist.checking) tr(S.public_access_checking) else tr(S.public_access_recheck),
                     color = MiuixTheme.colorScheme.primary,
                 )
             }
         }
     }
 
-    Group(tr("风险说明", "Risk warning"), padded = true) {
+    Group(tr(S.public_access_risk_warning), padded = true) {
         if (consentAccepted && !showRiskDetail) {
             Row(
                 Modifier.fillMaxWidth(),
@@ -549,43 +538,25 @@ fun PublicChecklistSection(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(
-                    tr("✓ 已了解并同意公网风险说明", "✓ Public access risks acknowledged"),
+                    tr(S.public_access_public_access_risks_acknowledged),
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
                     color = Palette.takeover,
                 )
                 LinkButton(onClick = { showRiskDetail = true }) {
-                    Text(tr("查看", "View"))
+                    Text(tr(S.public_access_view))
                 }
             }
         } else {
             val warnings = listOf(
-                tr(
-                    "1. 开启后，你的手机会有一个任何人都能访问的公网地址。这个地址会出现在公开的证书日志里，可能被扫描到。没有你在手机上确认，谁也连不进来。",
-                    "1. Once enabled, your phone will have a public address reachable by anyone. This address appears in public certificate logs and may be scanned. Nobody can connect without your confirmation on the phone.",
-                ),
-                tr(
-                    "2. 你授权的云端客户端会保存访问凭证。如果那个服务被入侵，对方可以在凭证有效期内操作你的手机。不用时请关闭或撤销。",
-                    "2. Authorized cloud clients store access credentials. If that service is compromised, an attacker could operate your phone while those credentials remain valid. Turn off or revoke when not in use.",
-                ),
-                tr(
-                    "3. 屏幕上的文字可能是别人写给 agent 的恶意指令（比如网页、消息里的内容）。付款、发送、安装等操作仍会要求你在手机上确认。",
-                    "3. Text on the screen may contain malicious instructions written for the agent (such as content in web pages or messages). Payments, sending messages, installs, and similar actions will still require your confirmation on the phone.",
-                ),
-                tr(
-                    "4. 配对时默认“省心”档（付款、发送等仍要确认），批准前可以改；“系统”权限永远不会开放到公网。",
-                    "4. Pairing defaults to \"Easy\" (payments, sending and similar still ask) and can be changed before approving; \"system\" is never exposed to the public internet.",
-                ),
+                tr(S.public_access_1_once_enabled_your_phone),
+                tr(S.public_access_2_authorized_cloud_clients_store),
+                tr(S.public_access_3_text_on_the_screen),
+                tr(S.public_access_4_pairing_defaults_to_easy),
             )
             val shown = when (channel) {
-                PublicAccess.Channel.CLOUDFLARE -> warnings + tr(
-                    "5. 走 Cloudflare 时，HTTPS 在 Cloudflare 的服务器上解开再转发到手机，Cloudflare 技术上看得到请求内容；隧道令牌只保存在本机，泄露后请在 Cloudflare 刷新。",
-                    "5. With Cloudflare, HTTPS is decrypted on Cloudflare's servers and forwarded to the phone, so Cloudflare can technically see requests; the tunnel token stays on this phone, refresh it in Cloudflare if it leaks.",
-                )
-                PublicAccess.Channel.NGROK -> warnings + tr(
-                    "5. 走 ngrok 时，HTTPS 在 ngrok 的服务器上解开再转发到手机，ngrok 技术上看得到请求内容；authtoken 只保存在本机，泄露后请在 ngrok 后台重置。",
-                    "5. With ngrok, HTTPS is decrypted on ngrok's servers and forwarded to the phone, so ngrok can technically see requests; the authtoken stays on this phone, reset it in the ngrok dashboard if it leaks.",
-                )
+                PublicAccess.Channel.CLOUDFLARE -> warnings + tr(S.public_access_5_with_cloudflare_https_is)
+                PublicAccess.Channel.NGROK -> warnings + tr(S.public_access_5_with_ngrok_https_is)
                 PublicAccess.Channel.TAILSCALE -> warnings
             }
             shown.forEach { w ->
@@ -606,7 +577,7 @@ fun PublicChecklistSection(
                         onClick = { PublicAccess.acceptRiskConsent(actx) },
                     )
                     Text(
-                        tr("我已了解以上风险（记住本次同意）", "I understand these risks (remember)"),
+                        tr(S.public_access_i_understand_these_risks_remember),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
                     )
@@ -614,7 +585,7 @@ fun PublicChecklistSection(
             } else {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     LinkButton(onClick = { showRiskDetail = false }) {
-                        Text(tr("收起", "Hide"))
+                        Text(tr(S.connect_hide))
                     }
                 }
             }
@@ -634,11 +605,11 @@ fun PublicChecklistSection(
                 modifier = Modifier.fillMaxWidth(),
                 color = MiuixTheme.colorScheme.primary,
             ) {
-                Text(tr("开启公网接入", "Turn on public access"), color = MiuixTheme.colorScheme.onPrimary)
+                Text(tr(S.public_access_turn_on_public_access), color = MiuixTheme.colorScheme.onPrimary)
             }
             if (!checklist.allOk) {
                 Text(
-                    tr("请先完成上方全部 ${checklist.items.size} 项前提条件，回到 App 会自动重查。", "Complete all ${checklist.items.size} items above first; returning to the app rechecks automatically."),
+                    tr(S.public_access_complete_all_items_above_first, checklist.items.size),
                     fontSize = 12.5.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )

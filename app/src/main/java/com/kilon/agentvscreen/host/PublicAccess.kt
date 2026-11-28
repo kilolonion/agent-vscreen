@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.app.KeyguardManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -258,47 +259,41 @@ object PublicAccess {
             isHeadscale -> CheckItem(
                 id = CheckId.TAILSCALE_OFFICIAL,
                 state = CheckState.FAIL,
-                title = tr("内置 Tailscale 已登录官方服务器", "Built-in Tailscale connected to official server"),
-                detail = tr(
-                    "当前使用自建控制服务器（Headscale），不支持 Funnel；请切回官方 Tailscale。",
-                    "Self-hosted control server (Headscale) does not support Funnel; switch back to official Tailscale.",
-                ),
+                title = tr(S.public_access_built_in_tailscale_connected_to),
+                detail = tr(S.public_access_self_hosted_control_server_headscale),
                 action = CheckAction.OPEN_REMOTE,
-                actionLabel = tr("去切换", "Open settings"),
+                actionLabel = tr(S.public_access_open_settings),
             )
             tailnetMode != Tailnet.Mode.BUILTIN -> CheckItem(
                 id = CheckId.TAILSCALE_OFFICIAL,
                 state = CheckState.FAIL,
-                title = tr("内置 Tailscale 已登录官方服务器", "Built-in Tailscale connected to official server"),
-                detail = tr(
-                    "请先在“其它设备（Tailscale）”里选择“内置 Tailscale”并登录。",
-                    "Select Built-in Tailscale under Other devices (Tailscale) and sign in first.",
-                ),
+                title = tr(S.public_access_built_in_tailscale_connected_to),
+                detail = tr(S.public_access_select_built_in_tailscale_under),
                 action = CheckAction.OPEN_REMOTE,
-                actionLabel = tr("去连接", "Connect"),
+                actionLabel = tr(S.public_access_connect),
             )
             tsStatus.loggedIn -> CheckItem(
                 id = CheckId.TAILSCALE_OFFICIAL,
                 state = CheckState.OK,
-                title = tr("内置 Tailscale 已登录官方服务器", "Built-in Tailscale connected to official server"),
+                title = tr(S.public_access_built_in_tailscale_connected_to),
                 detail = tsStatus.dnsName?.takeIf { it.isNotBlank() } ?: tsStatus.ip.orEmpty(),
             )
             tsStatus.running && tsStatus.authUrl == null && tsStatus.error == null && tsStatus.loginError == null &&
                 tsStatus.state in setOf("Starting", "NoState", "starting") -> CheckItem(
                 id = CheckId.TAILSCALE_OFFICIAL,
                 state = CheckState.CHECKING,
-                title = tr("内置 Tailscale 已登录官方服务器", "Built-in Tailscale connected to official server"),
-                detail = tr("正在连接 Tailscale…", "Connecting to Tailscale…"),
+                title = tr(S.public_access_built_in_tailscale_connected_to),
+                detail = tr(S.connect_connecting_to_tailscale),
                 action = CheckAction.OPEN_REMOTE,
-                actionLabel = tr("查看状态", "View status"),
+                actionLabel = tr(S.public_access_view_status),
             )
             else -> CheckItem(
                 id = CheckId.TAILSCALE_OFFICIAL,
                 state = CheckState.FAIL,
-                title = tr("内置 Tailscale 已登录官方服务器", "Built-in Tailscale connected to official server"),
-                detail = tr("请先登录官方内置 Tailscale 账号。", "Sign in to your official built-in Tailscale account first."),
+                title = tr(S.public_access_built_in_tailscale_connected_to),
+                detail = tr(S.public_access_sign_in_to_your_official),
                 action = CheckAction.OPEN_REMOTE,
-                actionLabel = tr("去登录", "Sign in"),
+                actionLabel = tr(S.public_access_sign_in),
             )
         }
 
@@ -310,43 +305,43 @@ object PublicAccess {
         if (!tailscaleOk) {
             val depState = if (tailscaleItem.state == CheckState.CHECKING) CheckState.CHECKING else CheckState.FAIL
             val depDetail = if (isHeadscale) {
-                tr("Headscale 不支持 Funnel", "Headscale does not support Funnel")
+                tr(S.public_access_headscale_does_not_support_funnel)
             } else {
-                tr("连上官方内置 Tailscale 后自动检查", "Checked automatically once built-in Tailscale is connected")
+                tr(S.public_access_checked_automatically_once_built_in)
             }
-            httpsItem = CheckItem(CheckId.HTTPS_CERT, depState, tr("HTTPS 证书已开启", "HTTPS certificates enabled"), depDetail)
-            funnelItem = CheckItem(CheckId.FUNNEL_ACL, depState, tr("Funnel 权限已开启", "Funnel ACL enabled"), depDetail)
-            port443Item = CheckItem(CheckId.FUNNEL_PORT_443, depState, tr("443 端口可用于 Funnel", "Port 443 allowed for Funnel"), depDetail)
+            httpsItem = CheckItem(CheckId.HTTPS_CERT, depState, tr(S.public_access_https_certificates_enabled), depDetail)
+            funnelItem = CheckItem(CheckId.FUNNEL_ACL, depState, tr(S.public_access_funnel_acl_enabled), depDetail)
+            port443Item = CheckItem(CheckId.FUNNEL_PORT_443, depState, tr(S.public_access_port_443_allowed_for_funnel), depDetail)
         } else if (funnelCheck == null || !funnelCheck.loggedIn) {
             val st = if (funnelChecking || funnelCheck == null) CheckState.CHECKING else CheckState.FAIL
             val detail = funnelCheck?.error?.takeIf { it.isNotBlank() }
-                ?: tr("正在向 Tailscale 查询 HTTPS 与 Funnel 权限…", "Querying Tailscale for HTTPS and Funnel readiness…")
+                ?: tr(S.public_access_querying_tailscale_for_https_and)
             httpsItem = CheckItem(
-                CheckId.HTTPS_CERT, st, tr("HTTPS 证书已开启", "HTTPS certificates enabled"), detail,
+                CheckId.HTTPS_CERT, st, tr(S.public_access_https_certificates_enabled), detail,
                 action = if (st == CheckState.FAIL) CheckAction.RETRY_CHECK else CheckAction.NONE,
-                actionLabel = if (st == CheckState.FAIL) tr("重试", "Retry") else "",
+                actionLabel = if (st == CheckState.FAIL) tr(S.public_access_retry) else "",
             )
-            funnelItem = CheckItem(CheckId.FUNNEL_ACL, st, tr("Funnel 权限已开启", "Funnel ACL enabled"), detail)
-            port443Item = CheckItem(CheckId.FUNNEL_PORT_443, st, tr("443 端口可用于 Funnel", "Port 443 allowed for Funnel"), detail)
+            funnelItem = CheckItem(CheckId.FUNNEL_ACL, st, tr(S.public_access_funnel_acl_enabled), detail)
+            port443Item = CheckItem(CheckId.FUNNEL_PORT_443, st, tr(S.public_access_port_443_allowed_for_funnel), detail)
         } else {
             val serveUrl = funnelCheck.https.url?.takeIf { it.isNotBlank() }
             httpsItem = if (funnelCheck.https.ok) {
                 CheckItem(
                     CheckId.HTTPS_CERT,
                     CheckState.OK,
-                    tr("HTTPS 证书已开启", "HTTPS certificates enabled"),
-                    funnelCheck.dnsName?.takeIf { it.isNotBlank() } ?: tr("已开启", "Enabled"),
+                    tr(S.public_access_https_certificates_enabled),
+                    funnelCheck.dnsName?.takeIf { it.isNotBlank() } ?: tr(S.public_access_enabled),
                 )
             } else {
                 CheckItem(
                     id = CheckId.HTTPS_CERT,
                     state = CheckState.FAIL,
-                    title = tr("HTTPS 证书已开启", "HTTPS certificates enabled"),
+                    title = tr(S.public_access_https_certificates_enabled),
                     detail = funnelCheck.https.text?.takeIf { it.isNotBlank() }
                         ?: funnelCheck.https.error?.takeIf { it.isNotBlank() }
-                        ?: tr("需在 Tailscale 开启 HTTPS Certificates，完成后回到本页自动重查。", "Enable HTTPS Certificates in Tailscale, then return here to recheck automatically."),
+                        ?: tr(S.public_access_enable_https_certificates_in_tailscale),
                     action = CheckAction.OPEN_URL,
-                    actionLabel = if (serveUrl != null) tr("去开启 HTTPS", "Enable HTTPS") else tr("打开 Tailscale DNS", "Open Tailscale DNS"),
+                    actionLabel = if (serveUrl != null) tr(S.public_access_enable_https) else tr(S.public_access_open_tailscale_dns),
                     actionUrl = serveUrl ?: ADMIN_DNS_URL,
                 )
             }
@@ -356,25 +351,22 @@ object PublicAccess {
                 CheckItem(
                     CheckId.FUNNEL_ACL,
                     CheckState.OK,
-                    tr("Funnel 权限已开启", "Funnel ACL enabled"),
-                    tr("已允许当前设备使用 Funnel", "Funnel allowed for this device"),
+                    tr(S.public_access_funnel_acl_enabled),
+                    tr(S.public_access_funnel_allowed_for_this_device),
                 )
             } else {
                 CheckItem(
                     id = CheckId.FUNNEL_ACL,
                     state = CheckState.FAIL,
-                    title = tr("Funnel 权限已开启", "Funnel ACL enabled"),
+                    title = tr(S.public_access_funnel_acl_enabled),
                     detail = funnelCheck.funnel.text?.takeIf { it.isNotBlank() }
                         ?: funnelCheck.funnel.error?.takeIf { it.isNotBlank() }
-                        ?: tr("需在 Tailscale 策略中开启 Funnel 权限，完成后回到本页自动重查。", "Enable Funnel in your Tailscale policy, then return here to recheck automatically."),
+                        ?: tr(S.public_access_enable_funnel_in_your_tailscale),
                     action = CheckAction.OPEN_URL,
-                    actionLabel = if (funnelUrl != null) tr("去开启 Funnel", "Enable Funnel") else tr("打开 Tailscale ACL", "Open Tailscale ACL"),
+                    actionLabel = if (funnelUrl != null) tr(S.public_access_enable_funnel) else tr(S.public_access_open_tailscale_acl),
                     actionUrl = funnelUrl ?: ADMIN_ACL_URL,
                     copySnippet = if (funnelUrl == null) FUNNEL_NODE_ATTRS_SNIPPET else null,
-                    copyGuide = if (funnelUrl == null) tr(
-                        "切到 JSON editor，在最外层加上这段；已有 nodeAttrs 就只加中间那一条。",
-                        "Switch to the JSON editor and add this at the top level; if nodeAttrs already exists, add only the middle entry.",
-                    ) else null,
+                    copyGuide = if (funnelUrl == null) tr(S.public_access_switch_to_the_json_editor) else null,
                 )
             }
 
@@ -382,19 +374,19 @@ object PublicAccess {
                 CheckItem(
                     CheckId.FUNNEL_PORT_443,
                     CheckState.OK,
-                    tr("443 端口可用于 Funnel", "Port 443 allowed for Funnel"),
-                    tr("允许 443 端口", "Port 443 allowed"),
+                    tr(S.public_access_port_443_allowed_for_funnel),
+                    tr(S.public_access_port_443_allowed),
                 )
             } else {
                 CheckItem(
                     id = CheckId.FUNNEL_PORT_443,
                     state = CheckState.FAIL,
-                    title = tr("443 端口可用于 Funnel", "Port 443 allowed for Funnel"),
+                    title = tr(S.public_access_port_443_allowed_for_funnel),
                     detail = funnelCheck.port443.error?.takeIf { it.isNotBlank() }
                         ?: funnelCheck.port443.text?.takeIf { it.isNotBlank() }
-                        ?: tr("Tailscale 策略不允许 443 端口开启 Funnel。", "Tailscale policy does not allow port 443 for Funnel."),
+                        ?: tr(S.public_access_tailscale_policy_does_not_allow),
                     action = CheckAction.OPEN_URL,
-                    actionLabel = if (funnelUrl != null) tr("去开启", "Open Tailscale") else tr("打开 Tailscale ACL", "Open Tailscale ACL"),
+                    actionLabel = if (funnelUrl != null) tr(S.public_access_open_tailscale) else tr(S.public_access_open_tailscale_acl),
                     actionUrl = funnelUrl ?: ADMIN_ACL_URL,
                 )
             }
@@ -404,20 +396,17 @@ object PublicAccess {
             CheckItem(
                 CheckId.LOCKSCREEN,
                 CheckState.OK,
-                tr("手机已设置锁屏密码", "Phone screen lock is set"),
-                tr("可用于生物识别或锁屏密码确认", "Ready for biometric or screen-lock confirmation"),
+                tr(S.public_access_phone_screen_lock_is_set),
+                tr(S.public_access_ready_for_biometric_or_screen),
             )
         } else {
             CheckItem(
                 id = CheckId.LOCKSCREEN,
                 state = CheckState.FAIL,
-                title = tr("手机已设置锁屏密码", "Phone screen lock is set"),
-                detail = tr(
-                    "公网开启与客户端配对必须通过生物识别或锁屏密码确认，不允许长按确认。",
-                    "Enabling public access and approving cloud clients require biometric or PIN lock confirmation.",
-                ),
+                title = tr(S.public_access_phone_screen_lock_is_set),
+                detail = tr(S.public_access_enabling_public_access_and_approving),
                 action = CheckAction.OPEN_LOCKSCREEN,
-                actionLabel = tr("去设置锁屏密码", "Set screen lock"),
+                actionLabel = tr(S.public_access_set_screen_lock),
             )
         }
 
@@ -467,12 +456,12 @@ object PublicAccess {
      */
     fun cloudflareChecklist(cfg: Cloudflared.Config, deviceSecure: Boolean): ChecklistSnapshot {
         val tok = CheckItem(CheckId.CF_TOKEN, if (cfg.tunnelId != null) CheckState.OK else CheckState.FAIL,
-            tr("已填写隧道令牌", "Tunnel token entered"),
-            if (cfg.tunnelId != null) tr("隧道 ${cfg.tunnelId!!.take(8)}…", "Tunnel ${cfg.tunnelId!!.take(8)}…")
-            else tr("在 Cloudflare 新建隧道后，粘贴安装命令或令牌", "After creating a tunnel in Cloudflare, paste its install command or token"))
+            tr(S.public_access_tunnel_token_entered),
+            if (cfg.tunnelId != null) tr(S.public_access_tunnel, cfg.tunnelId!!.take(8))
+            else tr(S.public_access_after_creating_a_tunnel_in))
         val host = CheckItem(CheckId.CF_HOSTNAME, if (cfg.hostname != null) CheckState.OK else CheckState.FAIL,
-            tr("已填写公网域名", "Public hostname entered"),
-            cfg.hostname ?: tr("隧道里“公共主机名”添加的域名，例如 phone.example.com", "The hostname added under the tunnel's Public Hostname, e.g. phone.example.com"))
+            tr(S.public_access_public_hostname_entered),
+            cfg.hostname ?: tr(S.public_access_the_hostname_added_under_the))
         val items = listOf(tok, host, lockItem(deviceSecure))
         return ChecklistSnapshot(items, items.all { it.state == CheckState.OK }, checking = false, shouldWait = false, dnsName = cfg.hostname)
     }
@@ -480,23 +469,23 @@ object PublicAccess {
     /** The ngrok checklist: authtoken, domain, screen lock; connection and self-test are shown live ([Ngrok.status]). */
     fun ngrokChecklist(cfg: Ngrok.Config, deviceSecure: Boolean): ChecklistSnapshot {
         val tok = CheckItem(CheckId.NGROK_TOKEN, if (cfg.token != null) CheckState.OK else CheckState.FAIL,
-            tr("已填写 authtoken", "Authtoken entered"),
-            if (cfg.token != null) tr("已保存（${cfg.token.take(4)}…）", "Saved (${cfg.token.take(4)}…)")
-            else tr("ngrok 后台 Your Authtoken 页面复制", "Copy it from Your Authtoken in the ngrok dashboard"))
+            tr(S.public_access_authtoken_entered),
+            if (cfg.token != null) tr(S.public_access_saved, cfg.token.take(4))
+            else tr(S.public_access_copy_it_from_your_authtoken))
         val dom = CheckItem(CheckId.NGROK_DOMAIN, if (cfg.domain != null) CheckState.OK else CheckState.FAIL,
-            tr("已填写固定域名", "Static domain entered"),
-            cfg.domain ?: tr("ngrok 后台 Domains 页面里的域名（免费账号有一个），例如 name.ngrok-free.app", "The domain under Domains in the ngrok dashboard (free accounts get one), e.g. name.ngrok-free.app"))
+            tr(S.public_access_static_domain_entered),
+            cfg.domain ?: tr(S.public_access_the_domain_under_domains_in))
         val items = listOf(tok, dom, lockItem(deviceSecure))
         return ChecklistSnapshot(items, items.all { it.state == CheckState.OK }, checking = false, shouldWait = false, dnsName = cfg.domain)
     }
 
     private fun lockItem(deviceSecure: Boolean): CheckItem {
         return CheckItem(CheckId.LOCKSCREEN, if (deviceSecure) CheckState.OK else CheckState.FAIL,
-            tr("手机已设置锁屏密码", "Phone screen lock is set"),
-            if (deviceSecure) tr("可用于生物识别或锁屏密码确认", "Ready for biometric or screen-lock confirmation")
-            else tr("公网开启与客户端配对必须通过生物识别或锁屏密码确认。", "Enabling public access and approving cloud clients require biometric or PIN confirmation."),
+            tr(S.public_access_phone_screen_lock_is_set),
+            if (deviceSecure) tr(S.public_access_ready_for_biometric_or_screen)
+            else tr(S.public_access_enabling_public_access_and_approving_2),
             action = if (deviceSecure) CheckAction.NONE else CheckAction.OPEN_LOCKSCREEN,
-            actionLabel = if (deviceSecure) "" else tr("去设置锁屏密码", "Set screen lock"))
+            actionLabel = if (deviceSecure) "" else tr(S.public_access_set_screen_lock))
     }
 
     @Synchronized private fun ensureCfOrigin(ctx: Context) {
@@ -665,29 +654,20 @@ object PublicAccess {
         val text = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
         return when {
             text.contains("HTTPS must be enabled") -> FunnelMessage(
-                title = tr("Tailscale 未开启 HTTPS 证书", "HTTPS certificates are not enabled in Tailscale"),
-                fix = tr(
-                    "在 Tailscale 管理页 › DNS 中开启 HTTPS Certificates，然后关闭再重新开启公网接入。",
-                    "Enable HTTPS Certificates under Tailscale Admin › DNS, then turn public access off and on again.",
-                ),
+                title = tr(S.public_access_https_certificates_are_not_enabled),
+                fix = tr(S.public_access_enable_https_certificates_under_tailscal),
             )
             text.contains("\"funnel\" node attribute not set") -> FunnelMessage(
-                title = tr("Tailscale ACL 未开启 Funnel 权限", "Funnel is not enabled in Tailscale ACL"),
-                fix = tr(
-                    "在 Tailscale 管理页 › Access Controls 中为该设备开启 funnel 节点属性（nodeAttrs），然后重试。",
-                    "Grant the \"funnel\" node attribute in Tailscale Admin › Access Controls for this device, then retry.",
-                ),
+                title = tr(S.public_access_funnel_is_not_enabled_in),
+                fix = tr(S.public_access_grant_the_funnel_node_attribute),
             )
             text.contains("port 443 is not allowed") -> FunnelMessage(
-                title = tr("Tailscale 不允许 443 端口开启 Funnel", "Port 443 is not allowed for Funnel"),
-                fix = tr(
-                    "在 Tailscale 管理页的 ACL / Funnel 配置中允许 443 端口，然后重试。",
-                    "Allow port 443 in your Tailscale Admin ACL / Funnel policy, then retry.",
-                ),
+                title = tr(S.public_access_port_443_is_not_allowed),
+                fix = tr(S.public_access_allow_port_443_in_your),
             )
             else -> FunnelMessage(
-                title = tr("Funnel 启动失败", "Funnel failed to start"),
-                fix = text + "\n" + tr("在 Tailscale 管理页确认 HTTPS 和 Funnel 已开启", "Confirm HTTPS and Funnel are enabled in Tailscale Admin"),
+                title = tr(S.public_access_funnel_failed_to_start),
+                fix = text + "\n" + tr(S.public_access_confirm_https_and_funnel_are),
             )
         }
     }
@@ -699,7 +679,7 @@ object PublicAccess {
             nm.createNotificationChannel(
                 NotificationChannel(
                     NOTE_CHANNEL,
-                    tr("公网接入状态", "Public access status"),
+                    tr(S.public_access_public_access_status),
                     NotificationManager.IMPORTANCE_DEFAULT,
                 ),
             )
@@ -734,18 +714,18 @@ object PublicAccess {
             val chTitle = channel.title
             val isTunnel = channel.tunnel != null
             val title = when {
-                isTunnel -> tr("公网接入已开启（$chTitle）", "Public access is on ($chTitle)")
-                funnelState == "on" -> tr("公网接入已开启", "Public access is on")
-                funnelState == "cert" -> tr("公网接入正在申请证书", "Public access: fetching certificate")
-                funnelState == "error" -> tr("公网接入启动失败", "Public access failed to start")
-                else -> tr("公网接入启动中", "Public access starting")
+                isTunnel -> tr(S.public_access_public_access_is_on_2, chTitle)
+                funnelState == "on" -> tr(S.public_access_public_access_is_on)
+                funnelState == "cert" -> tr(S.public_access_public_access_fetching_certificate)
+                funnelState == "error" -> tr(S.public_access_public_access_failed_to_start)
+                else -> tr(S.public_access_public_access_starting)
             }
             val body = when {
-                isTunnel -> addr ?: tr("正在通过 $chTitle 提供公网 MCP 入口；不使用时可随时关闭。", "Serving public MCP via $chTitle; tap Off when not needed.")
-                funnelState == "on" -> addr ?: tr("正在通过 $chTitle 提供公网 MCP 入口；不使用时可随时关闭。", "Serving public MCP via $chTitle; tap Off when not needed.")
-                funnelState == "cert" -> tr("正在申请 HTTPS 证书，首次约 30–60 秒。", "Requesting HTTPS certificate; first time takes ~30–60 seconds.")
-                funnelState == "error" -> Tailnet.status.value.funnelReason ?: tr("请打开 App 查看原因", "Open the app to inspect the error")
-                else -> addr ?: tr("正在启动 $chTitle…", "Starting $chTitle…")
+                isTunnel -> addr ?: tr(S.public_access_serving_public_mcp_via_tap, chTitle)
+                funnelState == "on" -> addr ?: tr(S.public_access_serving_public_mcp_via_tap, chTitle)
+                funnelState == "cert" -> tr(S.public_access_requesting_https_certificate_first_time)
+                funnelState == "error" -> Tailnet.status.value.funnelReason ?: tr(S.public_access_open_the_app_to_inspect)
+                else -> addr ?: tr(S.public_access_starting, chTitle)
             }
             val n = NotificationCompat.Builder(ctx, NOTE_CHANNEL)
                 .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
@@ -754,7 +734,7 @@ object PublicAccess {
                 .setContentIntent(openPublicIntent(ctx))
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
-                .addAction(0, tr("关闭", "Off"), offPi)
+                .addAction(0, tr(S.overview_off), offPi)
                 .build()
             nm.notify(NOTE_ON_ID, n)
         }
@@ -779,8 +759,8 @@ object PublicAccess {
             ensureChannel(nm)
             val n = NotificationCompat.Builder(ctx, NOTE_CHANNEL)
                 .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
-                .setContentTitle(tr("公网接入已自动关闭", "Public access turned off automatically"))
-                .setContentText(tr("24 小时没有已认证的公网请求，已自动关闭 ${channel.title}。需要时可在页面里重新开启。", "No authenticated public requests for 24 hours, so ${channel.title} was turned off. Re-enable when needed."))
+                .setContentTitle(tr(S.public_access_public_access_turned_off_automatically))
+                .setContentText(tr(S.public_access_no_authenticated_public_requests_for, channel.title))
                 .setContentIntent(openPublicIntent(ctx))
                 .setAutoCancel(true)
                 .build()

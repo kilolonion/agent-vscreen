@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.I18n
 import com.kilon.agentvscreen.tr
 
@@ -64,16 +65,16 @@ internal data class El(val n: Int, val text: String, val box: Rect, val fromA11y
     /** The words shown for it. */
     val label: String get() = when (kind) {
         ElKind.TEXT -> text
-        ElKind.EMPTY_INPUT -> tr("（空输入框", "(empty input box") + (hint?.let { " $it" } ?: "") + tr("）", ")")
-        ElKind.NO_TEXT -> if (detected) tr("（无文字 图标）", "(no text icon)") else tr("（无文字", "(no text") + (hint?.let { " $it" } ?: "") + tr("）", ")")
-        ElKind.LINK -> tr("（链接/标识 ${hint ?: "?"} 字）", "(link / id, ${hint ?: "?"} chars)")
+        ElKind.EMPTY_INPUT -> tr(S.vscreen_report_empty_input_box) + (hint?.let { " $it" } ?: "") + tr(S.agent_guide_text_2)
+        ElKind.NO_TEXT -> if (detected) tr(S.vscreen_report_no_text_icon) else tr(S.vscreen_report_no_text) + (hint?.let { " $it" } ?: "") + tr(S.agent_guide_text_2)
+        ElKind.LINK -> tr(S.vscreen_report_link_id_chars, hint ?: "?")
     }
     val flags: String get() = buildList {
-        if (editable) add(tr("可输入", "input")) else if (clickable) add(tr("可点", "tappable"))
-        if (scrollable) add(tr("可滚动", "scrollable"))
-        checked?.let { add(if (it) tr("已选", "checked") else tr("未选", "unchecked")) }
-        if (focused && editable) add(tr("有焦点", "focused"))
-        if (password) add(tr("密码", "password"))
+        if (editable) add(tr(S.vscreen_report_input)) else if (clickable) add(tr(S.vscreen_report_tappable))
+        if (scrollable) add(tr(S.vscreen_report_scrollable))
+        checked?.let { add(if (it) tr(S.vscreen_report_checked) else tr(S.vscreen_report_unchecked)) }
+        if (focused && editable) add(tr(S.vscreen_report_focused))
+        if (password) add(tr(S.vscreen_report_password))
     }.joinToString(" ")
     fun json(): org.json.JSONObject = org.json.JSONObject().put("n", n).put("text", if (placeholder) "" else text)
         .put("x", box.centerX()).put("y", box.centerY())
@@ -193,7 +194,7 @@ internal object Report {
 internal fun timeHintPart(sinceLastMs: Long?): String {
     if (sinceLastMs == null || sinceLastMs < 0L || sinceLastMs > Report.TIME_HINT_MAX_MS) return ""
     val sec = "${(sinceLastMs / 100) / 10.0}s"
-    return tr(" · 距上次回复 $sec", " · $sec since last reply")
+    return tr(S.vscreen_report_since_last_reply, sec)
 }
 
 // ── elements ─────────────────────────────────────────────────────────
@@ -464,9 +465,8 @@ internal fun staleFrameNote(lastFrameAtMs: Long, askedAtMs: Long, nowMs: Long, o
     if (lastFrameAtMs <= 0L || lastFrameAtMs >= askedAtMs) return null
     if (on != false && !parked) return null
     val s = ((nowMs - lastFrameAtMs) / 1000).coerceAtLeast(0)
-    val why = if (parked) tr("副屏处于省电停放", "the screen is parked to save power") else tr("副屏在休眠", "the screen is asleep")
-    return tr("画面是 $s 秒前的旧画面（$why，没有产生新画面）：可能不是应用现在的样子，先 look 确认再动作",
-        "The picture is $s s old ($why and drew no new frame): it may not be what the app shows now; look again before acting")
+    val why = if (parked) tr(S.vscreen_report_the_screen_is_parked_to) else tr(S.vscreen_report_the_screen_is_asleep)
+    return tr(S.vscreen_report_the_picture_is_s_old, s, why)
 }
 
 private val snapPool = java.util.concurrent.Executors.newCachedThreadPool { r -> Thread(r, "vscreen-snap").apply { isDaemon = true } }
@@ -560,18 +560,16 @@ internal fun sinceHeader(from: Long, to: Long, actionMs: Long, receivedAt: Long 
     val span = s(to - from)
     // 1.3: time is split by where it was spent. Before, everything that was not this segment's actions was called
     // "you thinking", including the phone building the last reply and the transfer of the reply and its picture.
-    if (receivedAt <= from || receivedAt > to) return if (actionMs > 0 && to - from > actionMs + 300) tr("上次返回到现在 $span（其中这段动作 ${s(actionMs)}）", "$span since the last reply (this segment's actions ${s(actionMs)})") else tr("这段 $span", "this segment $span")
+    if (receivedAt <= from || receivedAt > to) return if (actionMs > 0 && to - from > actionMs + 300) tr(S.vscreen_report_since_the_last_reply_this, span, s(actionMs)) else tr(S.vscreen_report_this_segment, span)
     val outside = receivedAt - from
     val here = to - receivedAt
-    return tr("上次返回到现在 $span：手机之外 ${s(outside)}（回复和图片在路上、你在看和思考），这条命令到手机后 ${s(here)}（其中动作和等待 ${s(actionMs)}）",
-        "$span since the last reply: ${s(outside)} outside the phone (the reply and picture in transit, you reading and thinking), ${s(here)} since this command reached the phone (actions and waits ${s(actionMs)})")
+    return tr(S.vscreen_report_since_the_last_reply_outside, span, s(outside), s(here), s(actionMs))
 }
 
 /** 1.3: what the phone spent on this reply, by part (ms), said at the end of 【做了什么】 and in data.timing. */
 internal class Timing(val received: Long, val actionMs: Long) {
     var lookMs = 0L; var trackMs = 0L; var pictureMs = 0L
-    fun line(total: Long): String = tr("手机端这条用了 ${sec(total)}：动作和等待 ${sec(actionMs)}，读屏 ${sec(lookMs)}，这段时间的录像 ${sec(trackMs)}，出图 ${sec(pictureMs)}",
-        "on the phone this took ${sec(total)}: actions and waits ${sec(actionMs)}, reading the screen ${sec(lookMs)}, the meanwhile track ${sec(trackMs)}, the picture ${sec(pictureMs)}")
+    fun line(total: Long): String = tr(S.vscreen_report_on_the_phone_this_took, sec(total), sec(actionMs), sec(lookMs), sec(trackMs), sec(pictureMs))
     fun json(total: Long) = org.json.JSONObject().put("phone_ms", total).put("action_ms", actionMs).put("look_ms", lookMs).put("track_ms", trackMs).put("picture_ms", pictureMs)
     private fun sec(ms: Long) = "${(maxOf(0L, ms) / 100) / 10.0}s"
 }
@@ -646,9 +644,9 @@ internal fun wordFactsFromReadings(rs: List<VScreenPerception.Reading>, @Suppres
     }
 
     val staticLines = ArrayList<String>()
-    if (appeared.isNotEmpty()) staticLines += tr("出现了：", "appeared: ") + list(appeared, Report.MAX_APPEARED)
-    if (gone.isNotEmpty()) staticLines += tr("不见了：", "disappeared: ") + list(gone, Report.MAX_GONE)
-    val betweenLines = if (between.isNotEmpty()) listOf(tr("中途出现过又消失：", "appeared and disappeared meanwhile: ") + list(between, Report.MAX_BETWEEN)) else emptyList()
+    if (appeared.isNotEmpty()) staticLines += tr(S.vscreen_report_appeared) + list(appeared, Report.MAX_APPEARED)
+    if (gone.isNotEmpty()) staticLines += tr(S.vscreen_report_disappeared) + list(gone, Report.MAX_GONE)
+    val betweenLines = if (between.isNotEmpty()) listOf(tr(S.vscreen_report_appeared_and_disappeared_meanwhile) + list(between, Report.MAX_BETWEEN)) else emptyList()
     return WordEvents(staticLines, betweenLines)
 }
 
@@ -674,9 +672,9 @@ internal fun formatSystemToasts(
         val text = ScreenText.clean(ev.text, maxLen = 80)
         if (text.isEmpty() || !seen.add(text)) continue
         val ago = Report.ago(ev.epochMs, toMs)
-        val suffix = if (sameOnMain) tr("（可能来自主屏上的同一应用）", " (may be from the same app on the main screen)") else ""
+        val suffix = if (sameOnMain) tr(S.vscreen_report_may_be_from_the_same) else ""
         val quoted = ScreenText.quote(text, maxLen = 80)
-        out += tr("toast：$quoted（$ago）$suffix", "toast: $quoted ($ago)$suffix")
+        out += tr(S.vscreen_report_toast, quoted, ago, suffix)
         if (out.size >= Report.MAX_TOASTS) break
     }
     return out
@@ -864,7 +862,7 @@ internal fun pictureEvents(
 ): PicEvents {
     // 1.3: an area that keeps playing (video, carousel) is said once and left out of the changes below.
     val mask = maskOverride ?: VScreenPerception.mask(d.displayId)
-    val maskLine = mask?.let { tr("一直在动的区域（视频、轮播或动画，里面的字不列出，稳定判断不算它）：${it.line(true)}", "areas that keep moving (video, carousel or animation; their words are not listed, settling ignores them): ${it.line(false)}") }
+    val maskLine = mask?.let { tr(S.vscreen_report_areas_that_keep_moving_video, it.line(true), it.line(false)) }
     val frames = VScreenRecorder.frames(d.displayId, from, to)
     if (frames.isEmpty()) return PicEvents(maskLine, emptyList(), 0, false, maxShare = 0.0, hasPopup = false)
     val base = VScreenRecorder.frameAt(d.displayId, from)
@@ -908,7 +906,7 @@ internal fun pictureEvents(
                 }
                 if (found.size >= 3) break
             }
-            return if (found.isEmpty()) "" else tr("：", ": ") + found.joinToString(" / ")
+            return if (found.isEmpty()) "" else tr(S.agent_guide_colon) + found.joinToString(" / ")
         }
 
         // 3.6: keep at most MAX_PIC_SPANS (3) spans (prioritizing popups, then size*duration), chronological order.
@@ -920,18 +918,18 @@ internal fun pictureEvents(
         val detailLines = ArrayList<String>()
         for (sp in shown) {
             if (sp.popupArea != null) {
-                detailLines += "${Report.ago(sp.start, to)} ${tr("弹出", "popup")} [${Report.box(sp.popupArea!!)}]${popupWords(sp)}"
+                detailLines += "${Report.ago(sp.start, to)} ${tr(S.vscreen_report_popup)} [${Report.box(sp.popupArea!!)}]${popupWords(sp)}"
             } else {
                 val dur = ((sp.end - sp.start) / 100) / 10.0
-                detailLines += "${Report.ago(sp.start, to)} ${tr("变化", "changed")} [${Report.box(sp.area)}] ${(sp.share * 100).roundToInt()}% (${dur}s)"
+                detailLines += "${Report.ago(sp.start, to)} ${tr(S.vscreen_report_changed)} [${Report.box(sp.area)}] ${(sp.share * 100).roundToInt()}% (${dur}s)"
             }
         }
         if (spans.size > shown.size) {
-            detailLines += tr("另有 ${spans.size - shown.size} 段较小的变化", "plus ${spans.size - shown.size} smaller changes")
+            detailLines += tr(S.vscreen_report_plus_smaller_changes, spans.size - shown.size)
         }
         firstLast?.let { (share, bb) ->
-            detailLines += if (share < Report.MIN_SPAN_SHARE) tr("开头和现在的画面一样（中间动过又回去了）", "the start and now look the same (it moved and came back)")
-            else tr("开头和现在相比：${(share * 100).roundToInt()}% 的格子不同", "start vs now: ${(share * 100).roundToInt()}% of cells differ") + (bb?.let { " [${Report.box(it)}]" } ?: "")
+            detailLines += if (share < Report.MIN_SPAN_SHARE) tr(S.vscreen_report_the_start_and_now_look)
+            else tr(S.vscreen_report_start_vs_now_of_cells, (share * 100).roundToInt()) + (bb?.let { " [${Report.box(it)}]" } ?: "")
         }
         return PicEvents(
             maskLine = maskLine,
@@ -1010,13 +1008,13 @@ internal fun VScreenOffloadHandler.picture(
     val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 15f; color = Color.rgb(30, 30, 160) }
     val line = Paint().apply { color = Color.rgb(30, 30, 160); strokeWidth = 1f }
     val faint = Paint().apply { color = Color.argb(70, 30, 30, 160); strokeWidth = 1f }
-    c.drawText(if (marks) tr("现在（边上是副屏坐标）", "Now (screen coordinates on the edges)") else tr("现在", "Now"), margin.toFloat(), 20f, head)
+    c.drawText(if (marks) tr(S.vscreen_report_now_screen_coordinates_on_the) else tr(S.app_now), margin.toFloat(), 20f, head)
     val ox = margin; val oy = title + margin
     c.drawBitmap(frame, null, Rect(ox, oy, ox + nw, oy + nh), Paint(Paint.FILTER_BITMAP_FLAG))
     if (marks) drawRuler(c, d, ox, oy, nw, nh, k, tick, line, faint)
     if (cells.isNotEmpty() && since != null) {
         val sx = if (landscape) 0 else nowW; val sy = if (landscape) nowH else 0
-        c.drawText(tr("这段时间（${Report.ago(since.from, since.to)} 到现在；圈=动作的位置，画在动作前那张上）", "Meanwhile (${Report.ago(since.from, since.to)} to now; ring = where an action touched, on the frame before it)"), (sx + pad).toFloat(), (sy + 20).toFloat(), head)
+        c.drawText(tr(S.vscreen_report_meanwhile_to_now_ring_where, Report.ago(since.from, since.to)), (sx + pad).toFloat(), (sy + 20).toFloat(), head)
         drawCells(c, sx, sy + title, cells, cols, cw, ch, fw, fh, since.to)
     }
     cells.forEach { it.bmp.recycle() }
@@ -1083,7 +1081,7 @@ internal fun VScreenOffloadHandler.pictureRegions(
     val coordBg = Paint().apply { color = Color.argb(215, 255, 255, 255); style = Paint.Style.FILL }
     val coordTxt = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 15f; color = Color.rgb(20, 20, 140); isFakeBoldText = true }
 
-    c.drawText(tr("全屏缩略图", "Full thumb"), pad.toFloat(), 18f, head)
+    c.drawText(tr(S.vscreen_report_full_thumb), pad.toFloat(), 18f, head)
     val tx = pad; val ty = titleH + pad
     c.drawBitmap(frame, null, Rect(tx, ty, tx + tw, ty + th), Paint(Paint.FILTER_BITMAP_FLAG))
     c.drawRect(tx.toFloat(), ty.toFloat(), (tx + tw).toFloat(), (ty + th).toFloat(), border)
@@ -1097,7 +1095,7 @@ internal fun VScreenOffloadHandler.pictureRegions(
 
     if (crops.isNotEmpty()) {
         val rx = leftW + pad
-        c.drawText(tr("变化区域（副屏坐标）", "Changed regions (screen coords)"), rx.toFloat(), 18f, head)
+        c.drawText(tr(S.vscreen_report_changed_regions_screen_coords), rx.toFloat(), 18f, head)
         var cy = titleH + pad
         for (item in crops) {
             val dst = Rect(rx, cy, rx + item.dw, cy + item.dh)
@@ -1116,7 +1114,7 @@ internal fun VScreenOffloadHandler.pictureRegions(
     }
 
     if (cells.isNotEmpty() && since != null) {
-        c.drawText(tr("这段时间（${Report.ago(since.from, since.to)} 到现在）", "Meanwhile (${Report.ago(since.from, since.to)} to now)"), pad.toFloat(), (mainH + 18).toFloat(), head)
+        c.drawText(tr(S.vscreen_report_meanwhile_to_now, Report.ago(since.from, since.to)), pad.toFloat(), (mainH + 18).toFloat(), head)
         drawCells(c, 0, mainH + titleH, cells, cols, cw, ch, fw, fh, since.to)
     }
     cells.forEach { it.bmp.recycle() }
@@ -1151,10 +1149,7 @@ internal fun VScreenOffloadHandler.savePic(sid: String, bmp: Bitmap, tag: String
 // ── 3.3 short reply & 3.7 reply budget (pure, unit-tested) ───────────
 
 /** 2.0.0-beta3 (3.11): fixed single-line escape hatch footer appended to every short reply (<= 30 tokens). */
-internal fun quietEscapeLine(): String = tr(
-    "要完整内容：act --full；要看图：look；要回看这段：look --last",
-    "Full reply: act --full; picture: look; replay: look --last",
-)
+internal fun quietEscapeLine(): String = tr(S.vscreen_report_full_reply_act_full_picture)
 
 /** 2.0.0-beta16 (Item 3): short reply text together with the exact current elements shown in it. */
 internal data class ShortReply(val text: String, val shown: List<El>)
@@ -1204,23 +1199,20 @@ internal fun formatShortReplyWithShown(
     val pageTag = "P${card.id} $safeTitle".trim()
     val timeHint = timeHintPart(sinceLastMs)
     sb.append(
-        tr(
-            "✓ 第 $turn 轮$timeHint · $pageTag · $stepCount 步都符合预期 · $totalSec",
-            "✓ Turn $turn$timeHint · $pageTag · ${com.kilon.agentvscreen.steps(stepCount)} as expected · $totalSec",
-        )
+        tr(S.vscreen_report_turn_as_expected, turn, timeHint, pageTag, stepCount, totalSec, com.kilon.agentvscreen.steps(stepCount))
     ).append('\n')
 
     val shownSteps = if (exec.size > Report.MAX_QUIET_STEPS_FULL) {
         val hidden = exec.size - Report.QUIET_TAIL_STEPS
-        sb.append(tr("前 $hidden 步均符合预期", "First $hidden steps all as expected")).append('\n')
+        sb.append(tr(S.vscreen_report_first_steps_all_as_expected, hidden)).append('\n')
         exec.takeLast(Report.QUIET_TAIL_STEPS)
     } else exec
 
     for (s in shownSteps) {
         val clean = s.step.substringBefore(" until ").trim()
-        val cond = s.waitedFor ?: if (s.typeVerified) tr("已输入", "typed") else "ok"
+        val cond = s.waitedFor ?: if (s.typeVerified) tr(S.vscreen_report_typed) else "ok"
         val waitSec = "${(maxOf(0L, s.waitMs ?: 0L) / 100) / 10.0}s"
-        val startNote = if (s.alreadyAtStart && !s.fact.isNullOrBlank()) tr("（${s.fact}）", " (${s.fact})") else ""
+        val startNote = if (s.alreadyAtStart && !s.fact.isNullOrBlank()) tr(S.public_guide_text, s.fact) else ""
         sb.append("${s.n} $clean → $cond ✓ $waitSec$startNote").append('\n')
     }
     for (rf in rulesFired) {
@@ -1231,17 +1223,11 @@ internal fun formatShortReplyWithShown(
     if (!card.isNew) {
         val modPart = if (diff.modified.isNotEmpty()) " ~${diff.modified.size}" else ""
         sb.append(
-            tr(
-                "现在 P${card.id}：和第 ${card.prevSeenTurn} 轮相比 +${diff.added.size} −${diff.removed.size}$modPart，其余 ${diff.unchanged.size} 个不变",
-                "Now P${card.id}: vs turn ${card.prevSeenTurn} +${diff.added.size} −${diff.removed.size}$modPart, ${diff.unchanged.size} unchanged",
-            )
+            tr(S.vscreen_report_now_p_vs_turn_unchanged, card.id, card.prevSeenTurn, diff.added.size, diff.removed.size, modPart, diff.unchanged.size)
         ).append('\n')
     } else {
         sb.append(
-            tr(
-                "现在 P${card.id} $safeTitle（新页面，共 ${els.size} 个元素）",
-                "Now P${card.id} $safeTitle (new page, ${els.size} elements)",
-            )
+            tr(S.vscreen_report_now_p_new_page_elements, card.id, safeTitle, els.size)
         ).append('\n')
     }
 
@@ -1264,7 +1250,7 @@ internal fun formatShortReplyWithShown(
     val shown = keptEntries.mapNotNull { it.second }
     if (diffEntries.size > Report.MAX_QUIET_DIFF) {
         val extra = diffEntries.size - Report.MAX_QUIET_DIFF
-        sb.append(tr("另有 $extra 处变化，act 不带步骤可看全部", "$extra more changes; act with no steps lists all")).append('\n')
+        sb.append(tr(S.vscreen_report_more_changes_act_with_no, extra)).append('\n')
     }
 
     if (!notes.isEmpty) {
@@ -1329,7 +1315,7 @@ internal fun applyReplyBudget(parts: FullReplyParts, budgetTokens: Int = Report.
             sb.append(ScreenText.FENCE_CLOSE).append('\n')
         }
         if (screenMeanwhile.isEmpty() && parts.maskLine == null) {
-            sb.append(tr("文字和画面都没有明显变化（光标、细小动画这类小变动不算）", "no clear change in text or picture (cursors and tiny animations don't count)")).append('\n')
+            sb.append(tr(S.vscreen_report_no_clear_change_in_text)).append('\n')
         }
         parts.sheetNoteLine?.let { sb.append(it).append('\n') }
         sb.append('\n').append(parts.nowHeader).append('\n')
@@ -1339,10 +1325,10 @@ internal fun applyReplyBudget(parts: FullReplyParts, budgetTokens: Int = Report.
             sb.append(ScreenText.FENCE_CLOSE).append('\n')
         }
         sb.append('\n').append(Blocks.notes).append('\n')
-        if (parts.notesLines.isEmpty()) sb.append(tr("无\n", "none\n"))
+        if (parts.notesLines.isEmpty()) sb.append(tr(S.vscreen_report_none))
         else parts.notesLines.forEach { sb.append("- ").append(it).append('\n') }
         if (omitted > 0) {
-            sb.append(tr("省略了 $omitted 行，look --last 可回看", "$omitted lines omitted; look --last to replay")).append('\n')
+            sb.append(tr(S.vscreen_report_lines_omitted_look_last_to, omitted)).append('\n')
         }
         return sb.toString()
     }
@@ -1364,7 +1350,7 @@ internal fun applyReplyBudget(parts: FullReplyParts, budgetTokens: Int = Report.
     if (over(curBetween, curPics, curTiming, omitted) && curPics.isNotEmpty()) {
         val count = maxOf(1, parts.picChangeCount)
         omitted += maxOf(1, curPics.size)
-        curPics = listOf(tr("画面变过 $count 次", "screen changed $count times"))
+        curPics = listOf(tr(S.vscreen_report_screen_changed_times, count))
     }
     // ③ Drop timing breakdown line last.
     if (over(curBetween, curPics, curTiming, omitted) && curTiming != null) {
@@ -1426,10 +1412,10 @@ internal fun VScreenOffloadHandler.fourBlocks(
         val total = System.currentTimeMillis() - received
         val timing = Timing(received, totalActionMs)
         val sb = StringBuilder()
-        sb.append(tr("第 $turn 轮$timeHint", "Turn $turn$timeHint")).append('\n')
+        sb.append(tr(S.vscreen_report_turn, turn, timeHint)).append('\n')
         sb.append(Blocks.done + "\n"); lines.forEach { sb.append(it).append('\n') }
         sb.append(timing.line(total)).append('\n')
-        sb.append("\n" + Blocks.meanwhile + "\n" + tr("（副屏已不存在，没有录屏）", "(the screen no longer exists, no recording)") + "\n\n" + Blocks.now + "\n" + tr("（没有副屏）", "(no screen)") + "\n")
+        sb.append("\n" + Blocks.meanwhile + "\n" + tr(S.vscreen_report_the_screen_no_longer_exists) + "\n\n" + Blocks.now + "\n" + tr(S.vscreen_report_no_screen) + "\n")
         sb.append("\n" + Blocks.notes + "\n")
         notes.list.forEach { sb.append("- ").append(it.line()).append('\n') }
         val returnedAt = recordReturned(null, -1L, null, if (actLoud != null) false else null, from)
@@ -1458,12 +1444,12 @@ internal fun VScreenOffloadHandler.fourBlocks(
     val lookMs0 = SystemClock.elapsedRealtime() - snapAt
 
     fun attachSnapNotes(s: Snap) {
-        if (s.activity == null) notes.add("NO_APP", tr("副屏上没有应用（副屏没有桌面，back 回不到桌面）：launch <应用名> 打开一个", "No app on the screen (the screen has no launcher; back can't reach one): open one with launch <app name>"))
+        if (s.activity == null) notes.add("NO_APP", tr(S.vscreen_report_no_app_on_the_screen))
         com.kilon.agentvscreen.core.VScreenOwnership.takeNotes(sid).forEach { notes += it }
         com.kilon.agentvscreen.core.VScreenDownscale.takeNote(d.displayId)?.let { notes += it }
         s.ocrProblem?.let { notes.add("OCR_DOWN", it) } ?: s.ocrFallback?.let { notes += it }
         s.staleNote?.let { notes += it }
-        VScreenPerception.blankFor(d.displayId)?.let { ms -> notes += tr("画面已连续 ${(ms / 100) / 10.0} 秒是一整片纯色（黑屏/白屏）", "The picture has been one solid color for ${(ms / 100) / 10.0} s (black / white screen)") }
+        VScreenPerception.blankFor(d.displayId)?.let { ms -> notes += tr(S.vscreen_report_the_picture_has_been_one, (ms / 100) / 10.0) }
     }
     attachSnapNotes(snap)
 
@@ -1628,24 +1614,18 @@ internal fun VScreenOffloadHandler.fourBlocks(
 
     // ── Full reply path (loud act, launch, handoff) ──
     if (showBeforeHint) {
-        notes += tr(
-            "你思考时画面一直在变：可以加 --hold 让应用在两轮之间暂停，或用 --on 让手机当场处理",
-            "The screen kept changing while you thought: add --hold to pause the app between turns, or --on to handle it on the spot",
-        )
+        notes += tr(S.vscreen_report_the_screen_kept_changing_while)
     }
     // 3.8: NO_EXPECT coaching hint (only when NO_EXPECT is the sole reason, at most once every 10 turns per sid).
     if (actLoud != null && reasons == listOf(Loud.NO_EXPECT) && actLoud.firstNoExpectStep != null && Loud.allowNoExpectHint(sid, turn)) {
         val stN = actLoud.firstNoExpectStep
-        notes += tr(
-            "第 $stN 步没写 until，所以给了完整回复。写上你期待看到什么，符合时只回一小段",
-            "Step $stN has no until, so a full reply was returned. Add what you expect to see for a short reply when it matches",
-        )
+        notes += tr(S.vscreen_report_step_has_no_until_so, stN)
     }
 
     val tTrack = SystemClock.elapsedRealtime()
     val picF = REPORT_POOL.submit<PicEvents>(com.kilon.agentvscreen.I18n.carry {
         runCatching { pictureEvents(d, from, now, actLoud?.firstActionMask) }.getOrElse {
-            PicEvents(null, listOf(tr("（读不到录屏：${it.message}）", "(recording unreadable: ${it.message})")), 0, false)
+            PicEvents(null, listOf(tr(S.vscreen_report_recording_unreadable, it.message)), 0, false)
         }
     })
     // 4.4: full reply for any drag uses a fixed 4-cell strip (before down, drag midpoint, before release, 350ms after release).
@@ -1678,15 +1658,12 @@ internal fun VScreenOffloadHandler.fourBlocks(
     val wordStaticWithToasts = wordEv.staticLines + toastLines
     val sinceHead = sinceHeader(from, now, totalActionMs, received)
     val sheetNote = when {
-        isDragStrip -> tr(
-            "拖动拼图 ${shownCells.size} 格：按下前、滑动中点、松手前、松手后 350ms",
-            "Drag strip (${shownCells.size} frames): before down, drag midpoint, before release, 350ms after release",
-        )
+        isDragStrip -> tr(S.vscreen_report_drag_strip_frames_before_down, shownCells.size)
         sheet -> {
             val before = shownCells.count { it.marks.isNotEmpty() }
-            tr("拼图 ${shownCells.size} 张：${before} 张是动作之前（圈和编号是点的位置，拖动是线），其余是开头和动作之后的结果，每张下面写着是哪一种", "Sheet of ${shownCells.size}: $before before actions (ring and number where it touched, a line for a drag), the others the start and what actions led to; each says which under it") +
-                (if (picked.leftOut > 0) tr("；前 ${picked.leftOut} 个动作没放进来", "; the first ${picked.leftOut} actions are not in it") else "") +
-                tr("。要更密、更长或别的时间段：vscreen look --last", ". Denser, longer or another stretch: vscreen look --last")
+            tr(S.vscreen_report_sheet_of_before_actions_ring, shownCells.size, before) +
+                (if (picked.leftOut > 0) tr(S.vscreen_report_the_first_actions_are_not, picked.leftOut) else "") +
+                tr(S.vscreen_report_denser_longer_or_another_stretch)
         }
         else -> null
     }
@@ -1696,7 +1673,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
         addAll(wordStaticWithToasts)
         addAll(wordEv.betweenLines)
         addAll(picEv.detailLines)
-        if (size == 1) add(tr("文字和画面都没有明显变化（光标、细小动画这类小变动不算）", "no clear change in text or picture (cursors and tiny animations don't count)"))
+        if (size == 1) add(tr(S.vscreen_report_no_clear_change_in_text))
         sheetNote?.let { add(it) }
     }
     val since = Since(allSinceLines, sheet, from, now)
@@ -1767,7 +1744,7 @@ internal fun VScreenOffloadHandler.fourBlocks(
     val pageTag = "P${card.id} $safePageTitle".trim()
     val baseFull = applyReplyBudget(
         FullReplyParts(
-            header = tr("第 $turn 轮$timeHint · $pageTag", "Turn $turn$timeHint · $pageTag"),
+            header = tr(S.vscreen_report_turn_2, turn, timeHint, pageTag),
             doneLines = doneWithRules,
             timingLine = timing.line(total),
             meanwhileHeader = sinceHead,
@@ -1890,27 +1867,24 @@ private fun buildNowSection(
     val safeAct = snap.activity?.let { ScreenText.clean(it, maxLen = 80) }
     val picSuffix = if (pic != null) {
         val desc = when {
-            usedRegionPic && hasSheet -> tr("（左缩略图、右变化区域，下方是拼图）", " (left thumb, right changed regions, sheet below)")
-            usedRegionPic -> tr("（左全屏缩略图，右变化区域裁图）", " (left full thumb, right changed region crops)")
-            hasSheet -> tr("（左/上是现在，旁边是这段时间的拼图）", " (left / top is now, next to it the strip of meanwhile)")
+            usedRegionPic && hasSheet -> tr(S.vscreen_report_left_thumb_right_changed_regions)
+            usedRegionPic -> tr(S.vscreen_report_left_full_thumb_right_changed)
+            hasSheet -> tr(S.vscreen_report_left_top_is_now_next)
             else -> ""
         }
-        tr("  图 ", "  picture ") + pic + desc
+        tr(S.vscreen_report_picture) + pic + desc
     } else ""
 
     if (els.isEmpty()) {
-        val header = "${Blocks.now} P${card.id} $safeTitle  ${safeAct ?: tr("（副屏上没有应用）", "(no app on the screen)")}${tr("  副屏 ", "  screen ")}${d.width}x${d.height}$picSuffix"
-        val emptyLine = if (snap.items == null) tr("（没读到文字：OCR 没有结果）", "(no text read: OCR returned nothing)")
-        else tr("（画面上没有可读的文字或控件：看图）", "(no readable text or widgets on the screen: look at the picture)")
+        val header = "${Blocks.now} P${card.id} $safeTitle  ${safeAct ?: tr(S.vscreen_report_no_app_on_the_screen_2)}${tr(S.vscreen_report_screen)}${d.width}x${d.height}$picSuffix"
+        val emptyLine = if (snap.items == null) tr(S.vscreen_report_no_text_read_ocr_returned)
+        else tr(S.vscreen_report_no_readable_text_or_widgets)
         return Triple(header, listOf(emptyLine), emptySet())
     }
 
     if (!fullList && card.canRef) {
         val diff = PageBook.diffElements(card.prevEls, els)
-        val header = tr(
-            "${Blocks.now} P${card.id} $safeTitle（第 ${card.prevSeenTurn} 轮看过，没变的 ${diff.unchanged.size} 个省略）  副屏 ${d.width}x${d.height}",
-            "${Blocks.now} P${card.id} $safeTitle (seen turn ${card.prevSeenTurn}, ${diff.unchanged.size} unchanged omitted)  screen ${d.width}x${d.height}",
-        ) + picSuffix
+        val header = tr(S.vscreen_report_p_seen_turn_unchanged_omitted, Blocks.now, card.id, safeTitle, card.prevSeenTurn, diff.unchanged.size, d.width, d.height) + picSuffix
         val outLines = ArrayList<String>()
         val shown = LinkedHashSet<El>()
         val changed = (diff.added + diff.modified.map { it.second }).sortedWith(compareBy({ it.box.centerY() }, { it.box.centerX() }))
@@ -1920,31 +1894,31 @@ private fun buildNowSection(
             shown += e
         }
         if (changed.size > limit) {
-            outLines += tr("（还有 ${changed.size - limit} 个变化未列出：act 不带步骤可看全部）", "(${changed.size - limit} more changed not listed: act with no steps lists all)")
+            outLines += tr(S.vscreen_report_more_changed_not_listed_act, changed.size - limit)
         }
         if (diff.removed.isNotEmpty()) {
-            val remShown = diff.removed.take(10).joinToString(tr("、", ", ")) { ScreenText.quote(it.label, maxLen = 20) }
-            outLines += tr("− 不见了 ${diff.removed.size} 个：$remShown", "− ${diff.removed.size} gone: $remShown")
+            val remShown = diff.removed.take(10).joinToString(tr(S.automation_list_sep)) { ScreenText.quote(it.label, maxLen = 20) }
+            outLines += tr(S.vscreen_report_gone, diff.removed.size, remShown)
         }
         return Triple(header, outLines, shown)
     }
 
-    val header = "${Blocks.now} P${card.id} $safeTitle  ${safeAct ?: tr("（副屏上没有应用）", "(no app on the screen)")}${tr("  副屏 ", "  screen ")}${d.width}x${d.height}$picSuffix"
+    val header = "${Blocks.now} P${card.id} $safeTitle  ${safeAct ?: tr(S.vscreen_report_no_app_on_the_screen_2)}${tr(S.vscreen_report_screen)}${d.width}x${d.height}$picSuffix"
     val ordered = els.sortedWith(compareBy({ it.box.centerY() }, { it.box.centerX() }))
     val taken = ordered.take(limit)
     val outLines = ArrayList<String>(taken.size + 1)
     taken.forEach { outLines += it.line() }
     if (ordered.size > limit) {
-        outLines += tr("（还有 ${ordered.size - limit} 个没列出：look x1,y1,x2,y2 列出那块的全部元素）", "(${ordered.size - limit} more not listed: look x1,y1,x2,y2 lists every element in that area)")
+        outLines += tr(S.vscreen_report_more_not_listed_look_x1, ordered.size - limit)
     }
     return Triple(header, outLines, taken.toSet())
 }
 
 /** 1.1.7: the four block headers (and the error header) in the current language. */
 object Blocks {
-    val done: String get() = tr("【做了什么】", "[Done]")
-    val meanwhile: String get() = tr("【这段时间】", "[Meanwhile]")
-    val now: String get() = tr("【现在】", "[Now]")
-    val notes: String get() = tr("【注意】", "[Notes]")
-    val error: String get() = tr("【错误】", "[Error]")
+    val done: String get() = tr(S.vscreen_report_done)
+    val meanwhile: String get() = tr(S.vscreen_report_meanwhile)
+    val now: String get() = tr(S.vscreen_report_now)
+    val notes: String get() = tr(S.vscreen_report_notes)
+    val error: String get() = tr(S.vscreen_report_error)
 }

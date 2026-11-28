@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
 import android.util.Base64
 import com.kilon.agentvscreen.BuildConfig
 import com.kilon.agentvscreen.cmd.CommandSpec
@@ -22,18 +23,13 @@ internal object Mcp {
 
     private fun lineTool() = JSONObject()
         .put("name", "vscreen")
-        .put("description", tr("在看不见的副屏里操作手机上的应用（不占用户主屏）。参数 command 是一条 vscreen 命令行，例如 " +
-            "`launch 设置`、`act \"tap 搜索; type 耳机; key enter until text:综合\"`、`act`（看一眼）、`help act`、`help codes`。" +
-            "也可以用按命令分开的工具（vscreen_act、vscreen_launch …），参数是字段，不用拼命令行。\n\n",
-            "Operates apps on the phone on an invisible second screen (the user's screen is not used). The command parameter is one vscreen command line, e.g. " +
-            "`launch Settings`, `act \"tap Search; type headphones; key enter until text:Results\"`, `act` (look), `help act`, `help codes`. " +
-            "The per-command tools (vscreen_act, vscreen_launch …) take fields instead of a command line.\n\n") + AgentGuide.loop())
+        .put("description", tr(S.mcp_operates_apps_on_the_phone) + AgentGuide.loop())
         .put("inputSchema", JSONObject()
             .put("\$schema", "https://json-schema.org/draft/2020-12/schema")
             .put("type", "object")
             .put("properties", JSONObject()
-                .put("command", JSONObject().put("type", "string").put("description", tr("vscreen 后面的部分，如 act \"tap 搜索; type 耳机\"", "What follows vscreen, e.g. act \"tap Search; type headphones\"")))
-                .put("session", JSONObject().put("type", "string").put("description", tr("可选：会话名（副屏同一时间属于一个会话）", "Optional: session name (the screen belongs to one session at a time)"))))
+                .put("command", JSONObject().put("type", "string").put("description", tr(S.mcp_what_follows_vscreen_e_g)))
+                .put("session", JSONObject().put("type", "string").put("description", tr(S.mcp_optional_session_name_the_screen))))
             .put("required", JSONArray().put("command")))
         .put("annotations", McpProtocol.lineToolAnnotations())
 
@@ -141,7 +137,7 @@ internal object Mcp {
         val shots = ShotStore.refs(res.output)
         val sent = ImagePolicy.pick(res, shots)
         var text = res.output
-        shots.forEachIndexed { _, n -> text = text.replace(ShotStore.REF + n, if (n in sent) tr("[图${sent.indexOf(n) + 1}，见附图]", "[picture ${sent.indexOf(n) + 1}, attached]") else ImagePolicy.leftOut()) }
+        shots.forEachIndexed { _, n -> text = text.replace(ShotStore.REF + n, if (n in sent) tr(S.mcp_picture_attached, sent.indexOf(n) + 1) else ImagePolicy.leftOut()) }
         val content = JSONArray().put(JSONObject().put("type", "text").put("text", text))
         for (n in sent) {
             val f = ShotStore.file(server.ctxFiles(), ImagePolicy.sendName(server.ctxFiles(), res, n)) ?: continue

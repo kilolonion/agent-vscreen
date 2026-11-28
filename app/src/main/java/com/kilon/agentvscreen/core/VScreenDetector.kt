@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.S
+import com.kilon.agentvscreen.tr
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
@@ -102,9 +104,7 @@ object VScreenDetector {
     fun decline(ctx: Context) { prefs(ctx).edit().putBoolean(K_DECLINED, true).apply() }
 
     /** The license notice, word for word the same in first-run setup and Settings. */
-    fun licenseNote(): String = com.kilon.agentvscreen.tr(
-        "识别模型是随 App 附带的单独文件，采用 ${DetectorModels.LICENSE} 许可（App 本身是 MIT）。它基于 Ultralytics YOLO 和 OmniParser 训练，训练代码在 tools/detector 公开。开启即表示你已了解这一点；不开 App 照常使用。",
-        "The model is a separate file shipped with the app under ${DetectorModels.LICENSE} (the app itself is MIT). It is trained from Ultralytics YOLO and OmniParser; the training code is public in tools/detector. Turning it on means you have read this; the app works the same without it.")
+    fun licenseNote(): String = tr(S.vscreen_detector_the_model_is_a_separate, DetectorModels.LICENSE)
 
     /** The user's switch (on once the license notice is accepted). */
     fun switchedOn(ctx: Context): Boolean = prefs(ctx).getBoolean(K_ON, true)

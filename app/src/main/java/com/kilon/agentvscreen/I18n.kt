@@ -10,8 +10,8 @@ import java.util.Locale
  * otherwise. Texts stay next to their use as tr("中文", "English") pairs, so a string and its translation never drift
  * apart.
  *
- * 2.0.1-beta2 (rainbow: support Japanese): Japanese is English underneath (agents, logs and anything untranslated
- * read English) with the user-facing English looked up in assets/i18n/ja.json ([Ja]); see tools/i18n.
+ * 2.0.1-beta2 (rainbow: support Japanese, languages on an equal footing): texts live in one table, a column per
+ * language ([Strings]); code calls tr(S.<key>, values…). Agents read Chinese or English only.
  */
 object I18n {
     enum class Lang(val key: String) { AUTO("auto"), ZH("zh"), EN("en"), JA("ja") }
@@ -20,7 +20,6 @@ object I18n {
     @Volatile private var cached: Lang = Lang.AUTO
 
     fun init(ctx: Context) {
-        Ja.init(ctx)
         prefs = ctx.getSharedPreferences("agent_vscreen_api", Context.MODE_PRIVATE)
         cached = Lang.entries.firstOrNull { it.key == prefs?.getString("lang", null) } ?: Lang.AUTO
         agentCached = if (prefs?.getString("agent_lang", null) == AGENT_AUTO) AGENT_AUTO else AGENT_EN
@@ -74,6 +73,18 @@ object I18n {
         }
     val code: String get() = if (en) "en" else "zh"
 
+    /** The table column for the current text language: a caller's forced reply language, else the app's. */
+    val column: Int
+        get() {
+            forced.get()?.let { return if (it) Strings.EN else Strings.ZH }
+            val code = when (cached) {
+                Lang.AUTO -> Locale.getDefault().language.lowercase()
+                else -> cached.key
+            }
+            val c = Strings.column(code)
+            return if (c >= 0) c else Strings.EN
+        }
+
     /** The app's own language is Japanese (never while a caller forced a reply language on this thread). */
     val ja: Boolean
         get() = forced.get() == null && when (cached) {
@@ -83,62 +94,87 @@ object I18n {
         }
 }
 
-/** Pick the text for the current language. */
-fun tr(zh: String, en: String): String = if (!I18n.en) zh else if (I18n.ja) Ja.of(en) else en
-
-/** "3 步" / "3 steps", "1 step". */
-fun steps(n: Int): String = tr("$n 步", if (n == 1) "1 step" else "$n steps")
+/**
+ * The text [id] (an `S.` constant) in the current language, with `{0}`, `{1}` filled from [args] in order. A language
+ * column left empty (agent-only rows) falls back to English.
+ */
+fun tr(id: Int, vararg args: Any?): String {
+    val text = Strings.text(id, I18n.column)
+    return if (args.isEmpty()) text else Strings.fill(text, args)
+}
 
 /**
- * 2.0.1-beta2: the Japanese table, keyed by the English text. Entries are exact texts, or templates whose `{0}`, `{1}`
- * stand for the values the Kotlin string put in (in its order); the Japanese side may reorder them. A text with no
- * entry stays English. Built from the tr() pairs by tools/i18n/build_ja.py.
+ * A pair that lives as data rather than in the table: enum titles, command specs, release notes, and replies an agent
+ * composes from pieces (agents read Chinese or English only). In another language the English is looked up in the
+ * table, so a title that is also a table text still shows translated.
  */
-object Ja {
-    private class Tpl(val parts: List<String>, val ja: String, val regex: Regex)
-    @Volatile private var exact: Map<String, String> = emptyMap()
-    @Volatile private var tpls: List<Tpl> = emptyList()
-    private val cache = object : LinkedHashMap<String, String>(256, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?) = size > 2048
-    }
-    private val HOLE = Regex("\\{(\\d+)\\}")
+fun trPair(zh: String, en: String): String = when (val c = I18n.column) {
+    Strings.ZH -> zh
+    Strings.EN -> en
+    else -> Strings.byEnglish(en, c) ?: en
+}
 
-    fun init(ctx: Context) {
-        runCatching {
-            val raw = ctx.assets.open("i18n/ja.json").bufferedReader().use { it.readText() }
-            load(org.json.JSONObject(raw))
+/** "3 步" / "3 steps", "1 step". */
+fun steps(n: Int): String = if (n == 1) tr(S.i18n_one_step) else tr(S.i18n_n_steps, n)
+
+/**
+ * 2.0.1-beta2 (rainbow: languages on an equal footing, more to come): every text the app shows is one row of
+ * resources/i18n/strings.tsv (key, scope, then one column per language), and code names it by its [S] constant.
+ * Edit the table with tools/i18n/strings.py, which regenerates [S] and checks every column is filled.
+ */
+object Strings {
+    const val ZH = 0
+    const val EN = 1
+
+    private class Table(val langs: List<String>, val rows: Array<Array<String>>, val english: Map<String, Int>)
+
+    private val table: Table by lazy { load() }
+
+    private fun load(): Table {
+        val stream = Strings::class.java.classLoader?.getResourceAsStream("i18n/strings.tsv")
+            ?: error("i18n/strings.tsv is missing from the app")
+        val lines = stream.bufferedReader(Charsets.UTF_8).use { it.readLines() }
+        val head = lines.first().split('\t')
+        val langs = head.drop(2)
+        val rows = ArrayList<Array<String>>(lines.size)
+        for (i in 1 until lines.size) {
+            val line = lines[i]
+            if (line.isEmpty()) continue
+            val cells = line.split('\t')
+            rows += Array(langs.size) { c -> cells.getOrNull(c + 2).orEmpty().replace('⏎', '\n') }
         }
+        val english = HashMap<String, Int>(rows.size * 2)
+        rows.forEachIndexed { i, r -> if (r[EN].indexOf('{') < 0) english.putIfAbsent(r[EN], i) }
+        return Table(langs, rows.toTypedArray(), english)
     }
 
-    internal fun load(o: org.json.JSONObject) {
-        val ex = HashMap<String, String>()
-        o.optJSONObject("exact")?.let { e -> e.keys().forEach { k -> ex[k] = e.getString(k) } }
-        val ts = ArrayList<Tpl>()
-        o.optJSONArray("tpl")?.let { a ->
-            for (i in 0 until a.length()) {
-                val pair = a.getJSONArray(i)
-                val en = pair.getString(0)
-                val parts = HOLE.split(en)
-                if (parts.sumOf { it.length } < 2) continue
-                val rx = Regex(parts.joinToString("(.*?)") { Regex.escape(it) }, RegexOption.DOT_MATCHES_ALL)
-                ts += Tpl(parts, pair.getString(1), rx)
+    /** The column of a language code ("zh", "en", "ja"…), or -1 when the table has none. */
+    fun column(code: String): Int = table.langs.indexOf(code)
+
+    fun text(id: Int, col: Int): String {
+        val row = table.rows[id]
+        val t = row.getOrNull(col).orEmpty()
+        return if (t.isNotEmpty() || col == ZH) t else row[EN]
+    }
+
+    fun byEnglish(en: String, col: Int): String? =
+        table.english[en]?.let { table.rows[it].getOrNull(col) }?.takeIf { it.isNotEmpty() }
+
+    fun fill(text: String, args: Array<out Any?>): String {
+        val sb = StringBuilder(text.length + 16)
+        var i = 0
+        while (i < text.length) {
+            val c = text[i]
+            if (c == '{') {
+                var j = i + 1
+                while (j < text.length && text[j].isDigit()) j++
+                if (j > i + 1 && j < text.length && text[j] == '}') {
+                    val n = text.substring(i + 1, j).toInt()
+                    if (n < args.size) { sb.append(args[n]); i = j + 1; continue }
+                }
             }
+            sb.append(c); i++
         }
-        exact = ex; tpls = ts.sortedByDescending { t -> t.parts.sumOf { it.length } }
-        synchronized(cache) { cache.clear() }
-    }
-
-    /** [en] in Japanese, or [en] itself when the table has no entry for it. */
-    fun of(en: String): String {
-        exact[en]?.let { return it }
-        if (tpls.isEmpty()) return en
-        synchronized(cache) { cache[en] }?.let { return it }
-        val out = tpls.firstNotNullOfOrNull { t ->
-            if (!en.startsWith(t.parts.first()) || !en.endsWith(t.parts.last())) return@firstNotNullOfOrNull null
-            val m = t.regex.matchEntire(en) ?: return@firstNotNullOfOrNull null
-            HOLE.replace(t.ja) { h -> m.groupValues.getOrNull(h.groupValues[1].toInt() + 1) ?: "" }
-        } ?: en
-        synchronized(cache) { cache[en] = out }
-        return out
+        return sb.toString()
     }
 }

@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.content.Context
@@ -162,12 +163,12 @@ class VScreenDisplay private constructor(
         return org.json.JSONObject()
             .put("display_rotation", rotation * 90)
             .put("surface", "${physWidth}x$physHeight")
-            .put("frame_space", tr("${width}x$height（已转正，read/look/截图/tap 的坐标都在这里）", "${width}x$height (upright; read/look/screenshot/tap coordinates are all in this space)"))
-            .put("input_space", tr("${iw}x$ih（系统注入触摸用的逻辑坐标）", "${iw}x$ih (logical coordinates the system uses for injected touches)"))
+            .put("frame_space", tr(S.vscreen_display_x_upright_read_look_screenshot, width, height))
+            .put("input_space", tr(S.vscreen_display_x_logical_coordinates_the_system, iw, ih))
             .put("frame_turn_deg", bufferTurn)
-            .put("turn_source", if (turnOverride != null) tr("screen rotate 手动", "screen rotate (manual)") else if (flip180) tr("自动（文字校准后翻转 180°）", "auto (flipped 180° after text calibration)") else tr("自动", "auto"))
-            .put("transform", if (identity) tr("identity：画面坐标 = 输入坐标，工具不需要也不会再换算", "identity: picture coordinates = input coordinates, nothing is converted")
-                else tr("letterbox：逻辑屏 ${iw}x$ih 缩放后居中放在 ${width}x$height 画面里，工具自动逆变换", "letterbox: the ${iw}x$ih logical screen is scaled and centered in the ${width}x$height picture; the tool converts back automatically"))
+            .put("turn_source", if (turnOverride != null) tr(S.vscreen_display_screen_rotate_manual) else if (flip180) tr(S.vscreen_display_auto_flipped_180_after_text) else tr(S.vscreen_display_auto))
+            .put("transform", if (identity) tr(S.vscreen_display_identity_picture_coordinates_input_coord)
+                else tr(S.vscreen_display_letterbox_the_x_logical_screen, iw, ih, width, height))
     }
 
     private var listener: DisplayManager.DisplayListener? = null
@@ -724,10 +725,10 @@ class VScreenDisplay private constructor(
     data class Resume(val kind: Int, val ms: Long)
 
     fun resumeText(r: Resume): String = when (r.kind) {
-        RESUME_RUNNING -> tr("副屏在运行", "screen running")
-        RESUME_WOKE -> tr("副屏刚从省电暂停中恢复（${r.ms}ms）。暂停时应用不在前台，有的应用（游戏、视频、录音）会自己暂停或弹出菜单：以下面的画面为准，不要按上次看到的操作", "The screen just resumed from its power-save pause (${r.ms}ms). While paused the app was not in front, and some apps (games, video, recorders) pause themselves or show a menu then: go by the picture below, not by what you saw last time")
-        RESUME_NO_FRAME -> tr("副屏已从省电暂停中恢复，但还没收到新画面（静止页面可能不重绘）；先 read 确认", "The screen resumed from its power-save pause but no new frame arrived yet (a still page may not redraw); check with read first")
-        else -> tr("副屏从省电暂停恢复失败：画面可能不更新。用 release 后重新 launch", "Resuming the screen from its power-save pause failed: the picture may not update. release, then launch again")
+        RESUME_RUNNING -> tr(S.vscreen_display_screen_running)
+        RESUME_WOKE -> tr(S.vscreen_display_the_screen_just_resumed_from, r.ms)
+        RESUME_NO_FRAME -> tr(S.vscreen_display_the_screen_resumed_from_its)
+        else -> tr(S.vscreen_display_resuming_the_screen_from_its)
     }
 
     /**
@@ -956,7 +957,7 @@ class VScreenDisplay private constructor(
                 com.kilon.agentvscreen.host.quiet("VScreenDisplay:489") { reader.close() }
                 thread.quitSafely()
                 return Result.failure(
-                    IllegalStateException(tr("系统拒绝创建虚拟显示屏（ROM 策略或显示屏数量上限）", "The system refused to create the virtual display (ROM policy or display limit)")),
+                    IllegalStateException(tr(S.vscreen_display_the_system_refused_to_create)),
                 )
             }
             val gen = synchronized(this) { ++generationCounter }

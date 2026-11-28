@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
+import com.kilon.agentvscreen.trPair
 import com.kilon.agentvscreen.tr
 import org.json.JSONArray
 import org.json.JSONObject
@@ -33,12 +35,10 @@ internal object UserWait {
     private val whereEn = "open Agent-VScreen (or tap the purple \"An agent is waiting for you\" bar at the top of the phone's screen) and tap this item under Waiting for you on its home page"
 
     fun tellUser(kind: Kind, what: String?): String = when (kind) {
-        Kind.CONFIRM -> tr("我需要你在手机上确认一步操作" + (what?.let { "：$it" } ?: "") + "。请$whereZh，按提示确认。好了告诉我一声。",
+        Kind.CONFIRM -> trPair("我需要你在手机上确认一步操作" + (what?.let { "：$it" } ?: "") + "。请$whereZh，按提示确认。好了告诉我一声。",
             "I need you to confirm a step on your phone" + (what?.let { ": $it" } ?: "") + ". Please $whereEn and confirm it. Tell me when it's done.")
-        Kind.QUESTION -> tr("我在手机上问了你一个问题。请$whereZh 回答。好了告诉我一声。",
-            "I asked you a question on your phone. Please $whereEn to answer it. Tell me when it's done.")
-        Kind.LESSON -> tr("我需要你在手机上给我演示一下怎么操作。请$whereZh 开始演示，做完点完成。好了告诉我一声。",
-            "I need you to show me how to do this on your phone. Please $whereEn to start, and press done when finished. Tell me when it's done.")
+        Kind.QUESTION -> tr(S.user_wait_i_asked_you_a_question, whereZh, whereEn)
+        Kind.LESSON -> tr(S.user_wait_i_need_you_to_show, whereZh, whereEn)
     }
 
     /** The waiting strong confirmation of the calling token, if any (what it asks, seconds left). */
@@ -81,11 +81,6 @@ internal object UserWait {
 
     fun block(say: String, leftS: Long): String {
         val min = (leftS + 59) / 60
-        return tr("【等用户】请求已经发到手机上（通知、App 首页“待处理”和屏幕顶部的提示条），现在在等用户。很多人的通知是静音的，用户多半还不知道。" +
-                "现在就在你和用户的对话里发这句话，然后停下等用户回话；不要换别的方式绕过，也不要反复重发命令去催：\n  「$say」\n" +
-                "用户说好了以后，把同一条命令原样再发一次（$min 分钟内有效）。\n",
-            "[Waiting for the user] The request is on the phone (a notification, Waiting for you on the app's home page, and a bar at the top of the screen) and waits for the user. Many people keep notifications silent, so the user most likely hasn't noticed. " +
-                "Send this to the user in your conversation now, then stop and wait for their reply; don't try another way around it and don't keep resending the command to push:\n  \"$say\"\n" +
-                "Once the user says it's done, send the same command again as it is (valid for $min minutes).\n")
+        return tr(S.user_wait_waiting_for_the_user_the, say, min)
     }
 }

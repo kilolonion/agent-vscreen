@@ -31,7 +31,8 @@ dict.txt[FA5L]: F:PP-OCR识别模型的字符字典，每行一个字符，下�
 
 ===/<repository>/app/src/main/java/com/kilon/agentvscreen/===
 Changes.kt[SD6L]: F:版本更新日志单一事实源：按versionCode倒序维护中英条目(2.0.1-beta1含令牌有效期与可选接入码、公网CIMD/配对隔离、双栈MCP 2026-07-28、付款与屏幕隔离、熄屏/热锁)、受众与路由，供升级弹窗、AgentNews与DocsSyncTest共享 | R:code:app/src/main/java/com/kilon/agentvscreen/api/AgentNews.kt,code:app/src/test/java/com/kilon/agentvscreen/api/DocsSyncTest.kt | A:Changes.releases,allUserReleases,agentItemsSince,selectAutoShow,init,consumeLaunchAutoShow | S:init须在VScreenApp早于ApiConfig.init运行，靠agent_vscreen_api是否为空区分全新安装与旧版升级；每次升versionCode须在releases首位补录条目且英文禁含全角标点
-I18n.kt[CL7T]: F:全应用语言与双语文本出口：管理UI语言choice(AUTO/中/英)、agent默认回复语言agentLang(默认en)及ThreadLocal按请求覆写与跨线程传递 | R:- | A:I18n.choice,agentLang,agentDefault,with,carry,tr | S:agent未指定语言时默认回复英文(AGENT_EN)，仅当agentLang设为auto才跟随UI语言；跨线程工作须用carry保留调用方语言
+I18n.kt[CL7T]: F:全应用语言与文本出口：UI语言choice(AUTO/中/英/日)映射到文本表列、agent默认回复语言agentLang(默认en)及ThreadLocal按请求覆写与跨线程传递；tr(S.key,值…)按列取文并填{n}，trPair供成对数据与agent拼接回复 | R:code:app/src/main/java/com/kilon/agentvscreen/S.kt | A:I18n,tr,trPair,Strings,steps | S:文本表resources/i18n/strings.tsv由tools/i18n/strings.py校验与生成S；agent回复只有中英，非中英语言的空列回落英文
+S.kt[CL2T]: F:由tools/i18n/strings.py从resources/i18n/strings.tsv生成的文本编号常量，供tr(S.key)按行号取文 | R:code:app/src/main/java/com/kilon/agentvscreen/I18n.kt | A:S | S:生成文件勿手改；与strings.tsv行序一致，CI的strings.py --check守门
 
 ===/<repository>/app/src/main/java/com/kilon/agentvscreen/api/===
 Abilities.kt[AE8M]: F:agent能力唯一声明表：涵盖操作、定时、盯守、采集、提问、示教、笔记、接力、静音、切屏暂存、权限提权、看图与排障并生成各处说明 | R:code:app/src/main/java/com/kilon/agentvscreen/cmd/CommandSpec.kt,code:app/src/main/java/com/kilon/agentvscreen/api/AgentGuide.kt,code:app/src/main/java/com/kilon/agentvscreen/api/AgentNews.kt | A:Abilities.all,of,changedSince,undisclosed,forVia | S:CommandSpec每条命令必须恰属一个能力否则AbilitiesTest失败；when文案须用用户视角；修改披露须递增changed才会推送旧agent更新提示

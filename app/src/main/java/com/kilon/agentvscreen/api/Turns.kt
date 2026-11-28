@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.os.Handler
@@ -110,10 +111,10 @@ object Turns {
         val running = inFlight[sid] ?: 0
         val since = quietSince[sid]
         when {
-            running > 0 -> tr("（它有命令正在执行，执行完后再安静 ${fmt(quietMs)} 才自动让出）", " (it has a command running; it gives way after ${fmt(quietMs)} of quiet once that finishes)")
+            running > 0 -> tr(S.turns_it_has_a_command_running, fmt(quietMs))
             since != null && sid in active -> {
                 val quiet = SystemClock.elapsedRealtime() - since
-                tr("（它的上一条命令 ${fmt(quiet)}前结束，再安静 ${fmt((quietMs - quiet).coerceAtLeast(0))} 自动让出）", " (its last command ended ${fmt(quiet)} ago; it gives way after ${fmt((quietMs - quiet).coerceAtLeast(0))} more of quiet)")
+                tr(S.turns_its_last_command_ended_ago, fmt(quiet), fmt((quietMs - quiet).coerceAtLeast(0)))
             }
             else -> ""
         }
@@ -128,7 +129,7 @@ object Turns {
 
     private fun fmt(ms: Long): String {
         val s = (ms / 1000).toInt()
-        return if (s >= 60) tr("${s / 60} 分 ${s % 60} 秒", "${s / 60} min ${s % 60} s") else tr("$s 秒", "$s s")
+        return if (s >= 60) tr(S.turns_min_s, s / 60, s % 60) else tr(S.turns_s, s)
     }
 
     fun sessions(): Set<String> = synchronized(this) { active.toSet() }

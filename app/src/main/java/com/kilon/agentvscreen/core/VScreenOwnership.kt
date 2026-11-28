@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.S
+import com.kilon.agentvscreen.trPair
 import android.content.Context
 import com.kilon.agentvscreen.host.AppLogger
 import com.kilon.agentvscreen.tr
@@ -70,9 +72,8 @@ object VScreenOwnership {
         val app = label(ctx, g.pkg)
         if (g.why != "ours") com.kilon.agentvscreen.host.quiet("handover-event") {
             com.kilon.agentvscreen.api.EventHub.post(ctx, g.session, "handover", g.pkg,
-                if (g.why == "user") tr("用户在主屏打开了 $app，它已经交给用户（副屏上没有它了）。在用户交回之前不要操作 $app；用 vscreen events --wait 等 handback，或去做别的应用。",
-                    "The user opened $app on the main screen; it is with the user now (no longer on the background screen). Don't operate $app until the user hands it back; wait for handback with vscreen events --wait, or work on another app.")
-                else tr("$app 已交给用户。用户交回时会有 handback 事件。", "$app is with the user. A handback event comes when the user hands it back."))
+                if (g.why == "user") tr(S.vscreen_ownership_the_user_opened_on_the, app)
+                else tr(S.vscreen_ownership_is_with_the_user_a, app))
         }
         com.kilon.agentvscreen.ui.Overlay.refresh()
     }
@@ -83,17 +84,17 @@ object VScreenOwnership {
      * [by]: "overlay", "notification" or "agent". Returns what happened, for the caller to show.
      */
     fun handBack(ctx: Context, pkg: String, by: String): String {
-        val g = _given.value[pkg] ?: return tr("$pkg 不在你手上", "$pkg is not with you")
+        val g = _given.value[pkg] ?: return tr(S.vscreen_ownership_is_not_with_you, pkg)
         val vs = BackgroundOperation.state.value.displayId
         val onMain = runCatching { com.kilon.agentvscreen.core.VScreenHandoff.tasksOn(0) }.getOrDefault(emptyList()).any { it.taskId == g.taskId }
         val app = label(ctx, pkg)
         val (moved, line) = when {
-            vs == null -> false to tr("副屏已经释放，agent 下次 launch $app 时重新打开", "The screen was released; the agent's next launch of $app opens it again")
-            !onMain -> false to tr("$app 原来的页面已经没有了（在主屏关掉了或应用重启了），agent 下次 launch 时从首页打开", "$app's page is gone (closed on the main screen or the app restarted); the agent's next launch opens it from its home page")
+            vs == null -> false to tr(S.vscreen_ownership_the_screen_was_released_the, app)
+            !onMain -> false to tr(S.vscreen_ownership_s_page_is_gone_closed, app)
             else -> {
                 val m = com.kilon.agentvscreen.core.VScreenHandoff.move(g.taskId, pkg, vs)
-                if (m.ok) true to tr("$app 已移回副屏，停在你最后的页面", "$app is back on the background screen, on the page you left it")
-                else false to tr("系统没让 $app 移回副屏（${m.detail}）", "The system did not move $app back (${m.detail})")
+                if (m.ok) true to tr(S.vscreen_ownership_is_back_on_the_background, app)
+                else false to tr(S.vscreen_ownership_the_system_did_not_move, app, m.detail)
             }
         }
         if (!moved && vs != null && onMain) return line // nothing changed: it stays with the user
@@ -104,9 +105,9 @@ object VScreenOwnership {
         AppLogger.info(TAG, "$pkg handed back by $by (moved=$moved)")
         com.kilon.agentvscreen.host.quiet("handback-event") {
             com.kilon.agentvscreen.api.EventHub.post(ctx, g.session, "handback", pkg, line + "。" +
-                (if (moved) tr("现在的页面 ${now ?: "?"}" + (if (now != null && g.page != null && now != g.page) "（交出时是 ${g.page}，用户换过页面）" else "") + "。先看一眼现在的画面再继续。",
+                (if (moved) trPair("现在的页面 ${now ?: "?"}" + (if (now != null && g.page != null && now != g.page) "（交出时是 ${g.page}，用户换过页面）" else "") + "。先看一眼现在的画面再继续。",
                     "Page now: ${now ?: "?"}" + (if (now != null && g.page != null && now != g.page) " (it was ${g.page} when handed over; the user moved on)" else "") + ". Look at the screen before going on.")
-                else tr("launch $pkg 重新打开。", "launch $pkg to open it again.")))
+                else tr(S.vscreen_ownership_launch_to_open_it_again, pkg)))
         }
         com.kilon.agentvscreen.ui.Overlay.refresh()
         return line
@@ -136,7 +137,7 @@ object VScreenOwnership {
     fun stretchEnd(ctx: Context, token: Long): String? {
         val st = synchronized(this) { open.remove(token)?.also { lastEnded = it to System.currentTimeMillis() } } ?: return null
         runCatching { tick(ctx) }
-        return synchronized(leaks) { leaks.remove(st.session) }?.distinct()?.joinToString(tr("；", "; "))
+        return synchronized(leaks) { leaks.remove(st.session) }?.distinct()?.joinToString(tr(S.agent_guide_sep))
     }
 
     /** The stretch a move seen now belongs to: one running, or one that ended within [GRACE_MS]. */
@@ -145,8 +146,7 @@ object VScreenOwnership {
 
     private fun leak(session: String, ctx: Context, pkg: String, frontBefore: String?, frontNow: String?) {
         val app = label(ctx, pkg)
-        synchronized(leaks) { leaks.getOrPut(session) { ArrayList() } += tr("副屏这边的 $app 跑到了主屏（主屏前台 ${frontBefore ?: "?"} → ${frontNow ?: "?"}）：用户正在用的主屏被我们打扰了。停下，告诉用户；要继续，handoff in 把它拿回副屏",
-            "$app from our screen came to the main screen (front app ${frontBefore ?: "?"} → ${frontNow ?: "?"}): the screen the user is using was disturbed by us. Stop and tell the user; to go on, take it back with handoff in") }
+        synchronized(leaks) { leaks.getOrPut(session) { ArrayList() } += tr(S.vscreen_ownership_from_our_screen_came_to, app, frontBefore ?: "?", frontNow ?: "?") }
     }
 
     /** The screen is gone: nothing is with the user any more, no hand-back to ask for. */
@@ -214,8 +214,7 @@ object VScreenOwnership {
                 if (stretch != null) leak(session, ctx, front.pkg, frontBefore, front.pkg)
                 else if (front.pkg in onScreen.values) {
                     val first = synchronized(bothSaid) { bothSaid.getOrPut(session) { HashSet() }.add(front.pkg) }
-                    if (first) synchronized(pendingNotes) { pendingNotes.getOrPut(session) { ArrayList() } += tr("用户也在主屏上用 ${label(ctx, front.pkg)}（另一份，和副屏这份互不影响）：不要做会影响用户那份的事（退出登录、清数据、改账号设置）。",
-                        "The user is also using ${label(ctx, front.pkg)} on the main screen (a separate copy; the two don't affect each other): don't do things that would affect theirs (log out, clear data, change account settings).") }
+                    if (first) synchronized(pendingNotes) { pendingNotes.getOrPut(session) { ArrayList() } += tr(S.vscreen_ownership_the_user_is_also_using, label(ctx, front.pkg)) }
                 }
             }
         }
@@ -258,11 +257,10 @@ object VScreenOwnership {
                     _given.update { it + (g.pkg to g.copy(nudged = true)) }
                     val app = label(ctx, g.pkg)
                     val who = com.kilon.agentvscreen.api.Agents.nameOfSession(g.session)
-                    VScreenHandoff.alert(ctx, nudgeId(g.pkg), tr("$app 用完了吗？", "Done with $app?"),
-                        tr("「$who」在等你把 $app 交回去。用完了就点“交回”，它会从你离开的页面接着做；也可以点开 Agent-VScreen 处理。",
-                            "\"$who\" is waiting for $app. When you are done, tap Hand back and it carries on from where you left it, or open Agent-VScreen."),
+                    VScreenHandoff.alert(ctx, nudgeId(g.pkg), tr(S.vscreen_ownership_done_with, app),
+                        tr(S.vscreen_ownership_is_waiting_for_when_you, who, app),
                         com.kilon.agentvscreen.host.Needs.open(ctx, com.kilon.agentvscreen.host.Needs.Page.HOME, 7),
-                        listOf(tr("交回", "Hand back") to handBackIntent(ctx, g.pkg)))
+                        listOf(tr(S.vscreen_open_commands_hand_back) to handBackIntent(ctx, g.pkg)))
                 }
             }
         }

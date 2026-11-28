@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import com.kilon.agentvscreen.BuildConfig
 import com.kilon.agentvscreen.tr
@@ -87,7 +88,7 @@ object Updates {
                 setRequestProperty("User-Agent", "Agent-VScreen")
             }
             val code = c.responseCode
-            if (code != 200) return Outcome.Failed(tr("GitHub 回复 $code", "GitHub answered $code") + if (code == 403) tr("（查询太频繁，过一会儿再试）", " (too many checks, try again later)") else "")
+            if (code != 200) return Outcome.Failed(tr(S.updates_github_answered, code) + if (code == 403) tr(S.updates_too_many_checks_try_again) else "")
             val list = parse(c.inputStream.bufferedReader().use { it.readText() })
             prefs(ctx).edit().putLong("checked_at", System.currentTimeMillis()).apply()
             val ch = channel(ctx)
@@ -95,7 +96,7 @@ object Updates {
             return if (best != null) { newer.value = best; Outcome.Newer(best) }
             else { newer.value = null; Outcome.Latest(list.filter { onChannel(it, ch) }.maxWithOrNull { x, y -> compare(x.version, y.version) }?.version) }
         } catch (e: Exception) {
-            return Outcome.Failed(tr("连不上 GitHub（${e.javaClass.simpleName}）", "Could not reach GitHub (${e.javaClass.simpleName})"))
+            return Outcome.Failed(tr(S.updates_could_not_reach_github, e.javaClass.simpleName))
         } finally { checking.value = false }
     }
 

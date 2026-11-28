@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.trPair
 import android.graphics.Rect
 import java.util.Random
 import kotlin.math.abs
@@ -65,7 +66,7 @@ internal class Human(private val rnd: Random = Random()) {
         /** In words, for a step's fact: how far the tap was from the named point and how long the pause was. */
         fun said(pauseMs: Long, from: Pair<Int, Int>? = null, to: Pair<Int, Int>? = null): String {
             val off = if (from != null && to != null) abs(from.first - to.first) + abs(from.second - to.second) else 0
-            return com.kilon.agentvscreen.tr("（仿人：先停了 ${pauseMs}ms" + (if (off > 0) "，偏了 ${off}px" else "") + "）",
+            return trPair("（仿人：先停了 ${pauseMs}ms" + (if (off > 0) "，偏了 ${off}px" else "") + "）",
                 " (human pacing: paused ${pauseMs}ms" + (if (off > 0) ", ${off}px off" else "") + ")")
         }
     }

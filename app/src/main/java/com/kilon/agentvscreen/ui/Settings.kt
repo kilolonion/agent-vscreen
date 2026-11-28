@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import androidx.compose.foundation.layout.fillMaxHeight
 
 import top.yukonga.miuix.kmp.basic.Text
@@ -92,51 +93,51 @@ fun SettingsTab(bottom: Dp) {
     var eventDialog by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<Updates.Outcome?>(null) }
 
-    MiuixPage(tr("设置", "Settings"), back = false, bottom = bottom) {
+    MiuixPage(tr(S.app_settings), back = false, bottom = bottom) {
         // 2.0.1-beta2 (rainbow): every way in (this phone, Tailscale, cloud, tokens) lives on the 接入 tab only.
 
         // 2.0.0-beta8 (feedback 2): how much an agent may do is set per agent (接入 › the agent); here only what is about
         // apps, and the table of levels to read.
-        SmallTitle(tr("权限", "Permissions"))
+        SmallTitle(tr(S.settings_permissions))
         Card(Modifier.padding(horizontal = 12.dp).fillMaxWidth(), insideMargin = PaddingValues(0.dp)) {
-            ArrowPreference(title = tr("权限档位", "Permission levels"), summary = tr("各档位对每类操作的默认处理；具体档位在各 agent 页面中设置", "Default handling of each action type per level; set per agent on its page"),
+            ArrowPreference(title = tr(S.settings_permission_levels), summary = tr(S.settings_default_handling_of_each_action),
                 onClick = { nav.go(Route.Security) })
-            ArrowPreference(title = tr("应用规则", "App rules"), summary = tr("按应用设置禁止操作、只读或每次确认", "Per app: blocked, read-only or confirm every time"),
-                endActions = { Value(if (rules.isEmpty()) tr("无", "None") else tr("${rules.size} 条", "${rules.size}")) }, onClick = { nav.go(Route.Rules) })
+            ArrowPreference(title = tr(S.settings_app_rules), summary = tr(S.settings_per_app_blocked_read_only),
+                endActions = { Value(if (rules.isEmpty()) tr(S.settings_none) else tr(S.settings_rule_count, rules.size)) }, onClick = { nav.go(Route.Rules) })
         }
 
-        Group(tr("副屏", "Background screen")) {
+        Group(tr(S.settings_background_screen)) {
             ArrowPreference(
-                title = tr("悬浮窗", "Floating window"),
-                summary = if (s.showPreview) tr("已开启 · 小窗交互与按钮", "On · mini-window behavior & buttons") else tr("已关闭", "Off"),
+                title = tr(S.settings_floating_window),
+                summary = if (s.showPreview) tr(S.settings_on_mini_window_behavior_buttons) else tr(S.automation_off),
                 onClick = { nav.go(Route.FloatingWindow) },
             )
             // 1.4.0-beta13 (rainbow): sound has its own page: the screen's muting, what is silent now, muting by hand.
-            ArrowPreference(title = tr("应用静音", "App sound"), summary = if (com.kilon.agentvscreen.core.VScreenMute.enabled) tr("副屏静音已开启 · 可单独管理各应用", "Background-screen muting on · manage apps individually")
-                else tr("副屏静音已关闭 · 可单独管理各应用", "Background-screen muting off · manage apps individually"), onClick = { nav.go(Route.Sound) })
+            ArrowPreference(title = tr(S.settings_app_sound), summary = if (com.kilon.agentvscreen.core.VScreenMute.enabled) tr(S.settings_background_screen_muting_on_manage)
+                else tr(S.settings_background_screen_muting_off_manage), onClick = { nav.go(Route.Sound) })
             val idleSave by com.kilon.agentvscreen.core.VScreenStore.idlePowerSave.collectAsState()
             SwitchPreference(checked = idleSave, onCheckedChange = { BackgroundOperation.setIdlePowerSave(it) },
-                title = tr("空闲省电", "Idle power saving"), summary = tr("每轮任务结束后暂停副屏渲染", "Pause background-screen rendering after each turn"))
+                title = tr(S.settings_idle_power_saving), summary = tr(S.settings_pause_background_screen_rendering_after))
             // Issue #48 & #60: 3-mode phone screen behavior during tasks (allow sleep / keep on / wake when needed).
             val screenMode by com.kilon.agentvscreen.core.VScreenStore.phoneScreenMode.collectAsState()
             val sleepsWithPhone = BackgroundOperation.currentDisplay()?.let { !com.kilon.agentvscreen.core.VScreenAwake.canWakeAlone(it) } == true
             val inputBlocked = com.kilon.agentvscreen.core.InputReach.lastBlocked()
             val modeItems = listOf(
-                tr("允许熄屏", "Allow sleep"),
-                tr("任务中保持亮屏", "Keep on during tasks") + if (sleepsWithPhone && !inputBlocked) tr("（推荐）", " (recommended)") else "",
-                tr("需要时点亮", "Wake when needed") + if (inputBlocked) tr("（推荐）", " (recommended)") else "",
+                tr(S.settings_allow_sleep),
+                tr(S.settings_keep_on_during_tasks) + if (sleepsWithPhone && !inputBlocked) tr(S.settings_recommended) else "",
+                tr(S.settings_wake_when_needed) + if (inputBlocked) tr(S.settings_recommended) else "",
             )
             val modeSummary = when {
                 inputBlocked && screenMode != com.kilon.agentvscreen.core.VScreenStore.PhoneScreenMode.WAKE_WHEN_NEEDED ->
-                    tr("熄屏时系统会阻止副屏触摸", "The system blocks background-screen touch while the screen is off")
+                    tr(S.settings_the_system_blocks_background_screen)
                 sleepsWithPhone && screenMode == com.kilon.agentvscreen.core.VScreenStore.PhoneScreenMode.ALLOW_SLEEP ->
-                    tr("副屏随主屏熄屏而暂停", "The background screen pauses when the main screen turns off")
+                    tr(S.settings_the_background_screen_pauses_when)
                 else -> null
             }
             OverlayDropdownPreference(
                 items = modeItems,
                 selectedIndex = screenMode.ordinal,
-                title = tr("熄屏时", "When screen is off"),
+                title = tr(S.settings_when_screen_is_off),
                 summary = modeSummary,
                 onSelectedIndexChange = { i ->
                     com.kilon.agentvscreen.core.VScreenStore.setPhoneScreenMode(com.kilon.agentvscreen.core.VScreenStore.PhoneScreenMode.entries[i])
@@ -145,10 +146,10 @@ fun SettingsTab(bottom: Dp) {
             )
             val heatStopOn by com.kilon.agentvscreen.host.ThermalGuard.hardStopEnabled.collectAsState()
             ArrowPreference(
-                title = tr("过热保护", "Thermal protection"),
+                title = tr(S.settings_thermal_protection),
                 endActions = {
                     Value(
-                        if (heatStopOn) tr("已开启", "On") else tr("已关闭", "Off"),
+                        if (heatStopOn) tr(S.connect_on) else tr(S.automation_off),
                         if (!heatStopOn) Palette.stopped else MiuixTheme.colorScheme.onSurfaceVariantActions,
                     )
                 },
@@ -156,14 +157,14 @@ fun SettingsTab(bottom: Dp) {
             )
             val opts = listOf(1, 3, 5, 10, 30)
             var quiet by remember { mutableIntStateOf(ApiConfig.quietMinutes) }
-            OverlayDropdownPreference(items = opts.map { tr("$it 分钟", "$it min") }, selectedIndex = opts.indexOf(quiet).coerceAtLeast(0),
-                title = tr("任务轮次时长", "Turn idle timeout"), summary = tr("无新命令超过此时长，本轮任务结束", "A turn ends after this long with no new command"),
+            OverlayDropdownPreference(items = opts.map { tr(S.settings_min, it) }, selectedIndex = opts.indexOf(quiet).coerceAtLeast(0),
+                title = tr(S.settings_turn_idle_timeout), summary = tr(S.settings_a_turn_ends_after_this),
                 onSelectedIndexChange = { i -> ApiConfig.quietMinutes = opts[i]; quiet = opts[i] })
         }
 
-        Group(tr("通用", "General")) {
-            ArrowPreference(title = tr("首次配置", "Setup"), endActions = {
-                Value(if (app.items.isEmpty()) "…" else if (app.allOk) tr("已就绪", "Ready") else tr("还差 ${app.left} 项", "${app.left} left"),
+        Group(tr(S.settings_general)) {
+            ArrowPreference(title = tr(S.settings_setup), endActions = {
+                Value(if (app.items.isEmpty()) "…" else if (app.allOk) tr(S.settings_ready) else tr(S.settings_left, app.left),
                     if (app.items.isNotEmpty() && !app.allOk) Palette.stopped else MiuixTheme.colorScheme.onSurfaceVariantActions)
             }, onClick = { nav.go(Route.Setup) })
             // 1.4.2-beta3: where the shell-level permission comes from (what each means: the "?" on the setup step).
@@ -172,17 +173,17 @@ fun SettingsTab(bottom: Dp) {
             val pvSummary = when {
                 pv.state == com.kilon.agentvscreen.host.ShizukuManager.State.READY -> pv.label
                 pv.via == com.kilon.agentvscreen.host.Privileged.Via.SHIZUKU && detected != null ->
-                    tr("检测到 $detected · ", "Detected $detected · ") + com.kilon.agentvscreen.host.Privileged.notReadyHint().take(48)
+                    tr(S.settings_detected, detected) + com.kilon.agentvscreen.host.Privileged.notReadyHint().take(48)
                 android.os.Build.VERSION.SDK_INT >= 37 && pv.via == com.kilon.agentvscreen.host.Privileged.Via.SHIZUKU ->
-                    tr("Android 17+ 建议使用兼容分支或改用 Root", "On Android 17+, use a compatible fork or switch to Root")
+                    tr(S.settings_on_android_17_use_a)
                 else -> com.kilon.agentvscreen.host.Privileged.notReadyHint().take(60)
             }
-            OverlayDropdownPreference(items = listOf(tr("Shizuku / 兼容分支", "Shizuku / forks"), "Root"), selectedIndex = pv.via.ordinal,
-                title = tr("权限来源", "Permission source"),
+            OverlayDropdownPreference(items = listOf(tr(S.settings_shizuku_forks), "Root"), selectedIndex = pv.via.ordinal,
+                title = tr(S.settings_permission_source),
                 summary = pvSummary,
                 onSelectedIndexChange = { i -> val v = com.kilon.agentvscreen.host.Privileged.Via.entries[i]
                     if (v != pv.via) scope.launch(Dispatchers.IO) { com.kilon.agentvscreen.host.Privileged.choose(ctx, v) } })
-            val names = listOf(tr("跟随系统", "System"), "中文", "English", "日本語")
+            val names = listOf(tr(S.settings_system), "中文", "English", "日本語")
             OverlayDropdownPreference(items = names, selectedIndex = I18n.Lang.entries.indexOf(I18n.choice), title = "语言 / Language",
                 onSelectedIndexChange = { i ->
                     if (I18n.Lang.entries[i] != I18n.choice) {
@@ -193,47 +194,47 @@ fun SettingsTab(bottom: Dp) {
                     }
                 })
             // 2.0.0-beta11: what agents read is separate from the UI language (screen text is never translated).
-            OverlayDropdownPreference(items = listOf(tr("英文（推荐）", "English (recommended)"), tr("跟随界面语言", "Same as the app")),
+            OverlayDropdownPreference(items = listOf(tr(S.settings_english_recommended), tr(S.settings_same_as_the_app)),
                 selectedIndex = if (I18n.agentLang == I18n.AGENT_AUTO) 1 else 0,
-                title = tr("给 agent 的回复语言", "Language of replies to agents"),
+                title = tr(S.settings_language_of_replies_to_agents),
                 onSelectedIndexChange = { i -> I18n.agentLang = if (i == 1) I18n.AGENT_AUTO else I18n.AGENT_EN })
         }
 
-        Group(tr("识别与录制", "Recognition and recording")) {
+        Group(tr(S.settings_recognition_and_recording)) {
             SwitchPreference(checked = s.accurateOcr, onCheckedChange = { BackgroundOperation.setAccurateOcr(it) },
-                title = tr("精确文字识别", "Accurate text recognition"), summary = tr("PP-OCRv6，本机离线运行", "PP-OCRv6, offline on this phone"))
+                title = tr(S.settings_accurate_text_recognition), summary = tr(S.settings_pp_ocrv6_offline_on_this))
             DetectorPreference()
             SwitchPreference(checked = s.recording, onCheckedChange = { BackgroundOperation.setRecording(it) },
-                title = tr("后台录制", "Background recording"), summary = tr("保存副屏画面，用于回放和排查", "Keeps background-screen video for replay and troubleshooting"))
+                title = tr(S.settings_background_recording), summary = tr(S.settings_keeps_background_screen_video_for))
         }
 
-        Group(tr("更新", "Updates")) {
+        Group(tr(S.settings_updates)) {
             val newer by Updates.newer.collectAsState()
             val checking by Updates.checking.collectAsState()
-            ArrowPreference(title = tr("检查更新", "Check for updates"), endActions = {
-                Value(when { checking -> tr("检查中…", "Checking…"); newer != null -> tr("有新版本 ${newer!!.version}", "New: ${newer!!.version}"); else -> BuildConfig.VERSION_NAME },
+            ArrowPreference(title = tr(S.settings_check_for_updates), endActions = {
+                Value(when { checking -> tr(S.settings_checking); newer != null -> tr(S.settings_new, newer!!.version); else -> BuildConfig.VERSION_NAME },
                     if (newer != null) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantActions)
             }, onClick = { if (!checking) scope.launch { update = withContext(Dispatchers.IO) { Updates.check(ctx) } } })
             ArrowPreference(
-                title = tr("更新日志", "What's new"),
+                title = tr(S.settings_what_s_new),
                 endActions = { Value(BuildConfig.VERSION_NAME) },
                 onClick = { ChangesSheetHost.show(com.kilon.agentvscreen.Changes.allUserReleases()) },
             )
             // 1.4.2 (rainbow): which releases the check looks at.
             var channel by remember { mutableStateOf(Updates.channel(ctx)) }
-            OverlayDropdownPreference(items = listOf(tr("正式版", "Releases"), tr("测试版（含正式版）", "Betas (and releases)")), selectedIndex = channel.ordinal,
-                title = tr("更新渠道", "Update channel"),
+            OverlayDropdownPreference(items = listOf(tr(S.settings_releases), tr(S.settings_betas_and_releases)), selectedIndex = channel.ordinal,
+                title = tr(S.settings_update_channel),
                 onSelectedIndexChange = { i -> val c = Updates.Channel.entries[i]; if (c != channel) { channel = c; Updates.setChannel(ctx, c)
                     scope.launch { update = withContext(Dispatchers.IO) { Updates.check(ctx) } } } })
         }
 
-        Group(tr("记录与诊断", "Records and diagnostics")) {
-            ArrowPreference(title = tr("事件广播", "Event broadcast"), endActions = { Value(ApiConfig.eventTarget ?: tr("不广播", "Off")) }, onClick = { eventDialog = true })
-            ArrowPreference(title = tr("操作日志", "Activity log"), summary = tr("agent 发送的全部命令及结果", "Every command agents sent, with results"), onClick = { nav.go(Route.Log) })
-            ArrowPreference(title = tr("诊断与反馈", "Diagnostics and feedback"), onClick = { nav.go(Route.Diag) })
-            ArrowPreference(title = tr("帮助", "Help"), summary = tr("各设置项说明", "What each setting does"), onClick = { nav.go(Route.Help) })
+        Group(tr(S.settings_records_and_diagnostics)) {
+            ArrowPreference(title = tr(S.settings_event_broadcast), endActions = { Value(ApiConfig.eventTarget ?: tr(S.settings_off)) }, onClick = { eventDialog = true })
+            ArrowPreference(title = tr(S.records_activity_log), summary = tr(S.settings_every_command_agents_sent_with), onClick = { nav.go(Route.Log) })
+            ArrowPreference(title = tr(S.records_diagnostics_and_feedback), onClick = { nav.go(Route.Diag) })
+            ArrowPreference(title = tr(S.settings_help), summary = tr(S.settings_what_each_setting_does), onClick = { nav.go(Route.Help) })
             // 2.0.1 (rainbow): the project page.
-            ArrowPreference(title = tr("关于项目", "About"), summary = "GitHub · kilolonion/agent-vscreen",
+            ArrowPreference(title = tr(S.settings_about), summary = "GitHub · kilolonion/agent-vscreen",
                 endActions = { Value(BuildConfig.VERSION_NAME) },
                 onClick = { runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(com.kilon.agentvscreen.host.Feedback.REPO)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } })
         }
@@ -245,16 +246,16 @@ fun SettingsTab(bottom: Dp) {
         var target by remember { mutableStateOf(ApiConfig.eventTarget.orEmpty()) }
         GlassDialog(
             onDismissRequest = { eventDialog = false },
-            title = { DialogTitle(tr("事件广播", "Event broadcast")) },
+            title = { DialogTitle(tr(S.settings_event_broadcast)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(tr("监视条件触发时，事件默认只进入队列。填写应用包名后，事件还会广播给该应用；留空则不广播。", "When a watch sees its condition, the event is only queued by default. With a package here it is also broadcast to that app; empty means none."),
+                    Text(tr(S.settings_when_a_watch_sees_its),
                         fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                    AvsField(value = target, onValueChange = { target = it.trim() }, placeholder = tr("包名", "Package"))
+                    AvsField(value = target, onValueChange = { target = it.trim() }, placeholder = tr(S.settings_package))
                 }
             },
-            confirmButton = { LinkButton(onClick = { ApiConfig.eventTarget = target.ifEmpty { null }; eventDialog = false; app.bump() }) { Text(tr("保存", "Save")) } },
-            dismissButton = { LinkButton(onClick = { eventDialog = false }) { Text(tr("取消", "Cancel")) } },
+            confirmButton = { LinkButton(onClick = { ApiConfig.eventTarget = target.ifEmpty { null }; eventDialog = false; app.bump() }) { Text(tr(S.automation_save)) } },
+            dismissButton = { LinkButton(onClick = { eventDialog = false }) { Text(tr(S.app_picker_cancel)) } },
         )
     }
     update?.let { u -> UpdateDialog(u) { update = null } }
@@ -281,29 +282,29 @@ private fun UpdateDialog(u: Updates.Outcome, close: () -> Unit) {
     when (u) {
         is Updates.Outcome.Newer -> GlassDialog(
             onDismissRequest = close,
-            title = { DialogTitle(if (u.r.prerelease || u.r.version.contains('-')) tr("测试版 ${u.r.version}", "Beta ${u.r.version}") else tr("新版本 ${u.r.version}", "New version ${u.r.version}")) },
+            title = { DialogTitle(if (u.r.prerelease || u.r.version.contains('-')) tr(S.settings_beta, u.r.version) else tr(S.settings_new_version, u.r.version)) },
             text = {
                 Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(tr("当前版本 ${BuildConfig.VERSION_NAME}", "Current version ${BuildConfig.VERSION_NAME}"), fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    Text(tr(S.settings_current_version, BuildConfig.VERSION_NAME), fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     // 1.4.2: the notes are Markdown (GitHub release body); shown rendered, not as raw marks.
                     if (u.r.notes.isNotBlank()) MarkdownText(u.r.notes.take(6000))
                 }
             },
-            confirmButton = { LinkButton(onClick = { view(u.r.apk ?: u.r.page) }) { Text(if (u.r.apk != null) tr("下载 APK", "Download APK") else tr("打开发布页", "Open the release")) } },
-            dismissButton = { LinkButton(onClick = close) { Text(tr("稍后", "Later")) } },
+            confirmButton = { LinkButton(onClick = { view(u.r.apk ?: u.r.page) }) { Text(if (u.r.apk != null) tr(S.settings_download_apk) else tr(S.settings_open_the_release)) } },
+            dismissButton = { LinkButton(onClick = close) { Text(tr(S.settings_later)) } },
         )
         is Updates.Outcome.Latest -> GlassDialog(
             onDismissRequest = close,
-            title = { DialogTitle(tr("已是最新", "Up to date")) },
-            text = { Text(tr("当前版本 ${BuildConfig.VERSION_NAME}", "Current version ${BuildConfig.VERSION_NAME}") + (u.newest?.let { tr("，GitHub 上最新的发布是 $it", "; the newest release on GitHub is $it") } ?: "")) },
-            confirmButton = { LinkButton(onClick = close) { Text(tr("确定", "OK")) } },
+            title = { DialogTitle(tr(S.settings_up_to_date)) },
+            text = { Text(tr(S.settings_current_version, BuildConfig.VERSION_NAME) + (u.newest?.let { tr(S.settings_the_newest_release_on_github, it) } ?: "")) },
+            confirmButton = { LinkButton(onClick = close) { Text(tr(S.settings_ok)) } },
         )
         is Updates.Outcome.Failed -> GlassDialog(
             onDismissRequest = close,
-            title = { DialogTitle(tr("检查失败", "Check failed")) },
+            title = { DialogTitle(tr(S.settings_check_failed)) },
             text = { Text(u.why) },
-            confirmButton = { LinkButton(onClick = { view(Updates.PAGE) }) { Text(tr("打开发布页", "Open releases")) } },
-            dismissButton = { LinkButton(onClick = close) { Text(tr("关闭", "Close")) } },
+            confirmButton = { LinkButton(onClick = { view(Updates.PAGE) }) { Text(tr(S.settings_open_releases)) } },
+            dismissButton = { LinkButton(onClick = close) { Text(tr(S.ask_activity_close)) } },
         )
     }
 }
@@ -311,9 +312,9 @@ private fun UpdateDialog(u: Updates.Outcome, close: () -> Unit) {
 /** Per-app limits: blocked, read-only, ask every time. */
 @Composable
 fun RulesPage() {
-    MiuixPage(tr("应用规则", "App rules")) {
+    MiuixPage(tr(S.settings_app_rules)) {
         Group(padded = true) { VScreenAppRules() }
-        Footnote(tr("仅作用于副屏，不影响你自己使用。", "Applies only to the background screen, not to your own use."))
+        Footnote(tr(S.settings_applies_only_to_the_background))
     }
 }
 
@@ -338,30 +339,30 @@ fun TokensPage() {
     val tokenFold = rememberFold(4)
     val unused = remember(list, agents) { Tokens.neverUsed { id -> agents[id]?.used == true } }
     val fmt = remember { java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.ROOT) }
-    MiuixLazyPage(tr("令牌", "Tokens"), actions = {
-        LinkButton(onClick = { adding = true }, modifier = Modifier.padding(end = 12.dp)) { Text(tr("新建", "New")) }
+    MiuixLazyPage(tr(S.connect_tokens), actions = {
+        LinkButton(onClick = { adding = true }, modifier = Modifier.padding(end = 12.dp)) { Text(tr(S.settings_new_2)) }
     }) {
         item(key = "main") {
-            Group(tr("主令牌", "Main token")) {
+            Group(tr(S.settings_main_token)) {
                 BasicComponent(
                     title = if (show) token else "•".repeat(12) + token.takeLast(4),
-                    summary = tr("仅提供给信任的 agent", "Only for agents you trust"),
+                    summary = tr(S.settings_only_for_agents_you_trust),
                     endActions = {
-                        IconButton(onClick = { show = !show }) { Icon(if (show) MiuixIcons.Hide else MiuixIcons.Show, tr("显示令牌", "Show token")) }
-                        IconButton(onClick = { host.copy(tr("令牌", "Token"), token, sensitive = true) }) { Icon(MiuixIcons.Copy, tr("复制令牌", "Copy token")) }
-                        IconButton(onClick = { askRenew = true }) { Icon(MiuixIcons.Refresh, tr("重新生成令牌", "Regenerate token")) }
+                        IconButton(onClick = { show = !show }) { Icon(if (show) MiuixIcons.Hide else MiuixIcons.Show, tr(S.settings_show_token)) }
+                        IconButton(onClick = { host.copy(tr(S.connect_token), token, sensitive = true) }) { Icon(MiuixIcons.Copy, tr(S.settings_copy_token)) }
+                        IconButton(onClick = { askRenew = true }) { Icon(MiuixIcons.Refresh, tr(S.settings_regenerate_token)) }
                     },
                 )
             }
         }
         if (unused.isNotEmpty()) item(key = "unused") {
             Group {
-                BasicComponent(title = tr("删除 ${unused.size} 个未使用的令牌", "Remove ${unused.size} never-used tokens"),
-                    summary = tr("从未被任何请求使用；不影响主令牌和公网客户端", "No request ever used them; the main token and public clients are kept"),
+                BasicComponent(title = tr(S.settings_remove_never_used_tokens, unused.size),
+                    summary = tr(S.settings_no_request_ever_used_them),
                     onClick = { askUnused = unused })
             }
         }
-        cardItems(tr("每个 agent 一个令牌 · ${others.size}", "One token per agent · ${others.size}"), others, key = { it.id }, fold = tokenFold) { t ->
+        cardItems(tr(S.settings_one_token_per_agent, others.size), others, key = { it.id }, fold = tokenFold) { t ->
             TokenRow(t, fmt, open = { nav.go(Route.Agent(t.id)) }, remove = { askRemove = t })
         }
     }
@@ -369,64 +370,64 @@ fun TokensPage() {
     askUnused?.let { drop ->
         GlassDialog(
             onDismissRequest = { askUnused = null },
-            title = { DialogTitle(tr("删除 ${drop.size} 个没用过的令牌？", "Remove ${drop.size} never-used tokens?")) },
-            text = { Text(tr("这些令牌从未被使用过，删除后立即失效。", "These tokens were never used; they stop working once removed.")) },
+            title = { DialogTitle(tr(S.settings_remove_never_used_tokens_2, drop.size)) },
+            text = { Text(tr(S.settings_these_tokens_were_never_used)) },
             confirmButton = { LinkButton(onClick = {
                 val ids = drop.map { it.id }.toSet()
                 Thread { com.kilon.agentvscreen.api.Agents.forgetMany(ids) }.start()
                 Audit.security("token_cleanup", "removed ${ids.size} never-used tokens by hand")
-                host.say(tr("已删除 ${ids.size} 个", "Removed ${ids.size}"))
+                host.say(tr(S.settings_removed, ids.size))
                 askUnused = null
-            }) { Text(tr("删除", "Remove"), color = Palette.stopped) } },
-            dismissButton = { LinkButton(onClick = { askUnused = null }) { Text(tr("取消", "Cancel")) } },
+            }) { Text(tr(S.security_remove), color = Palette.stopped) } },
+            dismissButton = { LinkButton(onClick = { askUnused = null }) { Text(tr(S.app_picker_cancel)) } },
         )
     }
     askRemove?.let { t ->
         GlassDialog(
             onDismissRequest = { askRemove = null },
-            title = { DialogTitle(tr("删除「${t.name}」？", "Remove \"${t.name}\"?")) },
-            text = { Text(tr("该 agent 的令牌将立即失效，无法再连接；历史任务仍保留在记录中。", "The agent's token stops working at once and it can no longer connect; its past tasks stay in the records.")) },
+            title = { DialogTitle(tr(S.settings_remove, t.name)) },
+            text = { Text(tr(S.settings_the_agent_s_token_stops)) },
             confirmButton = { LinkButton(onClick = {
                 val id = t.id
                 Thread { com.kilon.agentvscreen.api.Agents.forget(actx, id) }.start()
                 Audit.security("revoke", t.name)
                 askRemove = null
-            }) { Text(tr("删除", "Remove"), color = Palette.stopped) } },
-            dismissButton = { LinkButton(onClick = { askRemove = null }) { Text(tr("取消", "Cancel")) } },
+            }) { Text(tr(S.security_remove), color = Palette.stopped) } },
+            dismissButton = { LinkButton(onClick = { askRemove = null }) { Text(tr(S.app_picker_cancel)) } },
         )
     }
     if (askRenew) GlassDialog(
         onDismissRequest = { askRenew = false },
-        title = { DialogTitle(tr("重新生成主令牌？", "Regenerate the main token?")) },
-        text = { Text(tr("旧令牌将立即失效，使用它的 agent 需要重新接入。", "The old token stops working at once; agents using it must connect again.")) },
-        confirmButton = { LinkButton(onClick = { ApiConfig.resetToken(); token = ApiConfig.token; askRenew = false; host.say(tr("已重新生成令牌", "Token regenerated")) }) { Text(tr("重新生成", "Regenerate")) } },
-        dismissButton = { LinkButton(onClick = { askRenew = false }) { Text(tr("取消", "Cancel")) } },
+        title = { DialogTitle(tr(S.settings_regenerate_the_main_token)) },
+        text = { Text(tr(S.settings_the_old_token_stops_working)) },
+        confirmButton = { LinkButton(onClick = { ApiConfig.resetToken(); token = ApiConfig.token; askRenew = false; host.say(tr(S.settings_token_regenerated)) }) { Text(tr(S.connect_regenerate)) } },
+        dismissButton = { LinkButton(onClick = { askRenew = false }) { Text(tr(S.app_picker_cancel)) } },
     )
 }
 
 /** Every explanation, one group per setting: what the rows only name. */
 @Composable
 fun HelpPage() {
-    MiuixPage(tr("帮助", "Help")) {
+    MiuixPage(tr(S.settings_help)) {
         listOf(
-            tr("常驻运行、按需启动和关闭", "Always running, on demand and off") to ServiceControl.help(),
-            tr("运行位置", "Where the agent runs") to H.where,
-            tr("接入方式", "How it connects") to H.how,
-            tr("令牌", "Tokens") to (H.token + "\n\n" + H.tokens),
-            tr("确认方式", "Confirmations") to H.autonomy,
-            tr("应用规则", "App rules") to H.rules,
-            tr("悬浮窗", "Floating window") to H.window,
-            tr("空闲省电", "Idle power saving") to H.idle,
-            tr("熄屏时", "When screen is off") to H.keepOn,
-            tr("过热保护", "Thermal protection") to H.thermal,
-            tr("副屏静音", "Mute the screen") to H.mute,
-            tr("任务轮次时长", "Turn idle timeout") to H.turn,
-            tr("定时预约", "Schedules") to H.schedule,
-            tr("示教", "Routines") to H.lessons,
-            tr("操作日志", "Activity log") to H.audit,
-            tr("事件广播", "Event broadcast") to H.events,
-            tr("首次配置", "Setup") to H.setup,
-            tr("诊断", "Diagnostics") to H.diag,
+            tr(S.settings_always_running_on_demand_and) to ServiceControl.help(),
+            tr(S.connect_where_the_agent_runs) to H.where,
+            tr(S.settings_how_it_connects) to H.how,
+            tr(S.connect_tokens) to (H.token + "\n\n" + H.tokens),
+            tr(S.settings_confirmations) to H.autonomy,
+            tr(S.settings_app_rules) to H.rules,
+            tr(S.settings_floating_window) to H.window,
+            tr(S.settings_idle_power_saving) to H.idle,
+            tr(S.settings_when_screen_is_off) to H.keepOn,
+            tr(S.settings_thermal_protection) to H.thermal,
+            tr(S.settings_mute_the_screen) to H.mute,
+            tr(S.settings_turn_idle_timeout) to H.turn,
+            tr(S.records_schedules) to H.schedule,
+            tr(S.records_routines) to H.lessons,
+            tr(S.records_activity_log) to H.audit,
+            tr(S.settings_event_broadcast) to H.events,
+            tr(S.settings_setup) to H.setup,
+            tr(S.settings_diagnostics) to H.diag,
         ).forEach { (t, body) ->
             Group(t, padded = true) { SelectionContainer { Text(body, fontSize = 14.sp, lineHeight = 22.sp) } }
         }
@@ -440,44 +441,25 @@ fun Footnote(t: String) = Text(t, fontSize = 12.sp, lineHeight = 17.sp, color = 
 
 /** The long words. 1.4: all of them on the Help page (and nowhere else), one paragraph per setting. */
 internal object H {
-    val where get() = tr("本机运行的 agent（Termux、Minis、Operit 等）直接连接 127.0.0.1:${ApiConfig.port}，无需额外配置。\n\n电脑、云服务器或其他手机上的 agent 通过 Tailscale 连接：仅允许你的 Tailscale 网络内的设备访问，流量经加密隧道传输，局域网和公网均无法直接访问，且仍需令牌。“内置”模式无需安装 Tailscale App；“外部 App”模式使用本机已安装的 Tailscale。\n\n云端 agent 若不在你的 Tailscale 网络内，可使用公网 MCP（Tailscale Funnel、Cloudflare Tunnel 或 ngrok，均经手机上的 OAuth 配对），默认关闭。",
-        "Agents on this phone (Termux, Minis, Operit, ...) connect to 127.0.0.1:${ApiConfig.port} directly; no setup is needed.\n\nAgents on a computer, a cloud server or another phone connect through Tailscale: only devices in your Tailscale network can reach the service, over an encrypted tunnel; the local network and the internet cannot, and a token is still required. Built-in mode needs no Tailscale app; External app mode uses the Tailscale app on this phone.\n\nCloud agents outside your Tailscale network can use public MCP (Tailscale Funnel, Cloudflare Tunnel or ngrok, all with OAuth pairing on the phone), which is off by default.")
-    val how get() = tr("命令行：适用于带终端的 agent。将“接入消息”发送给它，它会安装 vscreen 命令，并把这项能力写入长期记忆，供之后的新对话使用；只提供安装命令时，多数 agent 不会保留这项能力。\n\nMCP：适用于支持 MCP 的 agent。“接入消息”包含 MCP 配置（streamable HTTP，每条命令对应一个工具，截图随结果返回）和能力说明。\n\nHTTP：适用于自行编写调用代码的 agent 应用。返回 JSON（ok、code、next、text、images、steps、screen、notes），完整说明见 GET /v2/help。\n\n能力说明也可以直接粘贴到 agent 的“自定义指令”或“记忆”设置中。",
-        "Shell: agents with a terminal. Send them the message: it installs the vscreen command and has the agent save \"I can operate apps on the phone in the background\" in its long-term memory, so new conversations use it too. With only the install command, most agents forget it.\n\nMCP: agents with MCP. The message has the MCP config (streamable HTTP, one tool per command, screenshots attached) and the ability note.\n\nHTTP: agent apps that write their own calls. Replies are JSON (ok, code, next, text, images, steps, screen, notes); full reference at GET /v2/help.\n\nYou can also paste the ability note into the agent's custom instructions or memory setting.")
-    val token get() = tr("令牌是 agent 的访问凭据，持有令牌即可在副屏上操作你的应用，请只提供给信任的 agent。服务只接受本机请求（开启远程后还接受你 Tailscale 网络内的设备），拒绝所有网页发起的调用。重新生成主令牌后旧令牌立即失效，使用它的 agent 需重新接入。",
-        "A token is an agent's credential: whoever holds it can operate your apps on the background screen, so give it only to agents you trust. The service accepts only this phone (and, with remote access on, devices in your Tailscale network) and refuses all calls from web pages. Regenerating the main token invalidates the old one at once; agents using it must connect again.")
-    val autonomy get() = tr("确认分两种强度：\n• 指纹或锁屏密码（未设锁屏时长按 3 秒）：支付、接入新 agent、放宽 agent 的权限、开启公网接入、临时免确认支付。\n• 单击“允许”：其余需确认的操作，包括不可撤销操作、敏感操作、高频操作，以及设为“每次确认”的应用中的操作。\n\n单击确认可选择许可范围：仅此一次、本轮任务内（超过“任务轮次时长”无新命令即结束）或今天内。范围内同一 agent 在同一应用中的同类操作不再请求确认（设为“每次确认”的应用同样适用）。支付不用这些范围，每一笔单独确认；唯一例外是你在 agent 详情页开启的“临时免确认支付（30 分钟）”。\n\n所有档位下：每一步都写入操作日志；可随时在悬浮窗停止 agent 或接管；确认请求 60 秒内未处理时该步不执行，agent 会提示你处理。",
-        "Confirmations come in two strengths:\n• Fingerprint or screen-lock PIN (a 3-second hold without a screen lock): payments, connecting a new agent, widening an agent's permissions, enabling public access, payments without confirmation.\n• One tap on Allow: everything else that needs confirmation, including irreversible, sensitive and high-rate actions and actions in confirm-every-time apps.\n\nA tap can cover Just this once, This turn (ends once no command arrives for a turn length) or Today; within that range the same agent, action type and app are not asked again (apps set to confirm every time included). Payments take no scope: each one is confirmed on its own, unless you turned on \"Payments without confirmation (30 min)\" on the agent's page.\n\nAt every level: each step is logged; you can stop the AI or take over from the floating window at any time; a confirmation left unanswered for 60 s means the step is not done, and the agent will ask you to respond.")
-    val rules get() = tr("禁止操作：AI 不能在副屏打开、读取或操作该应用。\n只读：AI 可以打开、查看和滚动，但不能点击、输入或滑动。\n每次确认：AI 点击或输入前需在手机上确认，可选择仅此一次、本轮任务内或今天内。\n\n应用规则对所有 agent 生效，优先于 agent 的权限档位；仅作用于副屏，不影响你自己使用。",
-        "Blocked: the AI cannot open, read or operate the app on the background screen.\nRead-only: the AI can open, view and scroll, but cannot tap, type or swipe.\nConfirm every time: before the AI taps or types, you confirm on the phone, for just this once, this turn or today.\n\nApp rules apply to every agent and take precedence over its permission level. They affect only the background screen, not your own use.")
-    val tokens get() = tr("每个 agent 使用独立令牌：各自有权限档位，可单独移除，操作日志按令牌区分来源；不同令牌的 agent 不能接管彼此的会话。\n\n“临时免确认支付（30 分钟）”位于 agent 详情页：开启期间该 agent 的支付操作不再请求确认（仍写入操作日志）。仅在你在场监督时使用。",
-        "Each agent uses its own token: it has its own permission level, can be removed alone, and the activity log shows which token did what; agents with different tokens cannot take over each other's sessions.\n\n\"Payments without confirmation (30 min)\" is on the agent's page: while on, that agent's payments are not confirmed (still logged). Use it only while you are watching.")
-    val window get() = tr("副屏存在时显示在所有应用上层。拖动可移动，双指缩放可调整大小，拖至屏幕边缘可收起为侧边标签，长按画面 0.5 秒可接管。agent 等待你回复时，侧边标签显示为紫色问号。",
-        "Shown above all apps while the background screen exists. Drag to move, pinch to resize, push to an edge to fold it into a side tab, hold the picture 0.5 s to take over. While an agent waits for your reply, the tab shows a violet question mark.")
-    val idle get() = tr("每轮任务结束后暂停副屏渲染以节省电量；页面状态保留，收到下一条命令时自动恢复。少数应用恢复时会重新加载，遇到这种情况可关闭此项。",
-        "Pauses background-screen rendering after each turn to save power; the page is kept and resumes with the next command. A few apps reload on resume; turn this off if that happens.")
-    val keepOn get() = tr("决定手机熄屏时对主屏与副屏输入的处理方式：\n\n• 允许熄屏（默认）：主屏按系统超时自动熄屏，不点亮主屏。若系统在熄屏时拦截副屏触摸，按文字或元素编号的点击、滚动和输入会自动改走无障碍通道，坐标或手势操作会直接报错提示。\n• 任务中保持亮屏：仅在 agent 任务进行期间保持主屏不自动熄灭（可变暗），任务结束、出错或停止时立刻释放；按电源键手动熄屏仍有效，不会主动重新点亮。\n• 需要时点亮：包含“任务中保持亮屏”的全部行为；另外当手机已熄屏、系统拦截副屏触摸且操作只能走触摸手势时，会短暂点亮主屏（停在锁屏页，不解锁）并受频率和过热保护限制，任务结束后自动释放。\n\n注意：保持亮屏期间手机不会自动锁屏，也会多耗电。",
-        "Controls main-screen wake and background-screen input when the phone screen turns off:\n\n• Allow sleep (default): the main screen sleeps normally and is never woken. When the system blocks touch on the background screen while off, element taps, scrolls, and typing switch to accessibility automatically; coordinate taps and gestures refuse with guidance.\n• Keep on during tasks: prevents the main screen from timing out (may dim) only while an agent turn is active, and releases immediately when the turn ends, fails, or stops. Pressing the power button still turns the screen off without waking it back up.\n• Wake when needed: includes Keep on during tasks; additionally, when the screen is off, touch is blocked, and a gesture or coordinate action cannot use accessibility, it briefly wakes the main screen to the lock screen (never unlocking) under rate and thermal limits, then releases when the turn ends.\n\nNote: while kept on, the phone does not auto-lock and uses more battery.")
-    val thermal get() = tr("为避免长时间后台任务导致手机过热，热保护分三层：\n\n• 降负载与暂停识别：电池升温或系统热状态升高时，自动降低副屏帧率、改用轻量文字识别，必要时暂停 OCR 与后台唤醒。\n• 过热自动停止（默认开启）：电池达到 45.0°C 或系统热状态达到严重级别时停止后台任务并锁定。离开危险区后，电池低于 43.0°C 且热状态低于严重持续 60 秒即可在首页电源菜单手动恢复（1 小时内再次触发将收紧为低于 39.0°C 且热状态低于中度持续 180 秒）。\n• 关闭过热自动停止：不再强制停止或锁定，进入高温区时仅发一条不阻断的高优先级提醒；降负载策略与 Android 系统自带的降频和过热关机保护仍然有效。",
-        "Thermal protection works in three layers to keep long background runs safe:\n\n• Load throttling: as battery temperature or system thermal status rises, frame rate drops, OCR falls back to the lighter engine, and OCR or background wakes pause when needed.\n• Auto-stop when overheating (on by default): stops background work and latches when battery reaches 45.0°C or system thermal status reaches severe. Once out of the danger zone, holding below 43.0°C and below severe status for 60 s lets you resume manually in the Home power menu (a second trip within 1 hour tightens recovery to below 39.0°C and below moderate status for 180 s).\n• Turning auto-stop off: disables hard stop and latch, posting a single non-blocking high-priority warning per danger-zone entry while keeping load throttling and Android's built-in thermal protection active.")
-    val mute get() = tr("副屏中的应用不通过手机扬声器播放声音（如视频、直播）。应用移到主屏或副屏释放时恢复声音；App 异常退出后，下次连接时自动恢复。",
-        "Apps on the background screen do not play sound through the phone (videos, live streams). Sound returns when an app moves to the main screen or the screen is released; after a crash it is restored on the next connection.")
-    val turn get() = tr("agent 超过该时长未发送新命令即视为本轮任务结束：副屏随后进入省电暂停，10 分钟后释放。agent 也可以用 vscreen done 立即结束本轮。该时长同时决定“本轮任务内”许可的有效期。",
-        "A turn ends when the agent sends no command for this long: the screen then pauses to save power and is released 10 minutes later. The agent can end a turn at once with vscreen done. This length also sets how long a \"This turn\" allowance lasts.")
-    val lessons get() = tr("示教是你在副屏上录制并保存的操作流程。agent 用 act \"use 名称\" 调用；点开可查看每一步，不再需要的可删除。\n\n示教在全屏页面录制：由 agent 用 teach 发起请求，或你接管后手动开始录制。",
-        "A routine is a procedure you recorded on the background screen and saved. An agent calls it with act \"use name\"; open one to see its steps, and delete those you no longer need.\n\nRoutines are recorded on the full-screen page: an agent requests one with teach, or you take over and start recording.")
-    val schedule get() = tr("agent 的定时任务需要使用手机时，可用 vscreen schedule 预约时间。预约时间前 3 分钟会启动服务并自检，未就绪时发送通知。\n\n服务处于暂停状态时，到点自动开启；服务已关闭时不自动开启，仅发送通知。\n\n点开预约可修改时间、重复规则和保持时长；关闭开关会保留预约但到点不触发。",
-        "An agent whose timed task needs the phone can book the time with vscreen schedule. 3 minutes before, the service starts and checks itself, and you are notified if it is not ready.\n\nWhile the service is paused, a booking turns it on; while it is off, a booking only notifies you.\n\nOpen a booking to change its time, repeat rule and duration; switching it off keeps it without firing.")
-    val audit get() = tr("记录每条命令的来源（令牌、设备或公网来源地址）、时间、内容和结果。输入的文字只记录字数。",
-        "Records each command's source (token, device or public source address), time, content and result. Typed text is recorded as a length only.")
-    val events get() = tr("监视条件触发时，事件默认只进入队列，由 agent 通过 vscreen events 读取。填写应用包名后，事件还会广播给该应用，其他应用收不到。",
-        "Events from watches are queued by default and read by agents with vscreen events. With a package name set, each event is also broadcast to that app only.")
-    val privilege get() = tr("Agent-VScreen 需要 shell 级权限来创建副屏、注入点击和启动应用，可从以下两种来源中选择一种：\n\n• Shizuku / 兼容分支（默认）：无需 root，自动识别 Shizuku、Sui、AXManager 等兼容分支。手机每次重启后需重新启动服务；Android 17+ 如官方 Shizuku 受限，可选兼容分支或改用 Root。\n• Root：适用于已通过 Magisk、KernelSU、APatch 等获取 root 的手机，无需安装 Shizuku。首次使用时需在 root 管理器中授权，之后打开 App 即自动启动。副屏服务优先以 shell 身份运行，行为与 Shizuku 的 ADB 模式一致。\n\n切换来源时当前副屏会关闭，下一条命令通过新来源自动重新连接。",
-        "Agent-VScreen needs shell-level permission to open the background screen, tap and start apps. It comes from one of two sources:\n\n• Shizuku / compatible forks (default): no root needed. Recognizes Shizuku, Sui, AXManager and other compatible forks. Restart the manager after each phone reboot; on Android 17+, if official Shizuku is limited, use a compatible fork or Root.\n• Root: for phones rooted with Magisk, KernelSU, APatch and the like; Shizuku is not needed. The root manager asks once; after that it starts by itself when the app opens. The screen service runs as the shell user where it can, exactly as under Shizuku's ADB mode.\n\nSwitching closes the current screen; the next command reconnects through the new source by itself.")
-    val setup get() = tr("仅使用 Shizuku（或 Root）作为特权通道：不占用 adb、不修改无线调试、不重启 adbd。每一项只为本应用添加授权，不改动其他应用的设置；agent 自己使用的 adb / Shizuku 不受影响。",
-        "Uses only Shizuku (or root) as the privilege channel: adb is not taken, wireless debugging is not changed, adbd is not restarted. Each item only grants this app and leaves other apps' settings alone; your agent's own adb / Shizuku keep working.")
-    val diag get() = tr("汇总版本、配置状态和最近日志，用于问题反馈；不包含令牌和你输入的文字。",
-        "Collects version, setup state and recent logs for bug reports; contains no tokens and nothing you typed.")
+    val where get() = tr(S.settings_agents_on_this_phone_termux, ApiConfig.port)
+    val how get() = tr(S.settings_shell_agents_with_a_terminal)
+    val token get() = tr(S.settings_a_token_is_an_agent)
+    val autonomy get() = tr(S.settings_confirmations_come_in_two_strengths)
+    val rules get() = tr(S.settings_blocked_the_ai_cannot_open)
+    val tokens get() = tr(S.settings_each_agent_uses_its_own)
+    val window get() = tr(S.settings_shown_above_all_apps_while)
+    val idle get() = tr(S.settings_pauses_background_screen_rendering_after)
+    val keepOn get() = tr(S.settings_controls_main_screen_wake_and)
+    val thermal get() = tr(S.settings_thermal_protection_works_in_three)
+    val mute get() = tr(S.settings_apps_on_the_background_screen)
+    val turn get() = tr(S.settings_a_turn_ends_when_the)
+    val lessons get() = tr(S.settings_a_routine_is_a_procedure)
+    val schedule get() = tr(S.settings_an_agent_whose_timed_task)
+    val audit get() = tr(S.settings_records_each_command_s_source)
+    val events get() = tr(S.settings_events_from_watches_are_queued)
+    val privilege get() = tr(S.settings_agent_vscreen_needs_shell_level)
+    val setup get() = tr(S.settings_uses_only_shizuku_or_root)
+    val diag get() = tr(S.settings_collects_version_setup_state_and)
 }
 
 /**
@@ -488,7 +470,7 @@ internal object H {
 fun SecurityPage() {
     val c = MiuixTheme.colorScheme
     val levels = Tokens.LEVELS.filter { it != com.kilon.agentvscreen.api.Policy.CUSTOM }
-    MiuixPage(title = tr("权限档位", "Permission levels")) {
+    MiuixPage(title = tr(S.settings_permission_levels)) {
         Card(Modifier.padding(horizontal = 12.dp, vertical = 8.dp).fillMaxWidth(), insideMargin = PaddingValues(12.dp)) {
             Row(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
                 Spacer(Modifier.weight(1.4f))
@@ -505,8 +487,8 @@ fun SecurityPage() {
                 }
             }
         }
-        Footnote(tr("在 接入 › agent 详情 中为每个 agent 选择档位，可逐项修改或使用“自定义”。放宽权限需指纹验证，收紧立即生效。经公网接入的 agent 在任何档位都不能做系统操作。", "Pick a level for each agent under Connect › the agent; rows can be changed one by one, or use Custom. Widening needs a fingerprint; narrowing applies at once. Agents connected over the public internet can never do system actions, at any level."))
-        Group(tr("确认方式", "Confirmations"), padded = true) {
+        Footnote(tr(S.settings_pick_a_level_for_each))
+        Group(tr(S.settings_confirmations), padded = true) {
             Text(H.autonomy, fontSize = 14.sp, lineHeight = 22.sp)
         }
     }
@@ -519,7 +501,7 @@ fun FloatingWindowPage() {
     var help by remember { mutableStateOf(false) }
 
     MiuixPage(
-        title = tr("悬浮窗", "Floating window"),
+        title = tr(S.settings_floating_window),
         actions = {
             LinkButton(onClick = { help = true }) { Text("?") }
         },
@@ -528,17 +510,17 @@ fun FloatingWindowPage() {
             SwitchPreference(
                 checked = s.showPreview,
                 onCheckedChange = { BackgroundOperation.setShowPreview(it); if (it) Overlay.refresh() },
-                title = tr("显示悬浮窗", "Show floating window"),
+                title = tr(S.settings_show_floating_window),
             )
             SwitchPreference(
                 checked = s.miniShowControls,
                 onCheckedChange = { BackgroundOperation.setMiniShowControls(it) },
-                title = tr("小窗显示按钮", "Show buttons on mini window"),
+                title = tr(S.settings_show_buttons_on_mini_window),
             )
             SwitchPreference(
                 checked = s.miniTapToExpand,
                 onCheckedChange = { BackgroundOperation.setMiniTapToExpand(it) },
-                title = tr("点小窗自动放大", "Tap mini window to expand"),
+                title = tr(S.settings_tap_mini_window_to_expand),
             )
         }
     }
@@ -546,18 +528,15 @@ fun FloatingWindowPage() {
     if (help) {
         GlassDialog(
             onDismissRequest = { help = false },
-            title = { DialogTitle(tr("悬浮窗说明", "About floating window")) },
+            title = { DialogTitle(tr(S.settings_about_floating_window)) },
             text = {
                 Text(
-                    tr(
-                        "• 打开方式：每次有新的副屏时，悬浮窗以右上角小窗打开，轻点放大；同一副屏期间，沿用你调整后的大小和位置。\n\n• 显示悬浮窗：有副屏时在最上层显示实时画面。\n\n• 小窗显示按钮：默认开启，右上角小窗也显示标题、全屏、关闭和停止 agent 按钮。\n\n• 点小窗自动放大：默认开启；关闭后轻点小窗不再居中放大，只保留拖动、贴边折叠和长按操作。",
-                        "• How it opens: each new background screen opens as the small window in the top right corner; tap to enlarge. While the same screen is up, your size and position are kept.\n\n• Show floating window: displays the live background screen above other apps.\n\n• Show buttons on mini window: on by default; the compact corner window also shows title, fullscreen, close and Stop agent buttons.\n\n• Tap mini window to expand: on by default; turn off so tapping the mini window stays compact instead of expanding to center.",
-                    ),
+                    tr(S.settings_how_it_opens_each_new),
                     fontSize = 13.5.sp,
                     lineHeight = 20.sp,
                 )
             },
-            confirmButton = { LinkButton(onClick = { help = false }) { Text(tr("完成", "Done")) } },
+            confirmButton = { LinkButton(onClick = { help = false }) { Text(tr(S.connect_done)) } },
         )
     }
 }
@@ -583,32 +562,32 @@ fun ThermalPage() {
         }
     }
 
-    val tempText = snap.tempTenths?.let { String.format(java.util.Locale.ROOT, "%.1f°C", it / 10.0) } ?: tr("未知", "Unknown")
+    val tempText = snap.tempTenths?.let { String.format(java.util.Locale.ROOT, "%.1f°C", it / 10.0) } ?: tr(S.settings_unknown)
     val statusText = com.kilon.agentvscreen.host.ThermalGuard.thermalStatusName(snap.status)
     val phaseText = when (snap.phase) {
-        com.kilon.agentvscreen.host.HeatPolicy.Phase.NORMAL -> tr("正常", "Normal")
-        com.kilon.agentvscreen.host.HeatPolicy.Phase.LOCKED_HOT -> tr("过热锁定", "Locked (hot)")
-        com.kilon.agentvscreen.host.HeatPolicy.Phase.COOLING -> tr("冷却等待", "Cooling")
-        com.kilon.agentvscreen.host.HeatPolicy.Phase.READY -> tr("可手动恢复", "Ready to resume")
+        com.kilon.agentvscreen.host.HeatPolicy.Phase.NORMAL -> tr(S.settings_normal)
+        com.kilon.agentvscreen.host.HeatPolicy.Phase.LOCKED_HOT -> tr(S.settings_locked_hot)
+        com.kilon.agentvscreen.host.HeatPolicy.Phase.COOLING -> tr(S.settings_cooling)
+        com.kilon.agentvscreen.host.HeatPolicy.Phase.READY -> tr(S.settings_ready_to_resume)
     }
 
     MiuixPage(
-        title = tr("过热保护", "Thermal protection"),
+        title = tr(S.settings_thermal_protection),
         actions = {
             LinkButton(onClick = { help = true }) { Text("?") }
         },
     ) {
-        Group(tr("当前状态", "Current status")) {
+        Group(tr(S.settings_current_status)) {
             BasicComponent(
-                title = tr("电池温度", "Battery temperature"),
+                title = tr(S.settings_battery_temperature),
                 endActions = { Value(tempText) },
             )
             BasicComponent(
-                title = tr("系统热状态", "Thermal status"),
+                title = tr(S.settings_thermal_status),
                 endActions = { Value(statusText) },
             )
             BasicComponent(
-                title = tr("保护状态", "Protection state"),
+                title = tr(S.settings_protection_state),
                 summary = if (snap.phase != com.kilon.agentvscreen.host.HeatPolicy.Phase.NORMAL) {
                     com.kilon.agentvscreen.host.ThermalGuard.formatReason(snap)
                 } else null,
@@ -622,7 +601,7 @@ fun ThermalPage() {
             )
         }
 
-        Group(tr("控制", "Control")) {
+        Group(tr(S.settings_control)) {
             SwitchPreference(
                 checked = hardStopOn,
                 onCheckedChange = { want ->
@@ -633,7 +612,7 @@ fun ThermalPage() {
                         confirmOff = true
                     }
                 },
-                title = tr("过热自动停止", "Auto-stop when overheating"),
+                title = tr(S.settings_auto_stop_when_overheating),
             )
         }
     }
@@ -641,13 +620,10 @@ fun ThermalPage() {
     if (confirmOff) {
         GlassDialog(
             onDismissRequest = { confirmOff = false },
-            title = { DialogTitle(tr("关闭过热自动停止？", "Turn off overheat auto-stop?")) },
+            title = { DialogTitle(tr(S.settings_turn_off_overheat_auto_stop)) },
             text = {
                 Text(
-                    tr(
-                        "关闭后，长时间任务可能让手机过热：发烫、降频卡顿、电池加速老化，严重时系统会强制关机。之后只剩 Android 系统自带的降频和过热关机保护。",
-                        "When turned off, long-running tasks may overheat the phone: excessive heat, thermal throttling and lag, accelerated battery wear, and in severe cases forced shutdown by the system. Only Android's built-in throttling and thermal shutdown will remain.",
-                    ),
+                    tr(S.settings_when_turned_off_long_running),
                     fontSize = 13.5.sp,
                     lineHeight = 20.sp,
                 )
@@ -657,10 +633,10 @@ fun ThermalPage() {
                     com.kilon.agentvscreen.host.ThermalGuard.setHardStopEnabled(false)
                     snap = com.kilon.agentvscreen.host.ThermalGuard.snapshot()
                     confirmOff = false
-                }) { Text(tr("确认关闭", "Turn off"), color = Palette.stopped) }
+                }) { Text(tr(S.settings_turn_off), color = Palette.stopped) }
             },
             dismissButton = {
-                LinkButton(onClick = { confirmOff = false }) { Text(tr("取消", "Cancel")) }
+                LinkButton(onClick = { confirmOff = false }) { Text(tr(S.app_picker_cancel)) }
             },
         )
     }
@@ -668,9 +644,9 @@ fun ThermalPage() {
     if (help) {
         GlassDialog(
             onDismissRequest = { help = false },
-            title = { DialogTitle(tr("过热保护说明", "About thermal protection")) },
+            title = { DialogTitle(tr(S.settings_about_thermal_protection)) },
             text = { Text(H.thermal, fontSize = 13.5.sp, lineHeight = 20.sp) },
-            confirmButton = { LinkButton(onClick = { help = false }) { Text(tr("完成", "Done")) } },
+            confirmButton = { LinkButton(onClick = { help = false }) { Text(tr(S.connect_done)) } },
         )
     }
 }

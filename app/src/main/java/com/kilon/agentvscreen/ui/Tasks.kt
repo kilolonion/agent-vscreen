@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.runtime.mutableStateOf
 
@@ -84,14 +85,14 @@ private fun iconBitmap(d: android.graphics.drawable.Drawable): android.graphics.
 
 /** What the user reads as the task's name: the agent's own title, else what happened where. */
 fun taskTitle(t: TaskLog.Task, app: String?): String = t.title
-    ?: if (app != null) tr("在${app}里操作了 ${t.commands} 步", "${steps(t.commands)} in $app") else tr("操作了 ${t.commands} 步", steps(t.commands))
+    ?: if (app != null) tr(S.tasks_in, app, t.commands, steps(t.commands)) else tr(S.tasks_steps_done, t.commands, steps(t.commands))
 
 /** How it ended, and whether that is good news. */
 fun taskOutcome(t: TaskLog.Task): Pair<String, Boolean> = when {
-    t.running -> tr("进行中", "Running") to true
-    t.stoppedByUser -> tr("已由你停止", "Stopped by you") to false
-    t.lastCode != "OK" -> tr("未完成", "Not finished") to false
-    else -> tr("完成", "Done") to true
+    t.running -> tr(S.tasks_running) to true
+    t.stoppedByUser -> tr(S.tasks_stopped_by_you) to false
+    t.lastCode != "OK" -> tr(S.tasks_not_finished) to false
+    else -> tr(S.connect_done) to true
 }
 
 private val hm = SimpleDateFormat("HH:mm", Locale.ROOT)
@@ -99,7 +100,7 @@ fun hhmm(at: Long): String = hm.format(Date(at))
 
 fun took(t: TaskLog.Task): String {
     val s = (((if (t.running) System.currentTimeMillis() else t.end) - t.start) / 1000).coerceAtLeast(1)
-    return if (s < 60) tr("$s 秒", "${s}s") else tr("${s / 60} 分 ${s % 60} 秒", "${s / 60}m ${s % 60}s")
+    return if (s < 60) tr(S.tasks_s, s) else tr(S.tasks_m_s, s / 60, s % 60)
 }
 
 /** One of a task's small frames, read off the disk once. */
@@ -205,7 +206,7 @@ fun TaskCard(t: TaskLog.Task, onClick: () -> Unit) {
 @Composable
 fun TaskPage(id: Long) {
     val t = remember(id) { TaskLog.recent().firstOrNull { it.id == id } }
-    if (t == null) { MiuixPage(tr("任务", "Task")) { Note(tr("该记录已不存在", "This record no longer exists"), modifier = Modifier.padding(24.dp)) }; return }
+    if (t == null) { MiuixPage(tr(S.tasks_task)) { Note(tr(S.tasks_this_record_no_longer_exists), modifier = Modifier.padding(24.dp)) }; return }
     val (app, _) = appOf(t.pkg)
     val (word, good) = taskOutcome(t)
     val rows by produceState(emptyList<JSONObject>(), id) {
@@ -229,8 +230,8 @@ fun TaskPage(id: Long) {
                 TaskFrame(f, Modifier.weight(1f).aspectRatio(0.45f).clickable(enabled = f != null) { preview = t.frames to i }, 12.dp)
             }
         }
-        Group(tr("每一步", "Every step")) {
-            if (rows.isEmpty()) Note(tr("日志里没有这次的命令了", "The log no longer has these commands"), modifier = Modifier.padding(16.dp))
+        Group(tr(S.tasks_every_step)) {
+            if (rows.isEmpty()) Note(tr(S.tasks_the_log_no_longer_has), modifier = Modifier.padding(16.dp))
             // Newest first, as before; numbered in the order they were sent.
             rows.asReversed().forEachIndexed { i, o ->
                 val ok = o.optInt("exit") == 0
@@ -268,13 +269,13 @@ private fun StepSheet(o: JSONObject?, open: (String) -> Unit, close: () -> Unit)
             Column(Modifier.padding(20.dp).fillMaxWidth().heightIn(max = 640.dp).clip(RoundedCornerShape(28.dp)).background(c.surfaceContainer.copy(alpha = 0.96f))
                 .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }, indication = null) { }
                 .verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(tr("第 ${o.optInt("n")} 步", "Step ${o.optInt("n")}"), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = c.primary)
+                Text(tr(S.tasks_step, o.optInt("n")), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = c.primary)
                 Text(o.optString("cmd"), fontSize = 15.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
                 Text(hhmmss(o.optLong("at")) + (if (o.has("ms")) " · ${o.optLong("ms")} ms" else "") + " · " + o.optString("code"), fontSize = 13.sp, color = if (ok) c.onSurfaceVariantSummary else Palette.stopped)
                 com.kilon.agentvscreen.cmd.Codes.of(o.optString("code"))?.takeIf { !ok }?.let { Text(it.text, fontSize = 13.sp, lineHeight = 19.sp, color = c.onSurfaceVariantSummary) }
                 // 1.4.0-beta9 (rainbow: the preview was cut to a phone shape; a reply picture can be wide): its own proportions.
                 frame?.let { f -> NaturalFrame(f, Modifier.align(Alignment.CenterHorizontally).clickable { open(f) }) }
-                Text(o.optString("text").ifEmpty { tr("（这一步没有存下回执文字）", "(no reply text was kept for this step)") }, fontSize = 12.sp, lineHeight = 17.sp,
+                Text(o.optString("text").ifEmpty { tr(S.tasks_no_reply_text_was_kept) }, fontSize = 12.sp, lineHeight = 17.sp,
                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, color = c.onSurface)
             }
         }

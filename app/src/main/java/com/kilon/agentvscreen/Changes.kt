@@ -22,8 +22,8 @@ object Changes {
         val enDetail: String,
         val route: Route? = null,
     ) {
-        val title: String get() = tr(zhTitle, enTitle)
-        val detail: String get() = tr(zhDetail, enDetail)
+        val title: String get() = trPair(zhTitle, enTitle)
+        val detail: String get() = trPair(zhDetail, enDetail)
     }
 
     data class Release(

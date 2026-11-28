@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import android.content.Intent
 import com.kilon.agentvscreen.host.quiet
@@ -91,7 +92,7 @@ object EventHub {
             ctx.sendBroadcast(Intent(ACTION).setPackage(target).putExtra("session", session).putExtra("kind", kind).putExtra("name", name)
                 .putExtra("seq", ev.optLong("seq")).putExtra("text", text).putExtra("json", ev.toString())); true
         } == true
-        return tr("已放进会话 $session 的事件队列（vscreen events 取）", "Queued for session $session (collect with vscreen events)") + if (sent) tr("，并广播给 $target", " and broadcast to $target") else ""
+        return tr(S.event_hub_queued_for_session_collect_with, session) + if (sent) tr(S.event_hub_and_broadcast_to, target) else ""
     }
 
     /**

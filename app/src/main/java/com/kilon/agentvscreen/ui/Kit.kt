@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.Icon
@@ -150,13 +151,13 @@ fun Modifier.backdrop(): Modifier {
 fun Help(title: String, body: String, tint: Color = top.yukonga.miuix.kmp.theme.MiuixTheme.colorScheme.onSurfaceVariantActions) {
     var open by remember { mutableStateOf(false) }
     Box(Modifier.size(32.dp).clip(CircleShape).clickable { open = true }, contentAlignment = Alignment.Center) {
-        Icon(Icons.AutoMirrored.Outlined.HelpOutline, tr("说明", "About this"), tint = tint, modifier = Modifier.size(18.dp))
+        Icon(Icons.AutoMirrored.Outlined.HelpOutline, tr(S.kit_about_this), tint = tint, modifier = Modifier.size(18.dp))
     }
     if (open) GlassDialog(
         onDismissRequest = { open = false },
         title = { DialogTitle(title) },
         text = { Text(body, fontSize = 14.sp, lineHeight = 21.sp) },
-        confirmButton = { LinkButton(onClick = { open = false }) { Text(tr("知道了", "OK")) } },
+        confirmButton = { LinkButton(onClick = { open = false }) { Text(tr(S.app_ok)) } },
     )
 }
 

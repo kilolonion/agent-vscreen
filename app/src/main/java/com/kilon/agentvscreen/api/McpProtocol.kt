@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.cmd.CommandSpec
 import com.kilon.agentvscreen.tr
 import org.json.JSONArray
@@ -151,10 +152,7 @@ internal object McpProtocol {
         .put("idempotentHint", false)
         .put("openWorldHint", true)
 
-    fun serverInstructions(): String = tr(
-        "Agent-VScreen：这台手机上的后台副屏。要打开、查看或操作手机里的应用时用这里的工具，它在看不见的副屏上操作，不打扰用户主屏，不需要 adb。\n\n",
-        "Agent-VScreen: a background screen on this phone. To open, view or operate apps on the phone use these tools; they work on an invisible second screen, never disturb the user's screen, and need no adb.\n\n",
-    ) + AgentGuide.guide().replace("`vscreen ", "`")
+    fun serverInstructions(): String = tr(S.mcp_protocol_agent_vscreen_a_background_screen) + AgentGuide.guide().replace("`vscreen ", "`")
 
     fun jsonRpcResult(id: Any, r: JSONObject): JSONObject =
         JSONObject().put("jsonrpc", "2.0").put("id", id).put("result", r)
