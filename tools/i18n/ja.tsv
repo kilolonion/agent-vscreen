@@ -1,75 +1,75 @@
 # English text (as the app renders it, {0} {1} for inserted values) <TAB> Japanese. Newlines as ⏎.
-⏎Agents can no longer replay them with use.	⏎agent は use で再実行できなくなります。
+⏎Agents can no longer replay them with use.	⏎エージェントは use で再実行できなくなります。
 ⏎Tap to open Agent-VScreen.	⏎タップで Agent-VScreen を開きます。
   Using the screen now	  画面を使用中
  (as shell)	（shell として）
  (cannot be asked for)	（要求できません）
- (dropped {0}× in 10 min)	（10 分間に {0} 回切断）
- (for {0})	（{0} 用）
- (granted automatically once {0} is ready)	（{0} の準備ができると自動で許可されます）
+ (dropped {0}× in 10 min)	（10分間に{0}回切断）
+ (for {0})	（{0}用）
+ (granted automatically once {0} is ready)	（{0}の準備ができると自動で許可されます）
  (needs a new pairing)	（再ペアリングが必要）
  (note: {0})	（注：{0}）
- (once)	（1 回限り）
+ (once)	（1回限り）
  (optional)	（任意）
  (recommended)	（推奨）
  (tap to enlarge)	（タップで拡大）
  (temporary)	（一時的）
  (too many checks, try again later)	（確認回数が多すぎます。しばらくしてから再試行してください）
- ({0} changed)	（{0} 件変更）
- ({0} s)	（{0} 秒）
+ ({0} changed)	（{0}件変更）
+ ({0} s)	（{0}秒）
  ({0})	（{0}）
  ({0})	（{0}）
  ({0})	（{0}）
- It dropped {0} times in 10 minutes.	 10 分間に {0} 回切断されました。
+ It dropped {0} times in 10 minutes.	 10分間に{0}回切断されました。
  Saved in "{0}".	 「{0}」に保存しました。
  The system refused: on Xiaomi / Redmi turn on "USB debugging (Security settings)".	 システムに拒否されました：Xiaomi / Redmi では「USB デバッグ（セキュリティ設定）」をオンにしてください。
- {0} could not be restored.	 {0} を復元できませんでした。
+ {0} could not be restored.	 {0}を復元できませんでした。
  · expired	 · 期限切れ
  · expires 	 · 期限 
  · in use	 · 使用中
  · optional	 · 任意
  · paused	 · 一時停止中
  · payments unconfirmed until 	 · 支払い確認なし：期限 
- · used {0}×	 · {0} 回使用
- · {0} min	 · {0} 分
- · {0} min left	 · 残り {0} 分
- · {0} more	 · ほか {0} 件
-"{0}" asked you to show: {1}	「{0}」がやって見せてほしいと言いました：{1}
+ · used {0}×	 · {0}回使用
+ · {0} min	 · {0}分
+ · {0} min left	 · 残り{0}分
+ · {0} more	 · ほか{0}件
+"{0}" asked you to show: {1}	「{0}」が操作の実演を求めています：{1}
 "{0}" asked: {1}	「{0}」の質問：{1}
 "{0}" asks you	「{0}」からの質問
-"{0}" asks you to show	「{0}」がやって見せてほしいと言っています
-"{0}" booked by {1} goes; the service is no longer started for it.	{1} が予約した「{0}」を削除します。今後これのためにサービスは起動しません。
-"{0}" handed it to you; hand it back when done and it carries on from your page	「{0}」があなたに渡しました。終わったら返すと、あなたのページから続けます
+"{0}" asks you to show	「{0}」が操作の実演を求めています
+"{0}" booked by {1} goes; the service is no longer started for it.	{1}が予約した「{0}」を削除します。今後、この予約のためにサービスは起動しません。
+"{0}" handed it to you; hand it back when done and it carries on from your page	「{0}」から引き継ぎました。終わったらエージェントに戻すと、そのページから続けます
 "{0}" is using it. 	「{0}」が使用中です。
-"{0}" needs your OK	「{0}」があなたの OK を待っています
+"{0}" needs your OK	「{0}」が OK の確認待ちです
 "{0}" wants the screen too	「{0}」も画面を使いたがっています
 (Permissions changed: {0}. Full list: vscreen permissions.)	（権限が変更されました：{0}。一覧：vscreen permissions）
 (app overlay: the system may hide it for a secure page on the screen; turning on accessibility prevents that)	（アプリのオーバーレイ：画面に保護されたページがあるとシステムが隠すことがあります。ユーザー補助をオンにすると防げます）
 (no reply text was kept for this step)	（このステップの返信テキストは保存されていません）
 **What happened:**⏎⏎**Steps:**⏎⏎**Diagnostics summary (redacted; the full report is on the clipboard, paste it below):**	**何が起きたか：**⏎⏎**手順：**⏎⏎**診断の概要（伏せ字済み。完全なレポートはクリップボードにあるので下に貼り付けてください）：**
-+ Have the agent check after this	+ この後 agent に確認させる
-, so other devices cannot reach it for now ({0} s).	。そのため、しばらく他の端末から接続できません（{0} 秒）。
++ Have the agent check after this	+ この後エージェントに確認させる
+, so other devices cannot reach it for now ({0} s).	。そのため、しばらく他の端末から接続できません（{0}秒）。
 . Please do it by hand: 	。手動で行ってください：
 . The system refused: on Xiaomi / Redmi ask the user to turn on "USB debugging (Security settings)"	。システムに拒否されました：Xiaomi / Redmi ではユーザーに「USB デバッグ（セキュリティ設定）」をオンにしてもらってください
-1 day	1 日
+1 day	1日
 1 · Address (you add it to the client)	1 · アドレス（クライアントに追加します）
-10-minute one-time onboarding code	10 分間有効な一回限りの接続コード
-2 · Message for the agent	2 · agent へのメッセージ
-3 minutes before, the service is started and checked; you are told if it is not ready. Open one to change it; switched off it is kept but does not fire.	3 分前にサービスを起動して確認し、準備ができていなければ通知します。開くと変更でき、オフにすると保存されたまま実行されません。
-30 days	30 日
-7 days	7 日
-8-character pairing code (e.g. ABCD-EFGH)	8 文字のペアリングコード（例：ABCD-EFGH）
-; the newest release on GitHub is {0}	；GitHub の最新リリースは {0} です
-; {0} could not be restored ({1})	；{0} を復元できませんでした（{1}）
+10-minute one-time onboarding code	10分間有効な一回限りの接続コード
+2 · Message for the agent	2 · エージェントへのメッセージ
+3 minutes before, the service is started and checked; you are told if it is not ready. Open one to change it; switched off it is kept but does not fire.	3分前にサービスを起動して確認し、準備ができていなければ通知します。開くと変更でき、オフにすると保存されたまま実行されません。
+30 days	30日
+7 days	7日
+8-character pairing code (e.g. ABCD-EFGH)	8文字のペアリングコード（例：ABCD-EFGH）
+; the newest release on GitHub is {0}	；GitHub の最新リリースは{0}です
+; {0} could not be restored ({1})	；{0}を復元できませんでした（{1}）
 A VPN on this phone may affect the built-in Tailscale connection. If it keeps failing, try one of these options:	この端末の VPN が内蔵 Tailscale の接続に影響することがあります。失敗が続く場合は次のいずれかを試してください：
 A WAF, bot protection or Access rule on this hostname blocked it. Turn off Bot Fight Mode and similar protection for this subdomain, or allow it.	このホスト名の WAF、ボット対策、Access ルールにブロックされました。このサブドメインの Bot Fight Mode などの保護をオフにするか、許可してください。
 A cloud client's level is chosen when you approve its pairing on the phone, up to Easy.	クラウドクライアントの権限レベルは、端末でペアリングを承認するときに選びます（最大「かんたん」）。
 A habit of this app	このアプリの習慣
-A lesson is a procedure you demonstrated on the background screen and saved. An agent runs it with act "use name"; open one to see its steps, and delete those you no longer need.⏎⏎Lessons are recorded on the full-screen page: an agent requests one with teach, or you take over and start recording.	レッスンとは、バックグラウンド画面で実演して保存した手順です。agent は act "use 名前" で実行します。開くと手順を確認でき、不要になったものは削除できます。⏎⏎レッスンは全画面ページで記録します：agent が teach で依頼するか、あなたが操作を引き継いで記録を始めます。
-A lesson of your own	自分で作ったレッスン
-A new hostname's certificate takes minutes; the free certificate does not cover multi-level subdomains (a.b.example.com), use one level like phone.example.com.	新しいホスト名の証明書には数分かかります。無料の証明書は多階層サブドメイン（a.b.example.com）に対応しないため、phone.example.com のような 1 階層にしてください。
-A token is an agent's credential: whoever holds it can operate your apps on the background screen, so give it only to agents you trust. The service accepts only this phone (and, with remote access on, devices in your Tailscale network) and refuses all calls from web pages. Regenerating the main token invalidates the old one at once; agents using it must connect again.	トークンは agent の認証情報です。持っている人はバックグラウンド画面であなたのアプリを操作できるので、信頼できる agent にだけ渡してください。サービスはこの端末（リモートアクセスがオンなら Tailscale ネットワーク内の端末も）からの要求だけを受け付け、Web ページからの呼び出しはすべて拒否します。メイントークンを再生成すると古いトークンはすぐに無効になり、それを使っている agent は接続し直す必要があります。
-A turn ends when the agent sends no command for this long: the screen then pauses to save power and is released 10 minutes later. The agent can end a turn at once with vscreen done. This length also sets how long a "This turn" allowance lasts.	agent がこの時間コマンドを送らないとターンが終わります。画面は省電力のため一時停止し、10 分後に解放されます。agent は vscreen done ですぐにターンを終えられます。この長さは「このターン」の許可が続く時間にもなります。
+A lesson is a procedure you demonstrated on the background screen and saved. An agent runs it with act "use name"; open one to see its steps, and delete those you no longer need.⏎⏎Lessons are recorded on the full-screen page: an agent requests one with teach, or you take over and start recording.	お手本とは、バックグラウンド画面で実演して保存した手順です。エージェントは act "use 名前" で実行します。開くと手順を確認でき、不要になったものは削除できます。⏎⏎お手本は全画面ページで記録します：エージェントが teach で依頼するか、自分で操作を引き継いで記録を始めます。
+A lesson of your own	自分で作ったお手本
+A new hostname's certificate takes minutes; the free certificate does not cover multi-level subdomains (a.b.example.com), use one level like phone.example.com.	新しいホスト名の証明書には数分かかります。無料の証明書は多階層サブドメイン（a.b.example.com）に対応しないため、phone.example.com のような1階層にしてください。
+A token is an agent's credential: whoever holds it can operate your apps on the background screen, so give it only to agents you trust. The service accepts only this phone (and, with remote access on, devices in your Tailscale network) and refuses all calls from web pages. Regenerating the main token invalidates the old one at once; agents using it must connect again.	トークンはエージェントの認証情報です。持っている人はバックグラウンド画面でアプリを操作できるので、信頼できるエージェントにだけ渡してください。サービスはこの端末（リモートアクセスがオンなら Tailscale ネットワーク内の端末も）からの要求だけを受け付け、Web ページからの呼び出しはすべて拒否します。メイントークンを再生成すると古いトークンはすぐに無効になり、それを使っているエージェントは接続し直す必要があります。
+A turn ends when the agent sends no command for this long: the screen then pauses to save power and is released 10 minutes later. The agent can end a turn at once with vscreen done. This length also sets how long a "This turn" allowance lasts.	エージェントがこの時間コマンドを送らないとターンが終わります。画面は省電力のため一時停止し、10分後に解放されます。エージェントは vscreen done ですぐにターンを終えられます。この長さは「このターン」の許可が続く時間にもなります。
 AI asks: {0}	AI からの質問：{0}
 AI on standby	AI 待機中
 AI stopped	AI 停止中
@@ -79,14 +79,14 @@ About	概要
 About floating window	フローティングウィンドウについて
 About thermal protection	過熱保護について
 About this	これについて
-Access from other devices is on but Tailscale is not connected now: agents on other devices cannot get in	他の端末からのアクセスはオンですが、Tailscale が今つながっていません。他の端末の agent は接続できません
+Access from other devices is on but Tailscale is not connected now: agents on other devices cannot get in	他の端末からのアクセスはオンですが、Tailscale が今つながっていません。他の端末のエージェントは接続できません
 Accessibility (read-only)	ユーザー補助（読み取り専用）
 Accessibility cannot see the screen	ユーザー補助が画面を読み取れません
 Accessibility is on, but the system does not give it the screen's windows: the widget tree is empty and element lists have only OCR text and screenshots.	ユーザー補助はオンですが、システムが画面のウィンドウを渡していません。ウィジェットツリーが空で、要素リストには OCR の文字とスクリーンショットしかありません。
 Accessibility turned on (other accessibility services unchanged)	ユーザー補助をオンにしました（他のユーザー補助サービスは変更なし）
 Accessibility was turned off	ユーザー補助がオフになりました
-Accessibility was turned off right after being turned on automatically: taken as your choice, so it won't be turned on again (Set up the rest on the home page can turn it on)	自動でオンにした直後にユーザー補助がオフにされたため、あなたの選択とみなし再度オンにはしません（ホームの「残りを設定」でオンにできます）
-Accessibility: the setting was written but did not connect within 4 s (some systems block it); turn it on once in Settings › Accessibility › Agent-VScreen	ユーザー補助：設定は書き込みましたが 4 秒以内に接続されませんでした（ブロックするシステムがあります）。設定 › ユーザー補助 › Agent-VScreen で一度オンにしてください
+Accessibility was turned off right after being turned on automatically: taken as your choice, so it won't be turned on again (Set up the rest on the home page can turn it on)	自動でオンにした直後にユーザー補助がオフにされたため、ユーザーの選択とみなし再度オンにはしません（ホームの「残りを設定」でオンにできます）
+Accessibility: the setting was written but did not connect within 4 s (some systems block it); turn it on once in Settings › Accessibility › Agent-VScreen	ユーザー補助：設定は書き込みましたが4秒以内に接続されませんでした（ブロックするシステムがあります）。設定 › ユーザー補助 › Agent-VScreen で一度オンにしてください
 Accessibility: writing system settings failed ({0}); turn it on in Settings › Accessibility › Agent-VScreen	ユーザー補助：システム設定の書き込みに失敗しました（{0}）。設定 › ユーザー補助 › Agent-VScreen でオンにしてください
 Accessibility: {0}	ユーザー補助：{0}
 Account	アカウント
@@ -99,30 +99,30 @@ Add a time	時刻を追加
 Add an app	アプリを追加
 Add app	アプリを追加
 Add the public hostname, pointing at the phone	端末を指すパブリックホスト名を追加
-Add your domain to Cloudflare (the free plan is enough) and, as prompted, change its nameservers at your registrar to the two Cloudflare gives. This takes minutes to hours; continue once it shows Active. Skip if the domain is already on Cloudflare.	ドメインを Cloudflare に追加し（無料プランで十分）、案内に従ってレジストラでネームサーバーを Cloudflare が示す 2 つに変更します。数分から数時間かかります。Active と表示されたら次へ進んでください。すでに Cloudflare にある場合は飛ばしてかまいません。
+Add your domain to Cloudflare (the free plan is enough) and, as prompted, change its nameservers at your registrar to the two Cloudflare gives. This takes minutes to hours; continue once it shows Active. Skip if the domain is already on Cloudflare.	ドメインを Cloudflare に追加し（無料プランで十分）、案内に従ってレジストラでネームサーバーを Cloudflare が示す2つに変更します。数分から数時間かかります。Active と表示されたら次へ進んでください。すでに Cloudflare にある場合は飛ばしてかまいません。
 Address	アドレス
 Address: {0} (give it to the client after the self-test passes)	アドレス：{0}（セルフテストに合格してからクライアントに渡してください）
 Advanced	詳細
 After creating a tunnel in Cloudflare, paste its install command or token	Cloudflare でトンネルを作成したら、そのインストールコマンドかトークンを貼り付けてください
 After every act: {0}	毎回の act の後：{0}
 Again	もう一度
-Agent	agent
+Agent	エージェント
 Agent-VScreen diagnostics	Agent-VScreen 診断
-Agent-VScreen has no {0} permission yet	Agent-VScreen にはまだ {0} の権限がありません
-Agent-VScreen needs shell-level permission to open the background screen, tap and start apps. It comes from one of two sources:⏎⏎• Shizuku / compatible forks (default): no root needed. Recognizes Shizuku, Sui, AXManager and other compatible forks. Restart the manager after each phone reboot; on Android 17+, if official Shizuku is limited, use a compatible fork or Root.⏎• Root: for phones rooted with Magisk, KernelSU, APatch and the like; Shizuku is not needed. The root manager asks once; after that it starts by itself when the app opens. The screen service runs as the shell user where it can, exactly as under Shizuku's ADB mode.⏎⏎Switching closes the current screen; the next command reconnects through the new source by itself.	Agent-VScreen がバックグラウンド画面を開き、タップし、アプリを起動するには shell レベルの権限が必要です。権限の取得元は次の 2 つです：⏎⏎• Shizuku / 互換フォーク（既定）：root 不要。Shizuku、Sui、AXManager などの互換フォークを認識します。端末を再起動するたびにマネージャーを起動し直してください。Android 17 以降で公式 Shizuku が制限される場合は、互換フォークか Root を使ってください。⏎• Root：Magisk、KernelSU、APatch などで root 化した端末向けで、Shizuku は不要です。root マネージャーが一度だけ確認し、以後はアプリを開くと自動で起動します。画面サービスは可能な限り shell ユーザーとして動作し、Shizuku の ADB モードと同じです。⏎⏎切り替えると今の画面は閉じ、次のコマンドから新しい取得元で自動的に接続し直します。
+Agent-VScreen has no {0} permission yet	Agent-VScreen にはまだ{0}の権限がありません
+Agent-VScreen needs shell-level permission to open the background screen, tap and start apps. It comes from one of two sources:⏎⏎• Shizuku / compatible forks (default): no root needed. Recognizes Shizuku, Sui, AXManager and other compatible forks. Restart the manager after each phone reboot; on Android 17+, if official Shizuku is limited, use a compatible fork or Root.⏎• Root: for phones rooted with Magisk, KernelSU, APatch and the like; Shizuku is not needed. The root manager asks once; after that it starts by itself when the app opens. The screen service runs as the shell user where it can, exactly as under Shizuku's ADB mode.⏎⏎Switching closes the current screen; the next command reconnects through the new source by itself.	Agent-VScreen がバックグラウンド画面を開き、タップし、アプリを起動するには shell レベルの権限が必要です。権限の取得元は次の2つです：⏎⏎• Shizuku / 互換フォーク（既定）：root 不要。Shizuku、Sui、AXManager などの互換フォークを認識します。端末を再起動するたびにマネージャーを起動し直してください。Android 17以降で公式 Shizuku が制限される場合は、互換フォークか Root を使ってください。⏎• Root：Magisk、KernelSU、APatch などで root 化した端末向けで、Shizuku は不要です。root マネージャーが一度だけ確認し、以後はアプリを開くと自動で起動します。画面サービスは可能な限り shell ユーザーとして動作し、Shizuku の ADB モードと同じです。⏎⏎切り替えると今の画面は閉じ、次のコマンドから新しい取得元で自動的に接続し直します。
 Agent-VScreen service	Agent-VScreen サービス
 Agent-VScreen service running	Agent-VScreen サービス実行中
 Agent-VScreen stopped due to heat	Agent-VScreen は過熱のため停止しました
 Agent-VScreen · AI stopped	Agent-VScreen · AI 停止中
 Agent-VScreen · AI working in the background (window hidden)	Agent-VScreen · AI がバックグラウンドで作業中（ウィンドウ非表示）
-Agent-VScreen · woken by an agent, hides again when done	Agent-VScreen · agent に起こされました。終わると再び隠れます
-Agents can connect any time	agent はいつでも接続できます
-Agents can no longer replay it with use {0}.	agent は use {0} で再実行できなくなります。
-Agents can use the screen once it is set up	設定が済むと agent が画面を使えます
-Agents cannot use the screen right now	今は agent が画面を使えません
-Agents on this phone (Termux, Minis, Operit, ...) connect to 127.0.0.1:{0} directly; no setup is needed.⏎⏎Agents on a computer, a cloud server or another phone connect through Tailscale: only devices in your Tailscale network can reach the service, over an encrypted tunnel; the local network and the internet cannot, and a token is still required. Built-in mode needs no Tailscale app; External app mode uses the Tailscale app on this phone.⏎⏎Cloud agents outside your Tailscale network can use public MCP (Tailscale Funnel, Cloudflare Tunnel or ngrok, all with OAuth pairing on the phone), which is off by default.	この端末の agent（Termux、Minis、Operit など）は 127.0.0.1:{0} に直接接続します。設定は不要です。⏎⏎パソコン、クラウドサーバー、別の端末の agent は Tailscale 経由で接続します。暗号化トンネルを通じて Tailscale ネットワーク内の端末だけがサービスに届き、ローカルネットワークやインターネットからは届きません。トークンも引き続き必要です。内蔵モードは Tailscale アプリ不要、外部アプリモードはこの端末の Tailscale アプリを使います。⏎⏎Tailscale ネットワーク外のクラウド agent は公開 MCP（Tailscale Funnel、Cloudflare Tunnel、ngrok。いずれも端末での OAuth ペアリング付き）を使えます。既定ではオフです。
-Agents run it with: act "use {0}"	agent の実行方法：act "use {0}"
-Agents that edit their own MCP config add it; web clients skip that and only save the note	自分で MCP 設定を編集できる agent は追加します。Web クライアントはそれを飛ばしてメモだけ保存します
+Agent-VScreen · woken by an agent, hides again when done	Agent-VScreen · エージェントに起こされました。終わると再び隠れます
+Agents can connect any time	エージェントはいつでも接続できます
+Agents can no longer replay it with use {0}.	エージェントは use {0}で再実行できなくなります。
+Agents can use the screen once it is set up	設定が済むとエージェントが画面を使えます
+Agents cannot use the screen right now	今はエージェントが画面を使えません
+Agents on this phone (Termux, Minis, Operit, ...) connect to 127.0.0.1:{0} directly; no setup is needed.⏎⏎Agents on a computer, a cloud server or another phone connect through Tailscale: only devices in your Tailscale network can reach the service, over an encrypted tunnel; the local network and the internet cannot, and a token is still required. Built-in mode needs no Tailscale app; External app mode uses the Tailscale app on this phone.⏎⏎Cloud agents outside your Tailscale network can use public MCP (Tailscale Funnel, Cloudflare Tunnel or ngrok, all with OAuth pairing on the phone), which is off by default.	この端末のエージェント（Termux、Minis、Operit など）は127.0.0.1:{0}に直接接続します。設定は不要です。⏎⏎パソコン、クラウドサーバー、別の端末のエージェントは Tailscale 経由で接続します。暗号化トンネルを通じて Tailscale ネットワーク内の端末だけがサービスに届き、ローカルネットワークやインターネットからは届きません。トークンも引き続き必要です。内蔵モードは Tailscale アプリ不要、外部アプリモードはこの端末の Tailscale アプリを使います。⏎⏎Tailscale ネットワーク外のクラウドエージェントは公開 MCP（Tailscale Funnel、Cloudflare Tunnel、ngrok。いずれも端末での OAuth ペアリング付き）を使えます。既定ではオフです。
+Agents run it with: act "use {0}"	エージェントの実行方法：act "use {0}"
+Agents that edit their own MCP config add it; web clients skip that and only save the note	自分で MCP 設定を編集できるエージェントは追加します。Web クライアントはそれを飛ばしてメモだけ保存します
 All	すべて
 All items	すべての項目
 All records	すべての記録
@@ -134,12 +134,12 @@ Allow for	許可する期間
 Allow sleep	スリープを許可
 Always on	常駐
 Always on, on demand and off	常駐・必要時・オフ
-Always set to "{0}" · tap to let the agent fill it	常に「{0}」を設定 · タップで agent に入力させる
-Always types these words · tap to let the agent fill it	常にこの文字を入力 · タップで agent に入力させる
-An agent is already online (ERR_NGROK_108)	agent がすでにオンラインです（ERR_NGROK_108）
-An agent is waiting for you · {0}  ›	agent があなたを待っています · {0}  ›
-An agent whose timed task needs the phone can book the time with vscreen schedule. 3 minutes before, the service starts and checks itself, and you are notified if it is not ready.⏎⏎While the service is paused, a booking turns it on; while it is off, a booking only notifies you.⏎⏎Open a booking to change its time, repeat rule and duration; switching it off keeps it without firing.	時間指定のタスクで端末が必要な agent は、vscreen schedule で時間を予約できます。3 分前にサービスが起動して自己確認し、準備ができていなければ通知します。⏎⏎サービスが一時停止中なら予約でオンになり、オフのときは通知だけします。⏎⏎予約を開くと時刻、繰り返し、長さを変更できます。オフにすると保存されたまま実行されません。
-An agent woke it; tap to put it away now	agent が起こしました。タップで今すぐしまう
+Always set to "{0}" · tap to let the agent fill it	常に「{0}」を設定 · タップでエージェントに入力させる
+Always types these words · tap to let the agent fill it	常にこの文字を入力 · タップでエージェントに入力させる
+An agent is already online (ERR_NGROK_108)	エージェントがすでにオンラインです（ERR_NGROK_108）
+An agent is waiting for you · {0}  ›	エージェントが確認待ちです · {0}  ›
+An agent whose timed task needs the phone can book the time with vscreen schedule. 3 minutes before, the service starts and checks itself, and you are notified if it is not ready.⏎⏎While the service is paused, a booking turns it on; while it is off, a booking only notifies you.⏎⏎Open a booking to change its time, repeat rule and duration; switching it off keeps it without firing.	時間指定のタスクで端末が必要なエージェントは、vscreen schedule で時間を予約できます。3分前にサービスが起動して自己確認し、準備ができていなければ通知します。⏎⏎サービスが一時停止中なら予約でオンになり、オフのときは通知だけします。⏎⏎予約を開くと時刻、繰り返し、長さを変更できます。オフにすると保存されたまま実行されません。
+An agent woke it; tap to put it away now	エージェントが起こしました。タップで今すぐしまう
 Another VPN is on	別の VPN がオンです
 Another online ngrok endpoint already uses this domain: stop the other ngrok using it.	このドメインはオンラインの別の ngrok エンドポイントが使っています。そちらの ngrok を止めてください。
 Answer	回答
@@ -147,16 +147,16 @@ Answer later	後で回答
 App info (under Battery choose "Unrestricted / allow background activity")	アプリ情報（バッテリーで「制限なし / バックグラウンド動作を許可」を選択）
 App rules	アプリのルール
 App sound	アプリの音声
-Applies only to the background screen, not to your own use.	バックグラウンド画面だけに適用され、あなた自身の操作には影響しません。
+Applies only to the background screen, not to your own use.	バックグラウンド画面だけに適用され、自分での操作には影響しません。
 Apps on the background screen do not play sound through the phone (videos, live streams). Sound returns when an app moves to the main screen or the screen is released; after a crash it is restored on the next connection.	バックグラウンド画面のアプリは端末から音を出しません（動画、ライブ配信など）。アプリがメイン画面に移るか画面が解放されると音が戻り、クラッシュ後は次の接続時に復元されます。
 Apps on the screen are silent until they leave it	画面上のアプリは離れるまで無音です
 Apps that confirm every time: 	毎回確認するアプリ：
 Ask the user to approve this device in the Tailscale / Headscale console	Tailscale / Headscale の管理画面でこの端末を承認するようユーザーに依頼してください
-Ask the user to log in to Tailscale under Agent-VScreen › Connect › Remote access	Agent-VScreen › 接続 › リモートアクセス で Tailscale にログインするようユーザーに依頼してください
+Ask the user to log in to Tailscale under Agent-VScreen › Connect › Remote access	Agent-VScreen › 接続 › リモートアクセスで Tailscale にログインするようユーザーに依頼してください
 Ask the user to set by hand: {0}	手動での設定をユーザーに依頼してください：{0}
-Asking {0} for a login link…	{0} にログインリンクを要求中…
-At most {0} schedules on the phone across all agents: remove one with schedule off, or ask the user to delete unused ones in the app	端末の予約は全 agent 合わせて最大 {0} 件です。schedule off で削除するか、アプリで不要なものを消すようユーザーに依頼してください
-At most {0} schedules: remove one with schedule off first	予約は最大 {0} 件です。先に schedule off で 1 件削除してください
+Asking {0} for a login link…	{0}にログインリンクを要求中…
+At most {0} schedules on the phone across all agents: remove one with schedule off, or ask the user to delete unused ones in the app	端末の予約は全エージェント合わせて最大{0}件です。schedule off で削除するか、アプリで不要なものを消すようユーザーに依頼してください
+At most {0} schedules: remove one with schedule off first	予約は最大{0}件です。先に schedule off で1件削除してください
 At the top of the home page	ホームの上部
 At times	時々
 Auth key (optional, instead of the web login)	認証キー（任意、Web ログインの代わり）
@@ -179,16 +179,16 @@ Background screen sleeps with the main screen	バックグラウンド画面が�
 Background-screen muting off · manage apps individually	バックグラウンド画面のミュートはオフ · アプリごとに管理できます
 Background-screen muting on · manage apps individually	バックグラウンド画面のミュートはオン · アプリごとに管理できます
 Battery exemption and background running granted (granted again automatically if the system takes them back)	バッテリー最適化の除外とバックグラウンド動作を許可しました（システムが取り消しても自動で再許可します）
-Battery exemption and background running granted (the system took them back {0} times: {1}; each time they were granted again automatically, nothing to do)	バッテリー最適化の除外とバックグラウンド動作を許可しました（システムが {0} 回取り消しました：{1}。毎回自動で再許可済みなので操作は不要です）
+Battery exemption and background running granted (the system took them back {0} times: {1}; each time they were granted again automatically, nothing to do)	バッテリー最適化の除外とバックグラウンド動作を許可しました（システムが{0}回取り消しました：{1}。毎回自動で再許可済みなので操作は不要です）
 Battery optimization and background running	バッテリー最適化とバックグラウンド動作
 Battery temperature	バッテリー温度
 Before every act: {0}	毎回の act の前：{0}
-Beta {0}	ベータ {0}
-Betas (and releases)	ベータ版（と正式版）
+Beta {0}	ベータ{0}
+Betas (and releases)	ベータ版（正式版を含む）
 Between	間
 Blocked (no opening, reading or operating)	禁止（開く・読む・操作するのすべて不可）
 Blocked apps: 	禁止アプリ：
-Blocked: the AI cannot open, read or operate the app on the background screen.⏎Read-only: the AI can open, view and scroll, but cannot tap, type or swipe.⏎Confirm every time: before the AI taps or types, you confirm on the phone, for just this once, this turn or today.⏎⏎App rules apply to every agent and take precedence over its permission level. They affect only the background screen, not your own use.	禁止：AI はバックグラウンド画面でそのアプリを開くことも、読むことも、操作することもできません。⏎読み取り専用：AI は開く、見る、スクロールはできますが、タップ、入力、スワイプはできません。⏎毎回確認：AI がタップや入力をする前に端末で確認します。今回だけ、このターン、今日から選べます。⏎⏎アプリのルールはすべての agent に適用され、権限レベルより優先されます。影響するのはバックグラウンド画面だけで、あなた自身の操作には影響しません。
+Blocked: the AI cannot open, read or operate the app on the background screen.⏎Read-only: the AI can open, view and scroll, but cannot tap, type or swipe.⏎Confirm every time: before the AI taps or types, you confirm on the phone, for just this once, this turn or today.⏎⏎App rules apply to every agent and take precedence over its permission level. They affect only the background screen, not your own use.	禁止：AI はバックグラウンド画面でそのアプリを開くことも、読むことも、操作することもできません。⏎読み取り専用：AI は開く、見る、スクロールはできますが、タップ、入力、スワイプはできません。⏎毎回確認：AI がタップや入力をする前に端末で確認します。今回だけ、このターン、今日から選べます。⏎⏎アプリのルールはすべてのエージェントに適用され、権限レベルより優先されます。影響するのはバックグラウンド画面だけで、自分での操作には影響しません。
 Booked	予約済み
 Booking "{0}"	予約「{0}」
 Bring the thing into view, then tap Mark it.	対象を画面に表示してから「マーク」をタップしてください。
@@ -204,14 +204,14 @@ Can't find where to add the hostname	ホスト名を追加する場所が見つ�
 Cancel	キャンセル
 Cannot reach Cloudflare: its edge addresses could not be looked up. Check the network; with a proxy VPN on, let Agent-VScreen bypass it.	Cloudflare に接続できません：エッジのアドレスを解決できませんでした。ネットワークを確認し、プロキシ VPN がオンなら Agent-VScreen を除外してください。
 Cannot reach ngrok: its servers could not be looked up. Check the network; with a proxy VPN on, let Agent-VScreen bypass it.	ngrok に接続できません：サーバーを解決できませんでした。ネットワークを確認し、プロキシ VPN がオンなら Agent-VScreen を除外してください。
-Cannot reach the control server {0}	コントロールサーバー {0} に接続できません
+Cannot reach the control server {0}	コントロールサーバー{0}に接続できません
 Cannot start system verification: {0}	システム認証を開始できません：{0}
 Cert…	証明書…
 Change	変更
 Changed	変更済み
 Changed: {0}	変更：{0}
 Check for updates	アップデートを確認
-Check that the address and port are exactly your login server in the Tailscale app, and that this phone can open it now ({0}/key?v=1 should show some text in a browser).	アドレスとポートが Tailscale アプリのログインサーバーと完全に一致しているか、この端末から今開けるか（ブラウザで {0}/key?v=1 に何か文字が表示されるはず）を確認してください。
+Check that the address and port are exactly your login server in the Tailscale app, and that this phone can open it now ({0}/key?v=1 should show some text in a browser).	アドレスとポートが Tailscale アプリのログインサーバーと完全に一致しているか、この端末から今開けるか（ブラウザで{0}/key?v=1に何か文字が表示されるはず）を確認してください。
 Check the domain is spelled as under Domains in the dashboard. A proxy VPN may have stopped this request.	ドメインのつづりがダッシュボードの Domains と同じか確認してください。プロキシ VPN がこの要求を止めた可能性もあります。
 Check the pairing code and approve	ペアリングコードを確認して承認
 Checked automatically once built-in Tailscale is connected	内蔵 Tailscale が接続されると自動で確認します
@@ -228,18 +228,18 @@ Close screen	画面を閉じる
 Close window now	今すぐウィンドウを閉じる
 Cloud (Public MCP · Experimental)	クラウド（公開 MCP · 試験的）
 Cloud (Public MCP)	クラウド（公開 MCP）
-Cloud (Public MCP) · pairing code {0}	クラウド（公開 MCP）· ペアリングコード {0}
+Cloud (Public MCP) · pairing code {0}	クラウド（公開 MCP）· ペアリングコード{0}
 Cloud MCP clients via Tailscale Funnel, Cloudflare Tunnel or ngrok with on-phone pairing	Tailscale Funnel、Cloudflare Tunnel、ngrok 経由のクラウド MCP クライアント（端末でペアリング）
 Cloudflare blocked the request	Cloudflare が要求をブロックしました
 Cloudflare does not accept this tunnel token: copy the token (or the whole install command) again from the tunnel page. A deleted tunnel or a rotated token makes the old one stop working.	Cloudflare がこのトンネルトークンを受け付けません。トンネルのページからトークン（またはインストールコマンド全体）をもう一度コピーしてください。トンネルを削除したりトークンを再発行したりすると古いものは使えなくなります。
-Cloudflare has no DNS record for this hostname yet: add it under the tunnel's Public Hostname (that creates the record); if just added, wait 1–2 minutes. The domain itself must be on this Cloudflare account.	このホスト名の DNS レコードがまだ Cloudflare にありません。トンネルの Public Hostname に追加してください（レコードが作成されます）。追加したばかりなら 1〜2 分待ってください。ドメイン自体がこの Cloudflare アカウントにある必要があります。
+Cloudflare has no DNS record for this hostname yet: add it under the tunnel's Public Hostname (that creates the record); if just added, wait 1–2 minutes. The domain itself must be on this Cloudflare account.	このホスト名の DNS レコードがまだ Cloudflare にありません。トンネルの Public Hostname に追加してください（レコードが作成されます）。追加したばかりなら1〜2分待ってください。ドメイン自体がこの Cloudflare アカウントにある必要があります。
 Cloudflare says the tunnel is not connected	Cloudflare はトンネルが接続されていないと言っています
-Cloudflare usually needs a few minutes to issue a certificate for a new hostname. Multi-level subdomains (a.b.example.com) are not covered by the free certificate; use one level (phone.example.com).	Cloudflare が新しいホスト名の証明書を発行するには通常数分かかります。多階層サブドメイン（a.b.example.com）は無料の証明書の対象外なので、1 階層（phone.example.com）にしてください。
+Cloudflare usually needs a few minutes to issue a certificate for a new hostname. Multi-level subdomains (a.b.example.com) are not covered by the free certificate; use one level (phone.example.com).	Cloudflare が新しいホスト名の証明書を発行するには通常数分かかります。多階層サブドメイン（a.b.example.com）は無料の証明書の対象外なので、1階層（phone.example.com）にしてください。
 Collects version, setup state and recent logs for bug reports; contains no tokens and nothing you typed.	バグ報告用にバージョン、設定状態、最近のログを集めます。トークンや入力した内容は含みません。
 Come back here; it connects by itself within seconds	ここに戻ってください。数秒で自動的に接続されます
 Coming up	今後の予定
 Common problems	よくある問題
-Complete all {0} items above first; returning to the app rechecks automatically.	先に上の {0} 項目をすべて完了してください。アプリに戻ると自動で再確認します。
+Complete all {0} items above first; returning to the app rechecks automatically.	先に上の{0}項目をすべて完了してください。アプリに戻ると自動で再確認します。
 Computer or another phone over your own Tailscale network	自分の Tailscale ネットワーク経由のパソコンや別の端末
 Confirm	確認
 Confirm HTTPS and Funnel are enabled in Tailscale Admin	Tailscale 管理画面で HTTPS と Funnel が有効か確認
@@ -249,31 +249,31 @@ Confirm: {0}	確認：{0}
 Confirm: {0}	確認：{0}
 Confirmation resumes when it ends	終了すると確認が再開されます
 Confirmations	確認
-Confirmations come in two strengths:⏎• Fingerprint or screen-lock PIN (a 3-second hold without a screen lock): payments, connecting a new agent, widening an agent's permissions, enabling public access, payments without confirmation.⏎• One tap on Allow: everything else that needs confirmation, including irreversible, sensitive and high-rate actions and actions in confirm-every-time apps.⏎⏎A tap can cover Just this once, This turn (ends once no command arrives for a turn length) or Today; within that range the same agent, action type and app are not asked again (apps set to confirm every time included). Payments take no scope: each one is confirmed on its own, unless you turned on "Payments without confirmation (30 min)" on the agent's page.⏎⏎At every level: each step is logged; you can stop the AI or take over from the floating window at any time; a confirmation left unanswered for 60 s means the step is not done, and the agent will ask you to respond.	確認には 2 つの強さがあります：⏎• 指紋または画面ロックの PIN（画面ロックがない場合は 3 秒長押し）：支払い、新しい agent の接続、agent の権限拡大、公開アクセスの有効化、支払いの確認なし。⏎• 「許可」を 1 回タップ：その他の確認が必要な操作すべて（取り消せない操作、機微な操作、高頻度の操作、毎回確認するアプリでの操作を含む）。⏎⏎タップでは「今回だけ」「このターン」（ターンの長さの間コマンドが来なければ終了）「今日」を選べ、その範囲内では同じ agent、同じ種類の操作、同じアプリについて再確認しません（毎回確認のアプリも含む）。支払いには範囲がなく毎回個別に確認します。ただし agent のページで「支払いの確認なし（30 分）」をオンにした場合を除きます。⏎⏎どのレベルでも：各ステップは記録されます。フローティングウィンドウからいつでも AI を止めたり操作を引き継いだりできます。60 秒応答のない確認はそのステップを実行せず、agent が応答を求めます。
+Confirmations come in two strengths:⏎• Fingerprint or screen-lock PIN (a 3-second hold without a screen lock): payments, connecting a new agent, widening an agent's permissions, enabling public access, payments without confirmation.⏎• One tap on Allow: everything else that needs confirmation, including irreversible, sensitive and high-rate actions and actions in confirm-every-time apps.⏎⏎A tap can cover Just this once, This turn (ends once no command arrives for a turn length) or Today; within that range the same agent, action type and app are not asked again (apps set to confirm every time included). Payments take no scope: each one is confirmed on its own, unless you turned on "Payments without confirmation (30 min)" on the agent's page.⏎⏎At every level: each step is logged; you can stop the AI or take over from the floating window at any time; a confirmation left unanswered for 60 s means the step is not done, and the agent will ask you to respond.	確認には2つの強さがあります：⏎• 指紋または画面ロックの PIN（画面ロックがない場合は3秒長押し）：支払い、新しいエージェントの接続、エージェントの権限拡大、公開アクセスの有効化、確認なしで支払い。⏎• 「許可」を1回タップ：その他の確認が必要な操作すべて（取り消せない操作、機微な操作、高頻度の操作、毎回確認するアプリでの操作を含む）。⏎⏎タップでは「今回だけ」「このターン」（ターンの長さの間コマンドが来なければ終了）「今日」を選べ、その範囲内では同じエージェント、同じ種類の操作、同じアプリについて再確認しません（毎回確認のアプリも含む）。支払いには範囲がなく毎回個別に確認します。ただしエージェントのページで「確認なしで支払い（30分）」をオンにした場合を除きます。⏎⏎どのレベルでも：各ステップは記録されます。フローティングウィンドウからいつでも AI を止めたり操作を引き継いだりできます。60秒応答のない確認はそのステップを実行せず、エージェントが応答を求めます。
 Confirming together	一緒に確認中
 Connect	接続
 Connect Tailscale first to copy what the other device needs	他の端末に渡す内容をコピーするには、先に Tailscale に接続してください
-Connect a new agent	新しい agent を接続
-Connect an agent	agent を接続
-Connect your agent	agent を接続
-Connect your agent to this phone	agent をこの端末に接続
-Connect {0} ({1})	{0} を接続（{1}）
-Connect {0} ({1})	{0} を接続（{1}）
+Connect a new agent	新しいエージェントを接続
+Connect an agent	エージェントを接続
+Connect your agent	エージェントを接続
+Connect your agent to this phone	エージェントをこの端末に接続
+Connect {0} ({1})	{0}を接続（{1}）
+Connect {0} ({1})	{0}を接続（{1}）
 Connected	接続済み
 Connected through the Tailscale app	Tailscale アプリ経由で接続済み
 Connected to Tailscale	Tailscale に接続済み
-Connected to {0}	{0} に接続しました
-Connected {0}, but it has not said where it saved the note. New conversations may not know about it: send its message again, or put the ability note in its custom instructions.	{0} は接続しましたが、メモの保存場所をまだ伝えていません。新しい会話では知らない可能性があります。メッセージをもう一度送るか、能力メモをカスタム指示に入れてください。
+Connected to {0}	{0}に接続しました
+Connected {0}, but it has not said where it saved the note. New conversations may not know about it: send its message again, or put the ability note in its custom instructions.	{0}は接続しましたが、メモの保存場所をまだ伝えていません。新しい会話では知らない可能性があります。メッセージをもう一度送るか、能力メモをカスタム指示に入れてください。
 Connected · {0}	接続済み · {0}
 Connected: {0}	接続済み：{0}
-Connecting to Cloudflare is blocked; retrying automatically (it falls back from QUIC to HTTP/2 by itself). If it stays down, check whether the network or a proxy VPN blocks port 7844.	Cloudflare への接続がブロックされています。自動で再試行します（QUIC から HTTP/2 に自動で切り替わります）。つながらない場合は、ネットワークやプロキシ VPN がポート 7844 をブロックしていないか確認してください。
+Connecting to Cloudflare is blocked; retrying automatically (it falls back from QUIC to HTTP/2 by itself). If it stays down, check whether the network or a proxy VPN blocks port 7844.	Cloudflare への接続がブロックされています。自動で再試行します（QUIC から HTTP/2に自動で切り替わります）。つながらない場合は、ネットワークやプロキシ VPN がポート7844をブロックしていないか確認してください。
 Connecting to Tailscale…	Tailscale に接続中…
 Connecting to ngrok is blocked; retrying automatically. If it stays down, check the network or proxy VPN.	ngrok への接続がブロックされています。自動で再試行します。つながらない場合はネットワークやプロキシ VPN を確認してください。
-Connecting to {0}…	{0} に接続中…
+Connecting to {0}…	{0}に接続中…
 Connection methods	接続方法
 Control	コントロール
 Control server (blank = Tailscale)	コントロールサーバー（空欄 = Tailscale）
-Controls main-screen wake and background-screen input when the phone screen turns off:⏎⏎• Allow sleep (default): the main screen sleeps normally and is never woken. When the system blocks touch on the background screen while off, element taps, scrolls, and typing switch to accessibility automatically; coordinate taps and gestures refuse with guidance.⏎• Keep on during tasks: prevents the main screen from timing out (may dim) only while an agent turn is active, and releases immediately when the turn ends, fails, or stops. Pressing the power button still turns the screen off without waking it back up.⏎• Wake when needed: includes Keep on during tasks; additionally, when the screen is off, touch is blocked, and a gesture or coordinate action cannot use accessibility, it briefly wakes the main screen to the lock screen (never unlocking) under rate and thermal limits, then releases when the turn ends.⏎⏎Note: while kept on, the phone does not auto-lock and uses more battery.	端末の画面がオフになったときの、メイン画面の点灯とバックグラウンド画面の入力を制御します：⏎⏎• スリープを許可（既定）：メイン画面は通常どおりスリープし、点灯させません。画面オフ中にシステムがバックグラウンド画面のタッチをブロックした場合、要素のタップ、スクロール、入力は自動でユーザー補助に切り替わり、座標タップやジェスチャーは案内付きで拒否します。⏎• タスク中は点灯を維持：agent のターン中だけメイン画面のタイムアウトを防ぎ（暗くなることはあります）、ターンが終了・失敗・停止するとすぐに解除します。電源ボタンを押せば画面はオフになり、再点灯はしません。⏎• 必要なときに点灯：「タスク中は点灯を維持」を含みます。さらに画面オフでタッチがブロックされ、ジェスチャーや座標操作がユーザー補助を使えない場合、頻度と温度の制限内でメイン画面をロック画面まで短時間点灯し（ロック解除はしません）、ターン終了で解除します。⏎⏎注意：点灯を維持している間は自動ロックされず、電池の消費が増えます。
+Controls main-screen wake and background-screen input when the phone screen turns off:⏎⏎• Allow sleep (default): the main screen sleeps normally and is never woken. When the system blocks touch on the background screen while off, element taps, scrolls, and typing switch to accessibility automatically; coordinate taps and gestures refuse with guidance.⏎• Keep on during tasks: prevents the main screen from timing out (may dim) only while an agent turn is active, and releases immediately when the turn ends, fails, or stops. Pressing the power button still turns the screen off without waking it back up.⏎• Wake when needed: includes Keep on during tasks; additionally, when the screen is off, touch is blocked, and a gesture or coordinate action cannot use accessibility, it briefly wakes the main screen to the lock screen (never unlocking) under rate and thermal limits, then releases when the turn ends.⏎⏎Note: while kept on, the phone does not auto-lock and uses more battery.	端末の画面がオフになったときの、メイン画面の点灯とバックグラウンド画面の入力を制御します：⏎⏎• スリープを許可（既定）：メイン画面は通常どおりスリープし、点灯させません。画面オフ中にシステムがバックグラウンド画面のタッチをブロックした場合、要素のタップ、スクロール、入力は自動でユーザー補助に切り替わり、座標タップやジェスチャーは案内付きで拒否します。⏎• タスク中は点灯を維持：エージェントのターン中だけメイン画面のタイムアウトを防ぎ（暗くなることはあります）、ターンが終了・失敗・停止するとすぐに解除します。電源ボタンを押せば画面はオフになり、再点灯はしません。⏎• 必要なときに点灯：「タスク中は点灯を維持」を含みます。さらに画面オフでタッチがブロックされ、ジェスチャーや座標操作がユーザー補助を使えない場合、頻度と温度の制限内でメイン画面をロック画面まで短時間点灯し（ロック解除はしません）、ターン終了で解除します。⏎⏎注意：点灯を維持している間は自動ロックされず、バッテリーの消費が増えます。
 Cooling	冷却中
 Copied: {0}	コピーしました：{0}
 Copied: {0} ({1})	コピーしました：{0}（{1}）
@@ -284,10 +284,10 @@ Copy diagnostics	診断をコピー
 Copy it again from Your Authtoken. Resetting it in the dashboard invalidates the old one.	Your Authtoken からもう一度コピーしてください。ダッシュボードでリセットすると古いものは無効になります。
 Copy it from Your Authtoken in the ngrok dashboard	ngrok ダッシュボードの Your Authtoken からコピーしてください
 Copy login link	ログインリンクをコピー
-Copy message for the agent (HTTP)	agent へのメッセージをコピー（HTTP）
-Copy message for the agent (MCP)	agent へのメッセージをコピー（MCP）
-Copy message for the agent (shell)	agent へのメッセージをコピー（shell）
-Copy message for your agent	agent へのメッセージをコピー
+Copy message for the agent (HTTP)	エージェントへのメッセージをコピー（HTTP）
+Copy message for the agent (MCP)	エージェントへのメッセージをコピー（MCP）
+Copy message for the agent (shell)	エージェントへのメッセージをコピー（shell）
+Copy message for your agent	エージェントへのメッセージをコピー
 Copy onboarding code only	接続コードだけコピー
 Copy package name	パッケージ名をコピー
 Copy the MCP address and add it in the client (e.g. Add connector on claude.ai). On the first connection the phone shows a pairing request: check the code matches, approve, and pick the client's permission level.	MCP アドレスをコピーしてクライアントに追加します（例：claude.ai の「コネクタを追加」）。初回接続時に端末にペアリング要求が表示されるので、コードが一致することを確認して承認し、クライアントの権限レベルを選んでください。
@@ -309,32 +309,32 @@ Custom HTTP clients: address, token and note	独自の HTTP クライアント�
 Daily	毎日
 Day	日
 Decline	断る
-Default Agent	既定の agent
-Default handling of each action type per level; set per agent on its page	各レベルでの操作の種類ごとの既定の扱い。レベルは agent ごとのページで設定します
+Default Agent	既定のエージェント
+Default handling of each action type per level; set per agent on its page	各レベルでの操作の種類ごとの既定の扱い。レベルはエージェントごとのページで設定します
 Delete	削除
-Delete lesson "{0}"?	レッスン「{0}」を削除しますか？
-Delete these {0} lessons?	これら {0} 件のレッスンを削除しますか？
+Delete lesson "{0}"?	お手本「{0}」を削除しますか？
+Delete these {0} lessons?	これら{0}件のお手本を削除しますか？
 Delete this schedule?	この予約を削除しますか？
 Deny	拒否
 Details	詳細
-Detected {0} · 	{0} を検出 · 
+Detected {0} · 	{0}を検出 · 
 Diagnostics	診断
 Diagnostics and feedback	診断とフィードバック
 Discard	破棄
 Discard for sure?	本当に破棄しますか？
-Do step 2; returning to the app rechecks.	手順 2 を行ってください。アプリに戻ると再確認します。
-Do step 3; after changing the policy turn public access off and on.	手順 3 を行ってください。ポリシーを変更したら公開アクセスをオフにしてからオンにしてください。
+Do step 2; returning to the app rechecks.	手順2を行ってください。アプリに戻ると再確認します。
+Do step 3; after changing the policy turn public access off and on.	手順3を行ってください。ポリシーを変更したら公開アクセスをオフにしてからオンにしてください。
 Domain not on this account	ドメインがこのアカウントにありません
 Don't put a Cloudflare Access login or redirect rule on this subdomain, and turn off Bot Fight Mode and similar protection that blocks programs.	このサブドメインには Cloudflare Access のログインやリダイレクトルールを付けず、プログラムをブロックする Bot Fight Mode などの保護をオフにしてください。
 Done	完了
 Done: hidden again	完了：再び隠れました
 Download APK	APK をダウンロード
-Downloading {0}%	ダウンロード中 {0}%
+Downloading {0}%	ダウンロード中{0}%
 Drag a box on the picture	画像の上で範囲をドラッグ
 Drag a box on the picture. Not in view? Move there first.	画像の上で範囲をドラッグしてください。見えていなければ先にそこへ移動してください。
-Dropped {0} times in 10 minutes	10 分間に {0} 回切断
-Each agent uses its own token: it has its own permission level, can be removed alone, and the activity log shows which token did what; agents with different tokens cannot take over each other's sessions.⏎⏎"Payments without confirmation (30 min)" is on the agent's page: while on, that agent's payments are not confirmed (still logged). Use it only while you are watching.	agent ごとに専用のトークンを使います。それぞれ権限レベルを持ち、個別に削除でき、操作ログでどのトークンが何をしたか分かります。トークンが異なる agent は互いのセッションを引き継げません。⏎⏎「支払いの確認なし（30 分）」は agent のページにあります。オンの間、その agent の支払いは確認されません（記録は残ります）。あなたが見ているときだけ使ってください。
-Each one is restored and read back; many apps take a while	1 つずつ復元して読み戻します。多くのアプリでは時間がかかります
+Dropped {0} times in 10 minutes	10分間に{0}回切断
+Each agent uses its own token: it has its own permission level, can be removed alone, and the activity log shows which token did what; agents with different tokens cannot take over each other's sessions.⏎⏎"Payments without confirmation (30 min)" is on the agent's page: while on, that agent's payments are not confirmed (still logged). Use it only while you are watching.	エージェントごとに専用のトークンを使います。それぞれ権限レベルを持ち、個別に削除でき、操作ログでどのトークンが何をしたか分かります。トークンが異なるエージェントは互いのセッションを引き継げません。⏎⏎「確認なしで支払い（30分）」はエージェントのページにあります。オンの間、そのエージェントの支払いは確認されません（記録は残ります）。画面を見ているときだけ使ってください。
+Each one is restored and read back; many apps take a while	1つずつ復元して読み戻します。多くのアプリでは時間がかかります
 Each server keeps its own login, so switching back needs no new login. The built-in node does not carry the phone's own traffic, so there is no exit node option.	サーバーごとにログインを保存するので、元に戻すときに再ログインは不要です。内蔵ノードは端末自身の通信を扱わないため、出口ノードの設定はありません。
 Easy	かんたん
 Easy, plus system actions	かんたん＋システム操作
@@ -346,7 +346,7 @@ Enable HTTPS Certificates in Tailscale, then return here to recheck automaticall
 Enable icon finder	アイコン検出を有効化
 Enable public MCP access	公開 MCP アクセスを有効化
 Enabled	有効
-Enables a public HTTPS MCP endpoint via {0}	{0} 経由で公開 HTTPS MCP エンドポイントを有効にします
+Enables a public HTTPS MCP endpoint via {0}	{0}経由で公開 HTTPS MCP エンドポイントを有効にします
 Enabling public access and approving cloud clients require biometric or PIN confirmation.	公開アクセスの有効化とクラウドクライアントの承認には生体認証または PIN の確認が必要です。
 End now	今すぐ終了
 English (recommended)	英語（推奨）
@@ -355,12 +355,12 @@ Enter the full hostname below (e.g. phone.example.com). 	完全なホスト名�
 Enter the hostname and turn it on	ホスト名を入力してオンにする
 Error: 	エラー：
 Event broadcast	イベントのブロードキャスト
-Events from watches are queued by default and read by agents with vscreen events. With a package name set, each event is also broadcast to that app only.	監視のイベントは既定でキューに入り、agent が vscreen events で読みます。パッケージ名を設定すると、各イベントはそのアプリにだけブロードキャストもされます。
+Events from watches are queued by default and read by agents with vscreen events. With a package name set, each event is also broadcast to that app only.	監視のイベントは既定でキューに入り、エージェントが vscreen events で読みます。パッケージ名を設定すると、各イベントはそのアプリにだけブロードキャストもされます。
 Every	毎
-Every agent	すべての agent
-Every command agents sent, with results	agent が送ったすべてのコマンドと結果
+Every agent	すべてのエージェント
+Every command agents sent, with results	エージェントが送ったすべてのコマンドと結果
 Every step	すべてのステップ
-Every {0} min	{0} 分ごと
+Every {0} min	{0}分ごと
 Everything stops, public and remote access too, nothing stays in the background once you leave; public access comes back when you turn it on	公開アクセスとリモートアクセスも含めすべて停止し、離れた後もバックグラウンドには何も残りません。公開アクセスはオンにすると戻ります
 Experimental · For cloud MCP clients · {0}	試験的 · クラウド MCP クライアント向け · {0}
 External Tailscale app	外部の Tailscale アプリ
@@ -368,19 +368,19 @@ Failed	失敗
 Find "per-app proxy", "app routing" or "bypassed apps"	「アプリ別プロキシ」「アプリのルーティング」「除外アプリ」を探す
 Find a request by its code	コードでリクエストを探す
 Finds buttons and icons without text labels	文字ラベルのないボタンやアイコンを見つけます
-Finish the current lesson first	先に今のレッスンを終えてください
-Finish the lesson under way first	先に進行中のレッスンを終えてください
+Finish the current lesson first	先に今のお手本を終えてください
+Finish the lesson under way first	先に進行中のお手本を終えてください
 First get to the page where it starts on the screen; nothing is written down yet. Then tap Start.	まず画面で開始するページまで進んでください。まだ何も記録されていません。それから「開始」をタップします。
 Fix	修復
-Fix {0} first (fix no_privilege), or ask the user to turn it on in Settings › Accessibility › Installed apps › Agent-VScreen	先に {0} を修復するか（fix no_privilege）、設定 › ユーザー補助 › インストール済みアプリ › Agent-VScreen でオンにするようユーザーに依頼してください
+Fix {0} first (fix no_privilege), or ask the user to turn it on in Settings › Accessibility › Installed apps › Agent-VScreen	先に{0}を修復するか（fix no_privilege）、設定 › ユーザー補助 › インストール済みアプリ › Agent-VScreen でオンにするようユーザーに依頼してください
 Fixing…	修復中…
 Floating window	フローティングウィンドウ
 Fold into a button	ボタンにたたむ
-Folded to the edge; the lesson goes on	端にたたみました。レッスンは続いています
-For agents that only send HTTP requests	HTTP リクエストだけを送る agent 向け
+Folded to the edge; the lesson goes on	端にたたみました。お手本は続いています
+For agents that only send HTTP requests	HTTP リクエストだけを送るエージェント向け
 For clients where you add a connector in their web settings (e.g. claude.ai)	Web 設定でコネクタを追加するクライアント向け（例：claude.ai）
 For cloud MCP clients (Tailscale, Cloudflare or ngrok)	クラウド MCP クライアント向け（Tailscale、Cloudflare、ngrok）
-Free accounts allow one ngrok online at a time: stop ngrok elsewhere, or disconnect it under Agents in the dashboard.	無料アカウントでは同時にオンラインにできる ngrok は 1 つだけです。他の場所の ngrok を止めるか、ダッシュボードの Agents で切断してください。
+Free accounts allow one ngrok online at a time: stop ngrok elsewhere, or disconnect it under Agents in the dashboard.	無料アカウントでは同時にオンラインにできる ngrok は1つだけです。他の場所の ngrok を止めるか、ダッシュボードの Agents で切断してください。
 Free accounts show a warning page to browsers first. Client programs are not affected; if it still fails, check the domain's settings in the ngrok dashboard.	無料アカウントではブラウザに最初に警告ページが表示されます。クライアントプログラムには影響しません。それでも失敗する場合は ngrok ダッシュボードでドメインの設定を確認してください。
 Full	フル
 Full message	メッセージ全文
@@ -389,10 +389,10 @@ Funnel ACL enabled	Funnel ACL 有効
 Funnel allowed for this device	この端末で Funnel を許可済み
 Funnel failed to start	Funnel の起動に失敗しました
 Funnel is not enabled in Tailscale ACL	Tailscale の ACL で Funnel が有効になっていません
-Funnel not allowed or port 443 unavailable	Funnel が許可されていないか、ポート 443 が使えません
+Funnel not allowed or port 443 unavailable	Funnel が許可されていないか、ポート443が使えません
 Further down this page: 	このページの下の方：
 General	一般
-Generated a new 10-minute onboarding code	10 分間有効な接続コードを新しく生成しました
+Generated a new 10-minute onboarding code	10分間有効な接続コードを新しく生成しました
 Get a login link again	ログインリンクを再取得
 Getting ready to show	表示の準備中
 Getting ready: go to the start	準備：開始地点へ移動
@@ -400,31 +400,31 @@ GitHub answered {0}	GitHub の応答：{0}
 Give the address to the cloud client	アドレスをクラウドクライアントに渡す
 Got it	了解
 Grant permissions	権限を許可
-Grant {0}	{0} を許可
+Grant {0}	{0}を許可
 HTTPS certificates are not enabled in Tailscale	Tailscale で HTTPS 証明書が有効になっていません
 HTTPS certificates enabled	HTTPS 証明書有効
-Hand back	返す
+Hand back	エージェントに戻す
 Has not said where it saved it	保存場所をまだ伝えていません
-Have the agent check after this step	このステップの後に agent に確認させる
+Have the agent check after this step	このステップの後にエージェントに確認させる
 Headscale does not support Funnel	Headscale は Funnel に対応していません
 Headscale has no Funnel; use Cloudflare Tunnel or ngrok instead.	Headscale には Funnel がありません。代わりに Cloudflare Tunnel か ngrok を使ってください。
 Help	ヘルプ
-Helps agents find buttons without words (icons, ×, switches). 	文字のないボタン（アイコン、×、スイッチ）を agent が見つけやすくします。
+Helps agents find buttons without words (icons, ×, switches). 	文字のないボタン（アイコン、×、スイッチ）をエージェントが見つけやすくします。
 Hide	隠す
 Hide window	ウィンドウを隠す
 High action rate	高頻度の操作
 High phone temperature warning	端末の高温警告
-Hold 0.5 s to take over⏎Drag the bottom bar to resize⏎Drag to the top right for a small window	0.5 秒長押しで操作を引き継ぎ⏎下のバーをドラッグでサイズ変更⏎右上へドラッグで小窓
-Hold 3s to confirm	3 秒長押しで確認
-Hold the picture 0.5 s to take over; then taps, long presses and swipes go to the screen	画像を 0.5 秒長押しすると操作を引き継ぎ、タップ、長押し、スワイプが画面に送られます
+Hold 0.5 s to take over⏎Drag the bottom bar to resize⏎Drag to the top right for a small window	0.5秒長押しで操作を引き継ぎ⏎下のバーをドラッグでサイズ変更⏎右上へドラッグで小窓
+Hold 3s to confirm	3秒長押しで確認
+Hold the picture 0.5 s to take over; then taps, long presses and swipes go to the screen	画像を0.5秒長押しすると操作を引き継ぎ、タップ、長押し、スワイプが画面に送られます
 Honor App launch	Honor のアプリ起動管理
 How	方法
-How an agent runs it	agent の実行方法
+How an agent runs it	エージェントの実行方法
 How it connects	接続のしくみ
 Huawei App launch	Huawei のアプリ起動管理
 Human pacing	人間らしいペース
 I copied it	コピーしました
-I understand these risks (remember)	これらのリスクを理解しました（記憶する）
+I understand these risks (remember)	これらのリスクを理解しました（次回から確認しない）
 I understand, turn on	理解したのでオンにする
 Idle	待機中
 Idle power saving	待機時の省電力
@@ -433,28 +433,28 @@ Improved	改善
 In "{0}", set Agent-VScreen to manual management and allow auto-start, start by other apps and background activity	「{0}」で Agent-VScreen を手動管理にし、自動起動、他のアプリからの起動、バックグラウンド動作を許可してください
 In Connect › Other devices (Tailscale), choose Built-in Tailscale and sign in with an official account. The phone then shows in your Tailscale device list.	接続 › 他の端末（Tailscale）で「内蔵 Tailscale」を選び、公式アカウントでサインインします。端末が Tailscale のデバイス一覧に表示されます。
 In the tunnel list press the tunnel's name and open its own Routes tab. The left menu's Networking › Routes is a different page (for private networks).	トンネル一覧でトンネル名を押し、そのトンネル専用の Routes タブを開きます。左メニューの Networking › Routes は別のページ（プライベートネットワーク用）です。
-In the tunnel's Public Hostname, set this hostname's service to HTTP, address 127.0.0.1:{0}.	トンネルの Public Hostname で、このホスト名のサービスを HTTP、アドレス 127.0.0.1:{0} にします。
+In the tunnel's Public Hostname, set this hostname's service to HTTP, address 127.0.0.1:{0}.	トンネルの Public Hostname で、このホスト名のサービスを HTTP、アドレス127.0.0.1:{0}にします。
 In your VPN / proxy app, set Agent-VScreen to bypass it	VPN / プロキシアプリで Agent-VScreen を対象外に設定
-Includes the 10-minute code	10 分間有効なコードを含む
+Includes the 10-minute code	10分間有効なコードを含む
 Install Shizuku	Shizuku をインストール
-Install and log in to the Tailscale app on this phone; once it is connected this takes effect within 20 seconds. To skip the app, choose "Built-in".	この端末に Tailscale アプリをインストールしてログインしてください。接続されると 20 秒以内に有効になります。アプリを使わない場合は「内蔵」を選んでください。
+Install and log in to the Tailscale app on this phone; once it is connected this takes effect within 20 seconds. To skip the app, choose "Built-in".	この端末に Tailscale アプリをインストールしてログインしてください。接続されると20秒以内に有効になります。アプリを使わない場合は「内蔵」を選んでください。
 Install command	インストールコマンド
 Interval	間隔
 Invalid token	無効なトークン
 Irreversible actions	取り消せない操作
-It connected but has not said where it saved the note; without it, new conversations may not know they can use the phone. Tap to see which agent.	接続しましたがメモの保存場所をまだ伝えていません。このままでは新しい会話で端末を使えることを知らない可能性があります。タップでどの agent か確認できます。
+It connected but has not said where it saved the note; without it, new conversations may not know they can use the phone. Tap to see which agent.	接続しましたがメモの保存場所をまだ伝えていません。このままでは新しい会話で端末を使えることを知らない可能性があります。タップでどのエージェントか確認できます。
 It connects by itself; turning the VPN on again may break it again	自動で接続されます。VPN を再びオンにするとまた切れることがあります
 It did not change; the system still reads the same.	変化がありません。システムの値は同じままです。
-It gives way within {0} min of quiet; "{1}" retries by itself.	{0} 分操作がなければ譲ります。「{1}」は自動で再試行します。
+It gives way within {0} min of quiet; "{1}" retries by itself.	{0}分操作がなければ譲ります。「{1}」は自動で再試行します。
 It hides again when done	終わると再び隠れます
 It is installed. Open it and connect; this switches to "External Tailscale app"	インストール済みです。開いて接続すると「外部の Tailscale アプリ」に切り替わります
 It is running a command and gives way after.	コマンドを実行中で、終わったら譲ります。
 It saved the note	メモを保存しました
-It saved the note and came back after a break of half an hour or more {0} times (last {1}): new conversations remember it.	メモを保存し、30 分以上の間隔を空けて {0} 回戻ってきました（最後は {1}）。新しい会話でも覚えています。
+It saved the note and came back after a break of half an hour or more {0} times (last {1}): new conversations remember it.	メモを保存し、30分以上の間隔を空けて{0}回戻ってきました（最後は{1}）。新しい会話でも覚えています。
 It says it saved the note in "{0}" ({1}), so new conversations should know about it.	メモを「{0}」に保存したと伝えています（{1}）。新しい会話でも知っているはずです。
 It usually appears within seconds.	通常は数秒で表示されます。
 Its first call	最初の呼び出し
-Its note is from {0}; its next use brings this version's changes.	メモは {0} のものです。次に使うときにこのバージョンの変更が届きます。
+Its note is from {0}; its next use brings this version's changes.	メモは{0}のものです。次に使うときにこのバージョンの変更が届きます。
 Its records	記録
 Its token stops working at once; past tasks stay in the records	トークンはすぐに使えなくなります。過去のタスクは記録に残ります
 Its token stops working; its past tasks stay in the records.	トークンは使えなくなります。過去のタスクは記録に残ります。
@@ -466,18 +466,18 @@ Keep ready for	準備を保つ時間
 Keeps background-screen video for replay and troubleshooting	再生や調査用にバックグラウンド画面の映像を保存します
 Keeps its sound on the screen	画面上でも音を出す
 Kept	保存済み
-Language of replies to agents	agent への返信の言語
-Large model (~40 MB, slower, download)	大型モデル（約 40 MB、低速、要ダウンロード）
+Language of replies to agents	エージェントへの返信の言語
+Large model (~40 MB, slower, download)	大型モデル（約40 MB、低速、要ダウンロード）
 Last visitor	最後の訪問者
 Last: 	前回：
 Later	後で
 Less	少なく
-Lessons	レッスン
-Let "{0}" go first	「{0}」を先にする
+Lessons	お手本
+Let "{0}" go first	「{0}」を優先する
 Let go for a small window	指を離すと小窓
 Level	レベル
 License: 	ライセンス：
-Lights up when an agent next uses it	agent が次に使うときに点灯します
+Lights up when an agent next uses it	エージェントが次に使うときに点灯します
 Loading apps…	アプリを読み込み中…
 Loading…	読み込み中…
 Locked (hot)	ロック（高温）
@@ -490,19 +490,19 @@ Look	見る
 Look & operate	見る・操作する
 Look only	見るだけ
 MCP URL	MCP URL
-MCP agents: config and ability note	MCP agent：設定と能力メモ
+MCP agents: config and ability note	MCP エージェント：設定と能力メモ
 MCP config	MCP 設定
-ML Kit crashed during self-test and is disabled for this version; PP-OCRv6 took over (run diag or update the app to retry)	ML Kit がセルフテスト中にクラッシュしたため、このバージョンでは無効にしました。代わりに PP-OCRv6 を使います（diag を実行するかアプリを更新すると再試行します）
+ML Kit crashed during self-test and is disabled for this version; PP-OCRv6 took over (run diag or update the app to retry)	ML Kit がセルフテスト中にクラッシュしたため、このバージョンでは無効にしました。代わりに PP-OCRv6を使います（diag を実行するかアプリを更新すると再試行します）
 MMM d HH:mm	M月d日 HH:mm
 Main token	メイントークン
 Main token (built-in default)	メイントークン（内蔵の既定）
 Make a new main token?	新しいメイントークンを作りますか？
 Mark an area	範囲をマーク
 Mark it	マーク
-Marked: the agent checks after this step; say what on the save page	マーク済み：agent はこのステップの後に確認します。確認内容は保存ページで指定してください
+Marked: the agent checks after this step; say what on the save page	マーク済み：エージェントはこのステップの後に確認します。確認内容は保存ページで指定してください
 Menu names in the Tailscale admin may change; follow what it shows now.	Tailscale 管理画面のメニュー名は変わることがあります。今表示されているものに従ってください。
 Message	メッセージ
-Message for your agent	agent へのメッセージ
+Message for your agent	エージェントへのメッセージ
 Message preview	メッセージのプレビュー
 Mode	モード
 More	その他
@@ -516,7 +516,7 @@ Mute the screen	画面をミュート
 Mute which app	ミュートするアプリ
 Muting…	ミュート中…
 Name	名前
-Name (agents replay it with use <name>)	名前（agent は use <名前> で再実行します）
+Name (agents replay it with use <name>)	名前（エージェントは use <名前> で再実行します）
 Name is self-reported, not verified	名前は自己申告で、検証されていません
 Name it, copy its message, send it	名前を付け、メッセージをコピーして送る
 Name suffix of a self-hosted control server (optional, e.g. tail.example.com)	自前のコントロールサーバーの名前の末尾（任意、例：tail.example.com）
@@ -525,40 +525,40 @@ Never connects to Cloudflare	Cloudflare には一切接続しません
 Never connects to ngrok	ngrok には一切接続しません
 Never mind	やめておく
 New	新規
-New agent	新しい agent
+New agent	新しいエージェント
 New clients can initiate pairing now; the window closes automatically after approval.	新しいクライアントが今ペアリングを始められます。承認するとウィンドウは自動で閉じます。
 New conversations will know they can use the phone	新しい会話でも端末を使えることが分かります
 New token	新しいトークン
 New token made	新しいトークンを作成しました
-New version {0}	新しいバージョン {0}
+New version {0}	新しいバージョン{0}
 New: {0}	新規：{0}
 Next	次へ
-Next comes Install and run a connector: pick any system and press the copy button beside the command ① (the long string starting with eyJ is the token), come back and press Paste and save. Don't run it on a computer: the connector is this phone. Connection status ② keeps spinning and Continue stays grey: the connector comes online only when public access is on (step 5). That is expected; once the token is saved, just leave that page.	次は「Install and run a connector」です。任意のシステムを選び、コマンド横のコピーボタン①を押し（eyJ で始まる長い文字列がトークン）、ここに戻って「貼り付けて保存」を押します。パソコンで実行しないでください。コネクタはこの端末です。接続状態②は回り続け「Continue」は灰色のままです。コネクタは公開アクセスをオンにしたとき（手順 5）に初めてオンラインになるので、これは想定どおりです。トークンを保存したらそのページは離れてかまいません。
-Next {0}	次回 {0}
-Next: have the agent save the note	次：agent にメモを保存させる
+Next comes Install and run a connector: pick any system and press the copy button beside the command ① (the long string starting with eyJ is the token), come back and press Paste and save. Don't run it on a computer: the connector is this phone. Connection status ② keeps spinning and Continue stays grey: the connector comes online only when public access is on (step 5). That is expected; once the token is saved, just leave that page.	次は「Install and run a connector」です。任意のシステムを選び、コマンド横のコピーボタン①を押し（eyJ で始まる長い文字列がトークン）、ここに戻って「貼り付けて保存」を押します。パソコンで実行しないでください。コネクタはこの端末です。接続状態②は回り続け「Continue」は灰色のままです。コネクタは公開アクセスをオンにしたとき（手順5）に初めてオンラインになるので、これは想定どおりです。トークンを保存したらそのページは離れてかまいません。
+Next {0}	次回{0}
+Next: have the agent save the note	次：エージェントにメモを保存させる
 No Tailscale address yet	まだ Tailscale のアドレスがありません
 No Tailscale app needed	Tailscale アプリ不要
-No agent connected yet	まだ接続された agent はありません
-No agent has used it yet	まだ使った agent はいません
-No agent is online for this domain. Wait for Tunnel connection above to show connected; if it stays offline, check the domain and authtoken are on the same account.	このドメインでオンラインの agent がありません。上の「トンネル接続」が接続済みになるのを待ってください。オフラインのままなら、ドメインと authtoken が同じアカウントのものか確認してください。
-No agent is waiting for this; it is saved as your own, and any agent can use it.	待っている agent はいません。あなたのものとして保存され、どの agent でも使えます。
+No agent connected yet	まだ接続されたエージェントはありません
+No agent has used it yet	まだ使ったエージェントはいません
+No agent is online for this domain. Wait for Tunnel connection above to show connected; if it stays offline, check the domain and authtoken are on the same account.	このドメインでオンラインのエージェントがありません。上の「トンネル接続」が接続済みになるのを待ってください。オフラインのままなら、ドメインと authtoken が同じアカウントのものか確認してください。
+No agent is waiting for this; it is saved as your own, and any agent can use it.	待っているエージェントはいません。自分のものとして保存され、どのエージェントでも使えます。
 No app is running on the background screen	バックグラウンド画面で実行中のアプリはありません
-No authenticated public requests for 24 hours, so {0} was turned off. Re-enable when needed.	24 時間認証済みの公開リクエストがなかったため、{0} をオフにしました。必要になったら再度有効にしてください。
+No authenticated public requests for 24 hours, so {0} was turned off. Re-enable when needed.	24時間認証済みの公開リクエストがなかったため、{0}をオフにしました。必要になったら再度有効にしてください。
 No authorized public clients yet.	承認済みの公開クライアントはまだありません。
 No authtoken found: paste the token from Your Authtoken in the ngrok dashboard, or the whole ngrok config add-authtoken command	authtoken が見つかりません。ngrok ダッシュボードの Your Authtoken のトークン、または ngrok config add-authtoken コマンド全体を貼り付けてください
 No background screen right now	今はバックグラウンド画面がありません
 No connector is online for the tunnel behind this hostname: check the token and hostname belong to the same tunnel.	このホスト名の背後のトンネルにオンラインのコネクタがありません。トークンとホスト名が同じトンネルのものか確認してください。
 No connector is online for the tunnel this hostname points at. Check that the token is from the same tunnel and wait for Tunnel connection above to show connected.	このホスト名が指すトンネルにオンラインのコネクタがありません。トークンが同じトンネルのものか確認し、上の「トンネル接続」が接続済みになるまで待ってください。
 No domain needed; a *.ts.net address; needs an official Tailscale account	ドメイン不要。*.ts.net のアドレス。公式 Tailscale アカウントが必要
-No domain needed; free accounts get one static domain; needs an ngrok account; also works with Headscale	ドメイン不要。無料アカウントで固定ドメインが 1 つ。ngrok アカウントが必要。Headscale でも使えます
+No domain needed; free accounts get one static domain; needs an ngrok account; also works with Headscale	ドメイン不要。無料アカウントで固定ドメインが1つ。ngrok アカウントが必要。Headscale でも使えます
 No download source answered: 	どのダウンロード元も応答しませんでした：
 No larger model yet	まだ大型モデルはありません
-No login link yet (waited {0} s)	まだログインリンクがありません（{0} 秒待機）
+No login link yet (waited {0} s)	まだログインリンクがありません（{0}秒待機）
 No picture	画像なし
 No questions yet	まだ質問はありません
 No request ever used them. They stop working at once.	一度も使われていません。すぐに使えなくなります。
 No request ever used them; the main token and public clients are kept	一度も使われていません。メイントークンと公開クライアントは残ります
-No root: the root manager refused, or this phone is not rooted (su exit {0})	root なし：root マネージャーが拒否したか、この端末は root 化されていません（su 終了コード {0}）
+No root: the root manager refused, or this phone is not rooted (su exit {0})	root なし：root マネージャーが拒否したか、この端末は root 化されていません（su 終了コード{0}）
 No rules yet: every app can be operated	まだルールはありません。すべてのアプリを操作できます
 No tasks yet	まだタスクはありません
 No tunnel token found: paste the whole command under "Install and run a connector" on the tunnel page, or the long string in it that starts with eyJ	トンネルトークンが見つかりません。トンネルページの「Install and run a connector」のコマンド全体、またはその中の eyJ で始まる長い文字列を貼り付けてください
@@ -568,67 +568,67 @@ None / decline	どれでもない / 回答しない
 Normal	標準
 Not a valid domain: use the one under Domains in the ngrok dashboard, e.g. name.ngrok-free.app	有効なドメインではありません。ngrok ダッシュボードの Domains にあるもの（例：name.ngrok-free.app）を使ってください
 Not a valid hostname: use the public hostname you added to the tunnel, e.g. phone.example.com	有効なホスト名ではありません。トンネルに追加したパブリックホスト名（例：phone.example.com）を使ってください
-Not confirmed yet. Go back to step 3 and tap Confirm.	まだ確認されていません。手順 3 に戻って「確認」をタップしてください。
-Not connected to {0}	{0} に未接続
+Not confirmed yet. Go back to step 3 and tap Confirm.	まだ確認されていません。手順3に戻って「確認」をタップしてください。
+Not connected to {0}	{0}に未接続
 Not connected yet	まだ接続されていません
 Not connected yet. Send it its message.	まだ接続されていません。メッセージを送ってください。
 Not finished	未完了
-Not in the background; woken by an agent here or a booked time, then put away again	バックグラウンドにはいません。この端末の agent か予約時刻に起こされ、終わると再びしまわれます
+Not in the background; woken by an agent here or a booked time, then put away again	バックグラウンドにはいません。この端末のエージェントか予約時刻に起動され、終わると再び隠れます
 Not installed: 	未インストール：
 Not known which version its note is for; its next use brings an update notice.	メモがどのバージョン用か分かりません。次に使うときに更新のお知らせが届きます。
 Not now	今はしない
 Not on	オフ
-Not reached {0} yet	まだ {0} に届いていません
+Not reached {0} yet	まだ{0}に届いていません
 Not running	停止中
 Not started with root yet: tap "Start with root" in Agent-VScreen's setup	まだ root で起動していません。Agent-VScreen の設定で「root で起動」をタップしてください
 Not using the screen; no bookings or watches	画面を使っていません。予約や監視もありません
 Note saved	メモを保存しました
 Note: Cloudflare decrypts HTTPS on its servers before forwarding, so it can technically see requests. Pairing, OAuth and permission checks still happen on the phone. In mainland China, Cloudflare's speed and stability vary by network.	注意：Cloudflare は転送前にサーバーで HTTPS を復号するため、技術的にはリクエストを見ることができます。ペアリング、OAuth、権限の確認は引き続き端末で行います。中国本土では Cloudflare の速度と安定性はネットワークによって異なります。
-Note: ngrok decrypts HTTPS on its servers before forwarding, so it can technically see requests. Pairing, OAuth and permission checks still happen on the phone. Free accounts have traffic and request limits, usually enough for personal use, and allow one ngrok online at a time. In mainland China, speed varies by network.	注意：ngrok は転送前にサーバーで HTTPS を復号するため、技術的にはリクエストを見ることができます。ペアリング、OAuth、権限の確認は引き続き端末で行います。無料アカウントには通信量とリクエスト数の上限があり（個人利用なら通常は十分）、同時にオンラインにできる ngrok は 1 つです。中国本土では速度はネットワークによって異なります。
+Note: ngrok decrypts HTTPS on its servers before forwarding, so it can technically see requests. Pairing, OAuth and permission checks still happen on the phone. Free accounts have traffic and request limits, usually enough for personal use, and allow one ngrok online at a time. In mainland China, speed varies by network.	注意：ngrok は転送前にサーバーで HTTPS を復号するため、技術的にはリクエストを見ることができます。ペアリング、OAuth、権限の確認は引き続き端末で行います。無料アカウントには通信量とリクエスト数の上限があり（個人利用なら通常は十分）、同時にオンラインにできる ngrok は1つです。中国本土では速度はネットワークによって異なります。
 Nothing booked or watched	予約も監視もありません
 Nothing kept matches "{0}"	「{0}」に一致する保存済みのものはありません
 Nothing kept yet	まだ保存済みのものはありません
 Nothing recorded yet	まだ何も記録されていません
-Nothing wakes it; the power button at the top resumes it	何にも起こされません。上部の電源ボタンで再開します
+Nothing wakes it; the power button at the top resumes it	自動では起動しません。上部の電源ボタンで再開します
 Nothing was recorded.	何も記録されませんでした。
 Notifications	通知
 Now	現在
-OCR is unavailable: both PP-OCRv6 and ML Kit crashed during self-test and are disabled for this version; text on screen relies on accessibility and screenshots only (run diag or update the app to retry)	OCR を使えません。PP-OCRv6 と ML Kit の両方がセルフテスト中にクラッシュし、このバージョンでは無効です。画面の文字はユーザー補助とスクリーンショットだけに頼ります（diag を実行するかアプリを更新すると再試行します）
+OCR is unavailable: both PP-OCRv6 and ML Kit crashed during self-test and are disabled for this version; text on screen relies on accessibility and screenshots only (run diag or update the app to retry)	OCR を使えません。PP-OCRv6と ML Kit の両方がセルフテスト中にクラッシュし、このバージョンでは無効です。画面の文字はユーザー補助とスクリーンショットだけに頼ります（diag を実行するかアプリを更新すると再試行します）
 OK	OK
 OPPO Auto-launch	OPPO の自動起動
 Off	オフ
 Off (remote goes offline)	オフ（リモートはオフライン）
 Official docs	公式ドキュメント
 On	オン
-On Android 17+, use a compatible fork or switch to Root	Android 17 以降は互換フォークを使うか Root に切り替えてください
+On Android 17+, use a compatible fork or switch to Root	Android 17以降は互換フォークを使うか Root に切り替えてください
 On demand	必要時
 On demand (asleep)	必要時（スリープ中）
 On demand · awake right now	必要時 · 今は起きています
 On demand · remote offline	必要時 · リモートはオフライン
 On this phone	この端末
 On · mini-window behavior & buttons	オン · 小窓の動作とボタン
-On: the agent's element list includes icons, × and switches without words	オン：agent の要素リストに文字のないアイコン、×、スイッチが含まれます
+On: the agent's element list includes icons, × and switches without words	オン：エージェントの要素リストに文字のないアイコン、×、スイッチが含まれます
 Onboarding code	接続コード
-Once	1 回
-Once connected, each agent's records, tasks and questions stay apart	接続すると、agent ごとの記録、タスク、質問は分けて保存されます
-Once connected, the agent works in apps on a background screen, not on the one you are using.	接続すると、agent はあなたが使っている画面ではなく、バックグラウンド画面でアプリを操作します。
-One token per agent · {0}	agent ごとにトークン 1 つ · {0}
+Once	1回
+Once connected, each agent's records, tasks and questions stay apart	接続すると、エージェントごとの記録、タスク、質問は分けて保存されます
+Once connected, the agent works in apps on a background screen, not on the one you are using.	接続すると、エージェントは今使っている画面ではなく、バックグラウンド画面でアプリを操作します。
+One token per agent · {0}	エージェントごとにトークン1つ · {0}
 One-time code	一回限りのコード
 One-time onboarding code (pending)	一回限りの接続コード（未使用）
-Only agents on this phone can connect	この端末の agent だけが接続できます
-Only allow new pairings during a manual window	手動で開いた時間帯だけ新しいペアリングを許可
-Only arm64 phones are supported.	arm64 の端末だけに対応しています。
-Only for agents you trust	信頼できる agent にだけ
+Only agents on this phone can connect	この端末のエージェントだけが接続できます
+Only allow new pairings during a manual window	手動で受付を開いたときだけ新しいペアリングを許可
+Only arm64 phones are supported.	arm64の端末だけに対応しています。
+Only for agents you trust	信頼できるエージェントにだけ
 Only from your own Tailscale network	自分の Tailscale ネットワークからのみ
 Only these devices (names, logins or 100.x addresses, comma separated; empty = every device)	これらの端末のみ（端末名、ログイン名、100.x アドレスをカンマ区切り。空欄 = すべての端末）
-Only you can turn accessibility on, in system settings.	ユーザー補助をオンにできるのは、システム設定であなた自身だけです。
+Only you can turn accessibility on, in system settings.	ユーザー補助はシステム設定で本人だけがオンにできます。
 Open	開く
 Open Access controls	Access controls を開く
 Open Cloudflare	Cloudflare を開く
 Open DNS settings	DNS 設定を開く
 Open DNS settings goes straight to the DNS page of the Tailscale admin; scroll to HTTPS Certificates at the bottom and press Enable HTTPS. Needed once per tailnet.	「DNS 設定を開く」で Tailscale 管理画面の DNS ページに直接移動します。下部の HTTPS Certificates までスクロールして Enable HTTPS を押します。tailnet ごとに一度だけ必要です。
 Open Domains	Domains を開く
-Open Domains goes straight to the Domains page (Universal Gateway › Domains on the left). Free accounts already have one, like name.ngrok-free.app or name.ngrok-free.dev; if the list is empty, create one. Copy it, come back and press Paste and save.	「Domains を開く」で Domains ページ（左の Universal Gateway › Domains）に直接移動します。無料アカウントには name.ngrok-free.app や name.ngrok-free.dev のようなドメインがすでに 1 つあります。一覧が空なら作成してください。コピーしてここに戻り、「貼り付けて保存」を押します。
+Open Domains goes straight to the Domains page (Universal Gateway › Domains on the left). Free accounts already have one, like name.ngrok-free.app or name.ngrok-free.dev; if the list is empty, create one. Copy it, come back and press Paste and save.	「Domains を開く」で Domains ページ（左の Universal Gateway › Domains）に直接移動します。無料アカウントには name.ngrok-free.app や name.ngrok-free.dev のようなドメインがすでに1つあります。一覧が空なら作成してください。コピーしてここに戻り、「貼り付けて保存」を押します。
 Open Tailscale	Tailscale を開く
 Open Tailscale ACL	Tailscale ACL を開く
 Open Tailscale Admin	Tailscale 管理画面を開く
@@ -645,22 +645,22 @@ Open it and tap the picture to answer	開いて画像をタップして回答
 Open it to answer	開いて回答
 Open it to choose	開いて選択
 Open ngrok sign-up	ngrok の登録ページを開く
-Open pairing window (3 min)	ペアリングの時間帯を開く（3 分）
+Open pairing window (3 min)	ペアリング受付を開く（3分）
 Open releases	リリースを開く
 Open settings	設定を開く
 Open system settings	システム設定を開く
 Open the app to inspect the error	アプリを開いてエラーを確認
 Open the registration page	登録ページを開く
-Open the registration page of {0}. Headscale usually shows a register command: run it on the server and the node joins. Or put a pre-auth key in Advanced.	{0} の登録ページを開きます。Headscale では通常 register コマンドが表示されるので、サーバーで実行するとノードが参加します。または「詳細」に事前認証キーを入れてください。
+Open the registration page of {0}. Headscale usually shows a register command: run it on the server and the node joins. Or put a pre-auth key in Advanced.	{0}の登録ページを開きます。Headscale では通常 register コマンドが表示されるので、サーバーで実行するとノードが参加します。または「詳細」に事前認証キーを入れてください。
 Open the release	リリースを開く
 Open the tunnel list	トンネル一覧を開く
 Open the tunnel list goes straight to Networking › Tunnels (pick the account first if you have several). Press Create a tunnel, choose Cloudflared, name it (e.g. agent-vscreen) and press Create Tunnel. Note: Networking › Routes in the left menu is a different page for private networks; don't go there.	「トンネル一覧を開く」で Networking › Tunnels に直接移動します（複数アカウントがある場合は先に選択）。Create a tunnel を押し、Cloudflared を選んで名前を付け（例：agent-vscreen）、Create Tunnel を押します。注意：左メニューの Networking › Routes はプライベートネットワーク用の別ページなので開かないでください。
-Open the tunnel list, press the tunnel's name and open its Routes tab ① (inside the tunnel, not the left menu's Networking › Routes), press Add route ② at the top right, then Published application ③. In the form: subdomain ① e.g. phone; domain ② pick yours; leave the path empty; Service URL ③ exactly as below (not localhost, same port; if there is a separate Type drop-down pick HTTP and enter just 127.0.0.1:{0}), then press Add route ④. "Route added" means done. Older screens call it Public Hostname. The tunnel showing not connected is fine: it connects once public access is on.	トンネル一覧を開き、トンネル名を押してその Routes タブ①を開きます（トンネル内のタブで、左メニューの Networking › Routes ではありません）。右上の Add route ②、続いて Published application ③を押します。フォームでは、サブドメイン①（例：phone）、ドメイン②は自分のものを選択、パスは空欄、Service URL ③は下のとおり正確に入力し（localhost ではなく同じポート。Type のドロップダウンが別にある場合は HTTP を選び 127.0.0.1:{0} だけ入力）、Add route ④を押します。「Route added」と出れば完了です。古い画面では Public Hostname と呼ばれます。トンネルが未接続と表示されても問題ありません。公開アクセスをオンにすると接続されます。
+Open the tunnel list, press the tunnel's name and open its Routes tab ① (inside the tunnel, not the left menu's Networking › Routes), press Add route ② at the top right, then Published application ③. In the form: subdomain ① e.g. phone; domain ② pick yours; leave the path empty; Service URL ③ exactly as below (not localhost, same port; if there is a separate Type drop-down pick HTTP and enter just 127.0.0.1:{0}), then press Add route ④. "Route added" means done. Older screens call it Public Hostname. The tunnel showing not connected is fine: it connects once public access is on.	トンネル一覧を開き、トンネル名を押してその Routes タブ①を開きます（トンネル内のタブで、左メニューの Networking › Routes ではありません）。右上の Add route ②、続いて Published application ③を押します。フォームでは、サブドメイン①（例：phone）、ドメイン②は自分のものを選択、パスは空欄、Service URL ③は下のとおり正確に入力し（localhost ではなく同じポート。Type のドロップダウンが別にある場合は HTTP を選び127.0.0.1:{0}だけ入力）、Add route ④を押します。「Route added」と出れば完了です。古い画面では Public Hostname と呼ばれます。トンネルが未接続と表示されても問題ありません。公開アクセスをオンにすると接続されます。
 Open your VPN or proxy app	VPN またはプロキシアプリを開く
-Open {0}	{0} を開く
+Open {0}	{0}を開く
 Opened "{0}": allow auto-start, start by other apps and background activity	「{0}」を開きました：自動起動、他のアプリからの起動、バックグラウンド動作を許可してください
 Opened: {0}	開きました：{0}
-Opening {0} on the background screen…	バックグラウンド画面で {0} を開いています…
+Opening {0} on the background screen…	バックグラウンド画面で{0}を開いています…
 Opens a new issue with a redacted summary; the full report is copied for pasting	伏せ字済みの概要で新しい issue を開きます。完全なレポートは貼り付け用にコピーされます
 Operates apps; only irreversible and payment actions need confirmation (default)	アプリを操作します。取り消せない操作と支払いだけ確認が必要（既定）
 Operates apps; sensitive, irreversible and payment actions need confirmation	アプリを操作します。機微な操作、取り消せない操作、支払いは確認が必要
@@ -668,29 +668,29 @@ Other device (Tailscale)	他の端末（Tailscale）
 Other device (Tailscale) · {0}	他の端末（Tailscale）· {0}
 Other devices (Tailscale)	他の端末（Tailscale）
 Own server (Headscale), auth key	自前のサーバー（Headscale）、認証キー
-PP-OCRv6 crashed during self-test and is disabled for this version; ML Kit took over (run diag or update the app to retry)	PP-OCRv6 がセルフテスト中にクラッシュしたため、このバージョンでは無効にしました。代わりに ML Kit を使います（diag を実行するかアプリを更新すると再試行します）
+PP-OCRv6 crashed during self-test and is disabled for this version; ML Kit took over (run diag or update the app to retry)	PP-OCRv6がセルフテスト中にクラッシュしたため、このバージョンでは無効にしました。代わりに ML Kit を使います（diag を実行するかアプリを更新すると再試行します）
 PP-OCRv6, offline on this phone	PP-OCRv6、この端末でオフライン動作
 Package	パッケージ
 Package name	パッケージ名
 Pairing	ペアリング
-Pairing code must be 8 letters/digits (e.g. ABCD-EFGH, without 0/O/1/I).	ペアリングコードは英数字 8 文字です（例：ABCD-EFGH。0/O/1/I は使いません）。
-Pairing code {0}	ペアリングコード {0}
+Pairing code must be 8 letters/digits (e.g. ABCD-EFGH, without 0/O/1/I).	ペアリングコードは英数字8文字です（例：ABCD-EFGH。0/O/1/I は使いません）。
+Pairing code {0}	ペアリングコード{0}
 Pairing request received; waiting for your approval	ペアリング要求を受信しました。承認を待っています
-Pairing window open · {0} left	ペアリングの時間帯が開いています · 残り {0}
-Pairing {0} · {1}	ペアリング {0} · {1}
+Pairing window open · {0} left	ペアリング受付中 · 残り{0}
+Pairing {0} · {1}	ペアリング{0} · {1}
 Passed: the internet reaches this phone	合格：インターネットからこの端末に届きます
 Paste	貼り付け
 Paste and save	貼り付けて保存
 Paste into Operit or similar tools	Operit などのツールに貼り付け
-Paste into the agent's custom instructions or memory	agent のカスタム指示やメモリに貼り付け
+Paste into the agent's custom instructions or memory	エージェントのカスタム指示やメモリに貼り付け
 Pause	一時停止
 Pause background-screen rendering after each turn	各ターンの後にバックグラウンド画面の描画を一時停止
 Paused · nothing is written down	一時停止中 · 何も記録されません
 Paused: nothing is written down.	一時停止中：何も記録されません。
 Pauses background-screen rendering after each turn to save power; the page is kept and resumes with the next command. A few apps reload on resume; turn this off if that happens.	省電力のため各ターンの後にバックグラウンド画面の描画を一時停止します。ページは保持され、次のコマンドで再開します。再開時に再読み込みするアプリもあり、その場合はオフにしてください。
-Payments cannot be asked for ahead: each payment is confirmed on the phone; only the user can turn on Payments without confirmation in Agent-VScreen › Connect › this agent	支払いは事前に許可を求められません。支払いは毎回端末で確認します。「支払いの確認なし」をオンにできるのは、Agent-VScreen › 接続 › この agent でユーザーだけです
-Payments without confirmation (30 min)	支払いの確認なし（30 分）
-Payments without confirmation until {0}	{0} まで支払いの確認なし
+Payments cannot be asked for ahead: each payment is confirmed on the phone; only the user can turn on Payments without confirmation in Agent-VScreen › Connect › this agent	支払いは事前に許可を求められません。支払いは毎回端末で確認します。「確認なしで支払い」をオンにできるのは、Agent-VScreen › 接続 › このエージェントでユーザーだけです
+Payments without confirmation (30 min)	確認なしで支払い（30分）
+Payments without confirmation until {0}	{0}まで確認なしで支払い
 Per app: blocked, read-only or confirm every time	アプリごと：禁止、読み取り専用、毎回確認
 Per-action permissions	操作ごとの権限
 Permanent	無期限
@@ -702,12 +702,12 @@ Permissions	権限
 Permissions ({0}, level "{1}"):⏎	権限（{0}、レベル「{1}」）：⏎
 Phone screen lock is set	端末の画面ロックが設定済み
 Phone settings	端末の設定
-Pick a level for each agent under Connect › the agent; rows can be changed one by one, or use Custom. Widening needs a fingerprint; narrowing applies at once. Agents connected over the public internet can never do system actions, at any level.	接続 › 各 agent でレベルを選びます。行ごとに変更するか「カスタム」を使えます。権限の拡大には指紋が必要で、縮小はすぐに反映されます。公開インターネット経由で接続した agent は、どのレベルでもシステム操作はできません。
+Pick a level for each agent under Connect › the agent; rows can be changed one by one, or use Custom. Widening needs a fingerprint; narrowing applies at once. Agents connected over the public internet can never do system actions, at any level.	接続 › 各エージェントでレベルを選びます。行ごとに変更するか「カスタム」を使えます。権限の拡大には指紋が必要で、縮小はすぐに反映されます。公開インターネット経由で接続したエージェントは、どのレベルでもシステム操作はできません。
 Plans	予定
 Point it out	指し示す
-Port 443 allowed	ポート 443 許可済み
-Port 443 allowed for Funnel	Funnel でポート 443 許可済み
-Port 443 is not allowed for Funnel	Funnel でポート 443 が許可されていません
+Port 443 allowed	ポート443許可済み
+Port 443 allowed for Funnel	Funnel でポート443許可済み
+Port 443 is not allowed for Funnel	Funnel でポート443が許可されていません
 Prerequisites	前提条件
 Preview	プレビュー
 Preview & pieces	プレビューと部品
@@ -730,7 +730,7 @@ Public hostname, e.g. phone.example.com	パブリックホスト名（例：phon
 Querying Tailscale for HTTPS and Funnel readiness…	Tailscale に HTTPS と Funnel の準備状況を問い合わせ中…
 Questions	質問
 Questions that need your answer	回答が必要な質問
-Raise {0} to "{1}"	{0} を「{1}」に上げる
+Raise {0} to "{1}"	{0}を「{1}」に上げる
 Reaches ngrok but not the service on the phone	ngrok には届くが端末のサービスに届かない
 Reaching this phone from the internet…	インターネットからこの端末に接続中…
 Read-only (look and scroll, no tapping or typing)	読み取り専用（見る・スクロールのみ、タップや入力は不可）
@@ -740,10 +740,10 @@ Ready for biometric or screen-lock confirmation	生体認証または画面ロ�
 Ready to resume	再開の準備完了
 Recheck	再確認
 Recognition and recording	認識と録画
-Recording a lesson · {0}	レッスンを記録中 · {0}
-Recording a lesson · {0}	レッスンを記録中 · {0}
+Recording a lesson · {0}	お手本を記録中 · {0}
+Recording a lesson · {0}	お手本を記録中 · {0}
 Recording · {0}	記録中 · {0}
-Recording. No agent is waiting: it is saved as your own	記録中。待っている agent はいないので、あなたのものとして保存されます
+Recording. No agent is waiting: it is saved as your own	記録中。待っているエージェントはいないので、自分のものとして保存されます
 Recording: do it as usual, then tap Done	記録中：いつもどおり操作してから「完了」をタップ
 Records	記録
 Records and diagnostics	記録と診断
@@ -752,35 +752,35 @@ Redirect host	リダイレクト先ホスト
 Redo	やり直す
 Refresh	更新
 Regenerate	再生成
-Regenerate onboarding code (10 min)	接続コードを再生成（10 分）
+Regenerate onboarding code (10 min)	接続コードを再生成（10分）
 Relay	中継
 Releases	リリース
 Remote access	リモートアクセス
 Remove	削除
 Remove "{0}"?	「{0}」を削除しますか？
-Remove this agent	この agent を削除
+Remove this agent	このエージェントを削除
 Remove this check	この確認を削除
-Remove {0} never-used tokens	一度も使われていない {0} 個のトークンを削除
-Remove {0} never-used tokens?	一度も使われていない {0} 個のトークンを削除しますか？
-Removed {0}	{0} を削除しました
+Remove {0} never-used tokens	一度も使われていない{0}個のトークンを削除
+Remove {0} never-used tokens?	一度も使われていない{0}個のトークンを削除しますか？
+Removed {0}	{0}を削除しました
 Renew	更新
 Repeat	繰り返し
 Report a problem	問題を報告
 Report by email	メールで報告
 Report on GitHub	GitHub で報告
 Requesting HTTPS certificate	HTTPS 証明書を要求中
-Requesting HTTPS certificate; first time takes ~30–60 seconds.	HTTPS 証明書を要求中です。初回は約 30〜60 秒かかります。
+Requesting HTTPS certificate; first time takes ~30–60 seconds.	HTTPS 証明書を要求中です。初回は約30〜60秒かかります。
 Requests via the external app must be signed; built-in is not affected	外部アプリ経由のリクエストには署名が必要です。内蔵には影響しません
 Requires a fingerprint; apps set to confirm every time still ask	指紋が必要です。毎回確認に設定したアプリは引き続き確認します
 Restore the "{0}" preset	プリセット「{0}」に戻す
-Restored {0}; start playing again in the app.	{0} の音声を戻しました。アプリで再生し直してください。
+Restored {0}; start playing again in the app.	{0}の音声を戻しました。アプリで再生し直してください。
 Resume	再開
 Retry	再試行
 Review	確認
 Review and save	確認して保存
 Revoke	取り消す
 Revoke all public clients	すべての公開クライアントを取り消す
-Revoked {0} public clients	{0} 件の公開クライアントを取り消しました
+Revoked {0} public clients	{0}件の公開クライアントを取り消しました
 Risk warning	リスクの警告
 Root detected: use Root (no Shizuku needed)	root を検出：Root を使ってください（Shizuku 不要）
 Root permission	root 権限
@@ -800,7 +800,7 @@ Saved ({0}…)	保存済み（{0}…）
 Saved as "{0}"	「{0}」として保存しました
 Saved, and still using it	保存済み、使用中
 Saved, built-in Tailscale is reconnecting	保存しました。内蔵 Tailscale が再接続中です
-Say something…	何か話してください…
+Say something…	伝えたいことを入力…
 Schedules	予約
 Screen	画面
 Screen closed	画面を閉じました
@@ -810,28 +810,28 @@ Search apps	アプリを検索
 Search name or package	名前またはパッケージ名で検索
 Search name, app or steps	名前、アプリ、手順で検索
 Security confirmations	セキュリティの確認
-Segments you taught, segments agents saved and what they noted, by app, are kept here	あなたが教えた操作、agent が保存した操作とそのメモを、アプリごとにここに保存します
+Segments you taught, segments agents saved and what they noted, by app, are kept here	自分で教えた操作、エージェントが保存した操作とそのメモを、アプリごとにここに保存します
 Select	選択
 Select all	すべて選択
 Select none	選択を解除
 Self-test: 502 / cannot reach the phone	セルフテスト：502 / 端末に届きません
 Self-test: address offline (ERR_NGROK_3200)	セルフテスト：アドレスがオフライン（ERR_NGROK_3200）
 Self-test: certificate error	セルフテスト：証明書エラー
-Self-test: error 1033 / tunnel not connected	セルフテスト：エラー 1033 / トンネル未接続
+Self-test: error 1033 / tunnel not connected	セルフテスト：エラー1033 / トンネル未接続
 Self-test: hostname does not resolve	セルフテスト：ホスト名を解決できません
 Self-test: redirected or blocked	セルフテスト：リダイレクトまたはブロックされました
 Send	送信
 Send diagnostics	診断を送信
-Send to the agent	agent に送信
-Send to {0}	{0} に送信
+Send to the agent	エージェントに送信
+Send to {0}	{0}に送信
 Sensitive actions	機微な操作
-Sent to the agent; the lesson goes on	agent に送りました。レッスンは続いています
+Sent to the agent; the lesson goes on	エージェントに送りました。お手本は続いています
 Server	サーバー
 Service	サービス
 Service URL	Service URL
 Service off	サービスはオフ
-Serving public MCP via {0}; tap Off when not needed.	{0} 経由で公開 MCP を提供中です。不要になったら「オフ」をタップしてください。
-Session {0} · {1} left	セッション {0} · 残り {1}
+Serving public MCP via {0}; tap Off when not needed.	{0}経由で公開 MCP を提供中です。不要になったら「オフ」をタップしてください。
+Session {0} · {1} left	セッション{0} · 残り{1}
 Set Agent-VScreen to "allow background activity" in the system's background management.	システムのバックグラウンド管理で Agent-VScreen を「バックグラウンド動作を許可」にしてください。
 Set Agent-VScreen to direct / not proxied	Agent-VScreen を直接接続（プロキシなし）に設定
 Set a screen lock PIN or biometric for stronger confirmations	より強い確認のために画面ロックの PIN か生体認証を設定
@@ -845,7 +845,7 @@ Setup	初期設定
 Setup guide	設定ガイド
 Share diagnostics	診断を共有
 Shell	Shell
-Shell: agents with a terminal. Send them the message: it installs the vscreen command and has the agent save "I can operate apps on the phone in the background" in its long-term memory, so new conversations use it too. With only the install command, most agents forget it.⏎⏎MCP: agents with MCP. The message has the MCP config (streamable HTTP, one tool per command, screenshots attached) and the ability note.⏎⏎HTTP: agent apps that write their own calls. Replies are JSON (ok, code, next, text, images, steps, screen, notes); full reference at GET /v2/help.⏎⏎You can also paste the ability note into the agent's custom instructions or memory setting.	Shell：ターミナルを持つ agent 向け。メッセージを送ると vscreen コマンドをインストールし、「バックグラウンドで端末のアプリを操作できる」ことを agent の長期メモリに保存させるので、新しい会話でも使えます。インストールコマンドだけでは、ほとんどの agent は忘れてしまいます。⏎⏎MCP：MCP を持つ agent 向け。メッセージには MCP 設定（streamable HTTP、コマンドごとに 1 ツール、スクリーンショット添付）と能力メモが含まれます。⏎⏎HTTP：自分で呼び出しを書く agent アプリ向け。返信は JSON（ok、code、next、text、images、steps、screen、notes）で、完全なリファレンスは GET /v2/help にあります。⏎⏎能力メモを agent のカスタム指示やメモリ設定に貼り付けることもできます。
+Shell: agents with a terminal. Send them the message: it installs the vscreen command and has the agent save "I can operate apps on the phone in the background" in its long-term memory, so new conversations use it too. With only the install command, most agents forget it.⏎⏎MCP: agents with MCP. The message has the MCP config (streamable HTTP, one tool per command, screenshots attached) and the ability note.⏎⏎HTTP: agent apps that write their own calls. Replies are JSON (ok, code, next, text, images, steps, screen, notes); full reference at GET /v2/help.⏎⏎You can also paste the ability note into the agent's custom instructions or memory setting.	Shell：ターミナルを持つエージェント向け。メッセージを送ると vscreen コマンドをインストールし、「バックグラウンドで端末のアプリを操作できる」ことをエージェントの長期メモリに保存させるので、新しい会話でも使えます。インストールコマンドだけでは、ほとんどのエージェントは忘れてしまいます。⏎⏎MCP：MCP を持つエージェント向け。メッセージには MCP 設定（streamable HTTP、コマンドごとに1ツール、スクリーンショット添付）と能力メモが含まれます。⏎⏎HTTP：自分で呼び出しを書くエージェントアプリ向け。返信は JSON（ok、code、next、text、images、steps、screen、notes）で、完全なリファレンスは GET /v2/help にあります。⏎⏎能力メモをエージェントのカスタム指示やメモリ設定に貼り付けることもできます。
 Shizuku (or Sui) is not installed; a rooted phone can use root instead	Shizuku（または Sui）がインストールされていません。root 化した端末では代わりに root を使えます
 Shizuku (or a compatible fork / Sui) is not installed: ask the user to install and start Shizuku, or switch to root in the app	Shizuku（または互換フォーク / Sui）がインストールされていません。Shizuku をインストールして起動するか、アプリで root に切り替えるようユーザーに依頼してください
 Shizuku (or root) and accessibility: so it can open a background screen	Shizuku（または root）とユーザー補助：バックグラウンド画面を開くために必要
@@ -862,17 +862,17 @@ Show "{0}": {1}	「{0}」を表示：{1}
 Show buttons on mini window	小窓にボタンを表示
 Show floating window	フローティングウィンドウを表示
 Show it	見せる
-Show less	表示を減らす
+Show less	折りたたむ
 Show the recent log	最近のログを表示
 Show token	トークンを表示
 Show window	ウィンドウを表示
 Showing · {0}	表示中 · {0}
-Shown above all apps while the background screen exists. Drag to move, pinch to resize, push to an edge to fold it into a side tab, hold the picture 0.5 s to take over. While an agent waits for your reply, the tab shows a violet question mark.	バックグラウンド画面がある間、すべてのアプリの上に表示されます。ドラッグで移動、ピンチでサイズ変更、端に押し付けるとサイドタブにたたみ、画像を 0.5 秒長押しで操作を引き継ぎます。agent があなたの返事を待っている間、タブに紫の疑問符が表示されます。
+Shown above all apps while the background screen exists. Drag to move, pinch to resize, push to an edge to fold it into a side tab, hold the picture 0.5 s to take over. While an agent waits for your reply, the tab shows a violet question mark.	バックグラウンド画面がある間、すべてのアプリの上に表示されます。ドラッグで移動、ピンチでサイズ変更、端に押し付けるとサイドタブにたたみ、画像を0.5秒長押しで操作を引き継ぎます。エージェントが返事を待っている間、タブに紫の疑問符が表示されます。
 Sign in	サインイン
 Sign in to the built-in Tailscale	内蔵 Tailscale にサインイン
 Sign in to your official built-in Tailscale account first.	先に内蔵 Tailscale の公式アカウントにサインインしてください。
 Sign up for ngrok	ngrok に登録
-Sign up with email, GitHub or Google (free) and finish the verification it asks for. No need to download or install ngrok: the agent is this phone.	メール、GitHub、Google で登録し（無料）、求められる確認を済ませてください。ngrok のダウンロードやインストールは不要です。agent はこの端末です。
+Sign up with email, GitHub or Google (free) and finish the verification it asks for. No need to download or install ngrok: the agent is this phone.	メール、GitHub、Google で登録し（無料）、求められる確認を済ませてください。ngrok のダウンロードやインストールは不要です。エージェントはこの端末です。
 Signed requests only	署名付きリクエストのみ
 Silent now	現在無音
 Silent on every screen until you unmute it	ミュートを解除するまですべての画面で無音
@@ -883,7 +883,7 @@ Skipped; turn it on in Settings any time	スキップしました。設定でい
 Small window	小窓
 So it keeps this ability	この能力を覚えておくために
 Something needs you	対応が必要です
-Sound already playing changes only when the app plays again. Agents can do the same with the sound command.	すでに再生中の音は、アプリが再生し直したときにだけ変わります。agent も sound コマンドで同じことができます。
+Sound already playing changes only when the app plays again. Agents can do the same with the sound command.	すでに再生中の音は、アプリが再生し直したときにだけ変わります。エージェントも sound コマンドで同じことができます。
 Source address	送信元アドレス
 Standing by	待機中
 Start	開始
@@ -891,17 +891,17 @@ Start with root	root で起動
 Starting	起動中
 Starting Tailscale Funnel…	Tailscale Funnel を起動中…
 Starting the screen service with root… (the first time, the root manager asks)	root で画面サービスを起動中…（初回は root マネージャーが確認します）
-Starting {0}…	{0} を起動中…
+Starting {0}…	{0}を起動中…
 Starting…	起動中…
 State	状態
 Static domain entered	固定ドメイン入力済み
 Static domain, e.g. name.ngrok-free.app	固定ドメイン（例：name.ngrok-free.app）
 Status	状態
-Stays in the notification shade; agents here and on other devices reach it any time	通知領域に常駐し、この端末や他の端末の agent がいつでも接続できます
+Stays in the notification shade; agents here and on other devices reach it any time	通知領域に常駐し、この端末や他の端末のエージェントがいつでも接続できます
 Steady	安定
-Step {0}	ステップ {0}
-Step {0} of {1}	ステップ {0} / {1}
-Step {0} · {1}	ステップ {0} · {1}
+Step {0}	ステップ{0}
+Step {0} of {1}	ステップ{0} / {1}
+Step {0} · {1}	ステップ{0} · {1}
 Steps	手順
 Still logged in ({0}), but the phone cannot reach 	ログインは保持されています（{0}）が、端末から次に届きません：
 Stop	停止
@@ -919,7 +919,7 @@ Tailscale connection	Tailscale 接続
 Tailscale dropped, reconnecting	Tailscale が切断されました。再接続中
 Tailscale error, retrying	Tailscale エラー、再試行中
 Tailscale is connected	Tailscale に接続済み
-Tailscale policy does not allow port 443 for Funnel.	Tailscale のポリシーで Funnel のポート 443 が許可されていません。
+Tailscale policy does not allow port 443 for Funnel.	Tailscale のポリシーで Funnel のポート443が許可されていません。
 Tailscale says: 	Tailscale の応答：
 Tailscale: log in	Tailscale：ログイン
 Tailscale: log in again	Tailscale：再ログイン
@@ -938,8 +938,8 @@ Teach: record what you do next	教える：次の操作を記録
 Temporarily allowed: 	一時許可中：
 Temporarily raised to: 	一時的に引き上げ：
 Temporary: 	一時的：
-Terminal agents: installs vscreen and saves note	ターミナルの agent：vscreen をインストールしてメモを保存
-Termux, Operit…, direct to 127.0.0.1:{0}	Termux、Operit など、127.0.0.1:{0} に直接
+Terminal agents: installs vscreen and saves note	ターミナルのエージェント：vscreen をインストールしてメモを保存
+Termux, Operit…, direct to 127.0.0.1:{0}	Termux、Operit など、127.0.0.1:{0}に直接
 Text on screen	画面の文字
 Textless icon finder	文字のないアイコンの検出
 The AI asks you: {0}	AI からの質問：{0}
@@ -947,55 +947,55 @@ The HTTPS certificate is not ready	HTTPS 証明書の準備ができていませ
 The Tailscale app on this phone is already connected ({0}). If the phone needs its exit node to get online, the app has to stay on anyway, so choosing "External Tailscale app" is simpler.	この端末の Tailscale アプリはすでに接続されています（{0}）。端末のネット接続に出口ノードが必要ならアプリは常にオンのままなので、「外部の Tailscale アプリ」を選ぶほうが簡単です。
 The Tailscale login ran out: log in once more	Tailscale のログイン期限が切れました。もう一度ログインしてください
 The accessibility service is not connected (right after start the system may still be binding it; it updates in a few seconds): element lists have OCR text only (icon buttons have no text, non-ASCII typing goes through clipboard paste). For more reliability, ask the user to turn it on in Settings › Accessibility › Installed apps › Agent-VScreen.	ユーザー補助サービスが接続されていません（起動直後はシステムが接続中の場合があり、数秒で更新されます）。要素リストは OCR の文字だけです（アイコンボタンには文字がなく、ASCII 以外の入力はクリップボード貼り付けになります）。より確実にするため、設定 › ユーザー補助 › インストール済みアプリ › Agent-VScreen でオンにするようユーザーに依頼してください。
-The agent cannot use the phone this time. To let it in, turn the service on now. If you only want it out of the notification shade, choose On demand with the power button; bookings still wake it.	今回は agent が端末を使えません。使わせるには今サービスをオンにしてください。通知領域から消したいだけなら、電源ボタンで「必要時」を選んでください。予約では引き続き起動します。
-The agent exchanges it for a permanent token within 10 minutes	agent は 10 分以内にこれを無期限のトークンに交換します
-The agent may need a while to set up. You can tap Done now; it appears in the Connect list once it connects.	agent の設定には時間がかかることがあります。今「完了」をタップしてもかまいません。接続すると「接続」の一覧に表示されます。
-The agent sets itself up from the message and calls in	agent はメッセージから自分で設定して接続してきます
-The agent's actions are refused until you tap "Allow again"	「再び許可」をタップするまで agent の操作は拒否されます
-The agent's booking {0} is due, but something needs you	agent の予約 {0} の時刻ですが、対応が必要なことがあります
-The agent's booking {0} is due, but the service is off	agent の予約 {0} の時刻ですが、サービスがオフです
-The app runs on the background screen, not your main screen; take it over, hand it to an agent or close it any time.	アプリはメイン画面ではなくバックグラウンド画面で動いています。いつでも引き継ぐ、agent に渡す、閉じることができます。
+The agent cannot use the phone this time. To let it in, turn the service on now. If you only want it out of the notification shade, choose On demand with the power button; bookings still wake it.	今回はエージェントが端末を使えません。使わせるには今サービスをオンにしてください。通知領域から消したいだけなら、電源ボタンで「必要時」を選んでください。予約では引き続き起動します。
+The agent exchanges it for a permanent token within 10 minutes	エージェントは10分以内にこれを無期限のトークンに交換します
+The agent may need a while to set up. You can tap Done now; it appears in the Connect list once it connects.	エージェントの設定には時間がかかることがあります。今「完了」をタップしてもかまいません。接続すると「接続」の一覧に表示されます。
+The agent sets itself up from the message and calls in	エージェントはメッセージから自分で設定して接続してきます
+The agent's actions are refused until you tap "Allow again"	「再び許可」をタップするまでエージェントの操作は拒否されます
+The agent's booking {0} is due, but something needs you	エージェントの予約{0}の時刻ですが、対応が必要なことがあります
+The agent's booking {0} is due, but the service is off	エージェントの予約{0}の時刻ですが、サービスがオフです
+The app runs on the background screen, not your main screen; take it over, hand it to an agent or close it any time.	アプリはメイン画面ではなくバックグラウンド画面で動いています。いつでも引き継ぐ、エージェントに渡す、閉じることができます。
 The authtoken and domain are not set yet	authtoken とドメインがまだ設定されていません
 The authtoken is the key to this ngrok account and is kept only on this phone. If it may have leaked, reset it in the dashboard and paste the new one. ngrok's menu names may change; follow what it shows now.	authtoken はこの ngrok アカウントの鍵で、この端末にだけ保存されます。漏れた可能性があればダッシュボードでリセットして新しいものを貼り付けてください。ngrok のメニュー名は変わることがあります。今表示されているものに従ってください。
 The background screen is blank right now	バックグラウンド画面は今は空白です
 The background screen is closed; cannot record again	バックグラウンド画面が閉じられたため、もう一度記録できません
 The background screen was closed ({0}); this request ended	バックグラウンド画面が閉じられたため（{0}）、このリクエストは終了しました
 The body is the full redacted report	本文は伏せ字済みの完全なレポートです
-The check before window {0} failed: 	時間帯 {0} の前の確認に失敗しました：
+The check before window {0} failed: 	時間帯{0}の前の確認に失敗しました：
 The checklist below usually offers a one-tap link; otherwise Open Access controls goes to the policy file: add the snippet below inside the outermost braces and press Save.	下のチェックリストには通常ワンタップのリンクがあります。ない場合は「Access controls を開く」でポリシーファイルに移動し、下のスニペットを一番外側の中かっこの中に追加して Save を押してください。
 The clipboard is empty: press copy on the web page first	クリップボードが空です。先に Web ページでコピーを押してください
-The code is valid for 10 minutes; if it expires, make a new one here or on the agent's page.	コードの有効期間は 10 分です。期限が切れたら、ここか agent のページで新しく作ってください。
+The code is valid for 10 minutes; if it expires, make a new one here or on the agent's page.	コードの有効期間は10分です。期限が切れたら、ここかエージェントのページで新しく作ってください。
 The domain does not resolve	ドメインを解決できません
 The domain must be the one listed under Domains for this account; check the spelling.	ドメインはこのアカウントの Domains に載っているものである必要があります。つづりを確認してください。
-The domain under Domains in the ngrok dashboard (free accounts get one), e.g. name.ngrok-free.app	ngrok ダッシュボードの Domains にあるドメイン（無料アカウントにも 1 つあります）、例：name.ngrok-free.app
+The domain under Domains in the ngrok dashboard (free accounts get one), e.g. name.ngrok-free.app	ngrok ダッシュボードの Domains にあるドメイン（無料アカウントにも1つあります）、例：name.ngrok-free.app
 The earlier code stops working	以前のコードは使えなくなります
 The first connection opens an approval page; check the pairing code on this phone and approve. No token is needed.	最初の接続で承認ページが開きます。この端末でペアリングコードを確認して承認してください。トークンは不要です。
-The first one can take over a minute; after 3 minutes turn it off and on. With a proxy VPN on, let Agent-VScreen bypass it.	初回は 1 分以上かかることがあります。3 分経ったらオフにしてからオンにしてください。プロキシ VPN がオンなら Agent-VScreen を対象外にしてください。
+The first one can take over a minute; after 3 minutes turn it off and on. With a proxy VPN on, let Agent-VScreen bypass it.	初回は1分以上かかることがあります。3分経ったらオフにしてからオンにしてください。プロキシ VPN がオンなら Agent-VScreen を対象外にしてください。
 The hostname added under the tunnel's Public Hostname, e.g. phone.example.com	トンネルの Public Hostname に追加したホスト名、例：phone.example.com
 The hostname does not resolve	ホスト名を解決できません
 The hostname reaches Cloudflare but not the service on the phone	ホスト名は Cloudflare には届くが端末のサービスに届かない
 The hostname redirects	ホスト名がリダイレクトされます
 The log no longer has these commands	ログインにこれらのコマンドはもう残っていません
-The login expires in {0} days; then it needs logging in again. You can turn off key expiry for this device in the Tailscale console.	ログインは {0} 日後に期限が切れ、再ログインが必要になります。Tailscale の管理画面でこの端末のキーの有効期限をオフにできます。
-The login is done; your network requires new devices to be approved. Approve "{0}" in {1}; this connects by itself afterwards.	ログインは完了しました。あなたのネットワークでは新しい端末に承認が必要です。{1} で「{0}」を承認してください。その後は自動で接続されます。
+The login expires in {0} days; then it needs logging in again. You can turn off key expiry for this device in the Tailscale console.	ログインは{0}日後に期限が切れ、再ログインが必要になります。Tailscale の管理画面でこの端末のキーの有効期限をオフにできます。
+The login is done; your network requires new devices to be approved. Approve "{0}" in {1}; this connects by itself afterwards.	ログインは完了しました。このネットワークでは新しい端末に承認が必要です。{1}で「{0}」を承認してください。その後は自動で接続されます。
 The login is kept ({0}); it reconnects when awake.	ログインは保持されています（{0}）。起きると再接続します。
 The ngrok account needs to finish signing up: log in to the dashboard and complete it (e.g. verify the email).	ngrok アカウントの登録が完了していません。ダッシュボードにログインして完了してください（例：メールの確認）。
 The ngrok agent stopped unexpectedly; retrying	ngrok エージェントが予期せず停止しました。再試行中
-The old one stops working at once; every agent using it has to connect again.	古いものはすぐに使えなくなり、それを使っているすべての agent は接続し直す必要があります。
-The password is not kept; the agent fills it in	パスワードは保存されず、agent が入力します
+The old one stops working at once; every agent using it has to connect again.	古いものはすぐに使えなくなり、それを使っているすべてのエージェントは接続し直す必要があります。
+The password is not kept; the agent fills it in	パスワードは保存されず、エージェントが入力します
 The phone could not reach its public address. A proxy VPN may have stopped this request (outside access may still work); you can also open address/.well-known/oauth-protected-resource in a browser on a computer.	端末が自身の公開アドレスに届きませんでした。プロキシ VPN がこのリクエストを止めた可能性があります（外部からのアクセスは使えるかもしれません）。パソコンのブラウザでアドレス/.well-known/oauth-protected-resource を開いて確認することもできます。
 The phone's Tailscale node lost the server or relay ({0}) and is reconnecting; if it keeps happening, ask the user to check the phone's network, proxy or VPN	端末の Tailscale ノードがサーバーまたはリレー（{0}）を見失い、再接続中です。繰り返す場合は端末のネットワーク、プロキシ、VPN を確認するようユーザーに依頼してください
-The phone's traffic goes through a proxy / VPN app's virtual interface, which cuts Tailscale's long connections (up a few seconds, gone about two minutes). In the proxy app's per-app settings exclude (bypass) Agent-VScreen, or switch its server or turn it off.	端末の通信がプロキシ / VPN アプリの仮想インターフェースを通っており、Tailscale の長時間接続が切れます（数秒つながり、約 2 分切れる）。プロキシアプリのアプリ別設定で Agent-VScreen を除外するか、サーバーを変えるかオフにしてください。
-The public server on the phone did not answer. Turn public access off and on; if it still fails, export the log under Settings › Diagnostics.	端末の公開サーバーが応答しませんでした。公開アクセスをオフにしてからオンにしてください。それでも失敗する場合は、設定 › 診断 からログを書き出してください。
-The request ended ({0}); this is saved as your own	リクエストは終了しました（{0}）。あなたのものとして保存されます
+The phone's traffic goes through a proxy / VPN app's virtual interface, which cuts Tailscale's long connections (up a few seconds, gone about two minutes). In the proxy app's per-app settings exclude (bypass) Agent-VScreen, or switch its server or turn it off.	端末の通信がプロキシ / VPN アプリの仮想インターフェースを通っており、Tailscale の長時間接続が切れます（数秒つながり、約2分切れる）。プロキシアプリのアプリ別設定で Agent-VScreen を除外するか、サーバーを変えるかオフにしてください。
+The public server on the phone did not answer. Turn public access off and on; if it still fails, export the log under Settings › Diagnostics.	端末の公開サーバーが応答しませんでした。公開アクセスをオフにしてからオンにしてください。それでも失敗する場合は、設定 › 診断からログを書き出してください。
+The request ended ({0}); this is saved as your own	リクエストは終了しました（{0}）。自分のものとして保存されます
 The root manager did not answer (permission prompt left open?): allow Agent-VScreen in Magisk / KernelSU / APatch and try again	root マネージャーが応答しません（権限の確認ダイアログが開いたまま？）。Magisk / KernelSU / APatch で Agent-VScreen を許可してから再試行してください
 The root service did not start: 	root サービスが起動しませんでした：
 The root service exited	root サービスが終了しました
 The root service is not connected	root サービスが接続されていません
 The root service started but did not reach the app: 	root サービスは起動しましたがアプリに届きませんでした：
-The route from step 4 is missing or still propagating (wait 1–2 minutes); the domain must be on the same Cloudflare account.	手順 4 のルートがないか、まだ反映中です（1〜2 分待ってください）。ドメインは同じ Cloudflare アカウントにある必要があります。
-The route's service is wrong: it must be {0}.	ルートのサービスが間違っています。{0} である必要があります。
-The screen has no input focus of its own (needs Android 14+): key back/enter may not arrive; if they do nothing, tap the page's back / search buttons.	この画面には独自の入力フォーカスがありません（Android 14 以降が必要）。key back/enter が届かないことがあります。反応しなければページの戻る / 検索ボタンをタップしてください。
+The route from step 4 is missing or still propagating (wait 1–2 minutes); the domain must be on the same Cloudflare account.	手順4のルートがないか、まだ反映中です（1〜2分待ってください）。ドメインは同じ Cloudflare アカウントにある必要があります。
+The route's service is wrong: it must be {0}.	ルートのサービスが間違っています。{0}である必要があります。
+The screen has no input focus of its own (needs Android 14+): key back/enter may not arrive; if they do nothing, tap the page's back / search buttons.	この画面には独自の入力フォーカスがありません（Android 14以降が必要）。key back/enter が届かないことがあります。反応しなければページの戻る / 検索ボタンをタップしてください。
 The screen service did not answer just now; the next command reconnects by itself, nothing for the user to do	画面サービスが今応答しませんでした。次のコマンドで自動的に再接続するので、ユーザーの操作は不要です
 The screen's small window (progress, take over)	画面の小窓（進行状況、引き継ぎ）
 The self-test did not complete	セルフテストが完了しませんでした
@@ -1003,42 +1003,42 @@ The service could not become a foreground service ({0}), so the system freezes o
 The service is hidden; the built-in Tailscale is online only while it is awake	サービスは隠れています。内蔵 Tailscale はサービスが起きている間だけオンラインです
 The service is not a foreground service and may be frozen in the background; opening the app once fixes it	サービスがフォアグラウンドサービスではないため、バックグラウンドで凍結されることがあります。アプリを一度開くと直ります
 The service is off	サービスはオフです
-The service is off; agents cannot connect	サービスはオフです。agent は接続できません
+The service is off; agents cannot connect	サービスはオフです。エージェントは接続できません
 The service is off; the built-in Tailscale is not running	サービスはオフです。内蔵 Tailscale は動いていません
-The service is on demand now (an agent wakes it when needed)	サービスは「必要時」になりました（必要なときに agent が起こします）
+The service is on demand now (an agent wakes it when needed)	サービスは「必要時」になりました（必要なときにエージェントが起こします）
 The system froze the app	システムがアプリを凍結しました
 The system may cut Agent-VScreen's network in the background ({0}); model requests may fail with connection abort. 	システムがバックグラウンドで Agent-VScreen の通信を切ることがあります（{0}）。モデルへのリクエストが接続中断で失敗する可能性があります。
 The system recently froze Agent-VScreen in the background: the user must allow background activity in the system's background management	最近システムがバックグラウンドで Agent-VScreen を凍結しました。システムのバックグラウンド管理でバックグラウンド動作を許可する必要があります
 The system refused to start the service in the background: {0}	システムがバックグラウンドでのサービス起動を拒否しました：{0}
 The system refused: on Xiaomi / Redmi turn on "USB debugging (Security settings)" in developer options.	システムに拒否されました：Xiaomi / Redmi では開発者オプションの「USB デバッグ（セキュリティ設定）」をオンにしてください。
-The token is shown only here. Each agent's records, tasks and questions stay apart.	トークンはここにだけ表示されます。agent ごとの記録、タスク、質問は分けて保存されます。
-The token is shown only this once (the app keeps only its fingerprint). Copy the message for the agent now, or the token alone.	トークンが表示されるのはこの一度だけです（アプリは指紋だけを保存します）。今 agent へのメッセージかトークンだけをコピーしてください。
-The token is the key to this tunnel and is kept only on this phone. If it may have leaked, refresh it on the Cloudflare tunnel page and paste the new one. Screenshots are of the Cloudflare dashboard in November 2026; follow what it shows now.	トークンはこのトンネルの鍵で、この端末にだけ保存されます。漏れた可能性があれば Cloudflare のトンネルページで更新し、新しいものを貼り付けてください。スクリーンショットは 2026 年 11 月の Cloudflare ダッシュボードのものです。今表示されているものに従ってください。
-The tunnel is up, but the hostname's service in the Cloudflare dashboard is wrong: it must be {0} (type HTTP; not localhost, no other port).	トンネルは起動していますが、Cloudflare ダッシュボードでのホスト名のサービスが間違っています。{0} である必要があります（種類は HTTP。localhost や別のポートは不可）。
+The token is shown only here. Each agent's records, tasks and questions stay apart.	トークンはここにだけ表示されます。エージェントごとの記録、タスク、質問は分けて保存されます。
+The token is shown only this once (the app keeps only its fingerprint). Copy the message for the agent now, or the token alone.	トークンが表示されるのはこの一度だけです（アプリは指紋だけを保存します）。今エージェントへのメッセージかトークンだけをコピーしてください。
+The token is the key to this tunnel and is kept only on this phone. If it may have leaked, refresh it on the Cloudflare tunnel page and paste the new one. Screenshots are of the Cloudflare dashboard in November 2026; follow what it shows now.	トークンはこのトンネルの鍵で、この端末にだけ保存されます。漏れた可能性があれば Cloudflare のトンネルページで更新し、新しいものを貼り付けてください。スクリーンショットは2026年11月の Cloudflare ダッシュボードのものです。今表示されているものに従ってください。
+The tunnel is up, but the hostname's service in the Cloudflare dashboard is wrong: it must be {0} (type HTTP; not localhost, no other port).	トンネルは起動していますが、Cloudflare ダッシュボードでのホスト名のサービスが間違っています。{0}である必要があります（種類は HTTP。localhost や別のポートは不可）。
 The tunnel token and hostname are not set yet	トンネルトークンとホスト名がまだ設定されていません
-The tunnel uses port 7844 (QUIC first, HTTP/2 automatically if blocked). With a proxy VPN, let Agent-VScreen bypass it; some networks block the port, try another.	トンネルはポート 7844 を使います（まず QUIC、ブロックされると自動で HTTP/2）。プロキシ VPN を使っている場合は Agent-VScreen を対象外にしてください。ポートをブロックするネットワークもあるので、別のネットワークも試してください。
+The tunnel uses port 7844 (QUIC first, HTTP/2 automatically if blocked). With a proxy VPN, let Agent-VScreen bypass it; some networks block the port, try another.	トンネルはポート7844を使います（まず QUIC、ブロックされると自動で HTTP/2）。プロキシ VPN を使っている場合は Agent-VScreen を対象外にしてください。ポートをブロックするネットワークもあるので、別のネットワークも試してください。
 The user answered ({0}): send the same command again for the result	ユーザーが回答しました（{0}）。結果を得るには同じコマンドをもう一度送ってください
 The user declined ({0})	ユーザーが断りました（{0}）
 The user pressed "Stop AI"; only the user can lift it	ユーザーが「AI を停止」を押しました。解除できるのはユーザーだけです
-The user saved the lesson: send the same teach again for the result	ユーザーがレッスンを保存しました。結果を得るには同じ teach をもう一度送ってください
+The user saved the lesson: send the same teach again for the result	ユーザーがお手本を保存しました。結果を得るには同じ teach をもう一度送ってください
 The user turned Agent-VScreen off	ユーザーが Agent-VScreen をオフにしました
 The user turned Agent-VScreen off (their choice, not a fault): ask them to turn it on with the power button at the top of the app	ユーザーが Agent-VScreen をオフにしました（故障ではなくユーザーの選択です）。アプリ上部の電源ボタンでオンにするよう依頼してください
-The user's rules for this agent say "{0}" is not allowed: {1} was not done. Don't work around it; if needed, ask the user to change it in Agent-VScreen › Connect › this agent	この agent に対するユーザーのルールで「{0}」は許可されていません：{1} は実行されませんでした。回避しようとせず、必要なら Agent-VScreen › 接続 › この agent で変更するようユーザーに依頼してください
-The {0} screen service is unavailable, so only the app's own screen can be used: the system may open apps on the main screen. Ask the user to reconnect background operation in settings.	{0} 画面サービスが使えないため、アプリ自身の画面しか使えません。システムがアプリをメイン画面で開く可能性があります。設定でバックグラウンド操作を再接続するようユーザーに依頼してください。
+The user's rules for this agent say "{0}" is not allowed: {1} was not done. Don't work around it; if needed, ask the user to change it in Agent-VScreen › Connect › this agent	このエージェントに対するユーザーのルールで「{0}」は許可されていません：{1}は実行されませんでした。回避しようとせず、必要なら Agent-VScreen › 接続 › このエージェントで変更するようユーザーに依頼してください
+The {0} screen service is unavailable, so only the app's own screen can be used: the system may open apps on the main screen. Ask the user to reconnect background operation in settings.	{0}画面サービスが使えないため、アプリ自身の画面しか使えません。システムがアプリをメイン画面で開く可能性があります。設定でバックグラウンド操作を再接続するようユーザーに依頼してください。
 Then go back to the public page: 	それから公開ページに戻ります：
-Then the agent checks:	その後 agent が確認します：
+Then the agent checks:	その後エージェントが確認します：
 Thermal protection	過熱保護
-Thermal protection works in three layers to keep long background runs safe:⏎⏎• Load throttling: as battery temperature or system thermal status rises, frame rate drops, OCR falls back to the lighter engine, and OCR or background wakes pause when needed.⏎• Auto-stop when overheating (on by default): stops background work and latches when battery reaches 45.0°C or system thermal status reaches severe. Once out of the danger zone, holding below 43.0°C and below severe status for 60 s lets you resume manually in the Home power menu (a second trip within 1 hour tightens recovery to below 39.0°C and below moderate status for 180 s).⏎• Turning auto-stop off: disables hard stop and latch, posting a single non-blocking high-priority warning per danger-zone entry while keeping load throttling and Android's built-in thermal protection active.	長時間のバックグラウンド動作を安全に保つため、過熱保護は 3 段階で働きます：⏎⏎• 負荷の調整：電池温度やシステムの熱状態が上がると、フレームレートを下げ、OCR を軽量エンジンに切り替え、必要に応じて OCR やバックグラウンドの起動を一時停止します。⏎• 過熱時に自動停止（既定でオン）：電池が 45.0°C に達するか、システムの熱状態が severe になるとバックグラウンド作業を止めて固定します。危険域を出た後、43.0°C 未満かつ severe 未満を 60 秒保つと、ホームの電源メニューから手動で再開できます（1 時間以内に 2 回目の停止があると、復帰条件は 39.0°C 未満かつ moderate 未満を 180 秒に厳しくなります）。⏎• 自動停止をオフにした場合：強制停止と固定を無効にし、危険域に入るたびに操作を妨げない高優先度の警告を 1 回だけ出します。負荷の調整と Android 標準の過熱保護は引き続き有効です。
+Thermal protection works in three layers to keep long background runs safe:⏎⏎• Load throttling: as battery temperature or system thermal status rises, frame rate drops, OCR falls back to the lighter engine, and OCR or background wakes pause when needed.⏎• Auto-stop when overheating (on by default): stops background work and latches when battery reaches 45.0°C or system thermal status reaches severe. Once out of the danger zone, holding below 43.0°C and below severe status for 60 s lets you resume manually in the Home power menu (a second trip within 1 hour tightens recovery to below 39.0°C and below moderate status for 180 s).⏎• Turning auto-stop off: disables hard stop and latch, posting a single non-blocking high-priority warning per danger-zone entry while keeping load throttling and Android's built-in thermal protection active.	長時間のバックグラウンド動作を安全に保つため、過熱保護は3段階で働きます：⏎⏎• 負荷の調整：バッテリー温度やシステムの熱状態が上がると、フレームレートを下げ、OCR を軽量エンジンに切り替え、必要に応じて OCR やバックグラウンドの起動を一時停止します。⏎• 過熱時に自動停止（既定でオン）：バッテリーが45.0°C に達するか、システムの熱状態が深刻（severe）になるとバックグラウンド作業を止めてロック状態にします。危険域を出た後、43.0°C 未満かつ深刻（severe）未満を60秒保つと、ホームの電源メニューから手動で再開できます（1時間以内に2回目の停止があると、復帰条件は39.0°C 未満かつ中程度（moderate）未満を180秒に厳しくなります）。⏎• 自動停止をオフにした場合：強制停止とロックを無効にし、危険域に入るたびに操作を妨げない高優先度の警告を1回だけ出します。負荷の調整と Android 標準の過熱保護は引き続き有効です。
 Thermal status	熱の状態
 This action requires a screen lock PIN/biometric and does not allow hold-to-confirm.	この操作には画面ロックの PIN / 生体認証が必要で、長押しでの確認はできません。
 This address does not lead to this phone	このアドレスはこの端末につながっていません
 This cannot be undone.	元に戻せません。
 This confirmation request is already handled or expired	この確認要求はすでに処理済みか期限切れです
-This domain is not on this ngrok account: use the one listed under Domains in the dashboard (free accounts have one static domain).	このドメインはこの ngrok アカウントのものではありません。ダッシュボードの Domains に載っているものを使ってください（無料アカウントには固定ドメインが 1 つあります）。
+This domain is not on this ngrok account: use the one listed under Domains in the dashboard (free accounts have one static domain).	このドメインはこの ngrok アカウントのものではありません。ダッシュボードの Domains に載っているものを使ってください（無料アカウントには固定ドメインが1つあります）。
 This happens when the phone cannot reach Tailscale's server (controlplane.tailscale.com): switch networks or turn on a proxy that reaches it. Or put an auth key in Advanced.	端末が Tailscale のサーバー（controlplane.tailscale.com）に届かないときに起こります。ネットワークを変えるか、届くプロキシをオンにしてください。または「詳細」に認証キーを入れてください。
 This hostname does not lead to this phone	このホスト名はこの端末につながっていません
 This hostname has a redirect or a Cloudflare Access login. Public MCP needs direct access: remove the Access application or redirect rule from it.	このホスト名にはリダイレクトか Cloudflare Access のログインがあります。公開 MCP には直接アクセスが必要なので、Access アプリケーションやリダイレクトルールを外してください。
-This ngrok account already has an agent online (free accounts allow one at a time): stop ngrok elsewhere, or disconnect it under Agents in the dashboard.	この ngrok アカウントではすでに agent がオンラインです（無料アカウントは同時に 1 つ）。他の場所の ngrok を止めるか、ダッシュボードの Agents で切断してください。
+This ngrok account already has an agent online (free accounts allow one at a time): stop ngrok elsewhere, or disconnect it under Agents in the dashboard.	この ngrok アカウントではすでにエージェントがオンラインです（無料アカウントは同時に1つ）。他の場所の ngrok を止めるか、ダッシュボードの Agents で切断してください。
 This one	これ
 This package has no built-in Tailscale	このパッケージには内蔵 Tailscale がありません
 This pairing request expired or was already handled. Start pairing again from the client.	このペアリング要求は期限切れか処理済みです。クライアントからもう一度ペアリングを始めてください。
@@ -1052,10 +1052,10 @@ This question was already answered or has expired	この質問はすでに回答
 This record is gone	この記録はもうありません
 This tunnel no longer exists on Cloudflare: create a new one in the dashboard and paste its token.	このトンネルは Cloudflare にもう存在しません。ダッシュボードで新しく作成し、そのトークンを貼り付けてください。
 This turn (ends once no command arrives for a turn length)	このターン（ターンの長さの間コマンドが来なければ終了）
-Time without new commands before a turn ends	agent が新しいコマンドを送らずにターンが終わるまでの時間
+Time without new commands before a turn ends	ターン終了までの無操作時間
 Times	時刻
 Today	今日
-Today (until {0})	今日（{0} まで）
+Today (until {0})	今日（{0}まで）
 Token	トークン
 Token "{0}"	トークン「{0}」
 Token "{0}" · {1}	トークン「{0}」· {1}
@@ -1068,7 +1068,7 @@ Tunnel connection	トンネル接続
 Tunnel token entered	トンネルトークン入力済み
 Tunnel token or the whole install command	トンネルトークンまたはインストールコマンド全体
 Tunnel token saved	トンネルトークンを保存しました
-Tunnel {0}…	トンネル {0}…
+Tunnel {0}…	トンネル{0}…
 Turn it on	オンにする
 Turn length	ターンの長さ
 Turn off	オフにする
@@ -1084,7 +1084,7 @@ Type	種類
 Unavailable	利用不可
 Under way	進行中
 Undo	元に戻す
-Undo the {0} changed rows	変更した {0} 行を元に戻す
+Undo the {0} changed rows	変更した{0}行を元に戻す
 Unknown	不明
 Unmute	ミュート解除
 Unmute all	すべてミュート解除
@@ -1094,7 +1094,7 @@ Update channel	アップデートのチャネル
 Updates	アップデート
 Use Root instead (no Shizuku needed)	代わりに Root を使う（Shizuku 不要）
 Use Shizuku / compatible fork	Shizuku / 互換フォークを使う
-Uses only Shizuku (or root) as the privilege channel: adb is not taken, wireless debugging is not changed, adbd is not restarted. Each item only grants this app and leaves other apps' settings alone; your agent's own adb / Shizuku keep working.	権限の経路には Shizuku（または root）だけを使います。adb を占有せず、ワイヤレスデバッグを変更せず、adbd を再起動しません。各項目はこのアプリにだけ許可し、他のアプリの設定には触れないので、agent 自身の adb / Shizuku もそのまま使えます。
+Uses only Shizuku (or root) as the privilege channel: adb is not taken, wireless debugging is not changed, adbd is not restarted. Each item only grants this app and leaves other apps' settings alone; your agent's own adb / Shizuku keep working.	権限の経路には Shizuku（または root）だけを使います。adb を占有せず、ワイヤレスデバッグを変更せず、adbd を再起動しません。各項目はこのアプリにだけ許可し、他のアプリの設定には触れないので、エージェント自身の adb / Shizuku もそのまま使えます。
 Uses the Tailscale app already on this phone	この端末にインストール済みの Tailscale アプリを使います
 Uses your own domain; needs a Cloudflare account; also works with Headscale	自分のドメインを使います。Cloudflare アカウントが必要。Headscale でも使えます
 Using Headscale	Headscale を使用中
@@ -1102,24 +1102,24 @@ Using Tailscale's own server	Tailscale 公式サーバーを使用中
 Using the saved login ({0}); no new login needed.	保存済みのログイン（{0}）を使います。再ログインは不要です。
 Usually a few seconds.	通常は数秒です。
 Valid for	有効期間
-Verification cancelled (code {0})	認証がキャンセルされました（コード {0}）
+Verification cancelled (code {0})	認証がキャンセルされました（コード{0}）
 Verification did not match; try again	認証が一致しませんでした。もう一度お試しください
 Verify & confirm	認証して確認
 Verify pairing code	ペアリングコードを確認
 Version, setup state and recent log; no token, nothing you typed	バージョン、設定状態、最近のログ。トークンや入力内容は含みません
-Via {0}	{0} 経由
+Via {0}	{0}経由
 View	表示
 View screen	画面を見る
 View status	状態を見る
 Views the screen and status only; performs no actions	画面と状態を見るだけで、操作はしません
 Wait a moment before switching again	少し待ってから切り替えてください
 Wait for Tunnel connection to show connected; if it stays offline, check the authtoken and domain are on the same account.	「トンネル接続」が接続済みになるのを待ってください。オフラインのままなら authtoken とドメインが同じアカウントのものか確認してください。
-Wait for two green rows, then give it to the client	緑の行が 2 つになるのを待ってからクライアントに渡してください
+Wait for two green rows, then give it to the client	緑の行が2つになるのを待ってからクライアントに渡してください
 Waiting for approval	承認待ち
 Waiting for approval · {0}	承認待ち · {0}
-Waiting for the agent to connect	agent の接続を待っています
+Waiting for the agent to connect	エージェントの接続を待っています
 Waiting for this device to be approved	この端末の承認を待っています
-Waiting for you · {0}	あなたを待っています · {0}
+Waiting for you · {0}	確認待ち · {0}
 Wake when needed	必要なときに点灯
 Watch "{0}"	「{0}」を監視
 Watch alerts, hand-back reminders	監視の通知、返却のリマインダー
@@ -1127,23 +1127,23 @@ Watch · 	監視 ·
 Watching	監視中
 Weekdays	平日
 Weekends	週末
-What agents are doing	agent の作業状況
-What an agent did on the screen each time appears here, newest first	agent が画面で行ったことが新しい順にここに表示されます
-What came back is not this phone (HTTP {0}). Check that the tunnel's public hostname is the one entered here, with service HTTP 127.0.0.1:{1}.	返ってきたのはこの端末ではありません（HTTP {0}）。トンネルのパブリックホスト名がここに入力したものと同じで、サービスが HTTP 127.0.0.1:{1} になっているか確認してください。
+What agents are doing	エージェントの作業状況
+What an agent did on the screen each time appears here, newest first	エージェントが画面で行ったことが新しい順にここに表示されます
+What came back is not this phone (HTTP {0}). Check that the tunnel's public hostname is the one entered here, with service HTTP 127.0.0.1:{1}.	返ってきたのはこの端末ではありません（HTTP {0}）。トンネルのパブリックホスト名がここに入力したものと同じで、サービスが HTTP 127.0.0.1:{1}になっているか確認してください。
 What came back is not this phone (HTTP {0}). Check the domain is the one under Domains in the dashboard, with no other forwarding rules set on it in ngrok.	返ってきたのはこの端末ではありません（HTTP {0}）。ドメインがダッシュボードの Domains にあるものか、ngrok で他の転送ルールが設定されていないか確認してください。
 What each setting does	各設定の説明
 What's new	更新履歴
 When Tunnel connection shows connected and Public address self-test passes, copy the MCP address into the cloud client. On the first connection check the pairing code on the phone and approve. If a browser opens the pairing page, ngrok may show a notice first; press Visit Site to continue.	「トンネル接続」が接続済みになり「公開アドレスのセルフテスト」に合格したら、MCP アドレスをクラウドクライアントにコピーします。初回接続時に端末でペアリングコードを確認して承認してください。ブラウザでペアリングページを開くと ngrok が最初に案内を表示することがあります。Visit Site を押して進んでください。
 When Tunnel connection shows connected and Public address self-test passes, the internet can reach this phone. Copy the MCP address into the cloud client; on the first connection check the pairing code on the phone and approve.	「トンネル接続」が接続済みになり「公開アドレスのセルフテスト」に合格すれば、インターネットからこの端末に届きます。MCP アドレスをクラウドクライアントにコピーし、初回接続時に端末でペアリングコードを確認して承認してください。
 When a watch sees its condition, the event is only queued by default. With a package here it is also broadcast to that app; empty means none.	監視が条件を検出すると、既定ではイベントはキューに入るだけです。ここにパッケージを入れると、そのアプリにもブロードキャストします。空欄なら送りません。
-When an agent books a time on the phone, or waits for something to happen, it shows up here	agent が端末で時間を予約したり、何かが起きるのを待ったりすると、ここに表示されます
-When an agent is unsure it asks you on the phone; your answers are kept here	agent は迷ったときに端末であなたに質問します。回答はここに保存されます
-When done, tap Hand back; it carries on from where you left it	終わったら「返す」をタップしてください。あなたが離れたところから続けます
+When an agent books a time on the phone, or waits for something to happen, it shows up here	エージェントが端末で時間を予約したり、何かが起きるのを待ったりすると、ここに表示されます
+When an agent is unsure it asks you on the phone; your answers are kept here	エージェントは迷ったときに端末で質問します。回答はここに保存されます
+When done, tap Hand back; it carries on from where you left it	終わったら「エージェントに戻す」をタップしてください。離れたところから続けます
 When screen is off	画面オフ時
 Where	場所
-Where the agent runs	agent の動作場所
+Where the agent runs	エージェントの動作場所
 Which app keeps its sound	音を出すアプリ
-While showing the lesson the user told you: "{0}" (the lesson goes on)	レッスンを見せている間にユーザーが伝えました：「{0}」（レッスンは続いています）
+While showing the lesson the user told you: "{0}" (the lesson goes on)	お手本を見せている間にユーザーが伝えました：「{0}」（お手本は続いています）
 Who (token, device), when, what and the result; typed text is recorded as a length only.	誰が（トークン、端末）、いつ、何をして、結果はどうだったか。入力した文字は長さだけ記録します。
 Who it is for (e.g. desktop assistant)	誰が使うか（例：パソコンのアシスタント）
 Who it suits	向いている人
@@ -1151,39 +1151,39 @@ Who it suits and common problems	向いている人とよくある問題
 Whose records	誰の記録か
 Why strong confirmation is required	強い確認が必要な理由
 Wider: {0}	拡大：{0}
-Will use {0}	{0} を使用します
-Window {0} is ready: the service is running and Shizuku is available.	時間帯 {0} の準備ができました。サービスは動作中で、Shizuku も使えます。
+Will use {0}	{0}を使用します
+Window {0} is ready: the service is running and Shizuku is available.	時間帯{0}の準備ができました。サービスは動作中で、Shizuku も使えます。
 With a proxy VPN, let Agent-VScreen bypass it; some networks block ngrok, try another.	プロキシ VPN を使っている場合は Agent-VScreen を対象外にしてください。ngrok をブロックするネットワークもあるので、別のネットワークも試してください。
-With both saved above, 	上の 2 つを保存したら、
-With the screen on, the system froze this app in the background {0} times (last time {1} s): while frozen, the agent's commands wait until you open this app.	画面オンのまま、システムがこのアプリをバックグラウンドで {0} 回凍結しました（最後は {1} 秒）。凍結中は、このアプリを開くまで agent のコマンドが待たされます。
+With both saved above, 	上の2つを保存したら、
+With the screen on, the system froze this app in the background {0} times (last time {1} s): while frozen, the agent's commands wait until you open this app.	画面オンのまま、システムがこのアプリをバックグラウンドで{0}回凍結しました（最後は{1}秒）。凍結中は、このアプリを開くまでエージェントのコマンドが待たされます。
 With you · {0}	あなたが操作中 · {0}
-Woken when an agent needs it, hidden again after	agent が必要なときに起こされ、終わると再び隠れます
-Working in {0}	{0} で作業中
-Works once, then expires	1 回使うと期限切れ
+Woken when an agent needs it, hidden again after	エージェントが必要なときに起こされ、終わると再び隠れます
+Working in {0}	{0}で作業中
+Works once, then expires	1回使うと期限切れ
 Write an answer	回答を書く
 Write your answer	回答を書いてください
 Writing down the steps…	手順を書き出し中…
 Xiaomi Autostart	Xiaomi の自動起動
 Yesterday	昨日
-You can connect an agent now.	agent を接続できるようになりました。
+You can connect an agent now.	エージェントを接続できるようになりました。
 You have a domain (or will buy a cheap one) and want a fixed, memorable address such as https://phone.example.com/mcp; also for Headscale users. The phone dials out to Cloudflare: no public IP, no open port.	ドメインを持っている（または安く買う）人で、https://phone.example.com/mcp のような固定の覚えやすいアドレスにしたい場合。Headscale 利用者にも。端末から Cloudflare へ接続するので、グローバル IP もポート開放も不要です。
 You have no domain and want the quickest setup. Tailscale assigns the address, like https://phone.your-tailnet.ts.net/mcp. HTTPS is decrypted on the phone, so no server in between sees the content. Needs an official Tailscale account (free); Headscale is not supported.	ドメインがなく、いちばん手早く設定したい場合。アドレスは Tailscale が割り当てます（例：https://phone.your-tailnet.ts.net/mcp）。HTTPS は端末で復号するので、途中のサーバーは内容を見られません。公式 Tailscale アカウント（無料）が必要で、Headscale には対応していません。
-You have no domain, don't want to deal with DNS, and don't use Tailscale; or you use Headscale. A free ngrok account is enough: it comes with one static domain, so the address looks like https://name.ngrok-free.app/mcp (.ngrok-free.dev for newer accounts). The phone dials out to ngrok: no public IP, no open port.	ドメインがなく DNS も扱いたくない、Tailscale も使っていない、または Headscale を使っている場合。無料の ngrok アカウントで十分で、固定ドメインが 1 つ付くので、アドレスは https://name.ngrok-free.app/mcp のようになります（新しいアカウントは .ngrok-free.dev）。端末から ngrok へ接続するので、グローバル IP もポート開放も不要です。
-You have {0}	{0} 件あります
-You opened it on the main screen; "{0}" waits for it and carries on from your page	メイン画面で開きました。「{0}」はそれを待ち、あなたのページから続けます
-You pressed "Stop AI" on the floating window. Until you allow it, every action of the agent is refused and it is told to come to you. To let it go on, tap "Allow again" below.	フローティングウィンドウで「AI を停止」を押しました。許可するまで agent の操作はすべて拒否され、あなたに確認するよう伝えられます。続けさせるには下の「再び許可」をタップしてください。
-You stopped it	あなたが停止しました
+You have no domain, don't want to deal with DNS, and don't use Tailscale; or you use Headscale. A free ngrok account is enough: it comes with one static domain, so the address looks like https://name.ngrok-free.app/mcp (.ngrok-free.dev for newer accounts). The phone dials out to ngrok: no public IP, no open port.	ドメインがなく DNS も扱いたくない、Tailscale も使っていない、または Headscale を使っている場合。無料の ngrok アカウントで十分で、固定ドメインが1つ付くので、アドレスは https://name.ngrok-free.app/mcp のようになります（新しいアカウントは .ngrok-free.dev）。端末から ngrok へ接続するので、グローバル IP もポート開放も不要です。
+You have {0}	{0}件あります
+You opened it on the main screen; "{0}" waits for it and carries on from your page	メイン画面で開きました。「{0}」はそれを待ち、そのページから続けます
+You pressed "Stop AI" on the floating window. Until you allow it, every action of the agent is refused and it is told to come to you. To let it go on, tap "Allow again" below.	フローティングウィンドウで「AI を停止」を押しました。許可するまでエージェントの操作はすべて拒否され、ユーザーに確認するよう伝えられます。続けさせるには下の「再び許可」をタップしてください。
+You stopped it	手動で停止しました
 You stopped the AI	AI を停止しました
 You're in control	あなたが操作中です
 a temporary allow	一時許可
 allowed	許可
-another device · last {0}	別の端末 · 最終 {0}
+another device · last {0}	別の端末 · 最終{0}
 app not recognised	アプリを認識できません
 app rules or payment settings changed	アプリのルールまたは支払い設定が変更されました
-at most 24 times per entry	1 回の入域あたり最大 24 回
+at most 24 times per entry	危険域に入るたびに最大24回
 at the end of today	今日の終わりに
 awaiting approval	承認待ち
-battery temperature reading	電池温度の値
+battery temperature reading	バッテリー温度の値
 blocked	禁止
 can open and operate apps; cannot change system settings or force-stop apps	アプリを開いて操作できます。システム設定の変更やアプリの強制停止はできません
 can read status, the app list and analyse screenshots; cannot open or operate apps	状態、アプリ一覧の取得とスクリーンショットの分析ができます。アプリを開いたり操作したりはできません
@@ -1203,15 +1203,15 @@ emergency	緊急
 ended	終了
 error, retrying	エラー、再試行中
 every payment is confirmed on its own and cannot be asked away	支払いは毎回個別に確認され、省略を求めることはできません
-every {0} min	{0} 分ごと
+every {0} min	{0}分ごと
 everything (incl. system repair, force-stop)	すべて（システム修復、強制停止を含む）
 failed	失敗
 feedback	フィードバック
-gave sound back to {0} apps ({1}); playback must be started again in the app	{0} 個のアプリの音声を戻しました（{1}）。再生はアプリで開始し直す必要があります
+gave sound back to {0} apps ({1}); playback must be started again in the app	{0}個のアプリの音声を戻しました（{1}）。再生はアプリで開始し直す必要があります
 last used 	最終使用 
 left silent	無音のまま
-lesson	レッスン
-let through by an earlier allow	以前の許可により通過
+lesson	お手本
+let through by an earlier allow	以前の許可により実行
 light	軽度
 locked (hot)	ロック（高温）
 log in	ログイン
@@ -1222,7 +1222,7 @@ moderate	中程度
 muted by hand	手動でミュート
 never used	未使用
 ngrok does not accept this authtoken: copy it again from Your Authtoken in the dashboard. A reset makes the old one stop working.	ngrok がこの authtoken を受け付けません。ダッシュボードの Your Authtoken からもう一度コピーしてください。リセットすると古いものは使えなくなります。
-ngrok gave {0}, not the domain entered: check the domain belongs to this account.	ngrok から返ったのは入力したドメインではなく {0} でした。ドメインがこのアカウントのものか確認してください。
+ngrok gave {0}, not the domain entered: check the domain belongs to this account.	ngrok から返ったのは入力したドメインではなく{0}でした。ドメインがこのアカウントのものか確認してください。
 ngrok reported an error; see details.	ngrok がエラーを報告しました。詳細を確認してください。
 ngrok says this address is offline	ngrok はこのアドレスがオフラインだと言っています
 no app was left silent	無音のまま残ったアプリはありません
@@ -1230,16 +1230,16 @@ no time given	時刻の指定なし
 none	なし
 normal	正常
 not allowed	不許可
-not allowed by your rules	あなたのルールで不許可
+not allowed by your rules	ルールで不許可
 not answered in time	時間内に回答なし
-noted by an agent	agent のメモ
-noted by {0}	{0} のメモ
+noted by an agent	エージェントのメモ
+noted by {0}	{0}のメモ
 off	オフ
 offline while hidden	隠れている間はオフライン
 on the screen, back when it leaves	画面上では無音、離れると戻る
-only on {0}-{1} 	{0}〜{1} のみ 
+only on {0}-{1} 	{0}〜{1}のみ 
 operate	操作
-power save in {0}:{1}	{0}:{1} に省電力
+power save in {0}:{1}	{0}:{1}に省電力
 ready	準備完了
 ready to resume	再開の準備完了
 reconnected the background connection	バックグラウンド接続を再接続しました
@@ -1247,78 +1247,78 @@ restarted the built-in Tailscale; it is connected now	内蔵 Tailscale を再起
 restarted the service as a foreground service	サービスをフォアグラウンドサービスとして再起動しました
 restore preset	プリセットに戻す
 runs directly	そのまま実行
-saved by an agent	agent が保存
-saved by {0}	{0} が保存
+saved by an agent	エージェントが保存
+saved by {0}	{0}が保存
 severe	深刻
 shutdown	シャットダウン
 stopped by the user in the app	アプリでユーザーが停止
 system	システム
 system actions are never available over public MCP	公開 MCP ではシステム操作は使えません
 system thermal status reading	システムの熱状態の値
-taught by you	あなたが教えた
+taught by you	自分で教えた
 temporary power allowlist failed	一時的な省電力除外に失敗
-temporary power allowlist for {0} min	{0} 分間の一時的な省電力除外
+temporary power allowlist for {0} min	{0}分間の一時的な省電力除外
 the Tailscale server	Tailscale サーバー
-the agent withdrew it	agent が取り下げました
-the checklist rechecks by itself. When all show ✓, accept the risk note, press Turn on public access and confirm with your fingerprint. The first certificate takes about 30–60 seconds.	チェックリストは自動で再確認します。すべて ✓ になったら、リスクの説明に同意し、「公開アクセスをオンにする」を押して指紋で確認してください。最初の証明書には約 30〜60 秒かかります。
-the phone checks every command against this table before it runs, whatever you believe	あなたが何を信じていても、端末は実行前にすべてのコマンドをこの表と照合します
+the agent withdrew it	エージェントが取り下げました
+the checklist rechecks by itself. When all show ✓, accept the risk note, press Turn on public access and confirm with your fingerprint. The first certificate takes about 30–60 seconds.	チェックリストは自動で再確認します。すべて ✓ になったら、リスクの説明を確認し、「公開アクセスをオンにする」を押して指紋で確認してください。最初の証明書には約30〜60秒かかります。
+the phone checks every command against this table before it runs, whatever you believe	どう思っていても、端末は実行前にすべてのコマンドをこの表と照合します
 the relay{0}	リレー{0}
 the same as the main token	メイントークンと同じ
 the service is a foreground service	サービスはフォアグラウンドサービスです
 the user turned the service off	ユーザーがサービスをオフにしました
 this pairing may only look; operating needs a new pairing	このペアリングは見るだけです。操作には再ペアリングが必要です
-this phone · last {0}	この端末 · 最終 {0}
+this phone · last {0}	この端末 · 最終{0}
 this schedule is gone	この予約はもうありません
 unknown	不明
 unknown reason	理由不明
 vivo High background power use	vivo の高バックグラウンド電力消費
-wait for battery below {0}	電池が {0} 未満になるまで待機
-wait for thermal status below {0}	熱状態が {0} 未満になるまで待機
+wait for battery below {0}	バッテリーが{0}未満になるまで待機
+wait for thermal status below {0}	熱状態が{0}未満になるまで待機
 waiting for the tailnet admin to approve this device	tailnet の管理者がこの端末を承認するのを待っています
 weekdays	平日
 weekends	週末
-when the checklist is all ✓, accept the risk note, press Turn on public access and confirm with your fingerprint.	チェックリストがすべて ✓ になったら、リスクの説明に同意し、「公開アクセスをオンにする」を押して指紋で確認してください。
+when the checklist is all ✓, accept the risk note, press Turn on public access and confirm with your fingerprint.	チェックリストがすべて ✓ になったら、リスクの説明を確認し、「公開アクセスをオンにする」を押して指紋で確認してください。
 when this turn ends	このターンの終わりに
 woken on use	使うときに起動
 writing system settings failed	システム設定の書き込みに失敗
-you allowed	あなたが許可
-you answered	あなたが回答
-you answered in words	あなたが言葉で回答
-you declined	あなたが断った
-you refused	あなたが拒否
-you said something	あなたが何か言った
+you allowed	許可しました
+you answered	回答しました
+you answered in words	言葉で回答しました
+you declined	断りました
+you refused	拒否しました
+you said something	メッセージを送りました
 {0}⏎From: {1}	{0}⏎送信元：{1}
-{0}⏎From: {1} (session {2})	{0}⏎送信元：{1}（セッション {2}）
-{0} Let the VPN skip this app	{0} この アプリを VPN の対象外にする
-{0} Turn that VPN off for now	{0} その VPN をいったんオフにする
-{0} asks for "{1}"	{0} が「{1}」を求めています
-{0} asks to allow "{1}"	{0} が「{1}」の許可を求めています
-{0} changed	{0} 件変更
-{0} changed	{0} 件変更
-{0} connections	{0} 件の接続
-{0} devices online	{0} 台がオンライン
-{0} has its sound back; start playing again in the app.	{0} の音声を戻しました。アプリで再生し直してください。
+{0}⏎From: {1} (session {2})	{0}⏎送信元：{1}（セッション{2}）
+{0} Let the VPN skip this app	{0}このアプリを VPN の対象外にする
+{0} Turn that VPN off for now	{0}その VPN をいったんオフにする
+{0} asks for "{1}"	{0}が「{1}」を求めています
+{0} asks to allow "{1}"	{0}が「{1}」の許可を求めています
+{0} changed	{0}件変更
+{0} changed	{0}件変更
+{0} connections	{0}件の接続
+{0} devices online	{0}台がオンライン
+{0} has its sound back; start playing again in the app.	{0}の音声を戻しました。アプリで再生し直してください。
 {0} in {1}	{0}（{1}）
-{0} is muted until you unmute it here.	{0} はここでミュートを解除するまで無音です。
-{0} is not ready	{0} の準備ができていません
-{0} is not ready: 	{0} の準備ができていません：
-{0} is on your main screen	{0} はメイン画面にあります
-{0} is with you	{0} があなたを待っています
-{0} left	残り {0}
-{0} min	{0} 分
-{0} more	ほか {0} 件
-{0} must be connected	{0} の接続が必要です
-{0} needs HH:MM	{0} には HH:MM 形式が必要です
-{0} pairing requests pending	{0} 件のペアリング要求が保留中
-{0} performed {1} actions in one minute. To stop it, use the floating window or the app.	{0} が 1 分間に {1} 回操作しました。止めるにはフローティングウィンドウかアプリを使ってください。
-{0} recorded, waiting to be saved	{0} を記録、保存待ち
-{0} selected	{0} 件選択
-{0} waiting for you	{0} があなたを待っています
-{0} {1} is already past	{0} {1} はすでに過ぎています
-{0}: payments without confirmation for 30 minutes	{0}：30 分間、支払いを確認なしで実行
+{0} is muted until you unmute it here.	{0}はここでミュートを解除するまで無音です。
+{0} is not ready	{0}の準備ができていません
+{0} is not ready: 	{0}の準備ができていません：
+{0} is on your main screen	{0}はメイン画面にあります
+{0} is with you	{0}はあなたが操作中です
+{0} left	残り{0}
+{0} min	{0}分
+{0} more	ほか{0}件
+{0} must be connected	{0}の接続が必要です
+{0} needs HH:MM	{0}には HH:MM 形式が必要です
+{0} pairing requests pending	{0}件のペアリング要求が保留中
+{0} performed {1} actions in one minute. To stop it, use the floating window or the app.	{0}が1分間に{1}回操作しました。止めるにはフローティングウィンドウかアプリを使ってください。
+{0} recorded, waiting to be saved	{0}を記録、保存待ち
+{0} selected	{0}件選択
+{0} waiting for you	{0}が確認待ちです
+{0} {1} is already past	{0} {1}はすでに過ぎています
+{0}: payments without confirmation for 30 minutes	{0}：30分間、支払いを確認なしで実行
 {0}: the setup steps are right below	{0}：設定手順はすぐ下にあります
-{0}m {1}s	{0} 分 {1} 秒
-{0}s	{0} 秒
+{0}m {1}s	{0}分{1}秒
+{0}s	{0}秒
 ① Use the Tailscale app on this phone	① この端末の Tailscale アプリを使う
 ① copy the whole command; ② spinning with Continue grey is expected	① コマンド全体をコピー。② 回り続けて Continue が灰色なのは想定どおり
 ① subdomain; ② your domain; ③ Service URL {0}; ④ Add route	① サブドメイン、② 自分のドメイン、③ Service URL {0}、④ Add route
