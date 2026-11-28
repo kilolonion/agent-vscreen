@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.BuildConfig
 import com.kilon.agentvscreen.core.BackgroundOperation
 import com.kilon.agentvscreen.core.Vendor
@@ -47,21 +48,21 @@ internal fun diagText(context: android.content.Context): String = buildString {
     appendLine("detector: ${com.kilon.agentvscreen.core.VScreenDetector.status(context)}")
     appendLine("onnx: ${com.kilon.agentvscreen.core.OnnxRuntime.summary(context)}")
     // 1.4.0-beta2: a real reading on this phone, not the state of a flag.
-    append("\n" + tr("文字识别自检（本机真实识别一张已知图片）", "text recognition self-test (a real reading of a known picture on this phone)") + ":\n")
+    append("\n" + tr(S.vscreen_diag_text_recognition_self_test_a) + ":\n")
     append(runCatching { com.kilon.agentvscreen.core.VScreenOcr.selfTest(context) }.getOrElse { "self-test crashed: ${it.javaClass.simpleName}: ${it.message}" }.prependIndent("  ") + "\n")
-    append("\n" + tr("最近 ONNX 推理（最多 50 条）", "recent ONNX inferences (up to 50)") + ":\n")
+    append("\n" + tr(S.vscreen_diag_recent_onnx_inferences_up_to) + ":\n")
     append(com.kilon.agentvscreen.core.OnnxRuntime.formatRecent(com.kilon.agentvscreen.core.OnnxRuntime.MAX_RECORDS) + "\n")
     val sw = Swallowed.snapshot()
-    append("\n" + tr("被吞掉的异常（按位置计数）", "swallowed exceptions (count per site)") + ": " + (if (sw.isEmpty()) tr("无", "none") else "") + "\n")
+    append("\n" + tr(S.vscreen_diag_swallowed_exceptions_count_per_site) + ": " + (if (sw.isEmpty()) tr(S.vscreen_diag_none) else "") + "\n")
     sw.sortedByDescending { it.second.count }.take(30).forEach { (tag, e) -> append("  $tag ×${e.count}  ${fmt.format(Date(e.at))}  ${e.last.take(160)}\n") }
-    append("\n" + tr("最近的命令（不含输入的文字）", "recent commands (typed text not included)") + ":\n")
+    append("\n" + tr(S.vscreen_diag_recent_commands_typed_text_not) + ":\n")
     Audit.tail(40).forEach { o ->
         // 2.0.0-beta9: where the call came from (tailnet peer, or the real public address of a public client).
         val from = listOfNotNull(o.optString("source").takeIf { it.isNotEmpty() && it != "local" }, o.optString("src").takeIf { it.isNotEmpty() }?.let { "src=$it" },
             o.optString("peer").takeIf { it.isNotEmpty() && it != "null" && o.optString("source") == "tailnet" }).joinToString(" ").let { if (it.isEmpty()) "" else " [$it]" }
         append("  ${fmt.format(Date(o.optLong("at")))} ${o.optString("kind")} ${o.optString("token")}$from ${o.optString("cmd", o.optString("what"))} → ${o.optString("code", o.optString("answer"))} ${o.optLong("ms").takeIf { it > 0 }?.let { "${it}ms" } ?: ""}\n")
     }
-    append("\n" + tr("应用日志（最后 150 行）", "app log (last 150 lines)") + ":\n")
+    append("\n" + tr(S.vscreen_diag_app_log_last_150_lines) + ":\n")
     append(AppLogger.tail(150))
 }
 

@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import com.kilon.agentvscreen.core.BackgroundOperation
 import com.kilon.agentvscreen.tr
@@ -66,7 +67,7 @@ object ServiceControl {
         if (ThermalGuard.locked) return
         Prefs.setServiceOn(ctx, false); Prefs.setBlocked(ctx, false)
         HostService.ensureServer(ctx)
-        BackgroundOperation.stopAndRelease(tr("服务已改为按需启动（agent 使用时自动启动）", "Service set to on demand (starts when an agent needs it)"))
+        BackgroundOperation.stopAndRelease(tr(S.service_control_service_set_to_on_demand))
         HostService.stop(ctx)
         now(ctx)
         AppLogger.info("ServiceControl", "hidden: $why")
@@ -89,10 +90,10 @@ object ServiceControl {
         runCatching { com.kilon.agentvscreen.cmd.Tasks.cancelForHeat() }
         // 1.4.2-beta6: off at once, not when the service gets round to onDestroy: until then a command still running
         // reconnected by itself (acquire connects whenever the service is on) and built a new screen to go on with.
-        BackgroundOperation.setEnabled(false, tr("用户关闭了 Agent-VScreen", "The user turned Agent-VScreen off"))
+        BackgroundOperation.setEnabled(false, tr(S.service_control_the_user_turned_agent_vscreen))
         if (!HostService.isAlive) HostService.dropServer()
         // 1.4.0-beta4: off is off: watches (their own notification) end too.
-        runCatching { com.kilon.agentvscreen.core.VScreenRules.stopAll(tr("用户关闭了服务", "the user turned the service off")) }
+        runCatching { com.kilon.agentvscreen.core.VScreenRules.stopAll(tr(S.service_control_the_user_turned_the_service)) }
         HostService.stop(ctx)
         runCatching { Tailnet.stop("service off") }
         runCatching { Wake.arm(app) }
@@ -204,30 +205,19 @@ object ServiceControl {
 
     /** The home page's status line when the service is not always on: the state, then what it means. */
     fun title(ctx: Context): String = when (now(ctx)) {
-        State.ON -> tr("常驻运行中", "Always running")
-        State.HIDDEN -> if (HostService.isAlive) tr("按需启动 · 运行中", "On demand · Running")
-            else if (Tailnet.Mode.BUILTIN == com.kilon.agentvscreen.api.ApiConfig.tailnetMode) tr("按需启动 · 远程离线", "On demand · Remote offline") else tr("按需启动", "On demand")
-        State.BLOCKED -> tr("已关闭", "Off")
+        State.ON -> tr(S.service_control_always_running)
+        State.HIDDEN -> if (HostService.isAlive) tr(S.service_control_on_demand_running)
+            else if (Tailnet.Mode.BUILTIN == com.kilon.agentvscreen.api.ApiConfig.tailnetMode) tr(S.service_control_on_demand_remote_offline) else tr(S.connect_on_demand)
+        State.BLOCKED -> tr(S.automation_off)
     }
 
     fun sub(ctx: Context): String? = when (now(ctx)) {
         State.ON -> null
-        State.HIDDEN -> if (HostService.isAlive) tr("空闲后自动停止", "Stops automatically when idle")
-            else tr("agent 使用时自动启动，空闲后停止", "Starts when an agent uses it and stops when idle")
-        State.BLOCKED -> if (ThermalGuard.locked) ThermalGuard.reason() else tr("不会自动启动，点右上角电源键重新打开", "Will not start automatically; use the power button at the top to turn it on")
+        State.HIDDEN -> if (HostService.isAlive) tr(S.service_control_stops_automatically_when_idle)
+            else tr(S.service_control_starts_when_an_agent_uses)
+        State.BLOCKED -> if (ThermalGuard.locked) ThermalGuard.reason() else tr(S.service_control_will_not_start_automatically_use)
     }
 
     /** The full story behind the "?" next to the status line. */
-    fun help(): String = tr(
-        "右上角的电源键用于选择服务的运行方式，三选一，立即生效：\n\n" +
-            "常驻运行：服务持续运行，通知栏保留通知；本机和其它设备上的 agent 可随时连接。\n\n" +
-            "按需启动：平时不运行。本机 agent 发出命令，或预约时间到时自动启动；空闲 5 分钟后自动停止。此模式下其它设备上的 agent 无法启动服务（内置 Tailscale 运行在服务内）。服务运行期间再次点“按需启动”可立即停止。\n\n" +
-            "关闭：立即停止并移除通知，不会被任何方式启动；预约时间到时只通知你。通知上的“关闭”按钮作用相同。\n\n" +
-            "以下两个操作不改变服务状态：悬浮窗上的 × 只关闭副屏；“停止 agent”只拒绝 agent 的操作，直到你点“解除停止”。从最近任务中划掉应用也不影响服务。",
-        "The power button at the top chooses how the service runs. Pick one; it applies at once.\n\n" +
-            "Always running: the service keeps running with a persistent notification; agents on this and other devices can connect at any time.\n\n" +
-            "On demand: not running normally. It starts when a local agent sends a command or a schedule is due, and stops after 5 minutes of inactivity. Agents on other devices cannot start it (the built-in Tailscale runs inside the service). While it is running, choosing On demand again stops it immediately.\n\n" +
-            "Off: stops immediately and removes the notification; nothing starts it. A schedule that comes due only sends you a notification. The Off button on the notification does the same.\n\n" +
-            "Two other buttons do not change the service: the × on the floating window only closes the background screen, and Stop agent only refuses the agent's actions until you tap Resume agent. Swiping the app away from recents does not change it either.",
-    )
+    fun help(): String = tr(S.service_control_the_power_button_at_the)
 }

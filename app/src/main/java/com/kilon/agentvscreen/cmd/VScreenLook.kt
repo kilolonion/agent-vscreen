@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.core.BackgroundOperation
 import com.kilon.agentvscreen.core.BackgroundOperation.ActionError
 import com.kilon.agentvscreen.tr
@@ -28,7 +29,7 @@ internal enum class Detail(val key: String, val use: com.kilon.agentvscreen.core
     val nowSide: Int get() = use.side
     companion object {
         fun of(args: OffloadArgs): Detail = args.get("detail")?.let { v -> entries.firstOrNull { it.key == v.lowercase() }
-            ?: throw ActionError("INVALID_ARGS", tr("--detail 只能是 low、normal 或 high", "--detail is low, normal or high")) }
+            ?: throw ActionError("INVALID_ARGS", tr(S.vscreen_look_detail_is_low_normal_or)) }
             ?: if (args.hasFlag("big")) HIGH else NORMAL
     }
 }
@@ -48,7 +49,7 @@ internal class Layout(val per: Int?, val cols: Int?) {
                 "auto" -> Layout(null, null)
                 "single" -> Layout(1, 1)
                 "strip" -> Layout(6, 6)
-                else -> throw ActionError("INVALID_ARGS", tr("--layout 只能是 auto、single、strip 或 3x4", "--layout is auto, single, strip or 3x4"))
+                else -> throw ActionError("INVALID_ARGS", tr(S.vscreen_look_layout_is_auto_single_strip))
             }
         }
     }
@@ -62,18 +63,18 @@ internal object LookBudget {
 }
 
 internal fun OffloadArgs.marks(): Boolean = when (get("marks")?.lowercase()) { null, "on", "true", "1" -> true; "off", "false", "0" -> false
-    else -> throw ActionError("INVALID_ARGS", tr("--marks 只能是 on 或 off", "--marks is on or off")) }
+    else -> throw ActionError("INVALID_ARGS", tr(S.vscreen_look_marks_is_on_or_off)) }
 
 /** `look [x1,y1,x2,y2] [--last|--from|--to|--count|--every|--page] [--detail] [--layout] [--marks]`. [as]: zoom or frames when called by their old names. */
 internal fun VScreenOffloadHandler.lookCmd(sid: String?, args: OffloadArgs, `as`: String = "look"): NativeOffloadResult {
     val region = args.positional.firstOrNull()
     // A positional that is not a region is named as such, not mistaken for one (beta2: `--layout grid 3x4`).
     if (region != null && !REGION.matches(region.replace(" ", "")))
-        throw ActionError("INVALID_ARGS", tr("看不懂“$region”：区域写成 x1,y1,x2,y2；排法写成 --layout 3x4", "Cannot read \"$region\": a region is x1,y1,x2,y2; a layout is --layout 3x4"))
+        throw ActionError("INVALID_ARGS", tr(S.vscreen_look_cannot_read_a_region_is, region))
     BackgroundOperation.requireNotParked(sid)
     val stretch = `as` == "frames" || listOf("last", "from", "to", "count", "every", "page").any { args.get(it) != null }
     return when {
-        region != null && stretch -> throw ActionError("INVALID_ARGS", tr("一次只看一样：区域（x1,y1,x2,y2）或一段时间（--last 等），不能同时", "One thing at a time: a region (x1,y1,x2,y2) or a stretch (--last etc.), not both"))
+        region != null && stretch -> throw ActionError("INVALID_ARGS", tr(S.vscreen_look_one_thing_at_a_time))
         // 1.4.0-beta5: a scale alone means the whole screen at that scale (beta4 refused `zoom --scale 1.5`).
         region != null || args.get("scale") != null -> zoomCmd(sid, args)
         `as` == "zoom" -> throw ActionError("INVALID_ARGS", "look x1,y1,x2,y2 [--detail high]")
@@ -84,12 +85,12 @@ internal fun VScreenOffloadHandler.lookCmd(sid: String?, args: OffloadArgs, `as`
 
 /** The screen now, as asked (detail, ruler on or off), with no stretch strip. */
 private fun VScreenOffloadHandler.lookNow(sid: String?, args: OffloadArgs): NativeOffloadResult {
-    val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
+    val s = sid ?: throw ActionError("NO_SESSION", tr(S.vscreen_act_no_session_header_x_vscreen))
     val detail = Detail.of(args); val marks = args.marks()
-    return BackgroundOperation.agentAction(s, null, isRead = true, describe = tr("看现在的画面", "look at the screen")) { d ->
+    return BackgroundOperation.agentAction(s, null, isRead = true, describe = tr(S.vscreen_look_look_at_the_screen)) { d ->
         val frame = freshFrameOf(d)
         val ref = picture(s, d, frame, null, "look", emptyList(), detail, marks)
-        text(tr("现在的画面（${detail.key}）：", "The screen now (${detail.key}): ") + (ref ?: tr("（图没存下来）", "(not saved)")) +
-            tr("\n更清楚：--detail high；某一块：look x1,y1,x2,y2；刚才的过程：look --last 30s", "\nClearer: --detail high; a region: look x1,y1,x2,y2; what just happened: look --last 30s"))
+        text(tr(S.vscreen_look_the_screen_now, detail.key) + (ref ?: tr(S.vscreen_look_not_saved)) +
+            tr(S.vscreen_look_clearer_detail_high_a_region))
     }
 }

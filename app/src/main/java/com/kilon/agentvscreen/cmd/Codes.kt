@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
+import com.kilon.agentvscreen.trPair
 import com.kilon.agentvscreen.tr
 
 /**
@@ -20,7 +22,7 @@ internal object Codes {
     enum class Next(val key: String) { LOOK("look"), FIX("fix_command"), PHONE("user_on_phone"), USER("ask_user"), WAIT("retry_later"), NONE("none") }
 
     class Code(val name: String, val next: Next, private val zh: String, private val en: String) {
-        val text: String get() = tr(zh, en)
+        val text: String get() = trPair(zh, en)
     }
 
     val all: List<Code> = listOf(
@@ -137,13 +139,12 @@ internal object Codes {
 
     /** `help codes`. */
     fun help(): String = buildString {
-        append(tr("代码表：结果的 code 和【注意】里每条开头的代码。括号里是下一步该怎么走：look 先看画面再决定；fix_command 改命令重发；user_on_phone 请求已发到手机、用户可能没看到通知，把回复里【等用户】那句话发给用户，等他说好了再原样重发，不要绕；ask_user 只有用户能解决，告诉用户并停下，不要重试；retry_later 稍后再试。\n\n",
-            "Codes: the code of a result and the code each [Notes] line starts with. In brackets, the right next move: look = look at the screen and decide again; fix_command = correct the command and resend; user_on_phone = a request is on the phone and the user may not have seen the notification: send them the line under [Waiting for the user], wait until they say it's done, then resend unchanged, don't go around it; ask_user = only the user can unblock it, tell the user and stop, don't retry; retry_later = try again shortly.\n\n"))
+        append(tr(S.codes_codes_the_code_of_a))
         all.forEach { append("  ").append(it.name).append(" (").append(it.next.key).append(")  ").append(it.text).append('\n') }
     }
 
     fun markdown(): String = buildString {
-        append("| code | next | ").append(tr("含义", "meaning")).append(" |\n|---|---|---|\n")
+        append("| code | next | ").append(tr(S.codes_meaning)).append(" |\n|---|---|---|\n")
         all.forEach { append("| `").append(it.name).append("` | `").append(it.next.key).append("` | ").append(it.text.replace("|", "\\|")).append(" |\n") }
     }
 }

@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
+import com.kilon.agentvscreen.trPair
 import com.kilon.agentvscreen.I18n
 import com.kilon.agentvscreen.tr
 import org.json.JSONArray
@@ -26,8 +28,8 @@ internal object CommandSpec {
               val deprecated: Boolean = false,
               /** Option may be supplied multiple times (MCP JSON Schema allows string or string[]). */
               val repeatable: Boolean = false) {
-        val arg: String? get() = if (kind == Kind.SWITCH) null else tr(argZh ?: "值", argEn ?: "value")
-        val text: String get() = tr(zh, en)
+        val arg: String? get() = if (kind == Kind.SWITCH) null else trPair(argZh ?: "值", argEn ?: "value")
+        val text: String get() = trPair(zh, en)
         fun usage(): String = "--$name" + (arg?.let { " <$it>" } ?: "")
     }
 
@@ -56,14 +58,14 @@ internal object CommandSpec {
               val hidden: Boolean = false) {
         /** For MCP's readOnlyHint: callable while looking only and changes nothing. */
         val readOnly: Boolean get() = scope == Scope.LOOK && !sideEffects
-        val scopeNote: String get() = tr(scopeNoteZh, scopeNoteEn)
+        val scopeNote: String get() = trPair(scopeNoteZh, scopeNoteEn)
         fun scopeFor(args: OffloadArgs): Scope = scopeOf?.invoke(args) ?: scope
-        val positional: String get() = tr(posZh, posEn)
+        val positional: String get() = trPair(posZh, posEn)
         val body: List<String> get() = if (I18n.en) en else zh
-        val summary: String get() = tr(sumZh, sumEn).ifEmpty { body.firstOrNull().orEmpty() }
+        val summary: String get() = trPair(sumZh, sumEn).ifEmpty { body.firstOrNull().orEmpty() }
         /** 2.0.0-beta16 (Item 2): full description for MCP tools; prepends summary only when a distinct summary is set. */
         val description: String get() {
-            val sum = tr(sumZh, sumEn)
+            val sum = trPair(sumZh, sumEn)
             val bodyText = body.joinToString("\n")
             return when {
                 sum.isEmpty() || body.firstOrNull() == sum -> bodyText
@@ -77,7 +79,7 @@ internal object CommandSpec {
         fun help(): List<String> = buildList {
             add("  " + usageLine())
             body.forEach { add("        $it") }
-            allOpts.filter { !it.deprecated }.forEach { add("        ${it.usage()}${tr("：", ": ")}${it.text}") }
+            allOpts.filter { !it.deprecated }.forEach { add("        ${it.usage()}${tr(S.agent_guide_colon)}${it.text}") }
         }
     }
 
@@ -357,62 +359,16 @@ internal object CommandSpec {
 
     // ── help text ────────────────────────────────────────────────────────────
 
-    private val head: String get() = tr(
-        "vscreen — Agent-VScreen 后台操作：在看不见的副屏里操作其他应用，不占用户主屏。截图由你（调用方的模型）看，手机只报事实。\n" +
-            "agent 不需要连接 adb 或配置无线调试：Agent-VScreen 使用用户选定的 Shizuku 或 Root。不要去连 adb、配无线调试或改 adb 密钥。没有副屏时直接 launch，会自动建屏。\n\n" +
-            "怎么用（一个循环）：看（launch / act 返回的【现在】和截图）→ 做（act 一小段步骤，最后一步带 until 写明你期待看到什么）→ 核对（结果 ok 吗？【注意】里有什么？）。\n" +
-            "一段里只放你有把握连着做的步骤；不确定页面会变成什么样时，在那里断开，先看再做。\n\n" +
-            "返回的四段（launch / act / handoff in）：\n" +
-            "  【做了什么】 每一步做了什么、等到了什么或等到时间没等到、哪个停止条件触发了（只有事实）\n" +
-            "  【这段时间】 从你上次拿到结果到现在（包括你思考的时间）：出现/消失/出现又消失的字，画面哪里变了多久；有变化时附拼图\n" +
-            "  【现在】     前台界面、副屏尺寸、截图路径（边上标着副屏坐标）和编号元素：#N “字” (x,y) 可点/可输入/…；同一页上只列新出现或变了的元素（编号不变），不带步骤的 act 列出全部\n" +
-            "  【注意】     每条以代码开头（help codes 有每个代码的意思和该怎么办）；没有就是“无”\n" +
-            "结果是否成功看 ok / 退出码，不用读文字判断：0 = 整段按预期做完；1 = 停在了某一步或被拒绝（code 说明原因）；2 = 命令写错了，什么都没做。\n" +
-            "HTTP / MCP 返回的 JSON 里同样的内容是结构化的：steps[]（每步的状态）、screen.elements[]、notes[]（代码 + 文字）。\n\n命令：",
-        "vscreen — Agent-VScreen background operation: operate other apps on an invisible background screen without taking the user's screen. You (the caller's model) look at the screenshots; the phone only reports facts.\n" +
-            "Agents do not need adb or wireless debugging: Agent-VScreen uses Shizuku or root, whichever the user chose. Don't connect adb, set up wireless debugging or change adb keys. With no screen, just launch: one is created automatically.\n\n" +
-            "How to use it (one loop): look (the [Now] block and screenshot returned by launch / act) → act (a short stretch of steps, the last one with until saying what you expect to see) → check (is the result ok? what is in [Notes]?).\n" +
-            "Put in one stretch only the steps you are sure can follow each other; where you cannot tell what the page will become, break there and look before acting.\n\n" +
-            "The four blocks returned (launch / act / handoff in):\n" +
-            "  [Done]       what each step did, what was waited for and whether it came or time ran out, which stop condition fired (facts only)\n" +
-            "  [Meanwhile]  from your last result until now (including your thinking time): text that appeared / disappeared / flashed, where the picture changed and for how long; a contact sheet when it changed\n" +
-            "  [Now]        front screen, screen size, screenshot path (screen coordinates on the edges) and numbered elements: #N \"text\" (x,y) tappable/input/…; on the same page only new or changed elements are listed (numbers stay), act with no steps lists all\n" +
-            "  [Notes]      every line starts with a code (help codes explains each code and what to do); \"none\" when there are none\n" +
-            "Whether it worked is in ok / the exit code, no need to read the text for it: 0 = the whole stretch went as expected; 1 = it stopped at a step or was refused (code says why); 2 = the command was written wrong and nothing ran.\n" +
-            "The JSON returned over HTTP / MCP has the same content structured: steps[] (each step's status), screen.elements[], notes[] (code + text).\n\nCommands:")
+    private val head: String get() = tr(S.command_spec_vscreen_agent_vscreen_background_operati)
 
-    private val rules: String get() = tr(
-        "用户接管或重启之后：下一次 launch 或 act 返回的【现在】就算重新看过画面，不需要别的命令（没有 resume）。\n" +
-            "命令行的完整输出也存在 VSCREEN_SHOT_DIR 下的 last.txt（默认 TMPDIR/vscreen-shots/last.txt），输出太长或重定向出问题时读这个文件。\n\n" +
-            "规则：\n" +
-            "- 副屏不可用时命令直接失败，不会改到主屏执行。\n" +
-            "- 命令一条一条排队执行：同一块副屏上不会有两条命令同时动。排队超过 60 秒返回 QUEUE_TIMEOUT，这条没有执行。\n" +
-            "- 用户点“接管”时动作会等待（最多 15 秒，之后 USER_TAKEOVER）。接管只由用户结束，你这一轮结束了副屏也留在用户手上、不会被释放：用 vscreen events --wait 等 handback 事件再继续，不要 release 或重新 launch。交还后第一个改动画面的命令会被拒一次（REREAD_REQUIRED），先 act（不带步骤）看一眼再重发。\n" +
-            "- 用户在悬浮窗点“停止 AI”后，所有操作返回 USER_STOPPED：停下来，把返回里“怎么解除”那句转告用户，不要重试。\n" +
-            "- 用户可以把应用设成“禁止操作”（APP_BLOCKED）、“只读”（APP_READ_ONLY）或“每次确认”（手机上确认）。这是用户的决定，不要绕过，也不要换个入口进同一个应用。\n" +
-            "- 支付，以及这个 agent 的权限表里设为“问我”的类别（不可撤销操作、敏感操作如 stop --force、handoff in 等）：由用户在手机上确认（或用户事先给这个令牌开了临时免确认）。设为“不允许”的类别不会执行。你自己加任何参数都不能代替用户确认。\n" +
-            "- 涉及隐私（私信、通讯录、相册、余额）的步骤，先问用户，答复后再做。\n" +
-            "- 一个副屏同一时间只属于一个会话（请求头 X-VScreen-Session，默认 default）。别的会话在用时返回 BUSY，写明归谁、多久后自动让出。\n" +
-            "- --keep 在你不在时替你盯：告诉用户你在盯什么、盯多久、看到后会怎样、怎么停（keep off）。",
-        "After a user takeover or a restart: the [Now] of the next launch or act counts as a fresh look; no other command is needed (there is no resume).\n" +
-            "The full command-line output is also saved as last.txt under VSCREEN_SHOT_DIR (default TMPDIR/vscreen-shots/last.txt); read it when output is too long or redirection goes wrong.\n\n" +
-            "Rules:\n" +
-            "- When the background screen is unavailable, commands fail; they never run on the main screen instead.\n" +
-            "- Commands run one at a time, in a queue: two commands never move the same screen at once. After 60 s in the queue a command returns QUEUE_TIMEOUT and has not run.\n" +
-            "- While the user has taken over, actions wait (up to 15 s, then USER_TAKEOVER). Only the user ends a takeover: when your turn ends the screen stays with the user and is not released; wait for the handback event with vscreen events --wait, don't release or launch again. After the hand-back the first command that changes the screen is refused once (REREAD_REQUIRED): look with act (no steps), then send it again.\n" +
-            "- After the user taps \"Stop AI\" on the floating window, every action returns USER_STOPPED: stop, pass on the \"how to undo\" line to the user, don't retry.\n" +
-            "- The user can set an app to \"blocked\" (APP_BLOCKED), \"read-only\" (APP_READ_ONLY) or \"confirm every time\" (confirmed on the phone). That is the user's decision: don't get around it, and don't enter the same app another way.\n" +
-            "- Payments, and the classes this agent's permission table sets to \"Ask me\" (irreversible or sensitive actions such as stop --force and handoff in), are confirmed by the user on the phone (or the user gave this token a temporary no-confirmation period). Classes set to \"Not allowed\" are never done. No option you add can stand in for the user's confirmation.\n" +
-            "- Steps touching privacy (messages, contacts, photos, balances): ask the user first and act after the answer.\n" +
-            "- A screen belongs to one session at a time (header X-VScreen-Session, default \"default\"). When another session is using it you get BUSY, with whose it is and when it frees up.\n" +
-            "- --keep watches for you while you are away: tell the user what you watch, for how long, what happens when seen, and how to stop it (keep off).")
+    private val rules: String get() = tr(S.command_spec_after_a_user_takeover_or)
 
     /** `help all`. */
     fun fullHelp(): String = buildString {
         append(head).append('\n')
         commands.filterNot { it.hidden }.forEach { c -> c.help().forEach { append(it).append('\n') } }
-        append("  guide\n        ").append(tr("用法速查（一页）。", "the one-page quick usage.")).append('\n')
-        append("  help [all|codes|<").append(tr("主题", "topic")).append(">|<").append(tr("命令", "command")).append(">]\n        ").append(tr("完整说明 / 代码表 / 主题 / 单条命令。", "the full reference / the code table / a topic / one command.")).append('\n')
+        append("  guide\n        ").append(tr(S.command_spec_the_one_page_quick_usage)).append('\n')
+        append("  help [all|codes|<").append(tr(S.command_spec_topic)).append(">|<").append(tr(S.command_spec_command)).append(">]\n        ").append(tr(S.command_spec_the_full_reference_the_code)).append('\n')
         append('\n').append(rules)
     }
 
@@ -425,25 +381,19 @@ internal object CommandSpec {
      * option, step or condition is in it without anyone remembering to add a line.
      */
     fun quickHelp(): String = buildString {
-        append(tr("vscreen — Agent-VScreen：在看不见的副屏里操作应用，不占用户主屏（完整说明：help all；单条：help act；代码表：help codes）",
-            "vscreen — Agent-VScreen: operate apps on an invisible background screen without taking the user's screen (full guide: help all; one command: help act; codes: help codes)")).append('\n')
+        append(tr(S.command_spec_vscreen_agent_vscreen_operate_apps)).append('\n')
         for (c in commands) {
             if (c.hidden || c.name in OLD_FORMS) continue
             val use = (c.name + " " + c.positional).trim()
-            append("  ").append(use.padEnd(24)).append("  ").append(c.summary.substringBefore(tr("。", ". ")).trimEnd('.', '。')).append('\n')
+            append("  ").append(use.padEnd(24)).append("  ").append(c.summary.substringBefore(tr(S.command_spec_text)).trimEnd('.', '。')).append('\n')
             if (c.name == "act") {
-                append(tr("        步骤：", "        steps: ")).append(Steps.STEPS_HELP).append('\n')
-                append(tr("        目标：x y | #N（【现在】列表的编号）| 画面上的字；动作后可加 until 条件：", "        target: x y | #N (number in the [Now] list) | text on the screen; after an action add until <condition>: ")).append(Steps.CONDS_HELP).append('\n')
+                append(tr(S.command_spec_steps)).append(Steps.STEPS_HELP).append('\n')
+                append(tr(S.command_spec_target_x_y_n_number)).append(Steps.CONDS_HELP).append('\n')
                 append("        ").append(c.allOpts.filter { !it.deprecated }.joinToString("  ") { it.usage() }).append('\n')
             }
         }
-        append(tr("  旧写法：", "  old forms: ")).append(OLD_FORMS.entries.joinToString(tr("；", "; ")) { "${it.key} = ${it.value}" }).append('\n')
-        append(tr("成功与否看退出码 / ok：0 整段按预期做完；1 停在某一步或被拒绝（【注意】里的代码说明原因，help codes 查怎么办）；2 命令写错。\n" +
-            "一步没达到预期（until 没等到、字没输进去、找不到或有歧义）这段就停在那一步，后面的不做，【注意】里写明现在的画面。\n" +
-            "输出很长时完整结果也存在截图目录的 last.txt（路径见 help all），可以用 head / sed 分段看。",
-            "Success is in the exit code / ok: 0 the whole stretch went as expected; 1 it stopped at a step or was refused (the code in [Notes] says why, help codes says what to do); 2 the command was written wrong.\n" +
-            "If a step does not reach what it expects (until never came, text was not typed in, not found or ambiguous), the stretch stops at that step, skips the rest, and [Notes] describes the screen now.\n" +
-            "When output is long, the full result is also saved as last.txt in the screenshot folder (path in help all); read it in parts with head / sed."))
+        append(tr(S.command_spec_old_forms)).append(OLD_FORMS.entries.joinToString(tr(S.agent_guide_sep)) { "${it.key} = ${it.value}" }).append('\n')
+        append(tr(S.command_spec_success_is_in_the_exit))
     }
 
     /** `help <command>`; null when there is no such command. */
@@ -458,9 +408,9 @@ internal object CommandSpec {
             c.body.forEach { l -> append(if (l.startsWith("  ") || l.startsWith("    ")) "    $l\n" else "$l\n") }
             val opts = c.allOpts.filter { !it.deprecated }
             if (opts.isNotEmpty()) { append("\n"); opts.forEach { append("- `").append(it.usage()).append("` ").append(it.text).append('\n') } }
-            append("\n").append(tr("权限范围", "scope")).append(": `").append(c.scope.key).append("`")
-            if (c.scopeNote.isNotEmpty()) append(tr("（", " (")).append(c.scopeNote).append(tr("）", ")"))
-            if (c.screen) append(tr(" · 在副屏队列里执行", " · runs in the screen queue"))
+            append("\n").append(tr(S.command_spec_scope)).append(": `").append(c.scope.key).append("`")
+            if (c.scopeNote.isNotEmpty()) append(tr(S.command_spec_text_2)).append(c.scopeNote).append(tr(S.agent_guide_text_2))
+            if (c.screen) append(tr(S.command_spec_runs_in_the_screen_queue))
             append("\n\n")
         }
     }
@@ -475,8 +425,8 @@ internal object CommandSpec {
                 "args",
                 JSONObject().put("type", "string").put(
                     "description",
-                    tr("一个字符串（不是数组），写法：", "ONE string (not an array), written as: ") + c.positional.trim('[', ']').replace("\"", "") +
-                        (if (optional) tr("。可以不给", ". Optional") else ""),
+                    tr(S.command_spec_one_string_not_an_array) + c.positional.trim('[', ']').replace("\"", "") +
+                        (if (optional) tr(S.command_spec_optional) else ""),
                 ),
             )
             if (!optional) req.put("args")
@@ -498,7 +448,7 @@ internal object CommandSpec {
             }
             props.put(o.name.replace('-', '_'), prop)
         }
-        props.put("session", JSONObject().put("type", "string").put("description", tr("可选：会话名", "optional: session name")))
+        props.put("session", JSONObject().put("type", "string").put("description", tr(S.command_spec_optional_session_name)))
         return JSONObject()
             .put("\$schema", "https://json-schema.org/draft/2020-12/schema")
             .put("type", "object")

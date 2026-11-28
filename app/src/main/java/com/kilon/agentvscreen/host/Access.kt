@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import com.kilon.agentvscreen.api.AgentLedger
 import com.kilon.agentvscreen.api.ApiConfig
@@ -17,37 +18,37 @@ object Access {
     private const val IN_USE_MS = 30 * 60_000L
 
     class Way(val name: String, val state: String, val ok: Boolean, val inUse: Boolean) {
-        fun line(): String = "$name · $state" + if (inUse) tr(" · 在用", " · in use") else ""
+        fun line(): String = "$name · $state" + if (inUse) tr(S.access_in_use) else ""
     }
 
     fun ways(ctx: Context, now: Long = System.currentTimeMillis()): List<Way> {
         val st = ServiceControl.now(ctx)
         val led = AgentLedger.snap.value
-        val local = Way(tr("本机", "This phone"), when (st) {
-            ServiceControl.State.ON -> tr("可用", "ready")
-            ServiceControl.State.HIDDEN -> tr("按需启动", "on demand")
-            ServiceControl.State.BLOCKED -> tr("已禁止", "blocked")
+        val local = Way(tr(S.api_server_this_phone), when (st) {
+            ServiceControl.State.ON -> tr(S.access_ready)
+            ServiceControl.State.HIDDEN -> tr(S.access_on_demand)
+            ServiceControl.State.BLOCKED -> tr(S.access_blocked)
         }, st != ServiceControl.State.BLOCKED, led.lastLocalAt > 0 && now - led.lastLocalAt < IN_USE_MS)
         val remoteInUse = led.lastRemoteAt > 0 && now - led.lastRemoteAt < IN_USE_MS
         val remote = when (ApiConfig.tailnetMode) {
             Tailnet.Mode.OFF -> null
             Tailnet.Mode.SYSTEM -> Way("Tailscale App", when (st) {
-                ServiceControl.State.ON -> tr("可用", "ready")
-                ServiceControl.State.HIDDEN -> tr("待机时不可连接", "unavailable in standby")
-                ServiceControl.State.BLOCKED -> tr("已禁止", "blocked")
+                ServiceControl.State.ON -> tr(S.access_ready)
+                ServiceControl.State.HIDDEN -> tr(S.access_unavailable_in_standby)
+                ServiceControl.State.BLOCKED -> tr(S.access_blocked)
             }, st == ServiceControl.State.ON, remoteInUse)
             Tailnet.Mode.BUILTIN -> {
                 val p = Tailnet.phase(ctx)
                 Way("Tailscale", when (p) {
-                    Tailnet.Phase.CONNECTED -> tr("已连接", "connected")
-                    Tailnet.Phase.SERVICE_OFF -> if (st == ServiceControl.State.BLOCKED) tr("已禁止", "blocked") else tr("待机时离线", "offline in standby")
-                    Tailnet.Phase.STARTING -> tr("连接中", "connecting")
-                    Tailnet.Phase.NEEDS_LOGIN -> tr("要登录", "log in")
-                    Tailnet.Phase.EXPIRED -> tr("要重新登录", "log in again")
-                    Tailnet.Phase.NEEDS_APPROVAL -> tr("等批准", "awaiting approval")
-                    Tailnet.Phase.ERROR -> tr("出错，重试中", "error, retrying")
-                    Tailnet.Phase.UNSTABLE -> tr("断开了，重连中", "dropped, reconnecting")
-                    Tailnet.Phase.OFF -> tr("没开", "off")
+                    Tailnet.Phase.CONNECTED -> tr(S.access_connected)
+                    Tailnet.Phase.SERVICE_OFF -> if (st == ServiceControl.State.BLOCKED) tr(S.access_blocked) else tr(S.access_offline_in_standby)
+                    Tailnet.Phase.STARTING -> tr(S.access_connecting)
+                    Tailnet.Phase.NEEDS_LOGIN -> tr(S.access_log_in)
+                    Tailnet.Phase.EXPIRED -> tr(S.access_log_in_again)
+                    Tailnet.Phase.NEEDS_APPROVAL -> tr(S.access_awaiting_approval)
+                    Tailnet.Phase.ERROR -> tr(S.access_error_retrying)
+                    Tailnet.Phase.UNSTABLE -> tr(S.access_dropped_reconnecting)
+                    Tailnet.Phase.OFF -> tr(S.access_off)
                 }, p == Tailnet.Phase.CONNECTED, remoteInUse)
             }
         }
@@ -55,7 +56,7 @@ object Access {
     }
 
     /** The Connect tile: one line per way. */
-    fun tile(ctx: Context): String = if (ServiceControl.now(ctx) == ServiceControl.State.BLOCKED) tr("服务已关闭", "Service off")
+    fun tile(ctx: Context): String = if (ServiceControl.now(ctx) == ServiceControl.State.BLOCKED) tr(S.overview_service_off)
         else ways(ctx).joinToString("\n") { it.line() }
 
     /** Which way the Connect page opens on: the one the last call came by (0 = this phone, 1 = another device). */

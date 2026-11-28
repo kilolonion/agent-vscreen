@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -53,7 +54,7 @@ fun VScreenLiveFrame(sessionId: String, modifier: Modifier = Modifier) {
     }
     if (display == null) {
         Box(modifier.background(Color(0xFFF2F2F7)), contentAlignment = Alignment.Center) {
-            Text(tr("当前没有副屏画面", "No background screen right now"), fontSize = 11.sp, color = Color.Gray)
+            Text(tr(S.live_frame_no_background_screen_right_now), fontSize = 11.sp, color = Color.Gray)
         }
         return
     }
@@ -110,15 +111,15 @@ fun VScreenLiveFrame(sessionId: String, modifier: Modifier = Modifier) {
                 modifier = Modifier.fillMaxSize(),
             )
             if (blank) Text(
-                if (noApp) tr("副屏上没有运行的应用（空闲）", "No app is running on the background screen")
-                else tr("副屏暂时没有画面", "The background screen is blank right now"),
+                if (noApp) tr(S.live_frame_no_app_is_running_on)
+                else tr(S.live_frame_the_background_screen_is_blank),
                 fontSize = 9.sp, color = Color.Gray,
                 modifier = Modifier.align(Alignment.BottomCenter).background(Color(0xCCFFFFFF)).padding(horizontal = 6.dp, vertical = 2.dp),
             )
         } else {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                Text(tr("正在加载…", "Loading…"), fontSize = 9.sp, color = Color.Gray)
+                Text(tr(S.live_frame_loading), fontSize = 9.sp, color = Color.Gray)
             }
         }
     }

@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.app.NotificationChannel
@@ -82,15 +83,15 @@ internal object VScreenHandoff {
         val r = VScreenShell.run(arrayOf("am", "display", "move-stack", taskId.toString(), toDisplay.toString()), 10_000L)
         val out = r.combined.trim()
         val shellErr = r.exitCode != 0 || Regex("Exception|Error|Unknown|unknown|Permission Denial|not found").containsMatchIn(out)
-        notes += tr("am display move-stack：", "am display move-stack: ") + if (shellErr) (out.lines().firstOrNull { it.isNotBlank() }?.take(160) ?: "exit ${r.exitCode}") else tr("已执行", "done")
-        if (!shellErr && landed(taskId, pkg, toDisplay)) return Moved(true, "am display move-stack", notes.joinToString(tr("；", "; ")))
+        notes += tr(S.vscreen_handoff_am_display_move_stack) + if (shellErr) (out.lines().firstOrNull { it.isNotBlank() }?.take(160) ?: "exit ${r.exitCode}") else tr(S.vscreen_handoff_done)
+        if (!shellErr && landed(taskId, pkg, toDisplay)) return Moved(true, "am display move-stack", notes.joinToString(tr(S.agent_guide_sep)))
         val s = VScreenRemoteDisplay.moveTask(taskId, toDisplay)
         val okSvc = s.getOrNull()?.first == true
-        notes += tr("副屏服务 moveRootTaskToDisplay：", "screen service moveRootTaskToDisplay: ") + if (okSvc) tr("已执行", "done") else (s.getOrNull()?.second ?: s.exceptionOrNull()?.message ?: tr("失败", "failed"))
-        if (okSvc && landed(taskId, pkg, toDisplay)) return Moved(true, "moveRootTaskToDisplay", notes.joinToString(tr("；", "; ")))
-        if (okSvc || !shellErr) notes += tr("命令执行了，但这个应用没有出现在目标屏最前面（任务可能只移了记录、没有显示）", "The command ran, but the app is not in front on the target screen (the task may have moved only in the records, not on screen)")
+        notes += tr(S.vscreen_handoff_screen_service_moveroottasktodisplay) + if (okSvc) tr(S.vscreen_handoff_done) else (s.getOrNull()?.second ?: s.exceptionOrNull()?.message ?: tr(S.fullscreen_activity_failed))
+        if (okSvc && landed(taskId, pkg, toDisplay)) return Moved(true, "moveRootTaskToDisplay", notes.joinToString(tr(S.agent_guide_sep)))
+        if (okSvc || !shellErr) notes += tr(S.vscreen_handoff_the_command_ran_but_the)
         AppLogger.warning(TAG, "move task $taskId ($pkg) -> display $toDisplay failed: $notes")
-        return Moved(false, "", notes.joinToString(tr("；", "; ")))
+        return Moved(false, "", notes.joinToString(tr(S.agent_guide_sep)))
     }
 
     /**
@@ -117,11 +118,11 @@ internal object VScreenHandoff {
 
     /** The user's own button (full-screen view): put the app on the background screen in front of them. */
     fun userToMain(sessionId: String): Pair<Boolean, String> {
-        val d = BackgroundOperation.previewDisplayFor(sessionId) ?: return false to tr("副屏已经不在了", "The screen is gone")
-        val pkg = VScreenShell.topPackage(d.displayId) ?: return false to tr("副屏上没有应用", "No app on the screen")
-        val task = VScreenShell.taskIdOn(d.displayId, pkg) ?: return false to tr("找不到 $pkg 在副屏上的任务", "Cannot find $pkg's task on the screen")
+        val d = BackgroundOperation.previewDisplayFor(sessionId) ?: return false to tr(S.vscreen_handoff_the_screen_is_gone)
+        val pkg = VScreenShell.topPackage(d.displayId) ?: return false to tr(S.vscreen_handoff_no_app_on_the_screen)
+        val task = VScreenShell.taskIdOn(d.displayId, pkg) ?: return false to tr(S.vscreen_handoff_cannot_find_s_task_on, pkg)
         val m = move(task, pkg, 0)
-        return if (m.ok) true to tr("已把 $pkg 原样移到主屏", "Moved $pkg to the main screen as it was") else false to tr("系统不允许移到主屏（${m.detail.take(120)}），请用“接管”在这里操作", "The system does not allow moving it to the main screen (${m.detail.take(120)}); use \"Take over\" to operate it here")
+        return if (m.ok) true to tr(S.vscreen_handoff_moved_to_the_main_screen, pkg) else false to tr(S.vscreen_handoff_the_system_does_not_allow, m.detail.take(120))
     }
 
     // ── telling the user ──────────────────────────────────────────────────
@@ -131,7 +132,7 @@ internal object VScreenHandoff {
     fun ensureAlertChannel(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java) ?: return
         if (nm.getNotificationChannel(ALERT_CHANNEL) == null)
-            nm.createNotificationChannel(NotificationChannel(ALERT_CHANNEL, tr("后台操作提醒", "Background operation alerts"), NotificationManager.IMPORTANCE_HIGH))
+            nm.createNotificationChannel(NotificationChannel(ALERT_CHANNEL, tr(S.vscreen_handoff_background_operation_alerts), NotificationManager.IMPORTANCE_HIGH))
     }
 
     /**
@@ -139,18 +140,18 @@ internal object VScreenHandoff {
      * permission (13+), the app-op some systems set to ignore, or our alert channel switched off.
      */
     fun notifyBlocked(context: Context): String? = runCatching {
-        if (!androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) return@runCatching tr("系统设置里关了 Agent-VScreen 的通知", "Agent-VScreen notifications are off in system settings")
+        if (!androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) return@runCatching tr(S.vscreen_handoff_agent_vscreen_notifications_are_off)
         if (Build.VERSION.SDK_INT >= 33 && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
-            return@runCatching tr("没有授予通知权限（POST_NOTIFICATIONS）", "Notification permission not granted (POST_NOTIFICATIONS)")
+            return@runCatching tr(S.vscreen_handoff_notification_permission_not_granted_post)
         val ops = context.getSystemService(android.app.AppOpsManager::class.java)
         if (ops != null) {
             val mode = runCatching { ops.unsafeCheckOpNoThrow("android:post_notification", context.applicationInfo.uid, context.packageName) }.getOrNull()
             if (mode != null && mode != android.app.AppOpsManager.MODE_ALLOWED && mode != android.app.AppOpsManager.MODE_DEFAULT)
-                return@runCatching tr("系统的通知开关（appops POST_NOTIFICATION）是拒绝/忽略", "The system's notification switch (appops POST_NOTIFICATION) is deny/ignore")
+                return@runCatching tr(S.vscreen_handoff_the_system_s_notification_switch)
         }
         ensureAlertChannel(context)
         val ch = context.getSystemService(NotificationManager::class.java)?.getNotificationChannel(ALERT_CHANNEL)
-        if (ch != null && ch.importance == NotificationManager.IMPORTANCE_NONE) return@runCatching tr("“后台操作提醒”这类通知被关了", "The \"Background operation alerts\" channel is turned off")
+        if (ch != null && ch.importance == NotificationManager.IMPORTANCE_NONE) return@runCatching tr(S.vscreen_handoff_the_background_operation_alerts_channel)
         null
     }.getOrNull()
 

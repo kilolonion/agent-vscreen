@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import androidx.compose.foundation.layout.height
 import androidx.compose.material.icons.outlined.AddLink
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -103,44 +104,44 @@ fun ConnectPage(tab: Boolean = false, bottom: androidx.compose.ui.unit.Dp = 0.dp
     val shown = remember(tokens, agents) { tokens.filter { t -> agents[t.id]?.used == true || t.id != com.kilon.agentvscreen.api.Tokens.MAIN }
         .sortedByDescending { t -> maxOf(t.lastUsedAt, t.createdAt, agents[t.id]?.lastCallAt ?: 0L) } }
     val fold = rememberFold(4)
-    MiuixLazyPage(tr("接入", "Connect"), back = !tab, bottom = bottom) {
+    MiuixLazyPage(tr(S.app_connect), back = !tab, bottom = bottom) {
         // 2.0.0-beta11 (rainbow: left the wizard while the agent was still connecting; nothing showed here). A cloud agent
         // exists only once its pairing is approved, so a pairing still waiting is listed here, above the connected ones.
         if (pairings.isNotEmpty()) item(key = "pairing") {
-            Group(tr("待批准 · ${pairings.size}", "Pending approval · ${pairings.size}")) {
+            Group(tr(S.connect_pending_approval, pairings.size)) {
                 pairings.forEach { r ->
                     ArrowPreference(title = r.publicClientName ?: r.tokenName,
-                        summary = tr("云端（公网 MCP） · 配对码 ${r.pairingCode}", "Cloud (Public MCP) · pairing code ${r.pairingCode}"),
+                        summary = tr(S.connect_cloud_public_mcp_pairing_code, r.pairingCode),
                         onClick = { StrongConfirmActivity.open(ctx, r.id) })
                 }
             }
         }
-        if (shown.isEmpty()) item(key = "empty") { Column(Modifier.padding(horizontal = 12.dp)) { EmptyState(androidx.compose.material.icons.Icons.Outlined.AddLink, tr("尚未接入 agent", "No agent connected yet"),
-            tr("接入后，每个 agent 的记录、任务和提问会分开保存", "Once connected, each agent's records, tasks and questions are kept separately")) } }
-        else cardItems(tr("已经接入的 · ${shown.size}", "Connected · ${shown.size}"), shown, key = { it.id }, fold = fold) { t ->
+        if (shown.isEmpty()) item(key = "empty") { Column(Modifier.padding(horizontal = 12.dp)) { EmptyState(androidx.compose.material.icons.Icons.Outlined.AddLink, tr(S.connect_no_agent_connected_yet),
+            tr(S.connect_once_connected_each_agent_s)) } }
+        else cardItems(tr(S.connect_connected, shown.size), shown, key = { it.id }, fold = fold) { t ->
             AgentCard(t.id, agents[t.id] ?: AgentLedger.Snapshot()) { nav.go(Route.Agent(t.id)) }
         }
         item(key = "rest") { Column {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 14.dp)) {
             PrimaryButton(onClick = { nav.go(Route.NewAgent) }, modifier = Modifier.fillMaxWidth(), color = MiuixTheme.colorScheme.primary) {
-                Text(tr("接入新的 agent", "Connect a new agent"), color = MiuixTheme.colorScheme.onPrimary)
+                Text(tr(S.connect_connect_a_new_agent), color = MiuixTheme.colorScheme.onPrimary)
             }
         }
-        Group(tr("连接方式", "Connection methods")) {
+        Group(tr(S.connect_connection_methods)) {
             val localStatus = when (svcState) {
-                ServiceControl.State.ON -> tr("可用", "Ready")
-                ServiceControl.State.HIDDEN -> tr("按需启动", "On demand")
-                ServiceControl.State.BLOCKED -> tr("已关闭", "Off")
+                ServiceControl.State.ON -> tr(S.connect_ready)
+                ServiceControl.State.HIDDEN -> tr(S.connect_on_demand)
+                ServiceControl.State.BLOCKED -> tr(S.automation_off)
             }
             BasicComponent(
-                title = tr("本机", "On this phone"),
+                title = tr(S.connect_on_this_phone),
                 summary = "127.0.0.1:${ApiConfig.port}",
                 endActions = {
                     Value(localStatus, if (svcState == ServiceControl.State.BLOCKED) Palette.stopped else Palette.takeover)
                 },
             )
             ArrowPreference(
-                title = tr("其它设备（Tailscale）", "Other devices (Tailscale)"),
+                title = tr(S.connect_other_devices_tailscale),
                 summary = remember(ts) { Tailnet.line(ctx) },
                 onClick = { nav.go(Route.Remote) },
             )
@@ -149,19 +150,19 @@ fun ConnectPage(tab: Boolean = false, bottom: androidx.compose.ui.unit.Dp = 0.dp
             val tunnelState = tunnel?.status?.collectAsState()?.value?.state
             val cf = tunnel != null
             val pubStatus = when {
-                !pubOn -> tr("未开启", "Off")
-                cf && tunnelState == com.kilon.agentvscreen.host.TunnelState.CONNECTED -> tr("已开启", "On")
-                cf && tunnelState == com.kilon.agentvscreen.host.TunnelState.ERROR -> tr("连接失败", "Failed")
-                cf -> tr("启动中", "Starting")
-                ts.funnel == "on" -> tr("已开启", "On")
-                ts.funnel == "cert" -> tr("申请证书中", "Cert…")
-                ts.funnel == "error" -> tr("启动失败", "Failed")
-                else -> tr("启动中", "Starting")
+                !pubOn -> tr(S.connect_off)
+                cf && tunnelState == com.kilon.agentvscreen.host.TunnelState.CONNECTED -> tr(S.connect_on)
+                cf && tunnelState == com.kilon.agentvscreen.host.TunnelState.ERROR -> tr(S.connect_failed)
+                cf -> tr(S.connect_starting)
+                ts.funnel == "on" -> tr(S.connect_on)
+                ts.funnel == "cert" -> tr(S.connect_cert)
+                ts.funnel == "error" -> tr(S.connect_failed_2)
+                else -> tr(S.connect_starting)
             }
             ArrowPreference(
-                title = tr("云端（公网 MCP）", "Cloud (Public MCP)"),
-                summary = if (pubOn) com.kilon.agentvscreen.host.PublicAccess.mcpUrl() ?: tr("通过 ${pubChannel.title} 连接", "Via ${pubChannel.title}")
-                    else tr("供云端 MCP 客户端连接（Tailscale、Cloudflare 或 ngrok）", "For cloud MCP clients (Tailscale, Cloudflare or ngrok)"),
+                title = tr(S.connect_cloud_public_mcp),
+                summary = if (pubOn) com.kilon.agentvscreen.host.PublicAccess.mcpUrl() ?: tr(S.connect_via, pubChannel.title)
+                    else tr(S.connect_for_cloud_mcp_clients_tailscale),
                 endActions = {
                     Value(
                         pubStatus,
@@ -179,7 +180,7 @@ fun ConnectPage(tab: Boolean = false, bottom: androidx.compose.ui.unit.Dp = 0.dp
             )
         }
         Group {
-            ArrowPreference(title = tr("令牌", "Tokens"), onClick = { nav.go(Route.Tokens) })
+            ArrowPreference(title = tr(S.connect_tokens), onClick = { nav.go(Route.Tokens) })
         }
         } }
     }
@@ -203,7 +204,7 @@ internal fun PolicyForm(table: Map<String, com.kilon.agentvscreen.api.Policy.Act
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(row.title, fontSize = 15.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                if (changed) Text(tr("已改", "Changed"), fontSize = 11.sp, color = c.primary,
+                if (changed) Text(tr(S.connect_changed), fontSize = 11.sp, color = c.primary,
                     modifier = Modifier.clip(RoundedCornerShape(50)).background(c.primary.copy(alpha = 0.12f)).padding(horizontal = 8.dp, vertical = 2.dp))
             }
             Text(row.hint, fontSize = 12.sp, lineHeight = 17.sp, color = c.onSurfaceVariantSummary)
@@ -255,7 +256,7 @@ fun NewAgentPage() {
     // Fixed once: a name computed from the live token list moved every time a token was made (feedback 5).
     val suggested = rememberSaveable {
         val used = com.kilon.agentvscreen.api.Tokens.list.value.map { it.name }.toSet()
-        val base = tr("默认 Agent", "Default Agent")
+        val base = tr(S.connect_default_agent)
         "$base ${generateSequence(1) { it + 1 }.first { "$base $it" !in used }}"
     }
     val want = name.trim().ifEmpty { suggested }
@@ -278,7 +279,7 @@ fun NewAgentPage() {
     /** When this wizard opened: a cloud agent that pairs or calls after this moment is the one being connected. */
     val openedAt = rememberSaveable { System.currentTimeMillis() }
     var step by rememberSaveable { mutableIntStateOf(0) }
-    val steps = listOf(tr("名称", "Name"), tr("运行位置", "Location"), tr("连接方式", "Method"), tr("发送", "Send"))
+    val steps = listOf(tr(S.connect_name), tr(S.connect_location), tr(S.connect_method), tr(S.ask_activity_send))
 
     /** Leaving step 3 for a local / tailnet agent: make (or update) its onboarding code or static MCP token, confirmed once with a fingerprint. */
     fun confirmAgent() {
@@ -310,7 +311,7 @@ fun NewAgentPage() {
                 return
             }
             val req = com.kilon.agentvscreen.host.StrongConfirm.createUiMultiRiskRequest(actx, listOf(com.kilon.agentvscreen.host.Risk.LEVEL_UP), existing,
-                tr("$want 升到「${levelLabel(level)}」", "Raise $want to \"${levelLabel(level)}\""), levelHint(level),
+                tr(S.connect_raise_to, want, levelLabel(level)), levelHint(level),
                 onApprove = {
                     T.setLevel(existing.id, level, custom)
                     com.kilon.agentvscreen.host.Audit.security("level_up", "$want ${existing.level}->$level")
@@ -322,7 +323,7 @@ fun NewAgentPage() {
         }
         val draft = com.kilon.agentvscreen.api.Tokens.Token("new", want, "", T.scopeOfLevel(level), System.currentTimeMillis(), level = level)
         val req = com.kilon.agentvscreen.host.StrongConfirm.createUiMultiRiskRequest(actx, listOf(com.kilon.agentvscreen.host.Risk.NEW_CLIENT), draft,
-            tr("接入 $want（${levelLabel(level)}）", "Connect $want (${levelLabel(level)})"), levelHint(level),
+            tr(S.connect_connect, want, levelLabel(level)), levelHint(level),
             onApprove = {
                 if (staticToken) {
                     val (t, text) = T.createLevel(want, level, custom, expiryNow())
@@ -340,7 +341,7 @@ fun NewAgentPage() {
         StrongConfirmActivity.open(actx, req.id)
     }
 
-    MiuixPage(tr("接入新的 agent", "Connect a new agent")) {
+    MiuixPage(tr(S.connect_connect_a_new_agent)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             steps.forEachIndexed { i, label ->
                 val on = i <= step
@@ -354,11 +355,11 @@ fun NewAgentPage() {
         }
 
         if (step == 0) {
-            Group(tr("名称", "Name")) {
-                AvsField(value = name, onValueChange = { name = it.take(24) }, placeholder = tr("例如：通用助手（$suggested）", "e.g. General assistant ($suggested)"),
+            Group(tr(S.connect_name)) {
+                AvsField(value = name, onValueChange = { name = it.take(24) }, placeholder = tr(S.connect_e_g_general_assistant, suggested),
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp))
             }
-            Group(tr("权限档位", "Permission level")) {
+            Group(tr(S.connect_permission_level)) {
                 com.kilon.agentvscreen.api.Tokens.LEVELS.forEach { lv ->
                     RadioButtonPreference(title = levelLabel(lv), summary = levelHint(lv), selected = level == lv, onClick = {
                         // Custom starts from what is on screen now; a preset starts clean.
@@ -367,9 +368,9 @@ fun NewAgentPage() {
                         if (lv == com.kilon.agentvscreen.api.Policy.CUSTOM) showTable = true
                     })
                 }
-                ArrowPreference(title = tr("分项权限", "Per-action permissions"),
-                    summary = if (custom.isEmpty() || level == com.kilon.agentvscreen.api.Policy.CUSTOM) tr("与档位预设一致", "Same as the level preset") else tr("已修改 ${custom.size} 项", "${custom.size} changed"),
-                    endActions = { Value(if (showTable) tr("收起", "Hide") else tr("展开", "Show")) }, onClick = { showTable = !showTable })
+                ArrowPreference(title = tr(S.connect_per_action_permissions),
+                    summary = if (custom.isEmpty() || level == com.kilon.agentvscreen.api.Policy.CUSTOM) tr(S.connect_same_as_the_level_preset) else tr(S.connect_changed_2, custom.size),
+                    endActions = { Value(if (showTable) tr(S.connect_hide) else tr(S.connect_show)) }, onClick = { showTable = !showTable })
                 AnimatedVisibility(showTable) {
                     Column {
                         PolicyForm(com.kilon.agentvscreen.api.Policy.table(level, custom), com.kilon.agentvscreen.api.Policy.PRESETS[level], false) { k, a ->
@@ -380,26 +381,26 @@ fun NewAgentPage() {
                     }
                 }
             }
-            Footnote(tr("云端客户端的档位在手机上批准配对时选择，最高为“省心”。", "A cloud client's level is chosen when you approve its pairing on the phone, up to Easy."))
+            Footnote(tr(S.connect_a_cloud_client_s_level))
         }
 
-        if (step == 1) Group(tr("运行位置", "Where the agent runs")) {
+        if (step == 1) Group(tr(S.connect_where_the_agent_runs)) {
             RadioButtonPreference(
-                title = tr("本机", "On this phone"),
-                summary = tr("Termux、Operit 等，直接连接 127.0.0.1:${ApiConfig.port}", "Termux, Operit…, direct to 127.0.0.1:${ApiConfig.port}"),
+                title = tr(S.connect_on_this_phone),
+                summary = tr(S.connect_termux_operit_direct_to_127, ApiConfig.port),
                 selected = where == 0,
                 onClick = { where = 0 },
             )
             RadioButtonPreference(
-                title = tr("其它设备（Tailscale）", "Other device (Tailscale)"),
-                summary = tr("电脑或其他手机，通过你的 Tailscale 网络", "Computer or another phone over your own Tailscale network"),
+                title = tr(S.connect_other_device_tailscale),
+                summary = tr(S.connect_computer_or_another_phone_over),
                 selected = where == 1,
                 onClick = { where = 1 },
             )
             if (where == 1) Row(Modifier.fillMaxWidth().clickable { nav.go(Route.Remote) }.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(tr("Tailscale 连接", "Tailscale connection"), fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                    Text(remoteBase ?: tr("先连好 Tailscale，才能复制给其它设备的内容", "Connect Tailscale first to copy what the other device needs"),
+                    Text(tr(S.connect_tailscale_connection), fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text(remoteBase ?: tr(S.connect_connect_tailscale_first_to_copy),
                         fontSize = 14.sp, fontFamily = if (remoteBase != null) FontFamily.Monospace else null, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     DotLine(if (remoteReady) Palette.takeover else Palette.stopped, dot = 7.dp, firstLine = 19.dp) {
                         Text(remember(ts, mode, remoteBase) { Tailnet.line(ctx) }, fontSize = 13.sp, lineHeight = 19.sp, color = if (remoteReady) Palette.takeover else Palette.stopped, maxLines = 1,
@@ -409,8 +410,8 @@ fun NewAgentPage() {
                 Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
             RadioButtonPreference(
-                title = tr("云端（公网 MCP · 实验性）", "Cloud (Public MCP · Experimental)"),
-                summary = tr("Claude、ChatGPT 等云端客户端，通过 Tailscale Funnel、Cloudflare Tunnel 或 ngrok 配对连接", "Cloud MCP clients via Tailscale Funnel, Cloudflare Tunnel or ngrok with on-phone pairing"),
+                title = tr(S.connect_cloud_public_mcp_experimental),
+                summary = tr(S.connect_cloud_mcp_clients_via_tailscale),
                 selected = where == 2,
                 onClick = { where = 2 },
             )
@@ -425,22 +426,22 @@ fun NewAgentPage() {
                     PublicChecklistSection(showEnableButton = true)
                 }
             } else {
-                Group(tr("连接方式", "How it connects")) {
+                Group(tr(S.connect_how_it_connects)) {
                     listOf(
-                        Triple(tr("命令行", "Shell"), tr("带终端的 agent：安装 vscreen 并记住能力", "Terminal agents: installs vscreen and saves note"), 0),
-                        Triple("MCP", tr("支持 MCP 的 agent：配置与能力说明", "MCP agents: config and ability note"), 1),
-                        Triple("HTTP", tr("自写调用的 agent：地址、令牌和说明", "Custom HTTP clients: address, token and note"), 2),
+                        Triple(tr(S.connect_shell), tr(S.connect_terminal_agents_installs_vscreen_and), 0),
+                        Triple("MCP", tr(S.connect_mcp_agents_config_and_ability), 1),
+                        Triple("HTTP", tr(S.connect_custom_http_clients_address_token), 2),
                     ).forEach { (t, sub, i) -> RadioButtonPreference(title = t, summary = sub, selected = how == i, onClick = { how = i; raw = false }) }
                 }
-                Group(tr("令牌", "Token")) {
-                    val choices = listOf(tr("长期", "Permanent"), tr("30 天", "30 days"), tr("7 天", "7 days"), tr("1 天", "1 day")) +
-                        (if (how != 1) listOf(tr("接入码（一次性）", "Setup code (one-time)")) else emptyList())
+                Group(tr(S.connect_token)) {
+                    val choices = listOf(tr(S.connect_permanent), tr(S.connect_30_days), tr(S.connect_7_days), tr(S.connect_1_day)) +
+                        (if (how != 1) listOf(tr(S.connect_setup_code_one_time)) else emptyList())
                     if (lifetime >= choices.size) lifetime = 0
                     OverlayDropdownPreference(
                         items = choices,
                         selectedIndex = lifetime,
-                        title = tr("有效期", "Valid for"),
-                        summary = if (oneTime) tr("agent 需在 10 分钟内用它换取长期令牌", "The agent must exchange it for a permanent token within 10 minutes") else null,
+                        title = tr(S.connect_valid_for),
+                        summary = if (oneTime) tr(S.connect_the_agent_must_exchange_it) else null,
                         onSelectedIndexChange = { lifetime = it },
                     )
                 }
@@ -465,7 +466,7 @@ fun NewAgentPage() {
                 modifier = Modifier.fillMaxWidth(),
                 color = MiuixTheme.colorScheme.primary,
             ) {
-                Text(if (step == 2 && where != 2 && made == null) tr("确认接入", "Confirm") else tr("下一步", "Next"), color = MiuixTheme.colorScheme.onPrimary)
+                Text(if (step == 2 && where != 2 && made == null) tr(S.connect_confirm) else tr(S.connect_next), color = MiuixTheme.colorScheme.onPrimary)
             }
         }
 
@@ -475,32 +476,32 @@ fun NewAgentPage() {
                 val url = cloudUrl.orEmpty()
                 if (url.isNotBlank()) {
                     val msg = remember(url) { AgentGuide.onboardPublic(url) }
-                    Group(tr("1 · 服务地址（填入客户端）", "1 · Address (you add it to the client)")) {
-                        WrappableCode(url) { host.copy(tr("公网 MCP 地址", "Public MCP URL"), url) }
-                        BasicComponent(title = tr("复制地址", "Copy address"), summary = tr("适用于在网页中添加连接器的客户端（如 claude.ai）", "For clients where you add a connector in their web settings (e.g. claude.ai)"),
-                            onClick = { host.copy(tr("公网 MCP 地址", "Public MCP URL"), url) })
+                    Group(tr(S.connect_1_address_you_add_it)) {
+                        WrappableCode(url) { host.copy(tr(S.connect_public_mcp_url), url) }
+                        BasicComponent(title = tr(S.connect_copy_address), summary = tr(S.connect_for_clients_where_you_add),
+                            onClick = { host.copy(tr(S.connect_public_mcp_url), url) })
                     }
-                    Group(tr("2 · 接入消息", "2 · Setup message")) {
-                        BasicComponent(title = tr("让 agent 记住此能力", "So the agent remembers this ability"),
-                            summary = tr("支持修改 MCP 配置的 agent 会自动添加；网页客户端不添加配置，仅保存能力说明", "Agents that can edit their MCP config add it automatically; web clients skip the config and only save the ability note"))
+                    Group(tr(S.connect_2_setup_message)) {
+                        BasicComponent(title = tr(S.connect_so_the_agent_remembers_this),
+                            summary = tr(S.connect_agents_that_can_edit_their))
                     }
                     Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-                        PrimaryButton(onClick = { host.copy(tr("接入消息", "Setup message"), msg) }, modifier = Modifier.fillMaxWidth(), color = MiuixTheme.colorScheme.primary) {
-                            Text(tr("复制接入消息", "Copy setup message"), color = MiuixTheme.colorScheme.onPrimary)
+                        PrimaryButton(onClick = { host.copy(tr(S.connect_setup_message), msg) }, modifier = Modifier.fillMaxWidth(), color = MiuixTheme.colorScheme.primary) {
+                            Text(tr(S.connect_copy_setup_message), color = MiuixTheme.colorScheme.onPrimary)
                         }
                     }
-                    Footnote(tr("第一次连接时会打开授权页，在这台手机上核对配对码批准；不需要令牌。", "The first connection opens an approval page; check the pairing code on this phone and approve. No token is needed."))
+                    Footnote(tr(S.connect_the_first_connection_opens_an))
                     WizardStatus(where, null, openedAt)
-                    Group(tr("预览", "Preview")) {
-                        ArrowPreference(title = tr("完整消息", "Full message"), endActions = { Value(if (raw) tr("收起", "Hide") else tr("查看", "Show")) }, onClick = { raw = !raw })
-                        AnimatedVisibility(raw) { Code(msg) { host.copy(tr("接入消息", "Setup message"), msg) } }
+                    Group(tr(S.connect_preview)) {
+                        ArrowPreference(title = tr(S.connect_full_message), endActions = { Value(if (raw) tr(S.connect_hide) else tr(S.connect_show_2)) }, onClick = { raw = !raw })
+                        AnimatedVisibility(raw) { Code(msg) { host.copy(tr(S.connect_setup_message), msg) } }
                     }
                 }
             } else {
                 val tok = made
                 val currentTok = madeId?.let { com.kilon.agentvscreen.api.Tokens.byId(it) }
                 if (tok == null) {
-                    Footnote(tr("尚未确认接入。请返回第 3 步，点“确认接入”。", "Not confirmed yet. Go back to step 3 and tap Confirm."))
+                    Footnote(tr(S.connect_not_confirmed_yet_go_back))
                 } else {
                     val useCode = madeIsCode && !staticToken
                     val messageText = remember(how, base, tok, useCode) {
@@ -512,40 +513,40 @@ fun NewAgentPage() {
                             else -> AgentGuide.onboard(base, tok)
                         }
                     }
-                    Group(tr("发给 $want", "Send to $want")) {
-                        BasicComponent(title = tr("运行位置", "Location"), summary = if (where == 0) tr("这台手机上 · 127.0.0.1:${ApiConfig.port}", "This phone · 127.0.0.1:${ApiConfig.port}") else tr("其它设备（Tailscale） · $base", "Other device (Tailscale) · $base"))
-                        BasicComponent(title = tr("权限档位", "Level"), summary = levelLabel(level))
-                        BasicComponent(title = tr("连接方式", "Method"), summary = listOf(tr("命令行", "Shell"), "MCP", "HTTP")[how])
+                    Group(tr(S.connect_send_to, want)) {
+                        BasicComponent(title = tr(S.connect_location), summary = if (where == 0) tr(S.connect_this_phone_127_0_0, ApiConfig.port) else tr(S.connect_other_device_tailscale_2, base))
+                        BasicComponent(title = tr(S.connect_level), summary = levelLabel(level))
+                        BasicComponent(title = tr(S.connect_method), summary = listOf(tr(S.connect_shell), "MCP", "HTTP")[how])
                         if (useCode) {
                             BasicComponent(
-                                title = tr("10 分钟有效的接入码", "Setup code, valid 10 minutes"),
-                                summary = tr("使用一次后失效", "Expires after one use"),
+                                title = tr(S.connect_setup_code_valid_10_minutes),
+                                summary = tr(S.connect_expires_after_one_use),
                                 endActions = {
                                     if (currentTok?.isPending == true) LinkButton(onClick = {
                                         made = com.kilon.agentvscreen.api.OnboardingCodes.issue(currentTok.id)
                                         com.kilon.agentvscreen.host.Audit.security("onboard_code_reissued", currentTok.name)
-                                        host.say(tr("已生成新的接入码（10 分钟有效）", "New setup code generated (valid 10 minutes)"))
-                                    }) { Text(tr("重新生成", "Regenerate")) }
+                                        host.say(tr(S.connect_new_setup_code_generated_valid))
+                                    }) { Text(tr(S.connect_regenerate)) }
                                 },
                             )
                         }
                     }
                     Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
                         PrimaryButton(
-                            onClick = { host.copy(tr("接入消息", "Setup message"), messageText, sensitive = true) },
+                            onClick = { host.copy(tr(S.connect_setup_message), messageText, sensitive = true) },
                             enabled = canCopyLocal,
                             modifier = Modifier.fillMaxWidth(),
                             color = MiuixTheme.colorScheme.primary,
                         ) {
-                            Text(tr("复制接入消息", "Copy setup message"), color = MiuixTheme.colorScheme.onPrimary)
+                            Text(tr(S.connect_copy_setup_message), color = MiuixTheme.colorScheme.onPrimary)
                         }
                     }
                     WizardStatus(where, madeId, openedAt)
                     Footnote(
-                        if (useCode) tr("接入码 10 分钟内有效；过期后可在此处或 agent 页面重新生成。", "The setup code is valid for 10 minutes; once it expires, regenerate it here or on the agent's page.")
-                        else tr("令牌仅在此显示一次。", "The token is shown only here, once."),
+                        if (useCode) tr(S.connect_the_setup_code_is_valid)
+                        else tr(S.connect_the_token_is_shown_only),
                     )
-                    Group(tr("预览与分段复制", "Preview & pieces")) {
+                    Group(tr(S.connect_preview_pieces)) {
                         val pieceText = remember(how, base, tok, useCode) {
                             when {
                                 how == 0 && useCode -> ApiConfig.installLineForCode(base, tok)
@@ -555,18 +556,18 @@ fun NewAgentPage() {
                             }
                         }
                         ArrowPreference(
-                            title = if (how == 0) tr("安装命令", "Install command") else if (how == 1) tr("MCP 配置", "MCP config") else tr("完整消息预览", "Message preview"),
-                            endActions = { Value(if (raw) tr("收起", "Hide") else tr("查看", "Show")) },
+                            title = if (how == 0) tr(S.connect_install_command) else if (how == 1) tr(S.connect_mcp_config) else tr(S.connect_message_preview),
+                            endActions = { Value(if (raw) tr(S.connect_hide) else tr(S.connect_show_2)) },
                             enabled = canCopyLocal,
                             onClick = { raw = !raw },
                         )
                         AnimatedVisibility(raw && canCopyLocal) {
-                            Code(pieceText) { host.copy(if (how == 0) tr("安装命令", "Install command") else if (how == 1) tr("MCP 配置", "MCP config") else tr("接入消息", "Setup message"), pieceText, sensitive = true) }
+                            Code(pieceText) { host.copy(if (how == 0) tr(S.connect_install_command) else if (how == 1) tr(S.connect_mcp_config) else tr(S.connect_setup_message), pieceText, sensitive = true) }
                         }
-                        BasicComponent(title = tr("能力说明", "Ability note"), summary = tr("可粘贴到 agent 的自定义指令或记忆中", "Paste into the agent's custom instructions or memory"),
+                        BasicComponent(title = tr(S.connect_ability_note), summary = tr(S.connect_paste_into_the_agent_s),
                             endActions = {
-                                IconButton(onClick = { host.copy(tr("能力说明", "Ability note"), when (how) { 1 -> AgentGuide.memoryMcp(base); 2 -> AgentGuide.memoryHttp(base); else -> AgentGuide.memory(base) }) }, enabled = canCopyLocal) {
-                                    Icon(MiuixIcons.Copy, tr("复制", "Copy"))
+                                IconButton(onClick = { host.copy(tr(S.connect_ability_note), when (how) { 1 -> AgentGuide.memoryMcp(base); 2 -> AgentGuide.memoryHttp(base); else -> AgentGuide.memory(base) }) }, enabled = canCopyLocal) {
+                                    Icon(MiuixIcons.Copy, tr(S.connect_copy))
                                 }
                             })
                     }
@@ -594,19 +595,18 @@ private fun WizardStatus(where: Int, madeId: String?, openedAt: Long) {
             .maxByOrNull { it.createdAt }?.id
     } else madeId?.takeIf { (agents[it]?.lastCallAt ?: 0L) > 0L }
     val (text, color) = when {
-        joined != null -> tr("已连接：${com.kilon.agentvscreen.api.Agents.name(joined)}", "Connected: ${com.kilon.agentvscreen.api.Agents.name(joined)}") to Palette.takeover
-        pairing != null -> tr("已收到配对请求，等待你批准", "Pairing request received; waiting for your approval") to Palette.standby
-        else -> tr("等待 agent 连接", "Waiting for the agent to connect") to MiuixTheme.colorScheme.onSurfaceVariantSummary
+        joined != null -> tr(S.connect_connected_2, com.kilon.agentvscreen.api.Agents.name(joined)) to Palette.takeover
+        pairing != null -> tr(S.connect_pairing_request_received_waiting_for) to Palette.standby
+        else -> tr(S.connect_waiting_for_the_agent_to) to MiuixTheme.colorScheme.onSurfaceVariantSummary
     }
-    Group(tr("连接状态", "Status")) {
-        BasicComponent(title = text, summary = if (joined == null) tr("agent 完成配置可能需要一些时间。可先点“完成”，连接后会显示在接入列表中。",
-            "The agent may need a while to set up. You can tap Done now; it appears in the Connect list once it connects.") else null,
+    Group(tr(S.connect_status)) {
+        BasicComponent(title = text, summary = if (joined == null) tr(S.connect_the_agent_may_need_a) else null,
             endActions = { Dot(color, 8.dp) })
-        if (pairing != null && joined == null) BasicComponent(title = tr("核对配对码并批准", "Check the pairing code and approve"),
-            summary = tr("配对码 ${pairing.pairingCode}", "Pairing code ${pairing.pairingCode}"),
+        if (pairing != null && joined == null) BasicComponent(title = tr(S.connect_check_the_pairing_code_and),
+            summary = tr(S.connect_pairing_code, pairing.pairingCode),
             onClick = { StrongConfirmActivity.open(ctx, pairing.id) })
     }
-    CardAction(tr("完成", "Done"), primary = false) { nav.back() }
+    CardAction(tr(S.connect_done), primary = false) { nav.back() }
 }
 
 /**
@@ -631,34 +631,34 @@ fun AgentPage(id: String) {
         Group { AgentCard(id, l) {} }
         val k = keptOf(l)
         InfoCard(if (k == Kept.CAME_BACK) Palette.takeover else if (k == Kept.CONNECTED) Palette.stopped else Palette.standby,
-            when (k) { Kept.CAME_BACK -> tr("已保存，后续仍在使用", "Saved, still in use"); Kept.SAVED -> tr("已保存能力说明", "Ability note saved"); Kept.CONNECTED -> tr("未确认保存位置", "Save location not confirmed"); Kept.NONE -> tr("尚未连接过", "Never connected") },
+            when (k) { Kept.CAME_BACK -> tr(S.connect_saved_still_in_use); Kept.SAVED -> tr(S.connect_ability_note_saved); Kept.CONNECTED -> tr(S.connect_save_location_not_confirmed); Kept.NONE -> tr(S.connect_never_connected) },
             remember(l, id) { keptText(id, l) })
         if (token != null && token.isPending) {
-            Group(tr("接入码（尚未使用）", "Setup code (not used yet)")) {
+            Group(tr(S.connect_setup_code_not_used_yet)) {
                 BasicComponent(
-                    title = tr("重新生成接入码（10 分钟有效）", "Regenerate setup code (10 min)"),
-                    summary = tr("旧的接入码随即失效", "The earlier code stops working"),
+                    title = tr(S.connect_regenerate_setup_code_10_min),
+                    summary = tr(S.connect_the_earlier_code_stops_working),
                     onClick = {
                         freshCode = com.kilon.agentvscreen.api.OnboardingCodes.issue(token.id)
                         com.kilon.agentvscreen.host.Audit.security("onboard_code_reissued", token.name)
-                        host.say(tr("已生成新的接入码（10 分钟有效）", "New setup code generated (valid 10 minutes)"))
+                        host.say(tr(S.connect_new_setup_code_generated_valid))
                     },
                 )
                 freshCode?.let { code ->
                     BasicComponent(
-                        title = tr("复制接入消息（命令行）", "Copy setup message (Shell)"),
-                        summary = tr("含接入码（10 分钟有效）", "Includes the setup code (10 min)"),
-                        onClick = { host.copy(tr("接入消息", "Setup message"), AgentGuide.onboardWithCode(ApiConfig.baseUrl, code), sensitive = true) },
+                        title = tr(S.connect_copy_setup_message_shell),
+                        summary = tr(S.connect_includes_the_setup_code_10),
+                        onClick = { host.copy(tr(S.connect_setup_message), AgentGuide.onboardWithCode(ApiConfig.baseUrl, code), sensitive = true) },
                     )
                     BasicComponent(
-                        title = tr("复制接入消息（HTTP）", "Copy setup message (HTTP)"),
-                        summary = tr("给只会发 HTTP 请求的 agent", "For agents that only send HTTP requests"),
-                        onClick = { host.copy(tr("接入消息", "Setup message"), AgentGuide.onboardHttpWithCode(ApiConfig.baseUrl, code), sensitive = true) },
+                        title = tr(S.connect_copy_setup_message_http),
+                        summary = tr(S.connect_for_agents_that_only_send),
+                        onClick = { host.copy(tr(S.connect_setup_message), AgentGuide.onboardHttpWithCode(ApiConfig.baseUrl, code), sensitive = true) },
                     )
                     BasicComponent(
-                        title = tr("仅复制接入码", "Copy setup code only"),
-                        summary = tr("填进 Operit 等工具", "Paste into Operit or similar tools"),
-                        onClick = { host.copy(tr("接入码", "Setup code"), code, sensitive = true) },
+                        title = tr(S.connect_copy_setup_code_only),
+                        summary = tr(S.connect_paste_into_operit_or_similar),
+                        onClick = { host.copy(tr(S.connect_setup_code), code, sensitive = true) },
                     )
                 }
             }
@@ -674,11 +674,11 @@ fun AgentPage(id: String) {
                 if (wider.isEmpty()) {
                     T.setLevel(id, level, custom)
                     com.kilon.agentvscreen.host.Audit.security("policy_narrow", "${token.name} $what")
-                    host.say(tr("已改：$what", "Changed: $what"))
+                    host.say(tr(S.connect_changed_3, what))
                 } else {
-                    val rows = wider.mapNotNull { com.kilon.agentvscreen.api.Policy.row(it)?.title }.joinToString(tr("、", ", "))
+                    val rows = wider.mapNotNull { com.kilon.agentvscreen.api.Policy.row(it)?.title }.joinToString(tr(S.automation_list_sep))
                     val req = com.kilon.agentvscreen.host.StrongConfirm.createUiMultiRiskRequest(actx, listOf(com.kilon.agentvscreen.host.Risk.LEVEL_UP), token,
-                        tr("${token.name}：$what", "${token.name}: $what"), tr("已放宽：$rows", "Wider: $rows"),
+                        tr(S.connect_name_value, token.name, what), tr(S.connect_wider, rows),
                         onApprove = {
                             T.setLevel(id, level, custom)
                             com.kilon.agentvscreen.host.Audit.security("policy_widen", "${token.name} $what")
@@ -686,7 +686,7 @@ fun AgentPage(id: String) {
                     StrongConfirmActivity.open(actx, req.id)
                 }
             }
-            Group(tr("权限档位", "Permission level")) {
+            Group(tr(S.connect_permission_level)) {
                 allowed.forEach { lv ->
                     RadioButtonPreference(
                         title = levelLabel(lv),
@@ -703,31 +703,31 @@ fun AgentPage(id: String) {
             // rainbow: the per-action table is folded by default; the level above is the usual choice.
             var showTable by rememberSaveable(id) { mutableStateOf(false) }
             Group {
-                ArrowPreference(title = tr("分项权限", "Per-action permissions"),
-                    summary = if (preset == null) tr("自定义", "Custom") else if (token.custom.isEmpty()) tr("与档位预设一致", "Same as the level preset") else tr("已修改 ${token.custom.size} 项", "${token.custom.size} changed"),
-                    endActions = { Value(if (showTable) tr("收起", "Hide") else tr("展开", "Show")) }, onClick = { showTable = !showTable })
+                ArrowPreference(title = tr(S.connect_per_action_permissions),
+                    summary = if (preset == null) tr(S.connect_custom) else if (token.custom.isEmpty()) tr(S.connect_same_as_the_level_preset) else tr(S.connect_changed_2, token.custom.size),
+                    endActions = { Value(if (showTable) tr(S.connect_hide) else tr(S.connect_show)) }, onClick = { showTable = !showTable })
                 AnimatedVisibility(showTable) { Column {
                 PolicyForm(token.policy, preset, token.publicOnly) { k, a ->
                     val next = if (preset != null && preset[k] == a) token.custom - k else token.custom + (k to a)
                     apply(token.level, next, "${com.kilon.agentvscreen.api.Policy.row(k)?.title ?: k} → ${a.title}")
                 }
                 } }
-                if (preset != null && token.custom.isNotEmpty()) BasicComponent(title = tr("恢复「${levelLabel(token.level)}」预设", "Restore the \"${levelLabel(token.level)}\" preset"),
-                    summary = tr("撤销已修改的 ${token.custom.size} 项", "Undo the ${token.custom.size} changed rows"),
-                    onClick = { apply(token.level, emptyMap(), tr("恢复预设", "restore preset")) })
+                if (preset != null && token.custom.isNotEmpty()) BasicComponent(title = tr(S.connect_restore_the_preset, levelLabel(token.level)),
+                    summary = tr(S.connect_undo_the_changed_rows, token.custom.size),
+                    onClick = { apply(token.level, emptyMap(), tr(S.connect_restore_preset)) })
             }
             // Feedback 2: "no confirmations for 30 minutes" is a temporary action here, not a setting.
             if (token.act(com.kilon.agentvscreen.api.Policy.OPERATE) != com.kilon.agentvscreen.api.Policy.Act.DENY) Group {
                 run {
                     val fmt = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.ROOT) }
-                    if (token.trusted) BasicComponent(title = tr("支付免确认至 ${fmt.format(java.util.Date(token.trustUntil))}", "Payments without confirmation until ${fmt.format(java.util.Date(token.trustUntil))}"),
-                        summary = tr("到期自动恢复确认", "Confirmation resumes when it ends"),
-                        endActions = { LinkButton(onClick = { T.trust(id, 0); com.kilon.agentvscreen.host.Audit.security("trust_end", token.name) }) { Text(tr("现在结束", "End now")) } })
-                    else ArrowPreference(title = tr("临时免确认支付（30 分钟）", "No confirmation for payments (30 min)"),
-                        summary = tr("需指纹验证；设为“每次确认”的应用仍需确认", "Requires a fingerprint; apps set to confirm every time still ask"),
+                    if (token.trusted) BasicComponent(title = tr(S.connect_payments_without_confirmation_until, fmt.format(java.util.Date(token.trustUntil))),
+                        summary = tr(S.connect_confirmation_resumes_when_it_ends),
+                        endActions = { LinkButton(onClick = { T.trust(id, 0); com.kilon.agentvscreen.host.Audit.security("trust_end", token.name) }) { Text(tr(S.connect_end_now)) } })
+                    else ArrowPreference(title = tr(S.connect_no_confirmation_for_payments_30),
+                        summary = tr(S.connect_requires_a_fingerprint_apps_set),
                         onClick = {
                             val req = com.kilon.agentvscreen.host.StrongConfirm.createUiRequest(actx, com.kilon.agentvscreen.host.Risk.TRUST_SET, token,
-                                tr("${token.name}：30 分钟内支付免确认", "${token.name}: payments without confirmation for 30 minutes")) {
+                                tr(S.connect_payments_without_confirmation_for_30, token.name)) {
                                 T.trust(id, 30)
                                 com.kilon.agentvscreen.host.Audit.security("trust", "${token.name} 30min")
                             }
@@ -736,18 +736,18 @@ fun AgentPage(id: String) {
                 }
             }
             val grants = remember(approvals, id) { approvals.filter { it.token == id && it.risk.startsWith(com.kilon.agentvscreen.host.StrongConfirm.GRANT_PREFIX) } }
-            if (grants.isNotEmpty()) Group(tr("有效的临时许可", "Active temporary allowances")) {
+            if (grants.isNotEmpty()) Group(tr(S.connect_active_temporary_allowances)) {
                 FoldedRows(grants) { g ->
                     BasicComponent(title = grantTitle(g.risk), summary = grantRange(g),
-                        endActions = { LinkButton(onClick = { com.kilon.agentvscreen.host.StrongConfirm.revoke(g) }) { Text(tr("撤销", "Revoke"), color = MiuixTheme.colorScheme.error) } })
+                        endActions = { LinkButton(onClick = { com.kilon.agentvscreen.host.StrongConfirm.revoke(g) }) { Text(tr(S.connect_revoke), color = MiuixTheme.colorScheme.error) } })
                 }
             }
         }
-        Group(tr("名称", "Name")) {
-            AvsField(value = n, onValueChange = { n = it.take(24) }, placeholder = tr("名称", "Name"),
+        Group(tr(S.connect_name)) {
+            AvsField(value = n, onValueChange = { n = it.take(24) }, placeholder = tr(S.connect_name),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp))
             val can = n.isNotBlank() && n.trim() != com.kilon.agentvscreen.api.Agents.name(id)
-            Text(tr("保存名字", "Save name"), fontSize = 15.sp, color = if (can) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            Text(tr(S.connect_save_name), fontSize = 15.sp, color = if (can) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.fillMaxWidth().clickable(enabled = can) { com.kilon.agentvscreen.api.Tokens.rename(id, n.trim()) }.padding(horizontal = 16.dp, vertical = 14.dp))
         }
         if (!main) Group {
@@ -757,8 +757,8 @@ fun AgentPage(id: String) {
                     com.kilon.agentvscreen.host.Audit.security("revoke", n); nav.back()
                 }
             }.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text(if (sure) tr("再点一次确认", "Tap again to confirm") else tr("移除此 agent", "Remove this agent"), fontSize = 15.sp, color = MiuixTheme.colorScheme.error)
-                Text(tr("令牌立即失效；历史任务保留在记录中", "Its token stops working at once; past tasks stay in the records"), fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                Text(if (sure) tr(S.connect_tap_again_to_confirm) else tr(S.connect_remove_this_agent), fontSize = 15.sp, color = MiuixTheme.colorScheme.error)
+                Text(tr(S.connect_its_token_stops_working_at), fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
         }
     }
@@ -771,13 +771,13 @@ internal fun grantTitle(key: String): String {
     val elevation = kind == com.kilon.agentvscreen.host.StrongConfirm.ROW_GRANT || kind == com.kilon.agentvscreen.host.StrongConfirm.LEVEL_GRANT
     val app = if (pkg == "*" || elevation) "" else (com.kilon.agentvscreen.core.VScreenKnowledge.label(pkg) ?: pkg)
     val what = when (kind) {
-        com.kilon.agentvscreen.host.Consent.DESTROY -> tr("不可撤销操作", "Irreversible actions")
-        com.kilon.agentvscreen.host.Consent.CAUTION -> tr("敏感操作", "Sensitive actions")
-        com.kilon.agentvscreen.host.Consent.APP -> tr("在“每次确认”的应用中操作", "Actions in a confirm-every-time app")
-        "rate" -> tr("高频操作", "High action rate")
+        com.kilon.agentvscreen.host.Consent.DESTROY -> tr(S.connect_irreversible_actions)
+        com.kilon.agentvscreen.host.Consent.CAUTION -> tr(S.connect_sensitive_actions)
+        com.kilon.agentvscreen.host.Consent.APP -> tr(S.connect_actions_in_a_confirm_every)
+        "rate" -> tr(S.connect_high_action_rate)
         // 2.0.0-beta11: temporary elevations the agent asked for.
-        com.kilon.agentvscreen.host.StrongConfirm.ROW_GRANT -> tr("临时允许：", "Temporarily allowed: ") + (com.kilon.agentvscreen.api.Policy.row(pkg)?.title ?: pkg)
-        com.kilon.agentvscreen.host.StrongConfirm.LEVEL_GRANT -> tr("临时提升至：", "Temporarily raised to: ") + com.kilon.agentvscreen.api.Policy.levelTitle(pkg)
+        com.kilon.agentvscreen.host.StrongConfirm.ROW_GRANT -> tr(S.connect_temporarily_allowed) + (com.kilon.agentvscreen.api.Policy.row(pkg)?.title ?: pkg)
+        com.kilon.agentvscreen.host.StrongConfirm.LEVEL_GRANT -> tr(S.connect_temporarily_raised_to) + com.kilon.agentvscreen.api.Policy.levelTitle(pkg)
         else -> kind
     }
     return if (app.isEmpty()) what else "$what · $app"
@@ -785,8 +785,8 @@ internal fun grantTitle(key: String): String {
 
 internal fun grantRange(g: com.kilon.agentvscreen.host.StrongConfirm.Approval): String {
     val fmt = java.text.SimpleDateFormat("HH:mm", java.util.Locale.ROOT)
-    return if (g.by.endsWith(":" + com.kilon.agentvscreen.host.StrongConfirm.Range.ROUND.key)) tr("本轮任务内（无新命令超过轮次时长即结束）", "This turn (ends after the turn length with no new command)")
-    else tr("今天内（至 ${fmt.format(java.util.Date(g.until))}）", "Today (until ${fmt.format(java.util.Date(g.until))})")
+    return if (g.by.endsWith(":" + com.kilon.agentvscreen.host.StrongConfirm.Range.ROUND.key)) tr(S.connect_this_turn_ends_after_the)
+    else tr(S.connect_today_until, fmt.format(java.util.Date(g.until)))
 }
 
 /**
@@ -807,35 +807,35 @@ private fun AgentNow(id: String) {
     val waits = open.count { mine(it.session) } + given.values.count { mine(it.session) }
     val s by BackgroundOperation.state.collectAsState()
     val using = mine(s.ownerSessionId) && s.displayId != null
-    Group(tr("当前状态", "Now")) {
+    Group(tr(S.connect_now)) {
         if (using) DotLine(Palette.brand, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
-            Text(tr("正在用副屏", "Using the screen now"), fontSize = 15.sp, lineHeight = 22.sp)
+            Text(tr(S.connect_using_the_screen_now), fontSize = 15.sp, lineHeight = 22.sp)
         }
-        if (waits > 0) ArrowPreference(title = tr("待处理 $waits 项", "$waits waiting for you"), summary = tr("显示在首页顶部", "At the top of the home page"), onClick = { nav.tab(0) })
+        if (waits > 0) ArrowPreference(title = tr(S.connect_waiting_for_you, waits), summary = tr(S.connect_at_the_top_of_the), onClick = { nav.tab(0) })
         FoldedRows(books) { e ->
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(tr("预约「${e.name}」", "Schedule \"${e.name}\""), fontSize = 15.sp)
+                    Text(tr(S.connect_schedule, e.name), fontSize = 15.sp)
                     Text(e.spec.describe(), fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                 }
-                Text(tr("取消", "Cancel"), color = MiuixTheme.colorScheme.error, fontSize = 14.sp,
+                Text(tr(S.app_picker_cancel), color = MiuixTheme.colorScheme.error, fontSize = 14.sp,
                     modifier = Modifier.clip(RoundedCornerShape(50)).clickable { Thread { com.kilon.agentvscreen.host.Wake.remove(ctx.applicationContext, e.name, id); tick++ }.start() }.padding(horizontal = 12.dp, vertical = 8.dp))
             }
         }
         FoldedRows(watches) { l ->
             Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(tr("监视「${l.spec.name}」", "Watch \"${l.spec.name}\""), fontSize = 15.sp)
+                    Text(tr(S.connect_watch, l.spec.name), fontSize = 15.sp)
                     Text(l.status, fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, maxLines = 2)
                 }
-                Text(tr("停止", "Stop"), color = MiuixTheme.colorScheme.error, fontSize = 14.sp,
-                    modifier = Modifier.clip(RoundedCornerShape(50)).clickable { com.kilon.agentvscreen.core.VScreenRules.stop(l.spec.agentId, l.spec.name, tr("用户在 App 里停止", "stopped by the user in the app")); tick++ }.padding(horizontal = 12.dp, vertical = 8.dp))
+                Text(tr(S.connect_stop), color = MiuixTheme.colorScheme.error, fontSize = 14.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).clickable { com.kilon.agentvscreen.core.VScreenRules.stop(l.spec.agentId, l.spec.name, tr(S.connect_stopped_by_the_user_in)); tick++ }.padding(horizontal = 12.dp, vertical = 8.dp))
             }
         }
         if (!using && waits == 0 && books.isEmpty() && watches.isEmpty())
-            Text(tr("未使用副屏，也没有预约或监视", "Not using the background screen; no schedules or watches"), fontSize = 14.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            Text(tr(S.connect_not_using_the_background_screen), fontSize = 14.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp))
-        ArrowPreference(title = tr("任务记录", "Its records"), onClick = { RecordsWho.value = id; nav.tab(TAB_RECORDS) })
+        ArrowPreference(title = tr(S.connect_its_records), onClick = { RecordsWho.value = id; nav.tab(TAB_RECORDS) })
     }
 }
 
@@ -847,7 +847,7 @@ fun Code(text: String, onCopy: () -> Unit) {
             Text(text, fontFamily = FontFamily.Monospace, fontSize = 11.5.sp, lineHeight = 17.sp, color = Color(0xFFE8E4F2), softWrap = false,
                 modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 14.dp, top = 14.dp, bottom = 14.dp, end = 52.dp))
         }
-        IconButton(onClick = onCopy, modifier = Modifier.align(Alignment.TopEnd)) { Icon(MiuixIcons.Copy, tr("复制", "Copy"), tint = Color(0xFFE8E4F2)) }
+        IconButton(onClick = onCopy, modifier = Modifier.align(Alignment.TopEnd)) { Icon(MiuixIcons.Copy, tr(S.connect_copy), tint = Color(0xFFE8E4F2)) }
     }
 }
 
@@ -887,22 +887,22 @@ internal fun keptOf(l: AgentLedger.Snapshot): Kept = when {
     else -> Kept.NONE
 }
 
-private val agentFmt get() = java.text.SimpleDateFormat(tr("M月d日 HH:mm", "MMM d HH:mm"), if (I18n.en) java.util.Locale.US else java.util.Locale.CHINA)
+private val agentFmt get() = java.text.SimpleDateFormat(tr(S.connect_mmm_d_hh_mm), if (I18n.en) java.util.Locale.US else java.util.Locale.CHINA)
 
 /** What the agent's current step means, and the one thing to do about it (the detail dialog). */
 internal fun keptText(id: String, l: AgentLedger.Snapshot): String {
     fun at(t: Long) = agentFmt.format(java.util.Date(t))
     val main = when (keptOf(l)) {
-        Kept.CAME_BACK -> tr("已保存能力说明，且间隔半小时以上后又使用了 ${l.comebacks} 次（最近 ${at(l.lastComebackAt)}），说明新对话中也能使用。", "The ability note is saved, and the agent came back ${l.comebacks} times after gaps of 30 minutes or more (last ${at(l.lastComebackAt)}), so new conversations can use it.") +
-            (l.rememberedWhere?.let { tr("存在「$it」。", " Saved in \"$it\".") } ?: "")
-        Kept.SAVED -> tr("它说把说明存在了「${l.rememberedWhere}」（${at(l.rememberedAt)}），新对话里应该也知道有这个能力。", "It says it saved the note in \"${l.rememberedWhere}\" (${at(l.rememberedAt)}), so new conversations should know about it.")
-        Kept.CONNECTED -> tr("${at(l.installAt)} 已连接，但 agent 未说明能力说明保存在哪里。新对话中它可能不知道可以使用本机：请再发一次接入消息，或把能力说明放入它的自定义指令。", "Connected ${at(l.installAt)}, but the agent has not said where it saved the ability note. New conversations may not know they can use this phone: send the setup message again, or put the ability note in its custom instructions.")
-        Kept.NONE -> tr("尚未连接。请把接入消息发给 agent。", "Not connected yet. Send the setup message to the agent.")
+        Kept.CAME_BACK -> tr(S.connect_the_ability_note_is_saved, l.comebacks, at(l.lastComebackAt)) +
+            (l.rememberedWhere?.let { tr(S.connect_saved_in, it) } ?: "")
+        Kept.SAVED -> tr(S.connect_it_says_it_saved_the, l.rememberedWhere, at(l.rememberedAt))
+        Kept.CONNECTED -> tr(S.connect_connected_but_the_agent_has, at(l.installAt))
+        Kept.NONE -> tr(S.connect_not_connected_yet_send_the)
     }
     val ack = AgentLedger.ackVersion(id)
     val ver = if (!l.used || ack >= BuildConfig.VERSION_CODE) "" else "\n\n" + (
-        if (ack <= 0) tr("无法确定已保存的能力说明是哪个版本；agent 下次使用时会收到更新提示。", "The version of the saved ability note is unknown; the agent gets an update notice on its next use.")
-        else tr("它记下的说明是 ${com.kilon.agentvscreen.api.AgentNews.nameOf(ack)} 的；下次用时会收到这一版的变化。", "Its note is from ${com.kilon.agentvscreen.api.AgentNews.nameOf(ack)}; its next use brings this version's changes."))
+        if (ack <= 0) tr(S.connect_the_version_of_the_saved)
+        else tr(S.connect_its_note_is_from_its, com.kilon.agentvscreen.api.AgentNews.nameOf(ack)))
     return main + ver
 }
 
@@ -910,9 +910,9 @@ internal fun keptText(id: String, l: AgentLedger.Snapshot): String {
 private fun AgentCard(id: String, l: AgentLedger.Snapshot, edit: () -> Unit) {
     fun at(t: Long) = agentFmt.format(java.util.Date(t))
     val way = when {
-        l.lastCallAt == 0L -> tr("尚未连接过", "Never connected")
-        l.lastRemoteAt > l.lastLocalAt -> tr("其它设备 · 最近 ${at(l.lastCallAt)}", "another device · last ${at(l.lastCallAt)}")
-        else -> tr("这台手机 · 最近 ${at(l.lastCallAt)}", "this phone · last ${at(l.lastCallAt)}")
+        l.lastCallAt == 0L -> tr(S.connect_never_connected)
+        l.lastRemoteAt > l.lastLocalAt -> tr(S.connect_another_device_last, at(l.lastCallAt))
+        else -> tr(S.connect_this_phone_last, at(l.lastCallAt))
     }
     val k = keptOf(l)
     Column(Modifier.fillMaxWidth().clickable(onClick = edit).padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -926,7 +926,7 @@ private fun AgentCard(id: String, l: AgentLedger.Snapshot, edit: () -> Unit) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             // 1.4.0-beta10 (rainbow: "自己再用" meant nothing and never lit): two facts the user can check, connected and
             // the note saved. Whether it later came back on its own is said in words on the agent's page, with when.
-            listOf(Kept.CONNECTED to tr("已连接", "Connected"), Kept.SAVED to tr("已保存能力说明", "Ability note saved")).forEach { (step, label) ->
+            listOf(Kept.CONNECTED to tr(S.connect_connected_3), Kept.SAVED to tr(S.connect_ability_note_saved)).forEach { (step, label) ->
                 val done = k.ordinal >= step.ordinal
                 val c = if (done) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary
                 Row(Modifier.clip(RoundedCornerShape(50)).background(c.copy(alpha = if (done) 0.14f else 0.06f)).padding(horizontal = 10.dp, vertical = 4.dp),
@@ -951,12 +951,12 @@ fun RemotePage() {
     val M = Tailnet.Mode.entries
     fun open(url: String) { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }
 
-    MiuixPage(tr("远程连接", "Remote access"), subtitle = tr("仅限你的 Tailscale 网络", "Only from your own Tailscale network")) {
-        Group(tr("方式", "Mode")) {
+    MiuixPage(tr(S.connect_remote_access), subtitle = tr(S.connect_only_from_your_own_tailscale)) {
+        Group(tr(S.connect_mode)) {
             listOf(
-                tr("关", "Off") to tr("只有这台手机上的 agent 能连", "Only agents on this phone can connect"),
-                tr("内置 Tailscale", "Built-in Tailscale") to tr("不用装 Tailscale App", "No Tailscale app needed"),
-                tr("外部 Tailscale App", "External Tailscale app") to tr("用这台手机上已经装好的 Tailscale", "Uses the Tailscale app already on this phone"),
+                tr(S.connect_off_2) to tr(S.connect_only_agents_on_this_phone),
+                tr(S.connect_built_in_tailscale) to tr(S.connect_no_tailscale_app_needed),
+                tr(S.connect_external_tailscale_app) to tr(S.connect_uses_the_tailscale_app_already),
             ).forEachIndexed { i, (t, sub) ->
                 RadioButtonPreference(title = t, summary = sub, selected = mode == M[i], onClick = {
                     if (mode != M[i]) {
@@ -968,40 +968,40 @@ fun RemotePage() {
             }
         }
         when (mode) {
-            Tailnet.Mode.BUILTIN -> Group(tr("状态", "State")) { BuiltinState(ts, host, ::open) { m -> mode = m; ApiConfig.tailnetMode = m; HostService.server?.start(ApiConfig.port); Tailnet.sync(ctx.applicationContext) } }
-            Tailnet.Mode.SYSTEM -> Group(tr("状态", "State")) {
-                if (remoteBase == null) InfoCard(Palette.stopped, tr("还没找到 Tailscale 地址", "No Tailscale address yet"),
-                    tr("在这台手机上装好并登录 Tailscale App，打开连接后 20 秒内自动生效。不想装 App 就选“内置”。", "Install and log in to the Tailscale app on this phone; once it is connected this takes effect within 20 seconds. To skip the app, choose \"Built-in\"."))
-                else InfoCard(Palette.takeover, tr("已通过 Tailscale App 连接", "Connected through the Tailscale app"), tr("地址", "Address") + " $remoteBase")
+            Tailnet.Mode.BUILTIN -> Group(tr(S.connect_state)) { BuiltinState(ts, host, ::open) { m -> mode = m; ApiConfig.tailnetMode = m; HostService.server?.start(ApiConfig.port); Tailnet.sync(ctx.applicationContext) } }
+            Tailnet.Mode.SYSTEM -> Group(tr(S.connect_state)) {
+                if (remoteBase == null) InfoCard(Palette.stopped, tr(S.connect_no_tailscale_address_yet),
+                    tr(S.connect_install_and_log_in_to))
+                else InfoCard(Palette.takeover, tr(S.connect_connected_through_the_tailscale_app), tr(S.connect_address) + " $remoteBase")
             }
             else -> {}
         }
         if (mode == Tailnet.Mode.BUILTIN && Tailnet.available(ctx)) {
             Group {
-                ArrowPreference(title = tr("高级选项", "Advanced"), summary = tr("自建服务器（Headscale）、auth key", "Own server (Headscale), auth key"), onClick = { advanced = true })
+                ArrowPreference(title = tr(S.connect_advanced), summary = tr(S.connect_own_server_headscale_auth_key), onClick = { advanced = true })
             }
         }
-        if (mode != Tailnet.Mode.OFF) Group(tr("安全", "Safety"), padded = true) { RemoteSafety() }
+        if (mode != Tailnet.Mode.OFF) Group(tr(S.connect_safety), padded = true) { RemoteSafety() }
     }
 
-    OverlayBottomSheet(show = advanced, title = tr("高级选项", "Advanced"), onDismissRequest = { advanced = false }) {
+    OverlayBottomSheet(show = advanced, title = tr(S.connect_advanced), onDismissRequest = { advanced = false }) {
         var key by remember { mutableStateOf("") }
         var ctl by remember { mutableStateOf(ApiConfig.tailnetControlUrl ?: "") }
         val problem = ApiConfig.controlUrlProblem(ctl)
         Column(Modifier.padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            AvsField(value = ctl, onValueChange = { ctl = it }, title = tr("控制服务器", "Control server"), placeholder = tr("留空 = Tailscale 官方", "Blank = Tailscale's own"))
-            Text(problem ?: ApiConfig.normalizeControlUrl(ctl)?.let { tr("将使用 $it", "Will use $it") } ?: tr("使用 Tailscale 官方服务器", "Using Tailscale's own server"),
+            AvsField(value = ctl, onValueChange = { ctl = it }, title = tr(S.connect_control_server), placeholder = tr(S.connect_blank_tailscale_s_own))
+            Text(problem ?: ApiConfig.normalizeControlUrl(ctl)?.let { tr(S.connect_will_use, it) } ?: tr(S.connect_using_tailscale_s_own_server),
                 fontSize = 12.sp, color = if (problem != null) Palette.stopped else MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 12.dp))
-            AvsField(value = key, onValueChange = { key = it }, title = tr("auth key（可选）", "Auth key (optional)"), placeholder = tr("代替网页登录", "Instead of the web login"))
-            Text(tr("每个服务器的登录分开保存，换回原来的服务器不用重新登录。内置节点不接管手机上网，所以没有出口节点这一项。", "Each server keeps its own login, so switching back needs no new login. The built-in node does not carry the phone's own traffic, so there is no exit node option."),
+            AvsField(value = key, onValueChange = { key = it }, title = tr(S.connect_auth_key_optional), placeholder = tr(S.connect_instead_of_the_web_login))
+            Text(tr(S.connect_each_server_keeps_its_own),
                 fontSize = 12.sp, lineHeight = 17.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 12.dp))
             PrimaryButton(onClick = {
                 if (problem != null) { host.say(problem); return@PrimaryButton }
                 val k = key.trim(); val c = ctl
                 Thread { Tailnet.configure(ctx.applicationContext, c, k) }.start()
                 advanced = false
-                host.say(tr("已保存，内置 Tailscale 重新连接中", "Saved, built-in Tailscale is reconnecting"))
-            }, modifier = Modifier.fillMaxWidth(), color = MiuixTheme.colorScheme.primary) { Text(tr("保存并重连", "Save and reconnect"), color = MiuixTheme.colorScheme.onPrimary) }
+                host.say(tr(S.connect_saved_built_in_tailscale_is))
+            }, modifier = Modifier.fillMaxWidth(), color = MiuixTheme.colorScheme.primary) { Text(tr(S.connect_save_and_reconnect), color = MiuixTheme.colorScheme.onPrimary) }
         }
     }
 }
@@ -1012,34 +1012,33 @@ private fun VpnGuide(host: AppHost, switchTo: (Tailnet.Mode) -> Unit) {
     val ctx = LocalContext.current
     val hasApp = remember { runCatching { ctx.packageManager.getPackageInfo("com.tailscale.ipn", 0); true }.getOrDefault(false) }
     var how by remember { mutableStateOf(false) }
-    InfoCard(Palette.standby, tr("手机上正开着另一个 VPN", "Another VPN is active on this phone"),
-        tr("手机上的 VPN 可能影响内置 Tailscale 的连接。如果一直连不上，可以尝试以下办法：",
-            "A VPN on this phone may affect the built-in Tailscale connection. If it keeps failing, try one of these options:"))
-    if (hasApp) ArrowPreference(title = tr("① 改用手机上的 Tailscale App", "① Use the Tailscale app on this phone"),
-        summary = tr("已安装。打开并连接后，将此处切换为“外部 Tailscale App”", "It is installed. Open it and connect; this switches to \"External Tailscale app\""),
-        endActions = { Value(tr("切换", "Switch")) }, onClick = { switchTo(Tailnet.Mode.SYSTEM) })
-    ArrowPreference(title = tr("${if (hasApp) "②" else "①"} 让 VPN 放过本应用", "${if (hasApp) "②" else "①"} Let the VPN skip this app"),
-        summary = tr("在 VPN / 代理 App 中将 Agent-VScreen 设为不经过 VPN", "In your VPN / proxy app, set Agent-VScreen to bypass it"),
-        endActions = { Value(if (how) tr("收起", "Hide") else tr("操作方法", "How to")) }, onClick = { how = !how })
+    InfoCard(Palette.standby, tr(S.connect_another_vpn_is_active_on),
+        tr(S.connect_a_vpn_on_this_phone))
+    if (hasApp) ArrowPreference(title = tr(S.connect_use_the_tailscale_app_on),
+        summary = tr(S.connect_it_is_installed_open_it),
+        endActions = { Value(tr(S.connect_switch)) }, onClick = { switchTo(Tailnet.Mode.SYSTEM) })
+    ArrowPreference(title = tr(S.connect_let_the_vpn_skip_this, if (hasApp) "②" else "①"),
+        summary = tr(S.connect_in_your_vpn_proxy_app),
+        endActions = { Value(if (how) tr(S.connect_hide) else tr(S.connect_how_to)) }, onClick = { how = !how })
     if (how) Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        listOf(tr("打开你的 VPN 或代理 App", "Open your VPN or proxy app"),
-            tr("找“分应用代理”“应用分流”或“绕过的应用”", "Find \"per-app proxy\", \"app routing\" or \"bypassed apps\""),
-            tr("把 Agent-VScreen 设为直连 / 不代理", "Set Agent-VScreen to direct / not proxied"),
-            tr("返回此页，几秒内会自动连接", "Return here; it connects automatically within seconds")).forEachIndexed { i, t ->
+        listOf(tr(S.connect_open_your_vpn_or_proxy),
+            tr(S.connect_find_per_app_proxy_app),
+            tr(S.connect_set_agent_vscreen_to_direct),
+            tr(S.connect_return_here_it_connects_automatically)).forEachIndexed { i, t ->
             Text("${i + 1}. $t", fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
         }
-        Text(tr("复制包名", "Copy package name"), fontSize = 13.sp, color = MiuixTheme.colorScheme.primary,
-            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { host.copy(tr("包名", "Package name"), ctx.packageName) }.padding(vertical = 4.dp))
+        Text(tr(S.connect_copy_package_name), fontSize = 13.sp, color = MiuixTheme.colorScheme.primary,
+            modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { host.copy(tr(S.connect_package_name), ctx.packageName) }.padding(vertical = 4.dp))
     }
-    BasicComponent(title = tr("${if (hasApp) "③" else "②"} 暂时关掉那个 VPN", "${if (hasApp) "③" else "②"} Turn that VPN off for now"),
-        summary = tr("关闭后将自动重连；再次开启可能再次断开", "It connects by itself; turning the VPN on again may break it again"))
+    BasicComponent(title = tr(S.connect_turn_that_vpn_off_for, if (hasApp) "③" else "②"),
+        summary = tr(S.connect_it_connects_by_itself_turning))
 }
 
 /** The built-in node: one phase decides the card (Tailnet.phase), the same word the settings row and agents see. */
 @Composable
 private fun BuiltinState(ts: Tailnet.Status, host: AppHost, open: (String) -> Unit, switchTo: (Tailnet.Mode) -> Unit) {
     val ctx = LocalContext.current
-    if (!Tailnet.available(ctx)) { InfoCard(Palette.stopped, tr("这个安装包里没有内置 Tailscale", "This package has no built-in Tailscale"), tr("只支持 arm64 手机。", "Only arm64 phones are supported.")); return }
+    if (!Tailnet.available(ctx)) { InfoCard(Palette.stopped, tr(S.connect_this_package_has_no_built), tr(S.connect_only_arm64_phones_are_supported)); return }
     val phase = Tailnet.phase(ctx)
     // VPN troubleshooting is relevant only after a failed or stalled connection.
     var vpnOn by remember { mutableStateOf(Tailnet.throughVpn(ctx)) }
@@ -1049,76 +1048,74 @@ private fun BuiltinState(ts: Tailnet.Status, host: AppHost, open: (String) -> Un
     if (vpnOn && (loginStalled || phase == TsPhase.UNSTABLE || phase == TsPhase.ERROR)) {
         VpnGuide(host, switchTo)
         var more by remember { mutableStateOf(false) }
-        ArrowPreference(title = tr("详情", "Details"), endActions = { Value(if (more) tr("收起", "Hide") else tr("查看", "Show")) }, onClick = { more = !more })
+        ArrowPreference(title = tr(S.connect_details), endActions = { Value(if (more) tr(S.connect_hide) else tr(S.connect_show_2)) }, onClick = { more = !more })
         if (!more) return
     }
     val known = remember(ts.loggedIn, phase) { Tailnet.known(ctx) }
     var wasOut by remember { mutableStateOf(false) }
     LaunchedEffect(phase) {
         if (phase == TsPhase.NEEDS_LOGIN || phase == TsPhase.EXPIRED || phase == TsPhase.NEEDS_APPROVAL) wasOut = true
-        if (phase == TsPhase.CONNECTED && wasOut) { wasOut = false; host.say(tr("已连接 Tailscale", "Connected to Tailscale")) }
+        if (phase == TsPhase.CONNECTED && wasOut) { wasOut = false; host.say(tr(S.connect_connected_to_tailscale)) }
     }
     when (phase) {
         TsPhase.SERVICE_OFF -> {
-            InfoCard(Palette.idle, if (ServiceControl.now(ctx) == ServiceControl.State.BLOCKED) tr("服务已关闭，内置 Tailscale 没在运行", "The service is off; the built-in Tailscale is not running")
-                else tr("服务处于待机，内置 Tailscale 仅在服务运行时在线", "The service is on standby; built-in Tailscale is online only while the service runs"),
-                (known?.let { tr("已保留登录状态（${it.dnsName ?: it.ip}），服务运行后自动连接。", "Login kept (${it.dnsName ?: it.ip}); reconnects when the service runs.") } ?: tr("打开服务后再登录。", "Turn the service on, then log in.")))
-            CardAction(tr("改为常驻运行", "Switch to always running")) { ServiceControl.turnOn(ctx, "tailnet card") }
+            InfoCard(Palette.idle, if (ServiceControl.now(ctx) == ServiceControl.State.BLOCKED) tr(S.connect_the_service_is_off_the)
+                else tr(S.connect_the_service_is_on_standby),
+                (known?.let { tr(S.connect_login_kept_reconnects_when_the, it.dnsName ?: it.ip) } ?: tr(S.connect_turn_the_service_on_then)))
+            CardAction(tr(S.connect_switch_to_always_running)) { ServiceControl.turnOn(ctx, "tailnet card") }
         }
         TsPhase.CONNECTED -> {
-            InfoCard(Palette.takeover, tr("已连接 Tailscale", "Connected to Tailscale"),
-                tr("名称", "Name") + " ${ts.dnsName ?: ApiConfig.tailnetHostname}\n" + tr("地址", "Address") + " ${ts.ip}" +
-                    (ts.user?.let { "\n" + tr("账号", "Account") + " $it" } ?: "") +
-                    (if (ts.ownServer) "\n" + tr("服务器", "Server") + " ${ts.serverName}" else "") +
-                    "\n" + tr("在线设备 ${ts.online} 台", "${ts.online} devices online") +
-                    (ts.relay?.let { "\n" + tr("中继", "Relay") + " $it" } ?: "") +
-                    (if (ts.flaps >= 2) "\n" + tr("10 分钟内断线 ${ts.flaps} 次", "Dropped ${ts.flaps} times in 10 minutes") else "") +
-                    (ts.lastPeer?.let { "\n" + tr("最近访问", "Last access") + " $it" } ?: ""))
+            InfoCard(Palette.takeover, tr(S.connect_connected_to_tailscale),
+                tr(S.connect_name) + " ${ts.dnsName ?: ApiConfig.tailnetHostname}\n" + tr(S.connect_address) + " ${ts.ip}" +
+                    (ts.user?.let { "\n" + tr(S.connect_account) + " $it" } ?: "") +
+                    (if (ts.ownServer) "\n" + tr(S.connect_server) + " ${ts.serverName}" else "") +
+                    "\n" + tr(S.connect_devices_online, ts.online) +
+                    (ts.relay?.let { "\n" + tr(S.connect_relay) + " $it" } ?: "") +
+                    (if (ts.flaps >= 2) "\n" + tr(S.connect_dropped_times_in_10_minutes, ts.flaps) else "") +
+                    (ts.lastPeer?.let { "\n" + tr(S.connect_last_access) + " $it" } ?: ""))
             val days = if (ts.keyExpiry > 0) ((ts.keyExpiry - System.currentTimeMillis()) / 86_400_000L).toInt() else -1
-            if (days in 0..14) Footnote(tr("登录 $days 天后过期，到时要重新登录。可以在 Tailscale 控制台给这台设备关掉“密钥过期”。", "The login expires in $days days; then it needs logging in again. You can turn off key expiry for this device in the Tailscale console."))
-            CardAction(tr("退出 Tailscale 登录", "Log out of Tailscale"), primary = false) { Tailnet.logout(ctx) }
+            if (days in 0..14) Footnote(tr(S.connect_the_login_expires_in_days, days))
+            CardAction(tr(S.connect_log_out_of_tailscale), primary = false) { Tailnet.logout(ctx) }
         }
-        TsPhase.NEEDS_APPROVAL -> InfoCard(Palette.standby, tr("等待批准这台设备", "Waiting for this device to be approved"),
-            tr("登录已经完成，你的网络要求新设备先批准。在 ${if (ts.ownServer) ts.serverName + " 的管理端" else "Tailscale 控制台（login.tailscale.com/admin/machines）"}里批准“${ApiConfig.tailnetHostname}”，批准后这里自动连上。",
-                "The login is done; your network requires new devices to be approved. Approve \"${ApiConfig.tailnetHostname}\" in ${if (ts.ownServer) "the admin of " + ts.serverName else "the Tailscale console (login.tailscale.com/admin/machines)"}; this connects by itself afterwards."))
+        TsPhase.NEEDS_APPROVAL -> InfoCard(Palette.standby, tr(S.connect_waiting_for_this_device_to),
+            tr(S.connect_the_login_is_done_your, if (ts.ownServer) ts.serverName + " 的管理端" else "Tailscale 控制台（login.tailscale.com/admin/machines）", ApiConfig.tailnetHostname, if (ts.ownServer) "the admin of " + ts.serverName else "the Tailscale console (login.tailscale.com/admin/machines)"))
         TsPhase.NEEDS_LOGIN, TsPhase.EXPIRED -> if (ts.authUrl != null) {
             InfoCard(Palette.standby,
-                if (phase == TsPhase.EXPIRED) tr("Tailscale 登录已过期，请重新登录", "Tailscale login expired; log in again") else tr("登录 Tailscale（只要一次）", "Log in to Tailscale (once)"),
-                if (ts.ownServer) tr("打开 ${ts.serverName} 的注册页。Headscale 通常会给出一条注册命令，在服务器上运行它就连上了；也可以在高级选项里填预授权 key。", "Open the registration page of ${ts.serverName}. Headscale usually shows a register command: run it on the server and the node joins. Or put a pre-auth key in Advanced.")
-                else tr("用你电脑上 Tailscale 的同一个账号登录，登录完回到这里会自动连上。手机上不方便登录的话，复制链接到电脑上打开。", "Log in with the same account as Tailscale on your computer; back here it connects by itself. If logging in on the phone is awkward, copy the link and open it on the computer."))
-            CardAction(if (ts.ownServer) tr("打开注册页", "Open the registration page") else tr("在浏览器里登录", "Log in in the browser")) { open(ts.authUrl) }
-            CardAction(tr("复制登录链接", "Copy login link"), primary = false) { host.copy(tr("登录链接", "Login link"), ts.authUrl, sensitive = true) }
+                if (phase == TsPhase.EXPIRED) tr(S.connect_tailscale_login_expired_log_in) else tr(S.connect_log_in_to_tailscale_once),
+                if (ts.ownServer) tr(S.connect_open_the_registration_page_of, ts.serverName)
+                else tr(S.connect_log_in_with_the_same))
+            CardAction(if (ts.ownServer) tr(S.connect_open_the_registration_page) else tr(S.connect_log_in_in_the_browser)) { open(ts.authUrl) }
+            CardAction(tr(S.connect_copy_login_link), primary = false) { host.copy(tr(S.connect_login_link), ts.authUrl, sensitive = true) }
         } else {
             val slow = ts.waitingS >= 15 || ts.loginError != null
             InfoCard(if (slow) Palette.stopped else Palette.standby,
-                if (ts.loginError != null) tr("连不上控制服务器 ${ts.serverName}", "Cannot reach the control server ${ts.serverName}")
-                else if (slow) tr("未获取到登录链接（已等待 ${ts.waitingS} 秒）", "No login link yet (waited ${ts.waitingS} s)")
-                else tr("正在向 ${ts.serverName} 获取登录链接…", "Requesting a login link from ${ts.serverName}…"),
-                if (!slow) tr("通常几秒内出现。", "It usually appears within seconds.")
-                else (ts.loginError?.let { tr("出错原因：", "Error: ") + it.take(240) + "\n" } ?: "") +
-                    (if (ts.ownServer) tr("请确认地址和端口跟你在 Tailscale App 里填的“登录服务器”完全一样，并且这台手机现在能打开它（浏览器打开 ${ts.control}/key?v=1 应该能看到一串字）。", "Check that the address and port are exactly your login server in the Tailscale app, and that this phone can open it now (${ts.control}/key?v=1 should show some text in a browser).")
-                    else tr("这台手机连不上 Tailscale 的服务器（controlplane.tailscale.com）时会这样：换个网络或打开能访问它的代理后会自动出现。也可以在高级选项里填 auth key。", "This happens when the phone cannot reach Tailscale's server (controlplane.tailscale.com): switch networks or turn on a proxy that reaches it. Or put an auth key in Advanced.")) +
-                    (if (ts.loginError == null) ts.health?.let { "\n" + tr("Tailscale 报告：", "Tailscale says: ") + it.take(240) } ?: "" else ""))
-            CardAction(tr("重新获取登录链接", "Get a login link again"), primary = false) { Tailnet.login() }
+                if (ts.loginError != null) tr(S.connect_cannot_reach_the_control_server, ts.serverName)
+                else if (slow) tr(S.connect_no_login_link_yet_waited, ts.waitingS)
+                else tr(S.connect_requesting_a_login_link_from, ts.serverName),
+                if (!slow) tr(S.connect_it_usually_appears_within_seconds)
+                else (ts.loginError?.let { tr(S.connect_error) + it.take(240) + "\n" } ?: "") +
+                    (if (ts.ownServer) tr(S.connect_check_that_the_address_and, ts.control)
+                    else tr(S.connect_this_happens_when_the_phone)) +
+                    (if (ts.loginError == null) ts.health?.let { "\n" + tr(S.connect_tailscale_says) + it.take(240) } ?: "" else ""))
+            CardAction(tr(S.connect_get_a_login_link_again), primary = false) { Tailnet.login() }
         }
-        TsPhase.UNSTABLE -> InfoCard(Palette.standby, tr("Tailscale 断开了，正在重连", "Tailscale dropped, reconnecting"),
-            tr("登录还在（${ts.dnsName ?: ts.ip}），但手机现在连不上", "Still logged in (${ts.dnsName ?: ts.ip}), but the phone cannot reach ") +
-                (if (!ts.controlOk) tr(" Tailscale 服务器", "the Tailscale server") else tr("中继${ts.relay?.let { " $it" } ?: ""}", "the relay${ts.relay?.let { " $it" } ?: ""}")) +
-                tr("，其它设备暂时连不上它（已 ${ts.downS} 秒）。", ", so other devices cannot reach it for now (${ts.downS} s).") +
-                (if (ts.flaps >= 2) tr("10 分钟内断了 ${ts.flaps} 次。", " It dropped ${ts.flaps} times in 10 minutes.") else ""))
-        TsPhase.ERROR -> InfoCard(Palette.stopped, tr("内置 Tailscale 出错，会自动重试", "Built-in Tailscale failed, retrying automatically"), ts.error ?: ts.state)
+        TsPhase.UNSTABLE -> InfoCard(Palette.standby, tr(S.connect_tailscale_dropped_reconnecting),
+            tr(S.connect_still_logged_in_but_the, ts.dnsName ?: ts.ip) +
+                (if (!ts.controlOk) tr(S.connect_the_tailscale_server) else tr(S.connect_the_relay, ts.relay?.let { " $it" } ?: "")) +
+                tr(S.connect_so_other_devices_cannot_reach, ts.downS) +
+                (if (ts.flaps >= 2) tr(S.connect_it_dropped_times_in_10, ts.flaps) else ""))
+        TsPhase.ERROR -> InfoCard(Palette.stopped, tr(S.connect_built_in_tailscale_failed_retrying), ts.error ?: ts.state)
         else -> {
             val waited = Tailnet.waitedMs()
-            InfoCard(Palette.standby, tr("正在连接 Tailscale…", "Connecting to Tailscale…") + if (waited > Tailnet.SLOW_MS) tr("（已 ${waited / 1000} 秒）", " (${waited / 1000} s)") else "",
-                (known?.let { tr("使用已保存的登录（${it.dnsName ?: it.ip}），无需重新登录。", "Using the saved login (${it.dnsName ?: it.ip}); no new login needed.") } ?: tr("通常几秒钟。", "Usually a few seconds.")) +
-                    (if (waited > Tailnet.SLOW_MS) "\n" + tr("尚未连接 ${if (ts.loggedIn) "中继" else ts.serverName}", "Not reached ${if (ts.loggedIn) "the relay" else ts.serverName} yet") +
+            InfoCard(Palette.standby, tr(S.connect_connecting_to_tailscale) + if (waited > Tailnet.SLOW_MS) tr(S.connect_s, waited / 1000) else "",
+                (known?.let { tr(S.connect_using_the_saved_login_no, it.dnsName ?: it.ip) } ?: tr(S.connect_usually_a_few_seconds)) +
+                    (if (waited > Tailnet.SLOW_MS) "\n" + tr(S.connect_not_reached_yet, if (ts.loggedIn) "中继" else ts.serverName, if (ts.loggedIn) "the relay" else ts.serverName) +
                         ((ts.loginError ?: ts.health)?.let { "：${it.take(160)}" } ?: "") else ""))
         }
     }
     val appVpn = remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { while (true) { appVpn.value = withContext(Dispatchers.IO) { com.kilon.agentvscreen.api.ApiServer.tailnetAddress()?.hostAddress }; delay(5_000) } }
-    if (appVpn.value != null) Footnote(tr("这台手机上的 Tailscale App 已经连着（${appVpn.value}）。手机要靠它的出口节点上网的话，App 得一直开着，这时直接选“外部 Tailscale App”更省事。",
-        "The Tailscale app on this phone is already connected (${appVpn.value}). If the phone needs its exit node to get online, the app has to stay on anyway, so choosing \"External Tailscale app\" is simpler."))
+    if (appVpn.value != null) Footnote(tr(S.connect_the_tailscale_app_on_this, appVpn.value))
 }
 
 /** Index of the "one-time code" entry in the new-agent lifetime picker (after the [com.kilon.agentvscreen.api.Tokens.LIFETIMES_MS] entries). */

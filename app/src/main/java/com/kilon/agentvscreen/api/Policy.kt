@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
+import com.kilon.agentvscreen.trPair
 import com.kilon.agentvscreen.tr
 import org.json.JSONObject
 
@@ -17,14 +19,14 @@ object Policy {
         DENY("deny", "不允许", "Not allowed", 0),
         ASK("ask", "问我", "Ask me", 1),
         ALLOW("allow", "允许", "Allowed", 2);
-        val title: String get() = tr(zh, en)
+        val title: String get() = trPair(zh, en)
         companion object { fun of(k: String?): Act? = entries.firstOrNull { it.key == k } }
     }
 
     /** One row: a class of action, the choices it offers, and how it reads. */
     class Row(val key: String, val zh: String, val en: String, val hintZh: String, val hintEn: String, val choices: List<Act>) {
-        val title: String get() = tr(zh, en)
-        val hint: String get() = tr(hintZh, hintEn)
+        val title: String get() = trPair(zh, en)
+        val hint: String get() = trPair(hintZh, hintEn)
     }
 
     const val OPERATE = "operate"
@@ -86,20 +88,20 @@ object Policy {
         after.filter { (k, v) -> v.rank > (before[k]?.rank ?: 0) }.keys.toList()
 
     fun levelTitle(level: String): String = when (level) {
-        Tokens.LOOK -> tr("只看", "Look only")
-        Tokens.CAREFUL -> tr("稳妥", "Steady")
-        Tokens.FREE -> tr("省心", "Easy")
-        Tokens.FREE_SYSTEM -> tr("全权", "Full")
-        CUSTOM -> tr("自定义", "Custom")
+        Tokens.LOOK -> tr(S.public_access_look_only)
+        Tokens.CAREFUL -> tr(S.policy_steady)
+        Tokens.FREE -> tr(S.policy_easy)
+        Tokens.FREE_SYSTEM -> tr(S.policy_full)
+        CUSTOM -> tr(S.connect_custom)
         else -> level
     }
 
     fun levelHint(level: String): String = when (level) {
-        Tokens.LOOK -> tr("仅查看画面和状态，不执行任何操作", "Views the screen and status only; performs no actions")
-        Tokens.CAREFUL -> tr("可操作应用；敏感、不可撤销和支付操作需确认", "Operates apps; sensitive, irreversible and payment actions need confirmation")
-        Tokens.FREE -> tr("可操作应用；仅不可撤销和支付操作需确认（默认）", "Operates apps; only irreversible and payment actions need confirmation (default)")
-        Tokens.FREE_SYSTEM -> tr("在“省心”基础上允许系统操作", "Easy, plus system actions")
-        CUSTOM -> tr("逐项设置每类操作的处理方式", "Set the handling of each action type")
+        Tokens.LOOK -> tr(S.policy_views_the_screen_and_status)
+        Tokens.CAREFUL -> tr(S.policy_operates_apps_sensitive_irreversible_and)
+        Tokens.FREE -> tr(S.policy_operates_apps_only_irreversible_and)
+        Tokens.FREE_SYSTEM -> tr(S.policy_easy_plus_system_actions)
+        CUSTOM -> tr(S.policy_set_the_handling_of_each)
         else -> ""
     }
 

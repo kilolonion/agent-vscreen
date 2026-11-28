@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import android.content.SharedPreferences
 import com.kilon.agentvscreen.tr
@@ -74,9 +75,9 @@ object Cloudflared : PublicTunnel {
      */
     fun save(rawToken: String?, rawHost: String?): String? {
         val tok = rawToken?.let { extractToken(it) }
-        if (!rawToken.isNullOrBlank() && tok == null) return tr("没有认出隧道令牌：请粘贴 Cloudflare 隧道页面上“安装并运行连接器”里的整条命令，或其中以 eyJ 开头的那一长串", "No tunnel token found: paste the whole command under \"Install and run a connector\" on the tunnel page, or the long string in it that starts with eyJ")
+        if (!rawToken.isNullOrBlank() && tok == null) return tr(S.cloudflared_no_tunnel_token_found_paste)
         val host = rawHost?.let { normalizeHost(it) }
-        if (!rawHost.isNullOrBlank() && host == null) return tr("域名格式不对：填你在隧道里添加的公网主机名，例如 phone.example.com", "Not a valid hostname: use the public hostname you added to the tunnel, e.g. phone.example.com")
+        if (!rawHost.isNullOrBlank() && host == null) return tr(S.cloudflared_not_a_valid_hostname_use)
         val next = Config(tok ?: _config.value.token, host ?: _config.value.hostname)
         prefs?.edit()?.putString(K_TOKEN, next.token)?.putString(K_HOST, next.hostname)?.apply()
         _config.value = next
@@ -116,7 +117,7 @@ object Cloudflared : PublicTunnel {
 
     @Synchronized override fun start(ctx: Context) {
         val app = ctx.applicationContext
-        if (!_config.value.complete) { _status.value = TunnelStatus(TunnelState.ERROR, problem = tr("还没填隧道令牌和域名", "The tunnel token and hostname are not set yet")); return }
+        if (!_config.value.complete) { _status.value = TunnelStatus(TunnelState.ERROR, problem = tr(S.cloudflared_the_tunnel_token_and_hostname)); return }
         if (runner.current) return
         _status.value = TunnelStatus(TunnelState.STARTING)
         runner.start(launch = { g -> launch(app, g) }, onLine = ::onLine, onStarted = { g ->
@@ -137,7 +138,7 @@ object Cloudflared : PublicTunnel {
 
     private fun launch(ctx: Context, g: Int): ProcessBuilder? {
         val bin = binary(ctx)
-        if (!bin.canExecute()) { _status.value = TunnelStatus(TunnelState.ERROR, problem = tr("内置 Cloudflare 组件缺失（$bin）", "Built-in Cloudflare component missing ($bin)")); return null }
+        if (!bin.canExecute()) { _status.value = TunnelStatus(TunnelState.ERROR, problem = tr(S.cloudflared_built_in_cloudflare_component_missing, bin)); return null }
         val dir = File(ctx.filesDir, "cloudflared").apply { mkdirs() }
         metricsPort = freePort()
         val pb = ProcessBuilder(bin.absolutePath, "tunnel", "--no-autoupdate", "--metrics", "127.0.0.1:$metricsPort",
@@ -189,19 +190,15 @@ object Cloudflared : PublicTunnel {
     /** A client error line → what it means for the user and what to do; null for noise the client recovers from. */
     internal fun explain(line: String): String? = when {
         line.contains("token is not valid", true) || line.contains("Invalid tunnel secret", true) ->
-            tr("Cloudflare 不认这个隧道令牌：在 Cloudflare 隧道页面重新复制令牌（或整条安装命令）粘贴进来。隧道被删除或令牌被轮换后，旧令牌会失效。",
-                "Cloudflare does not accept this tunnel token: copy the token (or the whole install command) again from the tunnel page. A deleted tunnel or a rotated token makes the old one stop working.")
+            tr(S.cloudflared_cloudflare_does_not_accept_this)
         line.contains("Tunnel not found", true) ->
-            tr("这个隧道在 Cloudflare 上已不存在：在 Cloudflare 后台新建隧道，再粘贴新令牌。", "This tunnel no longer exists on Cloudflare: create a new one in the dashboard and paste its token.")
+            tr(S.cloudflared_this_tunnel_no_longer_exists)
         line.contains("Unable to reach the origin service", true) || line.contains("connection refused", true) ->
-            tr("隧道已连接，但 Cloudflare 后台里这个域名的服务地址不对：应填 $ORIGIN_URL（类型 HTTP；不要写 localhost，也不要写别的端口）。",
-                "The tunnel is up, but the hostname's service in the Cloudflare dashboard is wrong: it must be $ORIGIN_URL (type HTTP; not localhost, no other port).")
+            tr(S.cloudflared_the_tunnel_is_up_but, ORIGIN_URL)
         line.contains("edge discovery", true) || line.contains("lookup", true) && line.contains("argotunnel", true) ->
-            tr("连不上 Cloudflare：查不到 Cloudflare 的接入地址。检查网络；开着代理 VPN 时，把 Agent-VScreen 设为直连或分流放行。",
-                "Cannot reach Cloudflare: its edge addresses could not be looked up. Check the network; with a proxy VPN on, let Agent-VScreen bypass it.")
+            tr(S.cloudflared_cannot_reach_cloudflare_its_edge)
         line.contains("failed to dial to edge", true) || line.contains("i/o timeout", true) || line.contains("Serve tunnel error", true) ->
-            tr("连接 Cloudflare 受阻，正在自动重试（会自动从 QUIC 切到 HTTP/2）。长时间连不上时，检查网络或代理 VPN 是否拦截了 7844 端口。",
-                "Connecting to Cloudflare is blocked; retrying automatically (it falls back from QUIC to HTTP/2 by itself). If it stays down, check whether the network or a proxy VPN blocks port 7844.")
+            tr(S.cloudflared_connecting_to_cloudflare_is_blocked)
         else -> null
     }
 
@@ -222,24 +219,24 @@ object Cloudflared : PublicTunnel {
         val mine = TunnelProbe.isMine(base, code, body)
         return when {
             mine -> TunnelSelfTest.Ok
-            body.contains("1033") -> TunnelSelfTest.Failed(tr("Cloudflare 显示隧道未连接", "Cloudflare says the tunnel is not connected"),
-                tr("这个域名指向的隧道当前没有在线的连接器。确认粘贴的是同一个隧道的令牌，并等待上方“隧道连接”变为已连接。", "No connector is online for the tunnel this hostname points at. Check that the token is from the same tunnel and wait for Tunnel connection above to show connected."), "HTTP $code")
-            code == 502 || code == 503 || code == 504 || body.contains("1016") -> TunnelSelfTest.Failed(tr("域名已到 Cloudflare，但转不到手机上的服务", "The hostname reaches Cloudflare but not the service on the phone"),
-                tr("在 Cloudflare 隧道的“公共主机名”里，把这个域名的服务改为 HTTP，地址 127.0.0.1:$ORIGIN_PORT。", "In the tunnel's Public Hostname, set this hostname's service to HTTP, address 127.0.0.1:$ORIGIN_PORT."), "HTTP $code")
-            code in 300..399 -> TunnelSelfTest.Failed(tr("域名被重定向了", "The hostname redirects"),
-                tr("这个域名开了跳转或 Cloudflare Access 登录。公网 MCP 需要直接访问：去掉这个域名上的 Access 应用或重定向规则。", "This hostname has a redirect or a Cloudflare Access login. Public MCP needs direct access: remove the Access application or redirect rule from it."), "HTTP $code")
-            code == 403 && body.contains("cloudflare", true) -> TunnelSelfTest.Failed(tr("Cloudflare 拦下了请求", "Cloudflare blocked the request"),
-                tr("这个域名上的 WAF、机器人防护或 Access 规则拦下了访问。为这个子域名关闭“机器人对抗模式”等防护，或单独放行。", "A WAF, bot protection or Access rule on this hostname blocked it. Turn off Bot Fight Mode and similar protection for this subdomain, or allow it."), "HTTP $code")
-            else -> TunnelSelfTest.Failed(tr("这个域名没有指向这台手机", "This hostname does not lead to this phone"),
-                tr("返回的不是本机的内容（HTTP $code）。确认 Cloudflare 隧道的公共主机名就是这里填的域名，服务为 HTTP 127.0.0.1:$ORIGIN_PORT。", "What came back is not this phone (HTTP $code). Check that the tunnel's public hostname is the one entered here, with service HTTP 127.0.0.1:$ORIGIN_PORT."), body.take(200))
+            body.contains("1033") -> TunnelSelfTest.Failed(tr(S.cloudflared_cloudflare_says_the_tunnel_is),
+                tr(S.cloudflared_no_connector_is_online_for), "HTTP $code")
+            code == 502 || code == 503 || code == 504 || body.contains("1016") -> TunnelSelfTest.Failed(tr(S.cloudflared_the_hostname_reaches_cloudflare_but),
+                tr(S.cloudflared_in_the_tunnel_s_public, ORIGIN_PORT), "HTTP $code")
+            code in 300..399 -> TunnelSelfTest.Failed(tr(S.cloudflared_the_hostname_redirects),
+                tr(S.cloudflared_this_hostname_has_a_redirect), "HTTP $code")
+            code == 403 && body.contains("cloudflare", true) -> TunnelSelfTest.Failed(tr(S.cloudflared_cloudflare_blocked_the_request),
+                tr(S.cloudflared_a_waf_bot_protection_or), "HTTP $code")
+            else -> TunnelSelfTest.Failed(tr(S.cloudflared_this_hostname_does_not_lead),
+                tr(S.cloudflared_what_came_back_is_not, code, ORIGIN_PORT), body.take(200))
         }
     }
 
     private fun judgeError(e: Throwable): TunnelSelfTest = when (e) {
-        is java.net.UnknownHostException -> TunnelSelfTest.Failed(tr("域名解析不到", "The hostname does not resolve"),
-            tr("Cloudflare 还没有这个域名的 DNS 记录：在隧道的“公共主机名”里添加它（会自动建 DNS 记录），刚添加的等 1–2 分钟再试。域名本身也要已托管在这个 Cloudflare 账号下。", "Cloudflare has no DNS record for this hostname yet: add it under the tunnel's Public Hostname (that creates the record); if just added, wait 1–2 minutes. The domain itself must be on this Cloudflare account."), e.message)
-        is javax.net.ssl.SSLException -> TunnelSelfTest.Failed(tr("HTTPS 证书还没准备好", "The HTTPS certificate is not ready"),
-            tr("Cloudflare 为新域名签发证书通常需要几分钟。多级子域名（如 a.b.example.com）不在免费证书范围内，请用一级子域名（如 phone.example.com）。", "Cloudflare usually needs a few minutes to issue a certificate for a new hostname. Multi-level subdomains (a.b.example.com) are not covered by the free certificate; use one level (phone.example.com)."), e.message)
+        is java.net.UnknownHostException -> TunnelSelfTest.Failed(tr(S.cloudflared_the_hostname_does_not_resolve),
+            tr(S.cloudflared_cloudflare_has_no_dns_record), e.message)
+        is javax.net.ssl.SSLException -> TunnelSelfTest.Failed(tr(S.cloudflared_the_https_certificate_is_not),
+            tr(S.cloudflared_cloudflare_usually_needs_a_few), e.message)
         else -> TunnelProbe.commonError(e)
     }
 }

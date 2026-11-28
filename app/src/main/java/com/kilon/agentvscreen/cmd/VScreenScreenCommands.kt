@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.content.Intent
@@ -32,18 +33,18 @@ private val FIX_KEYS = listOf(
 )
 
 private fun fixWhat(code: String): String? = when (code) {
-    "not_connected" -> tr("重新连接特权通道", "reconnect the privileged channel")
-    "not_foreground_service" -> tr("先加电池白名单，再把服务重新启动成前台服务；系统仍不允许时请用户打开一次 App", "grant the battery exemption, then start the service again as a foreground service; if the system still refuses, ask the user to open the app once")
-    "remote_down" -> tr("重启内置 Tailscale 并等它连上；要登录或批准时说明用户要做什么", "restart the built-in Tailscale and wait for it to connect; say what the user must do when it needs a login or approval")
-    "silent_apps" -> tr("把被留下静音的应用（不含手动静音的和正在副屏上的）恢复声音并逐个核实；fix 不带参数时总会检查", "give sound back to apps left silent (not the ones muted by hand or on the screen now), each read back; fix without arguments always checks this")
-    "frozen_in_background" -> tr("用 Shizuku 加电池白名单和后台运行许可，并说明厂商后台管理里要用户手动打开的项", "grant the battery exemption and background running via Shizuku, and explain what the user must allow by hand in the vendor's background management")
-    "no_privilege" -> tr("Shizuku 未启动/未授权：给出用户步骤，--open 在主屏打开 Shizuku", "Shizuku not running / not granted: give the user the steps; --open opens Shizuku on the main screen")
-    "no_accessibility" -> tr("通过 Shizuku 打开 Agent-VScreen 的无障碍服务（改系统设置）", "turn on Agent-VScreen's accessibility service via Shizuku (changes system settings)")
-    "app_owned_display" -> tr("重新连接并释放旧副屏，下次 launch 用 Shizuku 副屏", "reconnect and release the old screen; the next launch uses a Shizuku screen")
-    "no_display_focus" -> tr("系统版本限制（需 Android 14+），无法修复", "system version limit (needs Android 14+), cannot be fixed")
-    "accessibility_cannot_see_display" -> tr("重启无障碍服务后重新检查", "restart the accessibility service and check again")
-    "a11y_not_ready" -> tr("等待并重新检查控件树", "wait and check the widget tree again")
-    "background_network" -> tr("通过 Shizuku 把 Agent-VScreen 加入电池优化/后台运行/后台数据白名单（改系统设置）；没有 Shizuku 时给出手动步骤", "exempt Agent-VScreen from battery optimization / background limits / background data limits via Shizuku (changes system settings); without Shizuku, give manual steps")
+    "not_connected" -> tr(S.vscreen_screen_commands_reconnect_the_privileged_channel)
+    "not_foreground_service" -> tr(S.vscreen_screen_commands_grant_the_battery_exemption_then)
+    "remote_down" -> tr(S.vscreen_screen_commands_restart_the_built_in_tailscale)
+    "silent_apps" -> tr(S.vscreen_screen_commands_give_sound_back_to_apps)
+    "frozen_in_background" -> tr(S.vscreen_screen_commands_grant_the_battery_exemption_and)
+    "no_privilege" -> tr(S.vscreen_screen_commands_shizuku_not_running_not_granted)
+    "no_accessibility" -> tr(S.vscreen_screen_commands_turn_on_agent_vscreen_s)
+    "app_owned_display" -> tr(S.vscreen_screen_commands_reconnect_and_release_the_old)
+    "no_display_focus" -> tr(S.vscreen_screen_commands_system_version_limit_needs_android)
+    "accessibility_cannot_see_display" -> tr(S.vscreen_screen_commands_restart_the_accessibility_service_and)
+    "a11y_not_ready" -> tr(S.vscreen_screen_commands_wait_and_check_the_widget)
+    "background_network" -> tr(S.vscreen_screen_commands_exempt_agent_vscreen_from_battery)
     else -> null
 }
 
@@ -89,17 +90,17 @@ internal fun VScreenOffloadHandler.status(sid: String?, args: OffloadArgs): Nati
             .put("port", com.kilon.agentvscreen.host.HostService.server?.boundPort ?: 0)
             .put("port_note", com.kilon.agentvscreen.host.HostService.server?.portNote ?: JSONObject.NULL))
         .put("accessibility_auto", com.kilon.agentvscreen.host.A11yHeal.let { h -> when {
-            h.userOff(context) -> tr("用户关掉了，不再自动打开", "turned off by the user, not turned on again automatically")
-            h.blocked(context) -> tr("系统拦截写入：要在 系统设置 › 无障碍 里手动打开", "the system blocks the write: turn it on by hand in Settings › Accessibility")
-            h.wanted(context) -> tr("断开时自动重新打开（每分钟最多一次）", "turned on again automatically when it drops (at most once a minute)")
-            else -> tr("没开过（App 首页一键配置）", "never turned on (Set up the rest on the app's home page)")
+            h.userOff(context) -> tr(S.vscreen_screen_commands_turned_off_by_the_user)
+            h.blocked(context) -> tr(S.vscreen_screen_commands_the_system_blocks_the_write)
+            h.wanted(context) -> tr(S.vscreen_screen_commands_turned_on_again_automatically_when)
+            else -> tr(S.vscreen_screen_commands_never_turned_on_set_up)
         } })
         .put("user_stopped", BackgroundOperation.state.value.userStopped)
         // 1.4.0-beta6 (test: an app with the user was read as "the user pressed Stop AI"): three different states,
         // each with its own way back. with_user = apps the user has on the main screen now (handback event ends it).
         .put("with_user", org.json.JSONArray(com.kilon.agentvscreen.core.VScreenOwnership.given.value.values.map { g ->
             JSONObject().put("app", g.pkg).put("label", com.kilon.agentvscreen.core.VScreenOwnership.label(context, g.pkg)).put("since", g.at)
-                .put("note", tr("这个应用在用户手上（主屏），不是“停止 AI”：等 handback 事件（vscreen events --wait），或 launch 别的应用", "This app is with the user (main screen); it is not Stop AI: wait for the handback event (vscreen events --wait), or launch another app"))
+                .put("note", tr(S.vscreen_screen_commands_this_app_is_with_the))
         }))
         .also { o -> if (BackgroundOperation.state.value.userStopped) o.put("user_stopped_note", BackgroundOperation.userStoppedMessage()) }
         .put("window_hidden_by_user", s.windowHidden)
@@ -134,8 +135,8 @@ internal fun VScreenOffloadHandler.status(sid: String?, args: OffloadArgs): Nati
             .put("keeps_main_focus", VScreenDisplayService.keepsMainFocus(d.flags))
             .put("focus_restored", BackgroundOperation.focusRestores)
             .put("restore_failed", BackgroundOperation.focusRestoreFailures)
-            .put("note", if (VScreenDisplayService.keepsMainFocus(d.flags)) tr("副屏不抢主屏焦点（STEAL_TOP_FOCUS_DISABLED），键盘只跟着用户的主屏", "the screen does not steal the main screen's focus (STEAL_TOP_FOCUS_DISABLED); the keyboard stays with the user's screen")
-                else tr("本机没接受“不抢焦点”标志：每个副屏动作后若焦点被抢走，会立刻还给主屏（focus_restored 计数）", "this phone ignores the no-focus-steal flag: after each screen action, stolen focus is given straight back to the main screen (counted in focus_restored)")))
+            .put("note", if (VScreenDisplayService.keepsMainFocus(d.flags)) tr(S.vscreen_screen_commands_the_screen_does_not_steal)
+                else tr(S.vscreen_screen_commands_this_phone_ignores_the_no)))
             .put("display_has_own_focus", d.ownFocus)
             .put("shell_owned", d.shellOwned)
         val act = VScreenShell.topActivity(d.displayId)
@@ -143,14 +144,14 @@ internal fun VScreenOffloadHandler.status(sid: String?, args: OffloadArgs): Nati
         data.put("current_app", act?.substringBefore('/') ?: JSONObject.NULL)
             .put("current_activity", act ?: JSONObject.NULL)
             .put("resume_hint", if (act != null)
-                tr("副屏仍保留着 ${act.substringBefore('/')} 的页面：act 看一眼就能接着做，不必重新 launch", "The screen still holds ${act.substringBefore('/')}'s page: look with act and carry on, no need to launch again")
-            else tr("副屏还在但上面没有应用：用 launch 打开", "The screen exists but has no app: open one with launch"))
+                tr(S.vscreen_screen_commands_the_screen_still_holds_s, act.substringBefore('/'))
+            else tr(S.vscreen_screen_commands_the_screen_exists_but_has))
     } else if (s.displayId == null) {
-        data.put("resume_hint", tr("当前没有副屏，这是正常的：直接 launch <应用名或包名> 就会自动建屏。不需要 adb 或无线调试，不要去配置它们", "There is no screen right now, which is normal: launch <app name or package> creates one. No adb or wireless debugging needed; don't set them up"))
+        data.put("resume_hint", tr(S.vscreen_screen_commands_there_is_no_screen_right))
     } else if (s.ownerSessionId != sid) {
         data.put("resume_hint", if (s.idle || s.ownerSessionId == null || !BackgroundOperation.isTaskActive(s.ownerSessionId))
-            tr("副屏 ${s.displayId} 是上一轮留下的（空闲中）：act / launch 会直接接手它，页面保留", "Screen ${s.displayId} is left from the last turn (idle): act / launch take it over with the page kept")
-        else tr("副屏 ${s.displayId} 正被另一个会话的任务使用，等它结束后再操作", "Screen ${s.displayId} is in use by another session's task; wait until it ends"))
+            tr(S.vscreen_screen_commands_screen_is_left_from_the, s.displayId)
+        else tr(S.vscreen_screen_commands_screen_is_in_use_by, s.displayId))
     }
     data.put("capabilities", capabilities(d))
     data.put("perception", com.kilon.agentvscreen.core.OnnxRuntime.perceptionJson(context))
@@ -166,9 +167,9 @@ internal fun VScreenOffloadHandler.status(sid: String?, args: OffloadArgs): Nati
         for (i in 0 until deg.length()) {
             val code = deg.getString(i)
             fixes.put(JSONObject().put("code", code).put("command", "vscreen fix $code")
-                .put("auto", code in AUTO_FIXABLE).put("what", fixWhat(code) ?: tr("说明原因和用户要做的步骤", "explain the cause and the user's steps")))
+                .put("auto", code in AUTO_FIXABLE).put("what", fixWhat(code) ?: tr(S.vscreen_screen_commands_explain_the_cause_and_the)))
         }
-        data.put("fixes", fixes).put("fix_hint", tr("vscreen fix（不带参数）会依次处理全部问题；会改系统设置的步骤先征得用户同意", "vscreen fix (no arguments) handles every problem in turn; ask the user before steps that change system settings"))
+        data.put("fixes", fixes).put("fix_hint", tr(S.vscreen_screen_commands_vscreen_fix_no_arguments_handles))
     }
     data.put("took_ms", SystemClock.elapsedRealtime() - t0)
     return ok(args, data)
@@ -200,7 +201,7 @@ internal fun VScreenOffloadHandler.fix(sid: String?, args: OffloadArgs): NativeO
     } else listOf(when (what) { "accessibility", "a11y" -> "no_accessibility"; "shizuku", "privilege" -> "no_privilege"
         "connect", "reconnect", "connection" -> "not_connected"; "sound", "mute", "audio" -> "silent_apps"
         "tailscale", "remote" -> "remote_down"; "foreground" -> "not_foreground_service"; else -> what })
-    val tried = codes.map { code -> code to runCatching { fixOne(sid, code, args) }.getOrElse { false to tr("修复时出错：${it.message}", "Error while fixing: ${it.message}") } }
+    val tried = codes.map { code -> code to runCatching { fixOne(sid, code, args) }.getOrElse { false to tr(S.vscreen_screen_commands_error_while_fixing, it.message) } }
     BackgroundOperation.refreshStatus()
     val (deg, sug) = degraded(BackgroundOperation.previewDisplayFor(sid ?: ""))
     // 1.4.0-beta13: "fixed" is what the health check says afterwards, not what the attempt claimed.
@@ -218,9 +219,9 @@ internal fun VScreenOffloadHandler.fix(sid: String?, args: OffloadArgs): NativeO
         .put("results", results)
         .put("degraded_now", deg).put("suggestions", sug)
         .put("message", when {
-            quiet -> tr("没有发现问题", "no problems found")
-            left == 0 && deg.length() == 0 -> tr("全部正常了", "all fine now")
-            else -> tr("还有 ${maxOf(left, deg.length())} 项没解决：按每条 message 和 suggestions 请用户处理", "${maxOf(left, deg.length())} items remain: ask the user to handle them per each message and suggestions")
+            quiet -> tr(S.vscreen_screen_commands_no_problems_found)
+            left == 0 && deg.length() == 0 -> tr(S.vscreen_screen_commands_all_fine_now)
+            else -> tr(S.vscreen_screen_commands_items_remain_ask_the_user, maxOf(left, deg.length()))
         }))
 }
 
@@ -230,19 +231,19 @@ internal fun VScreenOffloadHandler.fixOne(sid: String?, code: String, args: Offl
     return when (code) {
         "not_connected" -> {
             val r = BackgroundOperation.connect()
-            if (r.connection.name == "READY") true to tr("已重新连接", "reconnected") else false to tr("重连失败：${r.connectionError ?: r.connection.name}", "reconnect failed: ${r.connectionError ?: r.connection.name}")
+            if (r.connection.name == "READY") true to tr(S.vscreen_screen_commands_reconnected) else false to tr(S.vscreen_screen_commands_reconnect_failed, r.connectionError ?: r.connection.name)
         }
         "no_privilege" -> {
             val viaRoot = com.kilon.agentvscreen.host.Privileged.via == com.kilon.agentvscreen.host.Privileged.Via.ROOT
             val srcName = com.kilon.agentvscreen.host.Privileged.name()
             val steps = if (viaRoot) {
-                if (s.privilege.name == "READY") tr("Root 已可用", "Root is available")
+                if (s.privilege.name == "READY") tr(S.vscreen_screen_commands_root_is_available)
                 else com.kilon.agentvscreen.host.Privileged.notReadyHint()
             } else when (s.privilege.name) {
-                "NOT_INSTALLED" -> tr("手机上没有安装 Shizuku（或其兼容分支 / Sui）：请用户安装并启动 Shizuku，或在 Agent-VScreen 首页配置里改用 Root。", "Shizuku (or a compatible fork / Sui) is not installed: ask the user to install and start it, or switch to Root in Agent-VScreen's setup.")
-                "NOT_RUNNING" -> tr("$srcName 服务没在运行（重启手机后会停）：请用户打开 $srcName 重新启动服务，再回来执行 fix not_connected。", "$srcName is not running (it stops after a reboot): ask the user to open $srcName and start it, then run fix not_connected.")
-                "NOT_AUTHORIZED" -> tr("Agent-VScreen 还没获得 $srcName 授权：请用户打开 Agent-VScreen 点“授权 $srcName”并允许。", "Agent-VScreen has no $srcName permission yet: ask the user to open Agent-VScreen, tap \"Grant $srcName\" and allow.")
-                else -> tr("$srcName 已可用", "$srcName is available")
+                "NOT_INSTALLED" -> tr(S.vscreen_screen_commands_shizuku_or_a_compatible_fork)
+                "NOT_RUNNING" -> tr(S.vscreen_screen_commands_is_not_running_it_stops, srcName)
+                "NOT_AUTHORIZED" -> tr(S.vscreen_screen_commands_agent_vscreen_has_no_permission, srcName)
+                else -> tr(S.vscreen_screen_commands_is_available, srcName)
             }
             if (s.privilege.name == "READY") return true to steps
             var opened = ""
@@ -252,20 +253,20 @@ internal fun VScreenOffloadHandler.fixOne(sid: String?, code: String, args: Offl
                 val intent = candidates.distinct().firstNotNullOfOrNull { pm.getLaunchIntentForPackage(it) }
                 opened = if (intent != null) {
                     runCatching { context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                        .fold({ tr("（已在主屏打开 $srcName）", " (opened $srcName on the main screen)") }, { tr("（打开 $srcName 失败：${it.message}）", " (opening $srcName failed: ${it.message})") })
-                } else tr("（没找到 $srcName 应用）", " ($srcName app not found)")
+                        .fold({ tr(S.vscreen_screen_commands_opened_on_the_main_screen, srcName) }, { tr(S.vscreen_screen_commands_opening_failed, srcName, it.message) })
+                } else tr(S.vscreen_screen_commands_app_not_found, srcName)
             }
             false to steps + opened
         }
         "no_accessibility" -> {
-            if (a11yLive()) return true to tr("无障碍服务已连接", "the accessibility service is connected")
+            if (a11yLive()) return true to tr(S.vscreen_screen_commands_the_accessibility_service_is_connected)
             com.kilon.agentvscreen.host.Heal.accessibility(context)
         }
         "accessibility_cannot_see_display", "a11y_not_ready" -> {
-            val d = BackgroundOperation.previewDisplayFor(sid ?: "") ?: return false to tr("当前没有副屏", "there is no screen right now")
+            val d = BackgroundOperation.previewDisplayFor(sid ?: "") ?: return false to tr(S.vscreen_screen_commands_there_is_no_screen_right_2)
             val t0 = SystemClock.elapsedRealtime()
             while (SystemClock.elapsedRealtime() - t0 < 3_000) {
-                if (BackgroundOperation.nodeRoots(d.displayId).isNotEmpty()) return true to tr("无障碍已能看到副屏控件", "accessibility can see the screen's widgets")
+                if (BackgroundOperation.nodeRoots(d.displayId).isNotEmpty()) return true to tr(S.vscreen_screen_commands_accessibility_can_see_the_screen)
                 Thread.sleep(300)
             }
             if (code == "accessibility_cannot_see_display" && s.privilege.name == "READY") {
@@ -273,38 +274,38 @@ internal fun VScreenOffloadHandler.fixOne(sid: String?, code: String, args: Offl
                 if (VScreenAccessibilityService.getInstance() != null) {
                     val t1 = SystemClock.elapsedRealtime()
                     while (SystemClock.elapsedRealtime() - t1 < 3_000) {
-                        if (BackgroundOperation.nodeRoots(d.displayId).isNotEmpty()) return true to tr("已重启无障碍服务，现在能看到副屏控件", "Restarted the accessibility service; the screen's widgets are visible now")
+                        if (BackgroundOperation.nodeRoots(d.displayId).isNotEmpty()) return true to tr(S.vscreen_screen_commands_restarted_the_accessibility_service_the)
                         Thread.sleep(300)
                     }
                 }
             }
-            false to tr("无障碍仍看不到副屏控件：这个页面可能不提供控件。可继续用 OCR，或 release 后重新 launch", "Accessibility still cannot see the screen's widgets: this page may not expose any. Carry on with OCR, or release and launch again")
+            false to tr(S.vscreen_screen_commands_accessibility_still_cannot_see_the)
         }
         "app_owned_display" -> {
             val r = BackgroundOperation.connect()
-            if (r.connection.name != "READY") return false to tr("重连失败：${r.connectionError}", "reconnect failed: ${r.connectionError}")
+            if (r.connection.name != "READY") return false to tr(S.vscreen_screen_commands_reconnect_failed, r.connectionError)
             if (sid != null) BackgroundOperation.releaseNow(sid)
             val srcName = com.kilon.agentvscreen.host.Privileged.name()
-            true to tr("已重新连接并释放旧副屏；下一次 launch 会用 $srcName 副屏重建（页面不保留）", "Reconnected and released the old screen; the next launch rebuilds it as a $srcName screen (page not kept)")
+            true to tr(S.vscreen_screen_commands_reconnected_and_released_the_old, srcName)
         }
         "background_network" -> {
             val pw = com.kilon.agentvscreen.core.VScreenPower
-            if (pw.check(context).ok) return true to tr("后台网络不受限制", "background network is not restricted")
-            if (s.privilege.name != "READY") return false to tr("没有 Shizuku，无法自动设置。请用户手动：${pw.manualSteps()}", "No Shizuku, so this can't be set automatically. Ask the user to do it by hand: ${pw.manualSteps()}")
+            if (pw.check(context).ok) return true to tr(S.vscreen_screen_commands_background_network_is_not_restricted)
+            if (s.privilege.name != "READY") return false to tr(S.vscreen_screen_commands_no_shizuku_so_this_can, pw.manualSteps())
             val (ok, msg) = com.kilon.agentvscreen.host.Heal.power(context)
-            if (ok) true to msg else false to tr("$msg。其余请用户手动：${pw.manualSteps()}", "$msg. The rest the user does by hand: ${pw.manualSteps()}")
+            if (ok) true to msg else false to tr(S.vscreen_screen_commands_the_rest_the_user_does, msg, pw.manualSteps())
         }
-        "no_display_focus" -> false to tr("副屏没有独立输入焦点是系统限制（需要 Android 14+），无法修复；back 无效时直接点页面上的返回按钮", "The screen lacking its own input focus is a system limit (needs Android 14+) and can't be fixed; if back does nothing, tap the page's back button")
+        "no_display_focus" -> false to tr(S.vscreen_screen_commands_the_screen_lacking_its_own)
         "not_foreground_service" -> com.kilon.agentvscreen.host.Heal.foreground(context)
         "remote_down" -> com.kilon.agentvscreen.host.Heal.remote(context)
         "silent_apps" -> com.kilon.agentvscreen.host.Heal.sound()
-        "service_off" -> false to tr("用户关掉了服务（用户的选择）：请用户在 App 右上角的电源键里打开", "The user turned the service off (their choice): ask them to turn it on with the power button at the top of the app")
-        "user_stopped" -> false to tr("用户按了“停止 AI”，只有用户能解除", "The user pressed \"Stop AI\"; only the user can lift it")
+        "service_off" -> false to tr(S.vscreen_screen_commands_the_user_turned_the_service)
+        "user_stopped" -> false to tr(S.vscreen_screen_commands_the_user_pressed_stop_ai)
         "frozen_in_background" -> {
             val (ok, msg) = com.kilon.agentvscreen.host.Heal.power(context)
-            (ok && !com.kilon.agentvscreen.host.Liveness.frozenUnresolved()) to tr("系统白名单：$msg${if (ok) "（已全部生效）" else ""}。厂商自己的后台管理只能用户手动设：请用户打开 Agent-VScreen，点“后台运行受限”的“去设置”，允许自启动、关联启动和后台活动", "System exemptions: $msg${if (ok) " (all in effect)" else ""}. The vendor's own background management can only be set by the user: ask the user to open Agent-VScreen, tap Settings on \"Background running restricted\", and allow auto-start, start by other apps and background activity")
+            (ok && !com.kilon.agentvscreen.host.Liveness.frozenUnresolved()) to tr(S.vscreen_screen_commands_system_exemptions_the_vendor_s, msg, if (ok) "（已全部生效）" else "", if (ok) " (all in effect)" else "")
         }
-        else -> false to run { val keys = FIX_KEYS.joinToString(tr("、", ", ")); tr("不认识的问题代码：$code（可用：$keys）", "Unknown problem code: $code (available: $keys)") }
+        else -> false to run { val keys = FIX_KEYS.joinToString(tr(S.automation_list_sep)); tr(S.vscreen_screen_commands_unknown_problem_code_available, code, keys) }
     }
 }
 
@@ -322,26 +323,26 @@ internal fun VScreenOffloadHandler.apps(args: OffloadArgs): NativeOffloadResult 
 
 /** 2.0.0-beta8 (C6), pure: truthful `capabilities.drag` status string based on display ownership and privilege readiness. */
 internal fun dragCapabilityText(shellOwned: Boolean?, privilegeReady: Boolean): String = when {
-    shellOwned == true -> tr("副屏服务 POINTER（drag 多点、按住）", "screen service POINTER (multi-point drag, hold)")
-    shellOwned == null && privilegeReady -> tr("建副屏后可用（副屏服务 POINTER）", "available once the screen is created (screen service POINTER)")
-    else -> tr("不可用（需要 Shizuku 副屏服务）", "unavailable (needs the Shizuku screen service)")
+    shellOwned == true -> tr(S.vscreen_screen_commands_screen_service_pointer_multi_point)
+    shellOwned == null && privilegeReady -> tr(S.vscreen_screen_commands_available_once_the_screen_is)
+    else -> tr(S.vscreen_screen_commands_unavailable_needs_the_shizuku_screen)
 }
 
 /** Which mechanism each capability is using right now, for `status`. */
 internal fun VScreenOffloadHandler.capabilities(d: VScreenDisplay?): JSONObject {
     val s = BackgroundOperation.state.value
     val o = JSONObject()
-    o.put("screen", when { d == null -> tr("无副屏", "no screen"); d.shellOwned && d.trusted -> tr("Shizuku 服务创建的受信任副屏", "trusted screen created by the Shizuku service"); d.shellOwned -> tr("Shizuku 服务创建（未受信任）", "created by the Shizuku service (untrusted)"); else -> tr("应用自建副屏（受限）", "app's own screen (limited)") })
-    o.put("tap_swipe", tr("副屏服务注入（触摸事件直接进副屏，不经过 shell 命令）", "injected by the display service (touch events go straight to the screen, no shell command)"))
-    o.put("keys", if (d?.ownFocus == true) tr("带 displayId 注入（副屏有独立焦点）", "injected with displayId (the screen has its own focus)") else tr("带 displayId 注入，失败时 input -d", "injected with displayId, input -d as fallback"))
+    o.put("screen", when { d == null -> tr(S.vscreen_screen_commands_no_screen); d.shellOwned && d.trusted -> tr(S.vscreen_screen_commands_trusted_screen_created_by_the); d.shellOwned -> tr(S.vscreen_screen_commands_created_by_the_shizuku_service); else -> tr(S.vscreen_screen_commands_app_s_own_screen_limited) })
+    o.put("tap_swipe", tr(S.vscreen_screen_commands_injected_by_the_display_service))
+    o.put("keys", if (d?.ownFocus == true) tr(S.vscreen_screen_commands_injected_with_displayid_the_screen) else tr(S.vscreen_screen_commands_injected_with_displayid_input_d))
     o.put("drag", dragCapabilityText(d?.shellOwned, s.privilege == BackgroundOperation.Privilege.READY))
     o.put("ocr", VScreenOcr.engineInfo())
     o.put("with_user", org.json.JSONArray(com.kilon.agentvscreen.core.VScreenOwnership.given.value.values.map { g ->
         JSONObject().put("app", g.pkg).put("since", g.at).put("why", g.why) }))
-    o.put("accessibility", if (a11yLive()) tr("已连接（控件树可用）", "connected (widget tree available)") else tr("未连接（只用 OCR/视觉）", "not connected (OCR / vision only)"))
-    o.put("vision", tr("由调用方的模型看截图（本应用不调用任何模型）", "the caller's model looks at screenshots (this app calls no model)"))
-    o.put("orientation", if (d == null) "-" else run { val src = d.geometryJson().optString("turn_source"); tr("旋转 ${d.rotation * 90}°，画面转正 ${d.bufferTurn}°（$src）", "rotated ${d.rotation * 90}°, picture turned upright ${d.bufferTurn}° ($src)") })
-    o.put("clipboard", tr("非 ASCII 文字在无障碍写不进时走剪贴板，粘贴后恢复原剪贴板；系统不让读取时清空", "non-ASCII text goes through the clipboard when accessibility can't write it; the clipboard is restored after pasting, or cleared if the system won't let it be read"))
-    o.put("stop", tr("默认只关副屏里的任务；--force 才 force-stop 整个应用", "by default only the task on the screen is closed; --force force-stops the whole app"))
+    o.put("accessibility", if (a11yLive()) tr(S.vscreen_screen_commands_connected_widget_tree_available) else tr(S.vscreen_screen_commands_not_connected_ocr_vision_only))
+    o.put("vision", tr(S.vscreen_screen_commands_the_caller_s_model_looks))
+    o.put("orientation", if (d == null) "-" else run { val src = d.geometryJson().optString("turn_source"); tr(S.vscreen_screen_commands_rotated_picture_turned_upright, d.rotation * 90, d.bufferTurn, src) })
+    o.put("clipboard", tr(S.vscreen_screen_commands_non_ascii_text_goes_through))
+    o.put("stop", tr(S.vscreen_screen_commands_by_default_only_the_task))
     return o
 }

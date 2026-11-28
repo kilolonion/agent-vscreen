@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
 import android.graphics.Bitmap
 import android.graphics.Rect
 import com.kilon.agentvscreen.core.BackgroundOperation
@@ -28,15 +29,15 @@ internal fun elementsIn(list: List<El>, r: Rect): List<El> = list.filter { r.con
 internal fun VScreenOffloadHandler.askCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {
     val session = sid ?: VScreenOffloadHandler.DEFAULT_SESSION
     val question = args.positional.joinToString(" ").trim()
-    if (question.isEmpty()) throw ActionError("INVALID_ARGS", tr("ask \"问题\" [--point|--area|--choose \"甲|乙\"|--text]", "ask \"question\" [--point|--area|--choose \"A|B\"|--text]"))
-    if (question.length > 200) throw ActionError("INVALID_ARGS", tr("问题最多 200 字", "a question has at most 200 characters"))
+    if (question.isEmpty()) throw ActionError("INVALID_ARGS", tr(S.vscreen_ask_ask_question_point_area_choose))
+    if (question.length > 200) throw ActionError("INVALID_ARGS", tr(S.vscreen_ask_a_question_has_at_most))
     val choose = args.get("choose")?.split('|')?.map { it.trim() }?.filter { it.isNotEmpty() }
     val picked = listOfNotNull(
         UserAsk.Kind.POINT.takeIf { args.hasFlag("point") }, UserAsk.Kind.AREA.takeIf { args.hasFlag("area") },
         UserAsk.Kind.TEXT.takeIf { args.hasFlag("text") }, UserAsk.Kind.CHOOSE.takeIf { choose != null })
-    if (picked.size > 1) throw ActionError("INVALID_ARGS", tr("--point / --area / --choose / --text 只能选一个", "use only one of --point / --area / --choose / --text"))
+    if (picked.size > 1) throw ActionError("INVALID_ARGS", tr(S.vscreen_ask_use_only_one_of_point))
     val kind = picked.firstOrNull() ?: UserAsk.Kind.POINT
-    if (kind == UserAsk.Kind.CHOOSE && (choose!!.size < 2 || choose.size > 8)) throw ActionError("INVALID_ARGS", tr("--choose 给 2 到 8 个选项，用 | 隔开", "--choose takes 2 to 8 options separated by |"))
+    if (kind == UserAsk.Kind.CHOOSE && (choose!!.size < 2 || choose.size > 8)) throw ActionError("INVALID_ARGS", tr(S.vscreen_ask_choose_takes_2_to_8))
     // 1.3 beta2: as a task (--async) nobody holds a connection, so it waits as long as the question is valid (the
     // answer then lands in the task's result). Before, it gave up after the default 60 s and the task kept ASK_PENDING.
     val inTask = Call.current()?.taskId != null
@@ -51,20 +52,20 @@ internal fun VScreenOffloadHandler.askCmd(sid: String?, args: OffloadArgs): Nati
     val ask = if (old != null && (old.answer != null || old.live)) old else {
         var pic: File? = null; var w = 0; var h = 0
         if (kind == UserAsk.Kind.POINT || kind == UserAsk.Kind.AREA) {
-            val disp = d ?: throw ActionError("NO_SCREEN", tr("--point / --area 要在副屏的画面上回答，现在没有副屏：先 launch，或改用 --choose / --text", "--point / --area are answered on the screen's picture and there is no screen: launch first, or use --choose / --text"))
+            val disp = d ?: throw ActionError("NO_SCREEN", tr(S.vscreen_ask_point_area_are_answered_on))
             disp.requestFreshFrame()
             val frame = disp.awaitFrameAfter(System.currentTimeMillis() - 500, 1_500L) ?: disp.latestFrame()
-                ?: throw ActionError("NO_FRAME", tr("副屏还没有画面", "the screen has no picture yet"))
+                ?: throw ActionError("NO_FRAME", tr(S.vscreen_ask_the_screen_has_no_picture))
             w = disp.width; h = disp.height
             pic = savePicture(frame)
         }
-        UserAsk.create(context, kind, key, question, tr("来自会话 $session", "from session $session"), options = choose.orEmpty(), picture = pic, screenW = w, screenH = h)
+        UserAsk.create(context, kind, key, question, tr(S.vscreen_ask_from_session, session), options = choose.orEmpty(), picture = pic, screenW = w, screenH = h)
     }
     if (ask.answer == null) {
-        call?.report(tr("问题已显示在手机上，等用户回答", "The question is on the phone; waiting for the user"))
+        call?.report(tr(S.vscreen_ask_the_question_is_on_the))
         UserAsk.await(ask, wait)
     }
-    if (call?.cancelled == true && ask.answer == null) { UserAsk.withdraw(context, ask); throw ActionError("CANCELLED", tr("调用方断开了，问题已从手机上撤下", "The caller went away; the question was taken off the phone")) }
+    if (call?.cancelled == true && ask.answer == null) { UserAsk.withdraw(context, ask); throw ActionError("CANCELLED", tr(S.vscreen_ask_the_caller_went_away_the)) }
     when (ask.answer) {
         null -> {
             val leftSec = ((ask.at + ask.validMs - System.currentTimeMillis()) / 1000L).coerceAtLeast(1L)
@@ -74,13 +75,12 @@ internal fun VScreenOffloadHandler.askCmd(sid: String?, args: OffloadArgs): Nati
             )
             throw ActionError(
                 "ASK_PENDING",
-                tr("问题已显示在手机上（通知和 Agent-VScreen 首页），用户 ${wait / 1000} 秒内没回答。告诉用户去手机上回答；之后把同一条 ask 原样再发一次就能拿到答案（${ask.validMs / 60_000} 分钟内有效）",
-                    "The question is on the phone (notification and the Agent-VScreen home page); the user did not answer within ${wait / 1000} s. Tell the user to answer it on the phone; then send the same ask again to get the answer (valid for ${ask.validMs / 60_000} minutes)"),
+                tr(S.vscreen_ask_the_question_is_on_the_2, wait / 1000, ask.validMs / 60_000),
                 data = askData,
             )
         }
-        false -> { UserAsk.markUsed(ask); UserAsk.endedWhy(ask)?.let { why -> throw ActionError("ASK_DECLINED", tr("副屏已经关闭（$why），这个要在副屏上回答的问题结束了：$question", "The background screen was closed ($why), so this question about it ended: $question")) }
-            throw ActionError("ASK_DECLINED", tr("用户选择不回答：$question", "The user chose not to answer: $question")) }
+        false -> { UserAsk.markUsed(ask); UserAsk.endedWhy(ask)?.let { why -> throw ActionError("ASK_DECLINED", tr(S.vscreen_ask_the_background_screen_was_closed, why, question)) }
+            throw ActionError("ASK_DECLINED", tr(S.vscreen_ask_the_user_chose_not_to, question)) }
         true -> UserAsk.markUsed(ask)
     }
     val reply = ask.reply ?: JSONObject()
@@ -94,21 +94,21 @@ internal fun VScreenOffloadHandler.askCmd(sid: String?, args: OffloadArgs): Nati
             val x = reply.optInt("x"); val y = reply.optInt("y")
             val e = elementAt(els, x, y)
             e?.let { data.put("element", el(it)) }
-            tr("用户点了 ($x, $y)", "The user tapped ($x, $y)") + (e?.let { tr("，在 #${it.n}「${it.text.take(40)}」上", ", on #${it.n} \"${it.text.take(40)}\"") }
-                ?: if (els.isEmpty()) tr("（还没有元素列表：act 看一眼就能对上编号）", " (no element list yet: look with act to match numbers)") else "")
+            tr(S.vscreen_ask_the_user_tapped, x, y) + (e?.let { tr(S.vscreen_ask_on, it.n, it.text.take(40)) }
+                ?: if (els.isEmpty()) tr(S.vscreen_ask_no_element_list_yet_look) else "")
         }
         UserAsk.Kind.AREA -> {
             val r = Rect(reply.optInt("x1"), reply.optInt("y1"), reply.optInt("x2"), reply.optInt("y2"))
             val inside = elementsIn(els, r)
             data.put("elements", JSONArray(inside.map { el(it) }))
-            tr("用户框了 ${r.left},${r.top},${r.right},${r.bottom}", "The user boxed ${r.left},${r.top},${r.right},${r.bottom}") +
-                if (inside.isNotEmpty()) tr("，框里有 ", ", holding ") + inside.take(12).joinToString(" ") { "#${it.n}「${it.text.take(20)}」" } else ""
+            tr(S.vscreen_ask_the_user_boxed, r.left, r.top, r.right, r.bottom) +
+                if (inside.isNotEmpty()) tr(S.vscreen_ask_holding) + inside.take(12).joinToString(" ") { "#${it.n}「${it.text.take(20)}」" } else ""
         }
-        UserAsk.Kind.CHOOSE -> tr("用户选了 ${reply.optInt("index")}：${reply.optString("choice")}", "The user chose ${reply.optInt("index")}: ${reply.optString("choice")}")
-        else -> tr("用户回答：${reply.optString("text")}", "The user answered: ${reply.optString("text")}")
+        UserAsk.Kind.CHOOSE -> tr(S.vscreen_ask_the_user_chose, reply.optInt("index"), reply.optString("choice"))
+        else -> tr(S.vscreen_ask_the_user_answered, reply.optString("text"))
     }
     // 1.4.0-beta4: the answer is marked on the live screen; the user may have scrolled to the target first.
-    val note = if (reply.optBoolean("moved")) tr("。用户先滑动了画面才标出来，坐标对的是现在的画面，不是你提问时那一屏", ". The user scrolled the screen before marking it: the point is on the screen now, not the one you asked about") else ""
+    val note = if (reply.optBoolean("moved")) tr(S.vscreen_ask_the_user_scrolled_the_screen) else ""
     data.put("message", said + note)
     return ok(args, data)
 }
@@ -116,7 +116,7 @@ internal fun VScreenOffloadHandler.askCmd(sid: String?, args: OffloadArgs): Nati
 /** 1.4.0-beta4 (rainbow): the user answered "说一句" instead (the question, the page or the lesson was wrong). */
 internal fun feedbackOf(reply: JSONObject): ActionError? = reply.takeIf { it.optString("kind") == "feedback" }?.let { r ->
     val t = r.optString("text").trim()
-    ActionError("USER_FEEDBACK", tr("用户没有照问的方式回答，说：「$t」", "The user did not answer as asked and said: \"$t\""), JSONObject().put("feedback", t))
+    ActionError("USER_FEEDBACK", tr(S.vscreen_ask_the_user_did_not_answer, t), JSONObject().put("feedback", t))
 }
 
 private fun VScreenOffloadHandler.savePicture(src: Bitmap): File {

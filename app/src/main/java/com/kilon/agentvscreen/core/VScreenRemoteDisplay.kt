@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.content.ComponentName
@@ -49,7 +50,7 @@ internal object VScreenRemoteDisplay {
         java.util.concurrent.SynchronousQueue()) { r -> Thread(r, "vscreen-call").apply { isDaemon = true } }
     @Volatile private var stuckSince = 0L
 
-    internal fun notResponding(s: Long) = IllegalStateException(tr("副屏服务 $s 秒没有响应（可能被系统冻结），稍后重试；一直这样就在 App 里重连 Shizuku", "The screen service has not responded for $s s (the system may have frozen it); retry shortly, and reconnect Shizuku in the app if it keeps happening"))
+    internal fun notResponding(s: Long) = IllegalStateException(tr(S.vscreen_remote_display_the_screen_service_has_not, s))
 
     private fun <T> timed(what: String, extraMs: Long = 0L, block: () -> T): T {
         val since = stuckSince
@@ -113,20 +114,20 @@ internal object VScreenRemoteDisplay {
     private fun service(): Result<IBinder> {
         if (Privileged.via == Privileged.Via.ROOT) return RootBackend.awaitBinder()
         shizukuBinder?.takeIf { it.isBinderAlive }?.let { return Result.success(it) }
-        if (!ShizukuManager.isReady()) return Result.failure(IllegalStateException(tr("Shizuku 未就绪", "Shizuku not ready")))
+        if (!ShizukuManager.isReady()) return Result.failure(IllegalStateException(tr(S.vscreen_remote_display_shizuku_not_ready)))
         synchronized(lock) {
             shizukuBinder?.takeIf { it.isBinderAlive }?.let { return Result.success(it) }
             val l = CountDownLatch(1).also { latch = it }
             try {
                 Shizuku.bindUserService(args, conn)
             } catch (t: Throwable) {
-                return Result.failure(IllegalStateException(tr("Shizuku 不支持 UserService：${t.message}", "Shizuku does not support UserService: ${t.message}")))
+                return Result.failure(IllegalStateException(tr(S.vscreen_remote_display_shizuku_does_not_support_userservice, t.message)))
             }
             if (!l.await(BIND_TIMEOUT_S, TimeUnit.SECONDS)) {
-                return Result.failure(IllegalStateException(tr("等待 Shizuku 启动副屏服务超时", "Timed out waiting for Shizuku to start the screen service")))
+                return Result.failure(IllegalStateException(tr(S.vscreen_remote_display_timed_out_waiting_for_shizuku)))
             }
             return shizukuBinder?.let { Result.success(it) }
-                ?: Result.failure(IllegalStateException(tr("副屏服务连接失败", "Connecting to the screen service failed")))
+                ?: Result.failure(IllegalStateException(tr(S.vscreen_remote_display_connecting_to_the_screen_service)))
         }
     }
 
@@ -198,7 +199,7 @@ internal object VScreenRemoteDisplay {
             try {
                 data.writeInterfaceToken(VScreenDisplayService.DESCRIPTOR)
                 write(data)
-                if (!b.transact(code, data, reply, 0)) error(tr("副屏服务不认识这个调用（旧版本服务仍在运行，重连后会更新）", "The screen service does not know this call (an old service version is still running; it updates after a reconnect)"))
+                if (!b.transact(code, data, reply, 0)) error(tr(S.vscreen_remote_display_the_screen_service_does_not))
                 if (reply.readInt() != 0) error(reply.readString() ?: "unknown error")
                 read(reply)
             } finally { data.recycle(); reply.recycle() }
@@ -226,7 +227,7 @@ internal object VScreenRemoteDisplay {
                     data.writeInterfaceToken(VScreenDisplayService.DESCRIPTOR)
                     data.writeStringArray(argv); data.writeStringArray(env); data.writeString(cwd); data.writeLong(timeoutMs)
                     outPipe[1].writeToParcel(data, 0); errPipe[1].writeToParcel(data, 0)
-                    if (!b.transact(VScreenDisplayService.EXEC, data, reply, 0)) error(tr("副屏服务太旧，不支持运行命令", "The screen service is too old to run commands"))
+                    if (!b.transact(VScreenDisplayService.EXEC, data, reply, 0)) error(tr(S.vscreen_remote_display_the_screen_service_is_too))
                     if (reply.readInt() != 0) error(reply.readString() ?: "unknown error")
                     reply.readInt()
                 } finally { data.recycle(); reply.recycle() }

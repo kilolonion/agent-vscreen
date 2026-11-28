@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.graphics.Rect
@@ -12,14 +13,14 @@ import kotlin.math.roundToInt
 /** "x1,y1,x2,y2" (also with Chinese commas, any corner order) → Rect. */
 internal fun parseRect(v: String, what: String): Rect {
     val n = v.split(',', '，').mapNotNull { it.trim().toDoubleOrNull()?.roundToInt() }
-    if (n.size != 4) throw ActionError("INVALID_ARGS", tr("$what 写成 x1,y1,x2,y2（收到 $v）", "write $what as x1,y1,x2,y2 (got $v)"))
+    if (n.size != 4) throw ActionError("INVALID_ARGS", tr(S.vscreen_args_write_as_x1_y1_x2, what, v))
     return Rect(minOf(n[0], n[2]), minOf(n[1], n[3]), maxOf(n[0], n[2]), maxOf(n[1], n[3]))
 }
 
 /** 500ms / 5s / 30m / 2h; a bare number is milliseconds; null → [def]. */
 internal fun parseDuration(v: String?, def: Long): Long {
     val t = v?.trim() ?: return def
-    return VScreenOptions.durationMs(t) ?: throw ActionError("INVALID_ARGS", tr("时长写成 500ms / 5s / 30m / 2h（不带单位就是毫秒）：$v", "write a duration as 500ms / 5s / 30m / 2h (no unit means milliseconds): $v"))
+    return VScreenOptions.durationMs(t) ?: throw ActionError("INVALID_ARGS", tr(S.vscreen_args_write_a_duration_as_500ms, v))
 }
 
 /** A value the tool had to change (clamped) is said in the result instead of silently. */
@@ -45,7 +46,7 @@ internal fun durWords(ms: Long): String = when {
  * --wait 10m used to return after 120 s without a word). Every duration limit goes through here or [capMs].
  */
 internal fun boundedMs(name: String, v: Long, lo: Long, hi: Long): Long {
-    if (v < lo) throw OffloadArgs.BadOption(tr("--$name ${durWords(v)} 太短（可用 ${durWords(lo)}–${durWords(hi)}）", "--$name ${durWords(v)} is too short (allowed ${durWords(lo)}–${durWords(hi)})"))
+    if (v < lo) throw OffloadArgs.BadOption(tr(S.vscreen_args_is_too_short_allowed, name, durWords(v), durWords(lo), durWords(hi)))
     return capMs("--$name", v, hi).coerceAtLeast(lo)
 }
 
@@ -55,7 +56,7 @@ internal fun boundedMs(name: String, v: Long, lo: Long, hi: Long): Long {
  */
 internal fun capMs(what: String, v: Long, hi: Long, withValue: Boolean = true): Long {
     val w = if (withValue) "$what ${durWords(v)}" else what
-    if (v > hi) adjusted(tr("$w 超过上限，只等 ${durWords(hi)}", "$w is over the limit; waited at most ${durWords(hi)}"))
+    if (v > hi) adjusted(tr(S.vscreen_args_is_over_the_limit_waited, w, durWords(hi)))
     return minOf(v, hi)
 }
 
@@ -64,7 +65,7 @@ internal fun bounded(name: String, v: Int, lo: Int, hi: Int): Int = bounded(name
 /** [v] kept within [lo]..[hi]; a value outside is clamped AND reported in the result. */
 internal fun bounded(name: String, v: Long, lo: Long, hi: Long): Long {
     // 1.3 beta2: below the smallest allowed value is a mistake (collect --pages -1 ran 1 page), not something to guess.
-    if (v < lo) throw OffloadArgs.BadOption(tr("--$name $v 太小（可用 $lo–$hi）", "--$name $v is too small (allowed $lo–$hi)"))
-    if (v > hi) adjusted(tr("--$name $v 超出范围，按 ${v.coerceIn(lo, hi)} 执行（可用 $lo–$hi）", "--$name $v is out of range, used ${v.coerceIn(lo, hi)} (allowed $lo–$hi)"))
+    if (v < lo) throw OffloadArgs.BadOption(tr(S.vscreen_args_is_too_small_allowed, name, v, lo, hi))
+    if (v > hi) adjusted(tr(S.vscreen_args_is_out_of_range_used, name, v, v.coerceIn(lo, hi), lo, hi))
     return v.coerceIn(lo, hi)
 }

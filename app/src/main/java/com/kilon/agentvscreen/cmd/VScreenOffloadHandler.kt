@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import com.kilon.agentvscreen.core.BackgroundOperation
 import com.kilon.agentvscreen.core.BackgroundOperation.ActionError
@@ -85,7 +86,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         "codes" -> Codes.help()
         else -> com.kilon.agentvscreen.api.AgentGuide.topic(cmd)
             ?: CommandSpec.helpFor(cmd)
-            ?: (tr("没有叫 $cmd 的命令。", "There is no command called $cmd.") + "\n\n" + CommandSpec.quickHelp())
+            ?: (tr(S.vscreen_offload_handler_there_is_no_command_called, cmd) + "\n\n" + CommandSpec.quickHelp())
     }
 
     /** Nothing a command does may take the app down: any throwable becomes an error result. Every call is audited. */
@@ -99,9 +100,9 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         } catch (t: Throwable) {
             AppLogger.error(TAG, "vscreen command crashed", t)
             if (call?.source == Call.Source.PUBLIC) {
-                err("INTERNAL_ERROR", tr("工具内部错误，命令没有执行完，请稍后重试。", "Internal tool error; the command did not finish. Please retry shortly."))
+                err("INTERNAL_ERROR", tr(S.vscreen_offload_handler_internal_tool_error_the_command))
             } else {
-                err("INTERNAL_ERROR", run { val why = "${t.javaClass.simpleName}: ${(t.cause?.message ?: t.message ?: "").take(300)}"; tr("工具内部错误（$why），命令没有执行完。vscreen diag 能导出诊断，交给开发者", "Internal tool error ($why); the command did not finish. vscreen diag exports a diagnostic bundle for the developer") })
+                err("INTERNAL_ERROR", run { val why = "${t.javaClass.simpleName}: ${(t.cause?.message ?: t.message ?: "").take(300)}"; tr(S.vscreen_offload_handler_internal_tool_error_the_command_2, why) })
             }
         }
         val sid = request.sessionId?.takeIf { it.isNotBlank() } ?: DEFAULT_SESSION
@@ -155,19 +156,19 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
             }.let { r ->
                 // 1.3 beta2: an option that was clamped is said by every command (collect, zoom … said nothing).
                 val left = takeAdjusted()
-                if (left.isEmpty()) r else r.copy(output = r.output.trimEnd() + "\n" + left.joinToString("\n") { tr("参数被调整：$it", "options adjusted: $it") } + "\n",
+                if (left.isEmpty()) r else r.copy(output = r.output.trimEnd() + "\n" + left.joinToString("\n") { tr(S.vscreen_act_options_adjusted, it) } + "\n",
                     data = r.data?.also { d -> d.put("adjusted", org.json.JSONArray(left)) })
             }
         } catch (e: ActionError) {
             // A failure after a cut limit (a wait that timed out at the cap) says the cut too.
             val left = takeAdjusted()
-            err(e.code, (e.message ?: e.code) + left.joinToString("") { tr("（参数被调整：$it）", " (options adjusted: $it)") }, data = e.data)
+            err(e.code, (e.message ?: e.code) + left.joinToString("") { tr(S.vscreen_offload_handler_options_adjusted, it) }, data = e.data)
         } catch (e: OffloadArgs.BadOption) {
-            err("INVALID_ARGS", e.message ?: tr("参数不对", "bad arguments"), 2)
+            err("INVALID_ARGS", e.message ?: tr(S.vscreen_offload_handler_bad_arguments), 2)
         } catch (t: Exception) {
             AppLogger.error(TAG, "$sub failed", t)
             if (Call.current()?.source == Call.Source.PUBLIC) {
-                err("OPERATION_FAILED", tr("操作执行失败，请稍后重试。", "Operation failed; please retry shortly."))
+                err("OPERATION_FAILED", tr(S.vscreen_offload_handler_operation_failed_please_retry_shortly))
             } else {
                 err("OPERATION_FAILED", "${t.javaClass.simpleName}: ${t.message}")
             }
@@ -187,12 +188,9 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         if (call.source == Call.Source.PUBLIC || tok == null || tok.publicOnly) {
             if (need.key in call.scopes && (tok == null || com.kilon.agentvscreen.host.StrongConfirm.effectiveAct(tok, need.key) != com.kilon.agentvscreen.api.Policy.Act.ASK)) return
             if (need.key in call.scopes && tok != null) return askRow(call, spec, need.key)
-            if (need.key == "system") throw ActionError("SCOPE_DENIED", tr("公网 MCP 不开放系统操作（${spec.name}），这是固定的边界，不是设置问题；不要换别的办法绕过。确实需要时，请用户在这台手机上或经 Tailscale 接入一个 agent 来做",
-                "System actions (${spec.name}) are never available over public MCP; this is a fixed boundary, not a setting. Don't work around it. If it is really needed, the user can connect an agent on this phone or over Tailscale to do it"))
-            if (tok != null && tok.scope == "operate") throw ActionError("SCOPE_DENIED", tr("这个公网客户端（${call.tokenName}）配对时只获准查看，之后在手机上调高档位不会放宽这次配对发出的凭据，这条 ${spec.name} 没有执行。要操作，请重新连接这个客户端并在手机上批准一次配对",
-                "This public client (${call.tokenName}) was paired to look only; raising its level on the phone later does not widen the credentials of that pairing, so this ${spec.name} did not run. To operate, reconnect the client and approve a new pairing on the phone"))
-            throw ActionError("SCOPE_DENIED", tr("这个公网客户端（${call.tokenName}）只获准查看，这条 ${spec.name} 没有执行。要操作，请用户在 Agent-VScreen › 接入 › 这个 agent 里把档位改成能操作的（或重新配对时选择）",
-                "This public client (${call.tokenName}) may only look, so this ${spec.name} did not run. To operate, the user can raise its level in Agent-VScreen › Connect › this agent (or pick one when pairing again)"))
+            if (need.key == "system") throw ActionError("SCOPE_DENIED", tr(S.vscreen_offload_handler_system_actions_are_never_available, spec.name))
+            if (tok != null && tok.scope == "operate") throw ActionError("SCOPE_DENIED", tr(S.vscreen_offload_handler_this_public_client_was_paired, call.tokenName, spec.name))
+            throw ActionError("SCOPE_DENIED", tr(S.vscreen_offload_handler_this_public_client_may_only, call.tokenName, spec.name))
         }
         when (com.kilon.agentvscreen.host.StrongConfirm.effectiveAct(tok, need.key)) {
             com.kilon.agentvscreen.api.Policy.Act.ALLOW -> return
@@ -210,8 +208,8 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
     /** A row set to "ask me": one tap on the phone, which can cover this run or today. */
     private fun askRow(call: Call, spec: CommandSpec.Cmd, key: String) {
         val row = com.kilon.agentvscreen.api.Policy.row(key)?.title ?: key
-        com.kilon.agentvscreen.host.StrongConfirm.requireForConsent(context, call, "row:$key:${spec.name}", tr("$row：${spec.name}", "$row: ${spec.name}"),
-            tr("${call.tokenName} 要执行 ${spec.name}", "${call.tokenName} wants to run ${spec.name}"), key, "*",
+        com.kilon.agentvscreen.host.StrongConfirm.requireForConsent(context, call, "row:$key:${spec.name}", tr(S.connect_name_value, row, spec.name),
+            tr(S.vscreen_offload_handler_wants_to_run, call.tokenName, spec.name), key, "*",
             com.kilon.agentvscreen.host.Consent.WAIT_MS, com.kilon.agentvscreen.host.Consent.VALID_MS)
     }
 
@@ -221,8 +219,8 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         val call = Call.current()
         val deadline = System.currentTimeMillis() + QUEUE_WAIT_MS
         while (!screenQueue.tryLock(200, TimeUnit.MILLISECONDS)) {
-            if (call?.cancelled == true) throw ActionError("CANCELLED", tr("排队时调用方断开了，命令没有执行", "The caller went away while queued; the command did not run"))
-            if (System.currentTimeMillis() > deadline) throw ActionError("QUEUE_TIMEOUT", run { val h = queueHolder ?: "?"; tr("副屏正被另一个调用使用（$h），排了 ${QUEUE_WAIT_MS / 1000} 秒还没轮到，命令没有执行。稍后重发", "The screen is in use by another call ($h); after ${QUEUE_WAIT_MS / 1000} s in the queue it was still not this command's turn, so it did not run. Send it again later") })
+            if (call?.cancelled == true) throw ActionError("CANCELLED", tr(S.vscreen_offload_handler_the_caller_went_away_while))
+            if (System.currentTimeMillis() > deadline) throw ActionError("QUEUE_TIMEOUT", run { val h = queueHolder ?: "?"; tr(S.vscreen_offload_handler_the_screen_is_in_use, h, QUEUE_WAIT_MS / 1000) })
         }
         queueHolder = "${call?.tokenName ?: "main"}/$sid ${spec.name}"
         try { return block() } finally { queueHolder = null; screenQueue.unlock() }
@@ -238,17 +236,17 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
         val foreign = given.filter { it !in allowed && it !in CommandSpec.GLOBAL_OPTIONS }.distinct()
         if (foreign.isNotEmpty()) throw ActionError("UNKNOWN_OPTION", run {
             val bad = foreign.joinToString(" ") { "--$it" }; val hint = suggestFor(sub, foreign.first())
-            val ok = CommandSpec.of(sub)?.allOpts?.filter { !it.deprecated }?.joinToString(" ") { "--${it.name}" }.orEmpty().ifEmpty { tr("无", "none") }
-            tr("$sub 没有参数 $bad$hint。命令没有执行。$sub 的参数：$ok", "$sub has no option $bad$hint. The command did not run. Options of $sub: $ok")
+            val ok = CommandSpec.of(sub)?.allOpts?.filter { !it.deprecated }?.joinToString(" ") { "--${it.name}" }.orEmpty().ifEmpty { tr(S.vscreen_diag_none) }
+            tr(S.vscreen_offload_handler_has_no_option_the_command, sub, bad, hint, ok)
         })
         for ((i, t) in rest.withIndex()) {
             if (!t.startsWith("--") || t.length <= 2) continue
             val key = t.substring(2).substringBefore('=')
             val kind = VScreenOptions.kindOf(sub, key)
-            if ('=' in t && kind == VScreenOptions.Kind.SWITCH) throw ActionError("INVALID_ARGS", tr("--$key 是开关，不带值（收到 $t）。命令没有执行", "--$key is a switch and takes no value (got $t). The command did not run"))
+            if ('=' in t && kind == VScreenOptions.Kind.SWITCH) throw ActionError("INVALID_ARGS", tr(S.vscreen_offload_handler_is_a_switch_and_takes, key, t))
             val next = rest.getOrNull(i + 1)
             if ('=' !in t && kind == VScreenOptions.Kind.VALUE && (next == null || next.startsWith("--")))
-                throw ActionError("INVALID_ARGS", run { val got = next ?: tr("结尾", "the end"); tr("--$key 后面要跟一个值（收到的是 $got）。命令没有执行", "--$key needs a value after it (got $got). The command did not run") })
+                throw ActionError("INVALID_ARGS", run { val got = next ?: tr(S.vscreen_offload_handler_the_end); tr(S.vscreen_offload_handler_needs_a_value_after_it, key, got) })
         }
     }
 
@@ -258,7 +256,7 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
     private fun suggestFor(sub: String, bad: String): String {
         val pool = (optionsOf(sub) ?: emptySet())
         val best = pool.minByOrNull { editDistance(it, bad) } ?: return ""
-        return if (editDistance(best, bad) <= maxOf(2, bad.length / 3)) tr("；是不是 --$best？", "; did you mean --$best?") else ""
+        return if (editDistance(best, bad) <= maxOf(2, bad.length / 3)) tr(S.vscreen_offload_handler_did_you_mean, best) else ""
     }
 
     private fun editDistance(a: String, b: String): Int {
@@ -322,9 +320,8 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
     }
 
     private fun unknown(sub: String): NativeOffloadResult = if (sub in setOf("resume", "continue", "screenshot", "tap", "type", "swipe", "key", "wait", "scroll"))
-        NativeOffloadResult(2, tr("vscreen: 没有 $sub 命令：看画面就 act（不带步骤），点击/输入/滑动/等待都写成 act 的步骤（act \"tap 登录; type 你好\"）。用户在悬浮窗上点了“停止”或接管时，只有用户能交还\n",
-            "vscreen: there is no $sub command: to see the screen, act (no steps); tapping / typing / swiping / waiting are act steps (act \"tap Login; type hello\"). When the user tapped \"Stop\" or took over on the floating window, only the user can hand back\n"), "UNKNOWN_COMMAND")
-    else NativeOffloadResult(2, tr("vscreen: 没有命令 '$sub'", "vscreen: no command '$sub'") + "\n\n" + CommandSpec.quickHelp() + "\n", "UNKNOWN_COMMAND")
+        NativeOffloadResult(2, tr(S.vscreen_offload_handler_vscreen_there_is_no_command, sub), "UNKNOWN_COMMAND")
+    else NativeOffloadResult(2, tr(S.vscreen_offload_handler_vscreen_no_command, sub) + "\n\n" + CommandSpec.quickHelp() + "\n", "UNKNOWN_COMMAND")
 
     /** Facts about the display, for status. */
     internal fun base(d: VScreenDisplay) = JSONObject()
@@ -339,6 +336,6 @@ class VScreenOffloadHandler(internal val context: Context) : NativeOffloadHandle
 
     /** An error reply: the code, what happened, and what to do next (from the code table). */
     internal fun err(code: String, message: String, exit: Int = if (code in setOf("INVALID_ARGS", "UNKNOWN_OPTION", "INVALID_STEP", "UNKNOWN_COMMAND")) 2 else 1, data: JSONObject? = null): NativeOffloadResult =
-        NativeOffloadResult(exit, "${Blocks.error}$code${tr("：", ": ")}$message\n", code,
+        NativeOffloadResult(exit, "${Blocks.error}$code${tr(S.agent_guide_colon)}$message\n", code,
             JSONObject().put("message", message).put("next", Codes.next(code)).also { o -> data?.keys()?.forEach { k -> o.put(k, data.get(k)) } })
 }

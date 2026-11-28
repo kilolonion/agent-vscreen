@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -44,15 +45,15 @@ fun DetectorPreference() {
     val accepted = remember(tick) { VScreenDetector.licenseAccepted(ctx) }
     val on = remember(tick) { VScreenDetector.active(ctx) }
     ArrowPreference(
-        title = tr("无字图标识别", "Icon without text detection"),
-        summary = tr("识别没有文字标签的按钮和图标", "Finds buttons and icons without text labels"),
+        title = tr(S.detector_icon_without_text_detection),
+        summary = tr(S.detector_finds_buttons_and_icons_without),
         endActions = {
             Value(
                 when {
-                    inst == null -> tr("不可用", "Unavailable")
-                    !accepted -> tr("未开启", "Not on")
-                    on -> tr("已开启", "On")
-                    else -> tr("已关闭", "Off")
+                    inst == null -> tr(S.detector_unavailable)
+                    !accepted -> tr(S.detector_not_on)
+                    on -> tr(S.connect_on)
+                    else -> tr(S.automation_off)
                 },
             )
         },
@@ -71,33 +72,30 @@ fun DetectorPreference() {
             val err = withContext(Dispatchers.IO) {
                 runCatching {
                     val (offers, errors) = DetectorModels.fetchOffers()
-                    if (offers.isEmpty()) error(tr("所有下载源都连不上：", "No download source answered: ") + errors.joinToString("; "))
+                    if (offers.isEmpty()) error(tr(S.detector_no_download_source_answered) + errors.joinToString("; "))
                     val pick = offers.filter { it.sha256 != inst.sha256 }.maxByOrNull { it.bytes }
-                        ?: error(tr("还没有更大的模型", "No larger model yet"))
+                        ?: error(tr(S.detector_no_larger_model_yet))
                     DetectorModels.install(ctx, pick) { got, total -> pct = (got * 100 / maxOf(1L, total)).toInt() }
                 }.exceptionOrNull()
             }
             busy = false; pct = -1; tick++
-            note = err?.let { tr("没装上：", "Not installed: ") + (it.message ?: it.javaClass.simpleName) }
+            note = err?.let { tr(S.detector_not_installed) + (it.message ?: it.javaClass.simpleName) }
         }
     }
 
     GlassDialog(
         onDismissRequest = { if (!busy) open = false },
-        title = { DialogTitle(tr("无字图标识别", "Icon without text detection")) },
+        title = { DialogTitle(tr(S.detector_icon_without_text_detection)) },
         text = {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    tr(
-                        "在本机找出图标、×、开关这类没有文字的可点目标，agent 的元素列表里会多出“（无文字\u00A0图标）”，可以直接 tap #编号。",
-                        "Finds tappable items without words (icons, ×, switches) on this phone; the agent's element list gains \"(no\u00A0text\u00A0icon)\" entries it can tap by #number.",
-                    ),
+                    tr(S.detector_finds_tappable_items_without_words),
                     fontSize = 13.sp,
                     lineHeight = 19.sp,
                     color = small,
                 )
                 if (!accepted) {
-                    Text(tr("许可说明：", "License: ") + VScreenDetector.licenseNote(), fontSize = 13.sp, lineHeight = 19.sp)
+                    Text(tr(S.detector_license) + VScreenDetector.licenseNote(), fontSize = 13.sp, lineHeight = 19.sp)
                 } else if (inst != null) {
                     SwitchPreference(
                         checked = on,
@@ -107,10 +105,10 @@ fun DetectorPreference() {
                                 tick++
                             }
                         },
-                        title = tr("开启无字图标识别", "Enable icon finder"),
+                        title = tr(S.detector_enable_icon_finder),
                     )
                     RadioButtonPreference(
-                        title = tr("内置小模型", "Built-in small model"),
+                        title = tr(S.detector_built_in_small_model),
                         selected = inst.builtIn,
                         onClick = {
                             if (!busy && !inst.builtIn) {
@@ -121,28 +119,28 @@ fun DetectorPreference() {
                         },
                     )
                     RadioButtonPreference(
-                        title = tr("大模型（约 40 MB，更慢，需下载）", "Large model (~40 MB, slower, download)"),
+                        title = tr(S.detector_large_model_40_mb_slower),
                         selected = !inst.builtIn,
                         onClick = { if (!busy && inst.builtIn) downloadLarge() },
                     )
                 }
-                if (pct >= 0) Text(tr("下载中 $pct%", "Downloading $pct%"), fontSize = 13.sp, color = MiuixTheme.colorScheme.primary)
+                if (pct >= 0) Text(tr(S.detector_downloading, pct), fontSize = 13.sp, color = MiuixTheme.colorScheme.primary)
                 note?.let { Text(it, fontSize = 12.sp, color = Palette.stopped) }
             }
         },
         confirmButton = {
             if (!accepted && inst != null) {
                 LinkButton(onClick = { VScreenDetector.acceptLicense(ctx); tick++ }) {
-                    Text(tr("已了解，开启", "I understand, turn on"))
+                    Text(tr(S.detector_i_understand_turn_on))
                 }
             } else {
                 LinkButton(enabled = !busy, onClick = { open = false }) {
-                    Text(tr("完成", "Done"))
+                    Text(tr(S.connect_done))
                 }
             }
         },
         dismissButton = if (!accepted && inst != null) {
-            { LinkButton(enabled = !busy, onClick = { open = false }) { Text(tr("暂不", "Not now")) } }
+            { LinkButton(enabled = !busy, onClick = { open = false }) { Text(tr(S.detector_not_now)) } }
         } else null,
     )
 }

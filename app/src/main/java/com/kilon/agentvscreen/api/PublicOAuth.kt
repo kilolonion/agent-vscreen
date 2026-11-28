@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
 import android.app.KeyguardManager
 import android.content.Context
 import android.util.Base64
@@ -924,8 +925,8 @@ object PublicOAuth {
             Audit.security("public_authorize_no_lockscreen", "client=$clientId")
             return ApiServer.Resp.html(
                 errorPageHtml(
-                    tr("无法授权：手机未设置锁屏密码", "Authorization refused: phone has no screen lock"),
-                    tr("公网接入要求手机已设置锁屏密码或生物识别，不允许长按确认。", "Public MCP requires a screen lock PIN or biometric on the phone."),
+                    tr(S.public_oauth_authorization_refused_phone_has_no),
+                    tr(S.public_oauth_public_mcp_requires_a_screen),
                 ),
                 403,
             )
@@ -1182,7 +1183,7 @@ object PublicOAuth {
         val rawDevice = randomToken()
         val srcDisplay = sourceDisplay(rawSrc)
         val scopes = resolveSelectableScopes(client.requestedScope, f("scope"))
-        val pairing = when (val started = startPairing(client, "", tr("无回调地址（设备码配对）", "no redirect (device code)"), "", expectedResource, null, scopes, src, srcDisplay, Tokens.sha256(rawDevice))) {
+        val pairing = when (val started = startPairing(client, "", tr(S.public_oauth_no_redirect_device_code), "", expectedResource, null, scopes, src, srcDisplay, Tokens.sha256(rawDevice))) {
             is Started.Ok -> started.pairing
             is Started.Refused -> return started.resp
         }
@@ -1203,11 +1204,8 @@ object PublicOAuth {
     /** verification_uri page: instructs the user to enter the pairing code in Agent-VScreen on the phone. */
     fun devicePageHtml(): ApiServer.Resp = ApiServer.Resp.html(
         errorPageHtml(
-            tr("请在手机上批准", "Approve on your phone"),
-            tr(
-                "手机上已经弹出确认卡（或在通知里）。核对配对码与 agent 给你的一致后批准即可，这个页面不用操作。",
-                "A confirmation card is on your phone (or in its notifications). Check that its pairing code matches the one from the agent, then approve; nothing to do on this page.",
-            ),
+            tr(S.public_oauth_approve_on_your_phone),
+            tr(S.public_oauth_a_confirmation_card_is_on),
         ),
         200,
     )

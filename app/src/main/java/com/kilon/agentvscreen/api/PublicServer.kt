@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import com.kilon.agentvscreen.host.AppLogger
 import com.kilon.agentvscreen.host.HostService
@@ -118,7 +119,7 @@ class PublicServer(
                     s.soTimeout = 500
                     HttpCore.writeResponse(
                         s.getOutputStream(),
-                        ApiServer.Resp.err(503, "SERVER_BUSY", tr("同时进来的连接太多，请稍后重试", "Too many concurrent connections; retry shortly")),
+                        ApiServer.Resp.err(503, "SERVER_BUSY", tr(S.public_server_too_many_concurrent_connections_retry)),
                         apiServer.cliVersion(),
                     )
                 }
@@ -160,7 +161,7 @@ class PublicServer(
                     route(req)
                 } catch (t: Throwable) {
                     AppLogger.error(TAG, "route ${req.path}", t)
-                    ApiServer.Resp.err(500, "INTERNAL_ERROR", tr("服务器内部错误，请稍后重试", "Internal server error; please retry shortly"))
+                    ApiServer.Resp.err(500, "INTERNAL_ERROR", tr(S.public_server_internal_server_error_please_retry))
                 }
                 afterSend = resp.afterSend
                 HttpCore.writeResponse(out, resp, apiServer.cliVersion())
@@ -184,7 +185,7 @@ class PublicServer(
         val expectedSecret = secretProvider()
         val givenSecret = r.headers["x-avs-public"]
         if (expectedSecret.isEmpty() || givenSecret == null || !ApiServer.constTimeEq(givenSecret, expectedSecret)) {
-            return ApiServer.Resp.err(403, "NOT_ALLOWED", tr("缺少或无效的公网通道凭证", "Missing or invalid public bridge header"))
+            return ApiServer.Resp.err(403, "NOT_ALLOWED", tr(S.public_server_missing_or_invalid_public_bridge))
         }
 
         // 7.7: mark public BEFORE any downstream logic so X-VScreen-Tailnet can NEVER elevate this request.
@@ -252,7 +253,7 @@ class PublicServer(
         val authHeader = r.headers["authorization"]?.trim()
         if (authHeader.isNullOrEmpty()) {
             // Standard initial unauthenticated discovery probe (RFC 9728): 401 + WWW-Authenticate without lockout penalty.
-            return ApiServer.Resp.err(401, "BAD_TOKEN", tr("还没配对：这个地址用 OAuth。访问令牌只能在用户手机上批准配对后拿到，不能自己编或猜。按 $prmUrl 找到授权服务器，用浏览器授权或设备码流程（RFC 8628）配对；做不到就告诉用户你接不了。", "Not paired yet: this address uses OAuth. An access token only comes from the user approving the pairing on the phone; it cannot be made up or guessed. Find the authorization server from $prmUrl and pair with the browser flow or the device flow (RFC 8628); if you can't, tell the user you can't connect.")).plus(wwwAuth)
+            return ApiServer.Resp.err(401, "BAD_TOKEN", tr(S.public_server_not_paired_yet_this_address, prmUrl)).plus(wwwAuth)
         }
         val bearer = if (authHeader.startsWith("Bearer ", ignoreCase = true)) {
             authHeader.substring(7).trim()
@@ -270,7 +271,7 @@ class PublicServer(
                     remote = true,
                     path = r.path,
                     code = "BAD_TOKEN",
-                    msg = tr("公网访问令牌无效、已过期或目标地址不匹配。令牌只能由手机上的配对发放，不能自己编或猜，乱试会被暂时封锁：过期就用 refresh_token 换新的，否则重新配对（$prmUrl）。", "Public access token is invalid, expired, or bound to another resource. Tokens only come from pairing on the phone and cannot be made up or guessed; repeated guesses get locked out. If it expired use the refresh_token, otherwise pair again ($prmUrl)."),
+                    msg = tr(S.public_server_public_access_token_is_invalid, prmUrl),
                     status = 401,
                     // RFC 6750 §3.1: a token that was sent and refused says so, so a client knows to refresh or re-pair.
                     headers = mapOf("WWW-Authenticate" to """Bearer error="invalid_token", resource_metadata="$prmUrl""""),

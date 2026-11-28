@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import android.content.Intent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -52,16 +53,16 @@ internal fun AppPickerDialog(onDismiss: () -> Unit, onPick: (LaunchableApp) -> U
     }
     GlassDialog(
         onDismissRequest = onDismiss,
-        title = { DialogTitle(tr("在副屏打开应用", "Open an app on the background screen")) },
+        title = { DialogTitle(tr(S.app_picker_open_an_app_on_the)) },
         text = {
             Column {
-                Text(tr("应用在后台副屏运行，不占主屏；你随时可以接管、交给 agent 或关掉。", "The app runs on the background screen, not your main screen; take it over, hand it to an agent or close it any time."),
+                Text(tr(S.app_picker_the_app_runs_on_the),
                     style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                 Spacer(Modifier.height(8.dp))
-                AvsField(value = query, onValueChange = { query = it }, placeholder = tr("搜索名称或包名", "Search name or package"))
+                AvsField(value = query, onValueChange = { query = it }, placeholder = tr(S.app_picker_search_name_or_package))
                 Spacer(Modifier.height(8.dp))
                 val list = apps
-                if (list == null) Text(tr("读取应用列表…", "Loading apps…"), style = MiuixTheme.textStyles.footnote1,
+                if (list == null) Text(tr(S.app_picker_loading_apps), style = MiuixTheme.textStyles.footnote1,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(vertical = 16.dp))
                 else {
                     val q = query.trim().lowercase()
@@ -85,6 +86,6 @@ internal fun AppPickerDialog(onDismiss: () -> Unit, onPick: (LaunchableApp) -> U
                 }
             }
         },
-        confirmButton = { LinkButton(onClick = onDismiss) { Text(tr("取消", "Cancel")) } },
+        confirmButton = { LinkButton(onClick = onDismiss) { Text(tr(S.app_picker_cancel)) } },
     )
 }

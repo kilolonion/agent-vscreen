@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.trPair
 import com.kilon.agentvscreen.tr
 
 import android.content.Context
@@ -47,7 +48,7 @@ internal object VScreenStore {
         BLOCK("block", "禁止操作", "blocked"), READONLY("readonly", "只读", "read-only"),
         /** 1.2: every stretch that acts in this app is confirmed by the user on the phone first. */
         ASK("ask", "每次确认", "confirm every time");
-        val zh: String get() = tr(zhText, enText)
+        val zh: String get() = trPair(zhText, enText)
         companion object { fun of(s: String?): Rule? = values().firstOrNull { it.key == s } }
     }
 

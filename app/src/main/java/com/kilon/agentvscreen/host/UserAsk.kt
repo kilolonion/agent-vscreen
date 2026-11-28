@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -144,7 +145,7 @@ object UserAsk {
     fun say(ctx: Context, id: Int, text: String): Boolean {
         val a = synchronized(lock) { asks.firstOrNull { it.id == id && it.answer == null } } ?: return false
         a.said += text.trim().take(300)
-        told(ctx, a, tr("用户在示教中对你说：「${text.trim().take(300)}」（示教还在继续）", "While showing the lesson the user told you: \"${text.trim().take(300)}\" (the lesson goes on)"))
+        told(ctx, a, tr(S.user_ask_while_showing_the_lesson_the, text.trim().take(300)))
         return true
     }
 
@@ -155,15 +156,15 @@ object UserAsk {
             a.reply = reply; a.answer = allow; a.answeredAt = System.currentTimeMillis()
             publish(); lock.notifyAll(); a
         }
-        com.kilon.agentvscreen.cmd.Teach.askEnded(id, if (reply?.optString("kind") == "feedback") tr("你回了一句话", "you answered in words") else null)
+        com.kilon.agentvscreen.cmd.Teach.askEnded(id, if (reply?.optString("kind") == "feedback") tr(S.user_ask_you_answered_in_words) else null)
         val what = when {
             reply?.optString("kind") == "feedback" -> "feedback"
             a.kind == Kind.CONFIRM -> if (allow) "allowed" else "denied"
             else -> if (allow) "answered ${a.kind.key}" else "declined"
         }
         Audit.consent(a.tokenName, a.session, "${a.title} — ${a.detail}", what)
-        told(ctx, a, if (allow) tr("用户已回答（${a.kind.key}）：把同一条命令再发一次取结果", "The user answered (${a.kind.key}): send the same command again for the result")
-            else tr("用户没有回答（${a.kind.key}）", "The user declined (${a.kind.key})"))
+        told(ctx, a, if (allow) tr(S.user_ask_the_user_answered_send_the, a.kind.key)
+            else tr(S.user_ask_the_user_declined, a.kind.key))
         quiet("ask-cancel") { ctx.getSystemService(NotificationManager::class.java)?.cancel(noteId(id)) }
     }
 
@@ -183,7 +184,7 @@ object UserAsk {
         }
         ended.forEach { a ->
             Audit.consent(a.tokenName, a.session, "${a.title} — ${a.detail}", "ended: $reason")
-            ctx?.let { told(it, a, tr("副屏已关闭（$reason），这个请求结束了", "The background screen was closed ($reason); this request ended")) }
+            ctx?.let { told(it, a, tr(S.user_ask_the_background_screen_was_closed, reason)) }
             ctx?.let { c -> quiet("ask-ended") { c.getSystemService(NotificationManager::class.java)?.cancel(noteId(a.id)) } }
         }
     }
@@ -206,7 +207,7 @@ object UserAsk {
     fun withdraw(ctx: Context, a: Ask) {
         // The user is answering it right now (a lesson under way or waiting to be saved): it stays.
         synchronized(lock) { if (bound(a)) return; if (a.answer == null) { asks.remove(a); a.picture?.delete(); publish() } }
-        com.kilon.agentvscreen.cmd.Teach.askEnded(a.id, tr("agent 撤回了请求", "the agent withdrew it"))
+        com.kilon.agentvscreen.cmd.Teach.askEnded(a.id, tr(S.user_ask_the_agent_withdrew_it))
         quiet("ask-withdraw") { ctx.getSystemService(NotificationManager::class.java)?.cancel(noteId(a.id)) }
     }
 
@@ -227,7 +228,7 @@ object UserAsk {
         quiet("ask-notify") {
             val nm = ctx.getSystemService(NotificationManager::class.java) ?: return@quiet
             if (nm.getNotificationChannel(CHANNEL) == null)
-                nm.createNotificationChannel(NotificationChannel(CHANNEL, tr("需要你确认或回答的问题", "Questions that need your answer"), NotificationManager.IMPORTANCE_HIGH))
+                nm.createNotificationChannel(NotificationChannel(CHANNEL, tr(S.user_ask_questions_that_need_your_answer), NotificationManager.IMPORTANCE_HIGH))
             val b = NotificationCompat.Builder(ctx, CHANNEL)
                 .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
                 .setPriority(NotificationCompat.PRIORITY_HIGH).setCategory(NotificationCompat.CATEGORY_ALARM)
@@ -237,22 +238,22 @@ object UserAsk {
                     Intent(ctx, NoteActions::class.java).setAction(ACTION).putExtra("id", a.id).putExtra("allow", allow),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
                 val open = Needs.open(ctx, Needs.Page.HOME, 6)
-                val body = tr("${a.detail}\n来自：${a.tokenName}（会话 ${a.session}）", "${a.detail}\nFrom: ${a.tokenName} (session ${a.session})")
-                b.setContentTitle(tr("AI 请求：${a.title}", "AI asks: ${a.title}"))
+                val body = tr(S.user_ask_from_session, a.detail, a.tokenName, a.session)
+                b.setContentTitle(tr(S.user_ask_ai_asks, a.title))
                     .setContentText(a.detail).setStyle(NotificationCompat.BigTextStyle().bigText(body))
                     .setContentIntent(open)
-                    .addAction(0, tr("拒绝", "Deny"), pi(false)).addAction(0, tr("允许", "Allow"), pi(true))
+                    .addAction(0, tr(S.ask_activity_deny), pi(false)).addAction(0, tr(S.ask_activity_allow), pi(true))
             } else {
                 val open = PendingIntent.getActivity(ctx, 9000 + a.id % 500, answerIntent(ctx, a.id), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT, com.kilon.agentvscreen.ui.MainDisplay.options())
                 val how = when (a.kind) {
-                    Kind.POINT -> tr("点开，在画面上点一下回答", "Open it and tap the picture to answer")
-                    Kind.AREA -> tr("点开，在画面上框出一块回答", "Open it and drag a box on the picture to answer")
-                    Kind.CHOOSE -> tr("点开选一个", "Open it to choose")
-                    Kind.TEACH -> tr("点开，在副屏上做一遍给它看", "Open it and do it once on the background screen")
-                    else -> tr("点开回答", "Open it to answer")
+                    Kind.POINT -> tr(S.user_ask_open_it_and_tap_the)
+                    Kind.AREA -> tr(S.user_ask_open_it_and_drag_a)
+                    Kind.CHOOSE -> tr(S.user_ask_open_it_to_choose)
+                    Kind.TEACH -> tr(S.user_ask_open_it_and_do_it)
+                    else -> tr(S.user_ask_open_it_to_answer)
                 }
-                b.setContentTitle(tr("AI 在问你：${a.title}", "The AI asks you: ${a.title}"))
-                    .setContentText(how).setStyle(NotificationCompat.BigTextStyle().bigText(tr("$how\n来自：${a.tokenName}", "$how\nFrom: ${a.tokenName}")))
+                b.setContentTitle(tr(S.user_ask_the_ai_asks_you, a.title))
+                    .setContentText(how).setStyle(NotificationCompat.BigTextStyle().bigText(tr(S.user_ask_from, how, a.tokenName)))
                     .setContentIntent(open)
             }
             nm.notify(noteId(a.id), b.build())
@@ -289,7 +290,7 @@ object UserAsk {
             }
         }
         Audit.consent(a.tokenName, a.session, a.title, "answered teach")
-        told(ctx, a, tr("用户存好了示教：把同一条 teach 再发一次取结果", "The user saved the lesson: send the same teach again for the result"))
+        told(ctx, a, tr(S.user_ask_the_user_saved_the_lesson))
     }
 
     /** For tests. */

@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.content.Context
@@ -80,8 +81,8 @@ object ApiConfig {
         val u = normalizeControlUrl(v) ?: return null
         val uri = runCatching { java.net.URI(u) }.getOrNull()
         return when {
-            uri == null || uri.host.isNullOrBlank() -> tr("看不懂这个地址，应该像 https://hs.example.com", "Not an address; it should look like https://hs.example.com")
-            uri.scheme != "https" && uri.scheme != "http" -> tr("只能是 https:// 或 http:// 开头", "It must start with https:// or http://")
+            uri == null || uri.host.isNullOrBlank() -> tr(S.api_config_not_an_address_it_should)
+            uri.scheme != "https" && uri.scheme != "http" -> tr(S.api_config_it_must_start_with_https)
             else -> null
         }
     }

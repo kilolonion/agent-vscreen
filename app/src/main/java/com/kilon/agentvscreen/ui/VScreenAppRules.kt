@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.basic.Text
 import com.kilon.agentvscreen.tr
@@ -58,7 +59,7 @@ fun VScreenAppRules() {
     }
 
     if (rules.isEmpty()) {
-        Text(tr("还没有限制，所有应用都可以操作", "No rules yet: every app can be operated"), fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        Text(tr(S.vscreen_app_rules_no_rules_yet_every_app), fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
     } else {
         rules.entries.sortedBy { labels[it.key] ?: it.key }.forEach { (pkg, rule) ->
             Row(
@@ -77,12 +78,12 @@ fun VScreenAppRules() {
                 LinkButton(onClick = {
                     val all = VScreenStore.Rule.values()
                     VScreenStore.setRule(pkg, all[(all.indexOf(rule) + 1) % all.size])
-                }) { Text(tr("换一种", "Change")) }
-                LinkButton(onClick = { VScreenStore.setRule(pkg, null) }) { Text(tr("移除", "Remove")) }
+                }) { Text(tr(S.vscreen_app_rules_change)) }
+                LinkButton(onClick = { VScreenStore.setRule(pkg, null) }) { Text(tr(S.sound_page_remove)) }
             }
         }
     }
-    SoftButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) { Text(tr("添加应用", "Add app")) }
+    SoftButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) { Text(tr(S.vscreen_app_rules_add_app)) }
 
     if (adding) AddRuleDialog(apps, rules.keys, onDismiss = { adding = false }) { pkg, rule ->
         VScreenStore.setRule(pkg, rule)
@@ -102,12 +103,12 @@ private fun AddRuleDialog(
     var picked by remember { mutableStateOf<Pair<String, String>?>(null) }
     GlassDialog(
         onDismissRequest = onDismiss,
-        title = { Text(picked?.first ?: tr("选择应用", "Choose app")) },
+        title = { Text(picked?.first ?: tr(S.vscreen_app_rules_choose_app)) },
         text = {
             val p = picked
             if (p == null) {
                 Column {
-                    AvsField(value = query, onValueChange = { query = it }, placeholder = tr("搜索名称或包名", "Search name or package"))
+                    AvsField(value = query, onValueChange = { query = it }, placeholder = tr(S.app_picker_search_name_or_package))
                     Spacer(Modifier.height(8.dp))
                     val q = query.trim().lowercase()
                     val shown = apps.filter { it.second !in existing && (q.isEmpty() || it.first.lowercase().contains(q) || it.second.lowercase().contains(q)) }
@@ -124,20 +125,20 @@ private fun AddRuleDialog(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(p.second, style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     SoftButton(onClick = { onPick(p.second, VScreenStore.Rule.BLOCK) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(tr("禁止操作（不能打开、读屏、操作）", "Blocked (no opening, reading or operating)"))
+                        Text(tr(S.vscreen_app_rules_blocked_no_opening_reading_or))
                     }
                     SoftButton(onClick = { onPick(p.second, VScreenStore.Rule.READONLY) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(tr("只读（能看和滚动，不能点击输入）", "Read-only (look and scroll, no tapping or typing)"))
+                        Text(tr(S.vscreen_app_rules_read_only_look_and_scroll))
                     }
                     SoftButton(onClick = { onPick(p.second, VScreenStore.Rule.ASK) }, modifier = Modifier.fillMaxWidth()) {
-                        Text(tr("每次确认（操作前在手机上问你）", "Confirm every time (asks you on the phone before acting)"))
+                        Text(tr(S.vscreen_app_rules_confirm_every_time_asks_you))
                     }
                 }
             }
         },
         confirmButton = {},
         dismissButton = {
-            LinkButton(onClick = { if (picked != null) picked = null else onDismiss() }) { Text(if (picked != null) tr("返回", "Back") else tr("取消", "Cancel")) }
+            LinkButton(onClick = { if (picked != null) picked = null else onDismiss() }) { Text(if (picked != null) tr(S.app_back) else tr(S.app_picker_cancel)) }
         },
     )
 }

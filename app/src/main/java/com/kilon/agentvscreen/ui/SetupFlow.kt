@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import top.yukonga.miuix.kmp.basic.Text
 import android.content.Intent
 import android.net.Uri
@@ -75,10 +76,10 @@ fun SetupFlowPage() {
         withContext(Dispatchers.IO) { com.kilon.agentvscreen.host.Privileged.choose(ctx, v) }
         kotlinx.coroutines.delay(600); refresh()
     }
-    fun open(i: Intent) { runCatching { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { host.say(tr("这台手机打不开这个设置页", "This phone cannot open that settings page")) } }
+    fun open(i: Intent) { runCatching { ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { host.say(tr(S.setup_flow_this_phone_cannot_open_that)) } }
 
-    MiuixPage(tr("首次配置", "Setup"), subtitle = if (root) tr("用 Root，不需要 Shizuku", "Root, no Shizuku needed") else tr("支持 Shizuku / 兼容分支，不占 adb", "Shizuku / compatible forks, adb untouched")) {
-        if (items.isEmpty()) { Footnote(tr("正在检查…", "Checking…")); return@MiuixPage }
+    MiuixPage(tr(S.settings_setup), subtitle = if (root) tr(S.setup_flow_root_no_shizuku_needed) else tr(S.setup_flow_shizuku_compatible_forks_adb_untouched)) {
+        if (items.isEmpty()) { Footnote(tr(S.public_access_checking)); return@MiuixPage }
         // Progress: one dot per item, filled when done.
         Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             items.forEach { Box(Modifier.weight(1f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(
@@ -90,15 +91,15 @@ fun SetupFlowPage() {
                     Box(Modifier.size(56.dp).clip(CircleShape).background(Palette.takeover.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
                         Text("✓", fontSize = 28.sp, color = Palette.takeover, fontWeight = FontWeight.Bold)
                     }
-                    Text(tr("配置完成", "All set"), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                    Text(if (skipped.isEmpty()) tr("现在可以接入 agent。", "You can connect an agent now.") else tr("跳过的可选项在下方列表中，可随时补上。", "Skipped optional items are in the list below and can be set up any time."),
+                    Text(tr(S.setup_flow_all_set), fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                    Text(if (skipped.isEmpty()) tr(S.setup_flow_you_can_connect_an_agent) else tr(S.setup_flow_skipped_optional_items_are_in),
                         fontSize = 14.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, textAlign = TextAlign.Center)
                     PrimaryButton(onClick = { nav.back(); nav.go(Route.Connect) }, modifier = Modifier.fillMaxWidth(), color = MiuixTheme.colorScheme.primary) {
-                        Text(tr("接入 agent", "Connect an agent"), color = MiuixTheme.colorScheme.onPrimary)
+                        Text(tr(S.setup_flow_connect_an_agent), color = MiuixTheme.colorScheme.onPrimary)
                     }
                 } else {
                     val n = items.indexOf(step) + 1
-                    Text(tr("第 $n 步，共 ${items.size} 步", "Step $n of ${items.size}") + if (step.key in OPTIONAL) tr(" · 可选", " · optional") else "",
+                    Text(tr(S.setup_flow_step_of, n, items.size) + if (step.key in OPTIONAL) tr(S.setup_flow_optional) else "",
                         fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     Text(step.label, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
                     Text(step.detail, fontSize = 14.sp, lineHeight = 20.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, textAlign = TextAlign.Center)
@@ -106,26 +107,26 @@ fun SetupFlowPage() {
                     val starting = root && rootPhase == com.kilon.agentvscreen.host.RootBackend.Phase.STARTING
                     val providerName = ShizukuManager.providerLabel() ?: "Shizuku"
                     val (label, act) = when {
-                        step.key == "detector" -> tr("已了解，开启", "I understand, turn on") to {
+                        step.key == "detector" -> tr(S.detector_i_understand_turn_on) to {
                             com.kilon.agentvscreen.core.VScreenDetector.acceptLicense(ctx); refresh(); Unit
                         }
-                        step.key == "privilege" && root -> (if (starting) tr("启动中…", "Starting…") else tr("用 Root 启动", "Start with root")) to {
+                        step.key == "privilege" && root -> (if (starting) tr(S.setup_flow_starting) else tr(S.setup_flow_start_with_root)) to {
                             choose(com.kilon.agentvscreen.host.Privileged.Via.ROOT); Unit
                         }
                         step.key == "privilege" -> when (sh.state) {
-                            ShizukuManager.State.NOT_INSTALLED -> tr("安装 Shizuku", "Install Shizuku") to { ShizukuManager.openInstallPage(ctx) }
-                            ShizukuManager.State.NOT_RUNNING -> tr("打开 $providerName", "Open $providerName") to { ShizukuManager.openShizukuApp(ctx) }
-                            else -> tr("授权 $providerName", "Grant $providerName") to { host.grantShizuku(); refresh(); Unit }
+                            ShizukuManager.State.NOT_INSTALLED -> tr(S.setup_flow_install_shizuku) to { ShizukuManager.openInstallPage(ctx) }
+                            ShizukuManager.State.NOT_RUNNING -> tr(S.setup_flow_open, providerName) to { ShizukuManager.openShizukuApp(ctx) }
+                            else -> tr(S.setup_flow_grant, providerName) to { host.grantShizuku(); refresh(); Unit }
                         }
-                        step.key == "vendor_bg" -> tr("去系统后台管理", "Open background management") to {
+                        step.key == "vendor_bg" -> tr(S.setup_flow_open_background_management) to {
                             val opened = Liveness.openBackgroundSettings(ctx)
-                            host.say(tr("已打开：$opened", "Opened: $opened")); app.liveProblem = Liveness.problem(); Unit
+                            host.say(tr(S.setup_flow_opened, opened)); app.liveProblem = Liveness.problem(); Unit
                         }
-                        ready && step.key != "accessibility" -> (if (busy) tr("配置中…", "Setting up…") else tr("自动开启", "Turn it on")) to {
+                        ready && step.key != "accessibility" -> (if (busy) tr(S.setup_flow_setting_up) else tr(S.setup_flow_turn_it_on)) to {
                             busy = true
                             scope.launch { log = withContext(Dispatchers.IO) { Setup.grantAll(ctx) }; busy = false; Overlay.refresh(); refresh() }; Unit
                         }
-                        else -> tr("去系统设置打开", "Open system settings") to {
+                        else -> tr(S.setup_flow_open_system_settings) to {
                             open(when (step.key) {
                                 "overlay" -> Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${ctx.packageName}"))
                                 "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
@@ -145,32 +146,32 @@ fun SetupFlowPage() {
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(
-                                if (suVisible) tr("检测到 Root：改用 Root（无需 Shizuku）", "Root detected: use Root (no Shizuku needed)")
-                                else tr("改用 Root（无需 Shizuku）", "Use Root instead (no Shizuku needed)"),
+                                if (suVisible) tr(S.setup_flow_root_detected_use_root_no)
+                                else tr(S.setup_flow_use_root_instead_no_shizuku),
                             )
                         }
                     }
                     if (step.key == "privilege") Row(verticalAlignment = Alignment.CenterVertically) {
                         if (root) {
                             LinkButton(onClick = { choose(com.kilon.agentvscreen.host.Privileged.Via.SHIZUKU) }) {
-                                Text(tr("改用 Shizuku / 兼容分支", "Use Shizuku / compatible fork"))
+                                Text(tr(S.setup_flow_use_shizuku_compatible_fork))
                             }
                         }
-                        Help(tr("Shizuku、兼容分支与 Root", "Shizuku, forks and Root"), H.privilege)
+                        Help(tr(S.setup_flow_shizuku_forks_and_root), H.privilege)
                     }
                     if (step.key in OPTIONAL) LinkButton(onClick = {
                         skipped += step.key
                         if (step.key == "detector") { com.kilon.agentvscreen.core.VScreenDetector.decline(ctx); refresh() }
-                    }) { Text(tr("跳过这一步", "Skip this step")) }
-                    if (step.key == "accessibility" && ready) Text(tr("无障碍只能由你在系统设置里打开。", "Only you can turn accessibility on, in system settings."),
+                    }) { Text(tr(S.setup_flow_skip_this_step)) }
+                    if (step.key == "accessibility" && ready) Text(tr(S.setup_flow_only_you_can_turn_accessibility),
                         fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                 }
             }
         }
         log.forEach { Footnote(it) }
-        Group(tr("全部项目", "All items")) {
+        Group(tr(S.setup_flow_all_items)) {
             items.forEach { it ->
-                BasicComponent(title = it.label + if (it.key in OPTIONAL) tr("（可选）", " (optional)") else "", summary = it.detail,
+                BasicComponent(title = it.label + if (it.key in OPTIONAL) tr(S.setup_flow_optional_2) else "", summary = it.detail,
                     startAction = { Box(Modifier.padding(end = 12.dp)) { Dot(if (it.ok) Palette.takeover else if (it.key in OPTIONAL) Palette.idle else Palette.stopped, 10.dp) } },
                     onClick = if (!it.ok && it.key in skipped) ({ skipped -= it.key }) else null)
             }

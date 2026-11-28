@@ -113,8 +113,7 @@ Entry 的语义必须来自模型对真实证据的理解。不得仅依据路�
    - 命令、结果码、能力清单分别以 `CommandSpec.kt`、`Codes.kt`、`Abilities.kt` 为单一事实源；图片编码统一经 `Pictures.kt`（严禁在其他文件直接调用 `Bitmap.compress`）；帧变化判定统一经 `Change.kt`；特权执行统一经 `Privileged.kt` 与 `ExecAllowlist.kt`（禁止运行时 `sh -c`）。
    - `AgentGuide.guide()` 必须满足 `<= 1500` tokens；`AgentGuide.memoryFor()` 必须满足 `< 1880` 字符（中文）/ `< 4170` 字符（英文）；严禁针对特定第三方应用编写硬编码特判。
 3. **双语与正则红线**：
-   - 所有面向用户与 agent 的文案一律使用 `tr("中", "En")`，英文输出严禁出现全角标点（`V200Beta16Test` 守门）。
-   - 日语按英文原文查 `tools/i18n/ja.tsv`：新增或修改 `ui/`、`host/` 里的英文文案时，同步把日语移到新英文下（只给 agent 看的写进 `ja-skip.txt`），再跑 `python3 tools/i18n/build_ja.py`；CI 用 `--check` 守门。
+   - 面向用户的文案一律放进文本表 `app/src/main/resources/i18n/strings.tsv`（key、scope、每种语言一列），代码里写 `tr(S.key, 值…)`，`{0}`、`{1}` 按参数顺序填入；改完表跑 `python3 tools/i18n/strings.py` 重新生成 `S.kt`。`ui` 行每种语言都要填，`agent` 行（只给 agent 看）中英即可。`ui/`、`host/` 里不允许内联 `tr("中", "En")`；枚举、命令说明、版本记录这类成对数据和 agent 回复的拼接文本用 `trPair(中, 英)`。英文严禁全角标点（`V200Beta16Test` 守门），CI 用 `strings.py --check` 守门。
    - `cmd/`、`core/`、`api/` 中的 `Regex("...")` 严禁裸 `{` 或 `}`（Android ICU 会导致类初始化崩溃，`VScreenRegexLintTest` 守门）。
 4. **线程与错误处理红线**：
    - 后台常驻循环必须在内层做好 `try/catch`；禁止在 `while (true)` 循环内把 `Thread.sleep` 包进 `quiet()` 掩盖中断或忙等；禁止在 `Dispatchers.Main` 上运行无异常捕获的无限循环。

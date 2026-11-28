@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
+import com.kilon.agentvscreen.trPair
 import com.kilon.agentvscreen.core.VScreenAwake
 import com.kilon.agentvscreen.core.Change
 import com.kilon.agentvscreen.tr
@@ -29,7 +31,7 @@ internal fun VScreenOffloadHandler.freshFrameOf(d: VScreenDisplay): Bitmap {
     val t0 = SystemClock.elapsedRealtime()
     d.requestFreshFrame()
     d.awaitFrameAfter(t0, 600)
-    return d.latestFrame() ?: throw ActionError("NO_FRAME", tr("副屏还没有画面", "the screen has no picture yet"))
+    return d.latestFrame() ?: throw ActionError("NO_FRAME", tr(S.vscreen_ask_the_screen_has_no_picture))
 }
 
 internal data class SpotFilterResult(val kept: List<VScreenSpots.Spot>, val skippedText: Int)
@@ -65,21 +67,21 @@ internal fun filterSpotsOnText(
 
 /** `spots [x1,y1,x2,y2] [--color #RRGGBB]`: colour blobs found on the device (no model), numbered S1…, with centres. */
 internal fun VScreenOffloadHandler.spotsCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {
-    val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
-    val region = args.positional.firstOrNull()?.let { parseRect(it, tr("区域", "region")) }
-    val color = args.get("color")?.let { VScreenSpots.parseColor(it) ?: throw ActionError("INVALID_ARGS", tr("--color 写成 #RRGGBB", "write --color as #RRGGBB")) }
-    return BackgroundOperation.agentAction(s, null, isRead = true, describe = tr("找色块", "find color spots")) { d ->
+    val s = sid ?: throw ActionError("NO_SESSION", tr(S.vscreen_act_no_session_header_x_vscreen))
+    val region = args.positional.firstOrNull()?.let { parseRect(it, tr(S.vscreen_helpers_region)) }
+    val color = args.get("color")?.let { VScreenSpots.parseColor(it) ?: throw ActionError("INVALID_ARGS", tr(S.vscreen_helpers_write_color_as_rrggbb)) }
+    return BackgroundOperation.agentAction(s, null, isRead = true, describe = tr(S.vscreen_helpers_find_color_spots)) { d ->
         val snap = snapshot(d)
-        val frame = snap.frame ?: throw ActionError("NO_FRAME", tr("副屏还没有画面", "the screen has no picture yet"))
+        val frame = snap.frame ?: throw ActionError("NO_FRAME", tr(S.vscreen_ask_the_screen_has_no_picture))
         val found = VScreenSpots.find(frame, region = region, color = color, limit = 120)
         val (list, textual) = filterSpotsOnText(found, snap.items.orEmpty().map { it.box }, snap.els, limit = 60)
-        if (list.isEmpty()) return@agentAction text(tr("没找到色块", "No color spots found") + (region?.let { tr("（区域 ${Report.box(it)}）", " (region ${Report.box(it)})") } ?: "") + if (textual > 0) tr("（有 $textual 个是文字，已略过）", " ($textual on text were skipped)") else "")
-        val sb = StringBuilder(tr("色块（本地按颜色找的，不是识别；tap 用括号里的坐标）", "Color spots (found locally by color, not recognized; tap the coordinates in brackets)") + (if (textual > 0) tr("，另有 $textual 个落在文字上的已略过", "; $textual more on text were skipped") else "") + tr("：\n", ":\n"))
+        if (list.isEmpty()) return@agentAction text(tr(S.vscreen_helpers_no_color_spots_found) + (region?.let { tr(S.vscreen_helpers_region_2, Report.box(it)) } ?: "") + if (textual > 0) tr(S.vscreen_helpers_on_text_were_skipped, textual) else "")
+        val sb = StringBuilder(tr(S.vscreen_helpers_color_spots_found_locally_by) + (if (textual > 0) tr(S.vscreen_helpers_more_on_text_were_skipped, textual) else "") + tr(S.vscreen_helpers_text))
         list.forEachIndexed { i, sp ->
-            sb.append("S${i + 1} ${sp.shape}${if (sp.hollow) tr("(空心)", "(hollow)") else ""} ${VScreenSpots.hex(sp.color)} (${sp.cx},${sp.cy}) ${sp.box.width()}x${sp.box.height()}\n")
+            sb.append("S${i + 1} ${sp.shape}${if (sp.hollow) tr(S.vscreen_helpers_hollow) else ""} ${VScreenSpots.hex(sp.color)} (${sp.cx},${sp.cy}) ${sp.box.width()}x${sp.box.height()}\n")
         }
         runCatching { VScreenGame.annotate(frame, list.mapIndexed { i, sp -> VScreenGame.Label("S${i + 1}", sp.box, sp.cx to sp.cy) }) }.getOrNull()?.let { b ->
-            savePic(s, b, "spots")?.let { sb.append(tr("标注图 ", "marked picture ")).append(it).append('\n') }; b.recycle()
+            savePic(s, b, "spots")?.let { sb.append(tr(S.vscreen_helpers_marked_picture)).append(it).append('\n') }; b.recycle()
         }
         text(sb.toString())
     }
@@ -87,13 +89,13 @@ internal fun VScreenOffloadHandler.spotsCmd(sid: String?, args: OffloadArgs): Na
 
 /** `zoom x1,y1,x2,y2 [--scale N]`: that area enlarged, with screen coordinates on its edges, plus the elements in it. */
 internal fun VScreenOffloadHandler.zoomCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {
-    val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
-    val r0 = args.positional.firstOrNull()?.let { parseRect(it, tr("区域", "region")) }
+    val s = sid ?: throw ActionError("NO_SESSION", tr(S.vscreen_act_no_session_header_x_vscreen))
+    val r0 = args.positional.firstOrNull()?.let { parseRect(it, tr(S.vscreen_helpers_region)) }
         ?: if (args.get("scale") != null) Rect(0, 0, Int.MAX_VALUE / 2, Int.MAX_VALUE / 2) else throw ActionError("INVALID_ARGS", "look x1,y1,x2,y2 [--scale 2]")
-    return BackgroundOperation.agentAction(s, null, isRead = true, describe = tr("放大看", "zoom in")) { d ->
+    return BackgroundOperation.agentAction(s, null, isRead = true, describe = tr(S.vscreen_helpers_zoom_in)) { d ->
         val frame = freshFrameOf(d)
         val r = Rect(r0.left.coerceIn(0, frame.width - 1), r0.top.coerceIn(0, frame.height - 1), r0.right.coerceIn(1, frame.width), r0.bottom.coerceIn(1, frame.height))
-        if (r.width() < 4 || r.height() < 4) throw ActionError("INVALID_ARGS", tr("区域太小或在副屏外（副屏 ${d.width}x${d.height}）", "region too small or outside the screen (screen ${d.width}x${d.height})"))
+        if (r.width() < 4 || r.height() < 4) throw ActionError("INVALID_ARGS", tr(S.vscreen_helpers_region_too_small_or_outside, d.width, d.height))
         val detail = Detail.of(args)
         // 1.4.0-beta3: an asked --scale is honoured up to the largest picture any detail makes (beta2 capped it at the
         // detail's own side and said nothing, so on a 520 px region 3 and 4 both came out as 2.5).
@@ -104,10 +106,8 @@ internal fun VScreenOffloadHandler.zoomCmd(sid: String?, args: OffloadArgs): Nat
         val whole = args.positional.isEmpty()
         // 1.4.0-beta6 (test: zoom --scale 1.5 on the whole screen always came out ×1 "would pass 2048 px"): the whole
         // screen at full detail is all there is; enlarging it adds no detail. Said so, with the way to get more.
-        if (whole && asked != null && asked > 1.0) adjusted(tr("整屏已按最清楚的给（放大整屏不会多出细节）；要看更细就框一块：look x1,y1,x2,y2 --scale $asked",
-            "the whole screen is given at full detail (enlarging it adds nothing); for more, frame a part: look x1,y1,x2,y2 --scale $asked"))
-        else if (asked != null && kotlin.math.abs(asked - k) > 0.05) adjusted(tr("--scale $asked 按 ${"%.1f".format(k)} 执行：这块区域再放大图会超过 $side 像素，框小一点能放得更大",
-            "--scale $asked used as ${"%.1f".format(k)}: a larger picture of this region would pass $side px; a smaller region zooms further"))
+        if (whole && asked != null && asked > 1.0) adjusted(tr(S.vscreen_helpers_the_whole_screen_is_given, asked))
+        else if (asked != null && kotlin.math.abs(asked - k) > 0.05) adjusted(tr(S.vscreen_helpers_scale_used_as_a_larger, asked, "%.1f".format(k), side))
         val w = (r.width() * k).roundToInt(); val h = (r.height() * k).roundToInt()
         val m = 34
         val out = Bitmap.createBitmap(w + m, h + m, Bitmap.Config.ARGB_8888)
@@ -122,8 +122,8 @@ internal fun VScreenOffloadHandler.zoomCmd(sid: String?, args: OffloadArgs): Nat
         val path = savePic(s, out, "zoom", if (asked != null && w + m > detail.use.side) Detail.HIGH.use else detail.use); out.recycle()
         val inside = synchronized(VScreenOffloadHandler.lastElements) { VScreenOffloadHandler.lastElements[s] }
             ?.takeIf { it.generation == d.generation }?.list?.filter { Rect.intersects(it.box, r) }.orEmpty()
-        val sb = StringBuilder(run { val x = "%.1f".format(k); tr("区域 ${Report.box(r)} 放大 $x 倍", "Region ${Report.box(r)} zoomed ×$x") } + (path?.let { tr("：$it", ": $it") } ?: tr("（图没存下来）", " (picture not saved)")) + tr("（边上是副屏坐标）\n", " (screen coordinates on the edges)\n"))
-        if (inside.isNotEmpty()) { sb.append(tr("上次列表里在这块的元素：\n", "elements from the last list inside it:\n")); inside.forEach { sb.append(it.line()).append('\n') } }
+        val sb = StringBuilder(run { val x = "%.1f".format(k); tr(S.vscreen_helpers_region_zoomed, Report.box(r), x) } + (path?.let { tr(S.vscreen_helpers_text_2, it) } ?: tr(S.vscreen_helpers_picture_not_saved)) + tr(S.vscreen_helpers_screen_coordinates_on_the_edges))
+        if (inside.isNotEmpty()) { sb.append(tr(S.vscreen_helpers_elements_from_the_last_list)); inside.forEach { sb.append(it.line()).append('\n') } }
         text(sb.toString())
     }
 }
@@ -271,17 +271,17 @@ internal const val SCROLL_SEEN_PX = 60
 
 /** `collect [--pages N] [--until 文字]`: scroll down page by page and gather the entries (de-duplicated). */
 internal fun VScreenOffloadHandler.collectCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {
-    val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
+    val s = sid ?: throw ActionError("NO_SESSION", tr(S.vscreen_act_no_session_header_x_vscreen))
     val pages = bounded("pages", args.getInt("pages") ?: 8, 1, 40)
     val until = args.get("until")?.let { VScreenOcr.norm(it) }
     var cancelled: String? = null
-    val body = BackgroundOperation.agentAction(s, null, isRead = false, describe = tr("滚动收集", "scroll and collect")) { d ->
+    val body = BackgroundOperation.agentAction(s, null, isRead = false, describe = tr(S.vscreen_helpers_scroll_and_collect)) { d ->
         VScreenPerception.ensure(d)
         val entries = ArrayList<String>()
         val keys = ArrayList<String>()
         /** Where each entry was first seen on its screen (to drop the ones that turn out to sit on a fixed bar). */
         val boxes = ArrayList<Rect>()
-        var why = tr("翻完 $pages 页", "went through $pages pages")
+        var why = tr(S.vscreen_helpers_went_through_pages, pages)
         var scanned = 0
         var fixed: List<Rect> = emptyList()
         var prevEls: List<El>? = null
@@ -303,12 +303,12 @@ internal fun VScreenOffloadHandler.collectCmd(sid: String?, args: OffloadArgs): 
                 before?.recycle(); after?.recycle(); ups++
                 if (moved <= Change.Level.SCROLL.max || runCatching { com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId).canScroll(forward = false) }.getOrNull() == false) break
             }
-            startNote = tr("先往上滚了 $ups 次回到顶部", "scrolled up $ups times to the top first")
+            startNote = tr(S.vscreen_helpers_scrolled_up_times_to_the, ups)
         } else if (runCatching { com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId).canScroll(forward = false) }.getOrNull() == true)
-            startNote = tr("是从当前位置往下收集的，这一页上面还有内容没有收（要从头收：collect --from-top）", "collected from the current position down; there is more above that was not collected (from the top: collect --from-top)")
+            startNote = tr(S.vscreen_helpers_collected_from_the_current_position)
         try {
             for (p in 0 until pages) {
-                if (Call.current()?.cancelled == true) throw ActionError("CANCELLED", tr("调用方取消了", "The caller cancelled"))
+                if (Call.current()?.cancelled == true) throw ActionError("CANCELLED", tr(S.vscreen_helpers_the_caller_cancelled))
                 val els = snapshot(d).els
                 scanned++
                 // Bars that did not move with the scroll (top tabs, a bottom bar, a sticky search box) are not entries.
@@ -331,7 +331,7 @@ internal fun VScreenOffloadHandler.collectCmd(sid: String?, args: OffloadArgs): 
                 if (p == 1 && fixed.isNotEmpty()) { entries.clear(); keys.clear(); boxes.clear(); hit = false; prevEls?.let { add(it) } }
                 prevEls = els
                 add(els)
-                if (hit) { why = run { val u = args.get("until"); tr("看到了“$u”", "saw \"$u\"") }; break }
+                if (hit) { why = run { val u = args.get("until"); tr(S.vscreen_helpers_saw, u) }; break }
                 if (p == pages - 1) break
                 // One scroll: how much of the picture changed (areas that move by themselves left out, unless they cover
                 // most of the screen: then they would hide the scroll itself).
@@ -371,9 +371,9 @@ internal fun VScreenOffloadHandler.collectCmd(sid: String?, args: OffloadArgs): 
                 }
                 if (scrolled(0.5, 450, 2_500L) <= Change.Level.SCROLL.max && scrolled(0.3, 650, 3_500L) <= Change.Level.SCROLL.max && !listScrolled()) {
                     why = when (runCatching { com.kilon.agentvscreen.core.A11yTree.snapshot(d.displayId).canScroll(forward = true) }.getOrNull()) {
-                        false -> tr("到底了（再滑两次画面都没动，列表也说不能再往下）", "reached the end (two more swipes moved nothing, and the list says it cannot go further)")
-                        true -> tr("再滑两次画面都没动，但列表说还能往下（可能在加载，或滑动落在了不能滚的地方）；稍后可以再 collect", "two more swipes moved nothing, though the list says it can go further (loading, or the swipe landed on something that does not scroll); collect again later")
-                        null -> tr("再滑两次画面都没动（可能到底了，或这块不能滚）", "two more swipes moved nothing (probably the end, or this area does not scroll)")
+                        false -> tr(S.vscreen_helpers_reached_the_end_two_more)
+                        true -> tr(S.vscreen_helpers_two_more_swipes_moved_nothing)
+                        null -> tr(S.vscreen_helpers_two_more_swipes_moved_nothing_2)
                     }
                     break
                 }
@@ -382,7 +382,7 @@ internal fun VScreenOffloadHandler.collectCmd(sid: String?, args: OffloadArgs): 
             // 1.3: a cancelled (or interrupted) collection returns what it had, and says where it stopped.
             if (entries.isEmpty() && e.code != "CANCELLED") throw e
             cancelled = e.code
-            why = tr("在第 $scanned 屏停下（${e.code}：${e.message}）", "stopped at screen $scanned (${e.code}: ${e.message})")
+            why = tr(S.vscreen_helpers_stopped_at_screen, scanned, e.code, e.message)
         }
         // 1.3.0: a bar found only on a later screen (a header that collapses first, then the tab bar stays) was
         // already taken as entries from the earlier screens. Whatever reads exactly like a fixed bar's words goes.
@@ -393,14 +393,14 @@ internal fun VScreenOffloadHandler.collectCmd(sid: String?, args: OffloadArgs): 
         fun onBar(b: Rect) = fixed.any { f -> Math.abs(f.centerX() - b.centerX()) <= 16 && Math.abs(f.centerY() - b.centerY()) <= 16 && Math.abs(f.height() - b.height()) <= 16 }
         for (k in keys.indices.reversed()) if (keys[k] in barWords || boxes.getOrNull(k)?.let { onBar(it) } == true) { keys.removeAt(k); entries.removeAt(k); if (k < boxes.size) boxes.removeAt(k) }
         chrome = fixed.size
-        val sb = StringBuilder(tr("收集了 ${entries.size} 条，看了 $scanned 屏，停下原因：$why（控件文字为主、OCR 补充，可能有错字；一张卡片或一行列表是一条，同一条在几屏里重复出现只记一次" + (if (chrome > 0) "；不随滚动移动的吸顶栏、标签栏、底栏（$chrome 处）不算条目" else "") + "）\n",
+        val sb = StringBuilder(trPair("收集了 ${entries.size} 条，看了 $scanned 屏，停下原因：$why（控件文字为主、OCR 补充，可能有错字；一张卡片或一行列表是一条，同一条在几屏里重复出现只记一次" + (if (chrome > 0) "；不随滚动移动的吸顶栏、标签栏、底栏（$chrome 处）不算条目" else "") + "）\n",
             "Collected ${entries.size} items over $scanned screens, stopped because: $why (widget text first, OCR fills in, may have typos; one card or list row is one item, an item repeated across screens is counted once" + (if (chrome > 0) "; $chrome bars that stay in place while scrolling (top, tabs, bottom) are not items" else "") + ")\n"))
         startNote?.let { sb.append(it).append('\n') }
         if (entries.isNotEmpty()) {
             sb.append(ScreenText.FENCE_OPEN).append('\n')
             entries.forEachIndexed { i, raw ->
                 val l = ScreenText.clean(raw, maxLen = 0)
-                val bodyLine = if (l.length > 160) l.take(150) + tr("…（这条共 ${l.length} 字）", "… (${l.length} characters in all)") else l
+                val bodyLine = if (l.length > 160) l.take(150) + tr(S.vscreen_helpers_characters_in_all, l.length) else l
                 sb.append(i + 1).append(". ").append(bodyLine).append('\n')
             }
             sb.append(ScreenText.FENCE_CLOSE).append('\n')

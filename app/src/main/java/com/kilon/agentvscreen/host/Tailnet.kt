@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.content.Context
@@ -184,16 +185,16 @@ object Tailnet {
     fun line(ctx: Context): String {
         val k = known(ctx)
         return when (phase(ctx)) {
-            Phase.OFF -> tr("仅本机", "This phone only")
-            Phase.SERVICE_OFF -> (if (ServiceControl.now(ctx) == ServiceControl.State.BLOCKED) tr("服务已关闭", "Service off") else tr("按需启动 · 待机", "On demand · Standby")) +
+            Phase.OFF -> tr(S.tailnet_this_phone_only)
+            Phase.SERVICE_OFF -> (if (ServiceControl.now(ctx) == ServiceControl.State.BLOCKED) tr(S.overview_service_off) else tr(S.tailnet_on_demand_standby)) +
                 (k?.let { " · ${it.ip}" } ?: "")
-            Phase.STARTING -> tr("Tailscale 连接中…", "Tailscale connecting…")
-            Phase.NEEDS_LOGIN -> tr("Tailscale 需要登录", "Tailscale: log in")
-            Phase.EXPIRED -> tr("Tailscale 需要重新登录", "Tailscale: log in again")
-            Phase.NEEDS_APPROVAL -> tr("等待批准这台设备", "Waiting for approval")
-            Phase.CONNECTED -> "Tailscale · ${_status.value.ip}" + if (_status.value.flaps >= 2) tr("（10 分钟内掉线 ${_status.value.flaps} 次）", " (dropped ${_status.value.flaps}× in 10 min)") else ""
-            Phase.UNSTABLE -> tr("Tailscale 断开了，重连中", "Tailscale dropped, reconnecting")
-            Phase.ERROR -> tr("Tailscale 出错，重试中", "Tailscale error, retrying")
+            Phase.STARTING -> tr(S.tailnet_tailscale_connecting)
+            Phase.NEEDS_LOGIN -> tr(S.tailnet_tailscale_log_in)
+            Phase.EXPIRED -> tr(S.tailnet_tailscale_log_in_again)
+            Phase.NEEDS_APPROVAL -> tr(S.tailnet_waiting_for_approval)
+            Phase.CONNECTED -> "Tailscale · ${_status.value.ip}" + if (_status.value.flaps >= 2) tr(S.tailnet_dropped_in_10_min, _status.value.flaps) else ""
+            Phase.UNSTABLE -> tr(S.tailnet_tailscale_dropped_reconnecting)
+            Phase.ERROR -> tr(S.tailnet_tailscale_error_retrying)
         }
     }
 
@@ -206,9 +207,9 @@ object Tailnet {
             .put("app_in_front", AppFront.visible).put("phase", p.key).put("summary", line(ctx)).put("last_ip", k?.ip ?: JSONObject.NULL)
             .put("key_expiry", _status.value.keyExpiry.takeIf { it > 0 }?.let { it / 1000 } ?: JSONObject.NULL)
             .put("user_action", if (vpnTrouble(ctx)) vpnAdvice() else when (p) {
-                Phase.UNSTABLE -> tr("手机上的 Tailscale 节点和服务器或中继断开了（${_status.value.problem ?: "原因未知"}），正在自动重连；一直这样请用户看手机网络、代理或 VPN", "The phone's Tailscale node lost the server or relay (${_status.value.problem ?: "cause unknown"}) and is reconnecting; if it keeps happening, ask the user to check the phone's network, proxy or VPN")
-                Phase.NEEDS_LOGIN, Phase.EXPIRED -> tr("请用户在 Agent-VScreen › 接入 › 远程访问 里登录 Tailscale", "Ask the user to log in to Tailscale under Agent-VScreen › Connect › Remote access")
-                Phase.NEEDS_APPROVAL -> tr("请用户在 Tailscale / Headscale 控制台批准这台设备", "Ask the user to approve this device in the Tailscale / Headscale console")
+                Phase.UNSTABLE -> tr(S.tailnet_the_phone_s_tailscale_node, _status.value.problem ?: "原因未知", _status.value.problem ?: "cause unknown")
+                Phase.NEEDS_LOGIN, Phase.EXPIRED -> tr(S.tailnet_ask_the_user_to_log)
+                Phase.NEEDS_APPROVAL -> tr(S.tailnet_ask_the_user_to_approve)
                 else -> JSONObject.NULL
             })
     }
@@ -245,8 +246,7 @@ object Tailnet {
         return struggling && throughVpn(ctx)
     }
 
-    fun vpnAdvice(): String = tr("手机流量正经过代理 / VPN 应用的虚拟网卡，它会中断 Tailscale 的长连接（连通几秒后中断约 2 分钟）。在代理应用的分应用设置中排除（绕过）Agent-VScreen，或更换节点、关闭代理。",
-        "The phone's traffic goes through a proxy / VPN app's virtual interface, which cuts Tailscale's long connections (up a few seconds, gone about two minutes). In the proxy app's per-app settings exclude (bypass) Agent-VScreen, or switch its server or turn it off.")
+    fun vpnAdvice(): String = tr(S.tailnet_the_phone_s_traffic_goes)
 
     private val _status = MutableStateFlow(Status())
     val status: StateFlow<Status> = _status.asStateFlow()
@@ -394,7 +394,7 @@ object Tailnet {
             }
             if (!wanted || g != gen) break
             if (!bin.canExecute()) {
-                _status.value = Status(state = "Error", error = tr("内置 Tailscale 组件缺失（$bin）", "Built-in Tailscale component missing ($bin)")); return
+                _status.value = Status(state = "Error", error = tr(S.tailnet_built_in_tailscale_component_missing, bin)); return
             }
             val t0 = System.currentTimeMillis()
             runCatching { runOnce(ctx, bin, g) }.onFailure { e ->
@@ -507,7 +507,7 @@ object Tailnet {
             proc = null
             stdin = null
             _status.value = _status.value.copy(running = false, state = if (wanted) "Restarting" else "Stopped",
-                error = if (code != 0 && wanted) tr("内置 Tailscale 退出（$code）", "Built-in Tailscale exited ($code)") else null)
+                error = if (code != 0 && wanted) tr(S.tailnet_built_in_tailscale_exited, code) else null)
         }
     }
 

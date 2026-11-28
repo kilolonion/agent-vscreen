@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.content.Context
@@ -179,7 +180,7 @@ object AgentLedger {
     fun remembered(where: String) {
         val id = com.kilon.agentvscreen.cmd.Call.current()?.tokenId ?: Tokens.MAIN
         ack(id)
-        save(id, of(id).copy(rememberedAt = System.currentTimeMillis(), rememberedWhere = where.trim().take(80).ifEmpty { tr("（没说）", "(not said)") }))
+        save(id, of(id).copy(rememberedAt = System.currentTimeMillis(), rememberedWhere = where.trim().take(80).ifEmpty { tr(S.agent_ledger_not_said) }))
     }
 
     /**

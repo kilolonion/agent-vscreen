@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.cmd.Call
 import com.kilon.agentvscreen.cmd.CommandSpec
 import com.kilon.agentvscreen.cmd.NativeOffloadResult
@@ -125,15 +126,15 @@ internal object McpTasks {
         val st = BackgroundOperation.state.value
         val d = BackgroundOperation.currentDisplay()
         if (d == null || st.ownerSessionId != session) {
-            return tr("原会话副屏已关闭或已易主", "session display is no longer open or changed owner")
+            return tr(S.mcp_tasks_session_display_is_no_longer)
         }
         if (expectedGen != null && d.generation != expectedGen) {
-            return tr("副屏已重建（页态已变）", "virtual display was rebuilt")
+            return tr(S.mcp_tasks_virtual_display_was_rebuilt)
         }
         if (expectedAct != null) {
             val actNow = runCatching { VScreenShell.topActivity(d.displayId) }.getOrNull()
             if (actNow != null && actNow != expectedAct) {
-                return tr("当前页面已从 $expectedAct 切换为 $actNow", "foreground page changed from $expectedAct to $actNow")
+                return tr(S.mcp_tasks_foreground_page_changed_from_to, expectedAct, actNow)
             }
         }
         return null
@@ -297,14 +298,14 @@ internal object McpTasks {
         if (code == "TASK_STARTED") {
             val bgId = data?.optString("task")?.takeIf { it.isNotBlank() } ?: return null
             val tid = PREFIX_BG + bgId
-            val msg = tr("后台任务已启动", "Background task started")
+            val msg = tr(S.mcp_tasks_background_task_started)
             return taskDescriptor(tid, "working", msg, now, now, POLL_FAST_MS).put("resultType", "task")
         }
 
         if (code == "ASK_PENDING") {
             val askId = data?.optJSONObject("ask")?.optInt("id", -1)?.takeIf { it > 0 } ?: return null
             val tid = PREFIX_ASK + askId
-            val msg = tellUser ?: tr("正在等待用户在手机上回答问题", "Waiting for the user to answer on the phone")
+            val msg = tellUser ?: tr(S.mcp_tasks_waiting_for_the_user_to)
             val entry = synchronized(lock) {
                 pruneLocked(now)
                 val existing = bridged[tid]?.takeIf { it.ownerKey == ownerKey && it.tokenId == tokenId }
@@ -337,7 +338,7 @@ internal object McpTasks {
         if (code == "CONFIRM_PENDING" || code == "NEEDS_CONFIRM") {
             val cfmId = data?.optJSONObject("confirm")?.optString("id")?.takeIf { it.isNotBlank() } ?: return null
             val tid = PREFIX_CFM + cfmId
-            val msg = tellUser ?: tr("正在等待用户在手机上完成确认", "Waiting for the user to confirm on the phone")
+            val msg = tellUser ?: tr(S.mcp_tasks_waiting_for_the_user_to_2)
             val entry = synchronized(lock) {
                 pruneLocked(now)
                 val existing = bridged[tid]?.takeIf { it.ownerKey == ownerKey && it.tokenId == tokenId }
@@ -373,7 +374,7 @@ internal object McpTasks {
             if (keepName != null) {
                 val tid = PREFIX_KEEP + keepName
                 synchronized(lock) { cancelledKeeps.remove("$ownerKey:$keepName") }
-                val msg = tr("后台盯守「$keepName」已启动", "Background watch \"$keepName\" started")
+                val msg = tr(S.mcp_tasks_background_watch_started, keepName)
                 return taskDescriptor(tid, "working", msg, now, now, POLL_KEEP_MS).put("resultType", "task")
             }
         }
@@ -495,9 +496,9 @@ internal object McpTasks {
                     else -> "working"
                 }
                 val msg = when (status) {
-                    "cancelled" -> tr("任务已取消", "Task cancelled")
-                    "completed" -> tr("任务已完成，无法取消", "Task already completed")
-                    else -> tr("已请求取消任务", "Cancellation requested")
+                    "cancelled" -> tr(S.mcp_tasks_task_cancelled)
+                    "completed" -> tr(S.mcp_tasks_task_already_completed)
+                    else -> tr(S.mcp_tasks_cancellation_requested)
                 }
                 val desc = taskDescriptor(taskId, status, msg, t.startedAt, if (t.endedAt > 0L) t.endedAt else now, POLL_FAST_MS)
                 McpProtocol.jsonRpcResult(id, desc.put("resultType", "complete"))
@@ -512,9 +513,9 @@ internal object McpTasks {
                             entry.cancelRequested = true
                             entry.phase = Phase.CANCELLED
                             entry.statusMessage = if (entry.kind == "ask") {
-                                tr("已取消提问任务", "Ask task cancelled")
+                                tr(S.mcp_tasks_ask_task_cancelled)
                             } else {
-                                tr("已取消确认等待句柄", "Confirmation wait handle cancelled")
+                                tr(S.mcp_tasks_confirmation_wait_handle_cancelled)
                             }
                             entry.completedAt = now
                             entry.lastUpdatedAt = now
@@ -526,7 +527,7 @@ internal object McpTasks {
                             // so the single replay completion transition picks either CANCELLED or COMPLETED.
                             entry.cancelRequested = true
                             entry.activeCall?.cancelled = true
-                            entry.statusMessage = tr("已请求取消，等待执行停止", "Cancellation requested; waiting for execution to stop")
+                            entry.statusMessage = tr(S.mcp_tasks_cancellation_requested_waiting_for_execu)
                             entry.lastUpdatedAt = now
                         }
                         Phase.COMPLETED, Phase.FAILED, Phase.CANCELLED -> {
@@ -554,11 +555,11 @@ internal object McpTasks {
                     synchronized(lock) { cancelledKeeps += "$ownerKey:$name" }
                     VScreenRules.stop(tokenId, name)
                     status = "cancelled"
-                    msg = tr("已停止盯守", "Watch stopped")
+                    msg = tr(S.mcp_tasks_watch_stopped)
                 } else {
                     val wasCancelled = synchronized(lock) { "$ownerKey:$name" in cancelledKeeps }
                     status = if (wasCancelled) "cancelled" else "completed"
-                    msg = if (wasCancelled) tr("已停止盯守", "Watch stopped") else tr("盯守已结束", "Watch already completed")
+                    msg = if (wasCancelled) tr(S.mcp_tasks_watch_stopped) else tr(S.mcp_tasks_watch_already_completed)
                 }
                 val desc = taskDescriptor(taskId, status, msg, live.startedAt, if (live.endedAt > 0L) live.endedAt else now, POLL_KEEP_MS)
                 McpProtocol.jsonRpcResult(id, desc.put("resultType", "complete"))
@@ -642,9 +643,9 @@ internal object McpTasks {
         val res = t.result
         val updated = if (t.endedAt > 0L) t.endedAt else System.currentTimeMillis()
         val (status, msg) = when {
-            t.state == "cancelled" -> "cancelled" to tr("任务已取消", "Task cancelled")
-            res == null -> "working" to (t.call.lastProgress ?: tr("后台任务执行中", "Background task running"))
-            res.exitCode == 0 -> "completed" to tr("任务已完成", "Task completed")
+            t.state == "cancelled" -> "cancelled" to tr(S.mcp_tasks_task_cancelled)
+            res == null -> "working" to (t.call.lastProgress ?: tr(S.mcp_tasks_background_task_running))
+            res.exitCode == 0 -> "completed" to tr(S.mcp_tasks_task_completed)
             // Per ext-tasks 2026-07-28: tool results with isError=true still complete with status="completed" + inline result.
             else -> "completed" to res.codeOrDefault
         }
@@ -707,10 +708,7 @@ internal object McpTasks {
         priorData.put("confirmed", true)
         priorData.put("continuation_skipped", true)
         priorData.put("prior_steps_done", entry.continuation.priorDoneCount)
-        val msg = tr(
-            "用户已在手机上批准确认。由于前面已有 ${entry.continuation.priorDoneCount} 步已执行且当前处于嵌套块/规则内，为避免重复执行已生效操作，本次已在此停住；请查看【现在】状态后决定后续步骤。\n",
-            "User approved confirmation on the phone. Because ${entry.continuation.priorDoneCount} prior step(s) already ran inside a nested block or rule, automatic replay was skipped to avoid duplicating side effects; inspect [Now] and continue explicitly.\n",
-        )
+        val msg = tr(S.mcp_tasks_user_approved_confirmation_on_the, entry.continuation.priorDoneCount)
         return NativeOffloadResult(
             exitCode = 0,
             output = msg,
@@ -724,10 +722,7 @@ internal object McpTasks {
         priorData.put("confirmed", true)
         priorData.put("continuation_skipped", true)
         priorData.put("drift_reason", driftReason)
-        val msg = tr(
-            "用户已批准确认，但等待期间画面状态已变化（$driftReason），为避免误操作已停住且未重复执行；请重新查看【现在】。\n",
-            "User approved confirmation, but the screen state changed while waiting ($driftReason); stopped without replaying to avoid unintended actions. Inspect [Now] first.\n",
-        )
+        val msg = tr(S.mcp_tasks_user_approved_confirmation_but_the, driftReason)
         return NativeOffloadResult(
             exitCode = 1,
             output = msg,
@@ -748,8 +743,8 @@ internal object McpTasks {
                 when {
                     ask == null -> {
                         entry.phase = Phase.COMPLETED
-                        entry.finalResult = NativeOffloadResult(1, tr("提问已过期\n", "Question expired\n"), "ASK_PENDING")
-                        entry.statusMessage = tr("提问已过期", "Question expired")
+                        entry.finalResult = NativeOffloadResult(1, tr(S.mcp_tasks_question_expired), "ASK_PENDING")
+                        entry.statusMessage = tr(S.mcp_tasks_question_expired_2)
                         entry.completedAt = now
                         entry.lastUpdatedAt = now
                         entry.lock.notifyAll()
@@ -759,15 +754,15 @@ internal object McpTasks {
                     }
                     ask.answer == false -> {
                         entry.phase = Phase.COMPLETED
-                        entry.finalResult = NativeOffloadResult(1, tr("用户未回答该问题\n", "The user declined to answer\n"), "ASK_DECLINED")
-                        entry.statusMessage = tr("用户未回答", "User declined")
+                        entry.finalResult = NativeOffloadResult(1, tr(S.mcp_tasks_the_user_declined_to_answer), "ASK_DECLINED")
+                        entry.statusMessage = tr(S.mcp_tasks_user_declined)
                         entry.completedAt = now
                         entry.lastUpdatedAt = now
                         entry.lock.notifyAll()
                     }
                     ask.answer == true -> {
                         entry.phase = Phase.REPLAYING
-                        entry.statusMessage = tr("用户已回答，正在汇总结果", "User answered; collecting result")
+                        entry.statusMessage = tr(S.mcp_tasks_user_answered_collecting_result)
                         entry.lastUpdatedAt = now
                         launchReplay = entry.continuation.resumeArgv
                     }
@@ -780,8 +775,8 @@ internal object McpTasks {
             when {
                 req == null -> {
                     entry.phase = Phase.COMPLETED
-                    entry.finalResult = NativeOffloadResult(1, tr("强确认已过期\n", "Confirmation expired\n"), "CONFIRM_PENDING")
-                    entry.statusMessage = tr("强确认已过期", "Confirmation expired")
+                    entry.finalResult = NativeOffloadResult(1, tr(S.mcp_tasks_confirmation_expired), "CONFIRM_PENDING")
+                    entry.statusMessage = tr(S.mcp_tasks_confirmation_expired_2)
                     entry.completedAt = now
                     entry.lastUpdatedAt = now
                     entry.lock.notifyAll()
@@ -791,8 +786,8 @@ internal object McpTasks {
                 }
                 req.answer == false -> {
                     entry.phase = Phase.COMPLETED
-                    entry.finalResult = NativeOffloadResult(1, tr("用户在手机上拒绝了确认\n", "The user denied confirmation on the phone\n"), "USER_DENIED")
-                    entry.statusMessage = tr("用户已拒绝确认", "User denied confirmation")
+                    entry.finalResult = NativeOffloadResult(1, tr(S.mcp_tasks_the_user_denied_confirmation_on), "USER_DENIED")
+                    entry.statusMessage = tr(S.mcp_tasks_user_denied_confirmation)
                     entry.completedAt = now
                     entry.lastUpdatedAt = now
                     entry.lock.notifyAll()
@@ -801,13 +796,13 @@ internal object McpTasks {
                     if (!entry.continuation.safeResume || entry.continuation.resumeArgv == null) {
                         entry.phase = Phase.COMPLETED
                         entry.finalResult = buildSafeStopAfterConfirmResult(entry)
-                        entry.statusMessage = tr("用户已批准；为防重复执行已安全停住", "Approved; stopped safely without replaying earlier steps")
+                        entry.statusMessage = tr(S.mcp_tasks_approved_stopped_safely_without_replayin)
                         entry.completedAt = now
                         entry.lastUpdatedAt = now
                         entry.lock.notifyAll()
                     } else {
                         entry.phase = Phase.REPLAYING
-                        entry.statusMessage = tr("用户已批准，正在继续执行剩余步骤", "User approved; continuing remaining steps")
+                        entry.statusMessage = tr(S.mcp_tasks_user_approved_continuing_remaining_steps)
                         entry.lastUpdatedAt = now
                         launchReplay = entry.continuation.resumeArgv
                     }
@@ -836,7 +831,7 @@ internal object McpTasks {
                 if (entry.cancelRequested) {
                     val t = System.currentTimeMillis()
                     entry.phase = Phase.CANCELLED
-                    entry.statusMessage = tr("任务已取消", "Task cancelled")
+                    entry.statusMessage = tr(S.mcp_tasks_task_cancelled)
                     entry.completedAt = t
                     entry.lastUpdatedAt = t
                     entry.lock.notifyAll()
@@ -858,7 +853,7 @@ internal object McpTasks {
                             val t = System.currentTimeMillis()
                             entry.phase = Phase.COMPLETED
                             entry.finalResult = driftRes
-                            entry.statusMessage = tr("页面已变化，安全停住", "Screen changed; stopped safely")
+                            entry.statusMessage = tr(S.mcp_tasks_screen_changed_stopped_safely)
                             entry.completedAt = t
                             entry.lastUpdatedAt = t
                             entry.activeCall = null
@@ -899,24 +894,24 @@ internal object McpTasks {
                     runException != null -> {
                         if (entry.cancelRequested) {
                             entry.phase = Phase.CANCELLED
-                            entry.statusMessage = tr("任务已取消", "Task cancelled")
+                            entry.statusMessage = tr(S.mcp_tasks_task_cancelled)
                         } else {
                             entry.phase = Phase.FAILED
                             entry.protocolError = JSONObject()
                                 .put("code", -32603)
-                                .put("message", tr("任务续跑发生内部错误", "Internal error during task continuation"))
-                            entry.statusMessage = tr("继续执行失败", "Continuation failed")
+                                .put("message", tr(S.mcp_tasks_internal_error_during_task_continuation))
+                            entry.statusMessage = tr(S.mcp_tasks_continuation_failed)
                         }
                     }
                     entry.cancelRequested && runResult?.codeOrDefault == "CANCELLED" -> {
                         entry.phase = Phase.CANCELLED
-                        entry.statusMessage = tr("任务已取消", "Task cancelled")
+                        entry.statusMessage = tr(S.mcp_tasks_task_cancelled)
                     }
                     else -> {
                         val res = runResult!!
                         entry.phase = Phase.COMPLETED
                         entry.finalResult = res
-                        entry.statusMessage = if (res.exitCode == 0) tr("已完成", "Completed") else res.codeOrDefault
+                        entry.statusMessage = if (res.exitCode == 0) tr(S.mcp_tasks_completed) else res.codeOrDefault
                     }
                 }
                 entry.completedAt = doneAt

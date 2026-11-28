@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
@@ -201,7 +202,7 @@ class StrongConfirmActivity : ComponentActivity() {
             setStroke((1f * density).toInt(), if (dark) AColor.argb(45, 255, 255, 255) else AColor.argb(30, 0, 0, 0))
         }
         val deny = TextView(this).apply {
-            text = tr("拒绝", "Deny")
+            text = tr(S.ask_activity_deny)
             gravity = Gravity.CENTER
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
             typeface = Typeface.DEFAULT_BOLD
@@ -285,7 +286,7 @@ class StrongConfirmActivity : ComponentActivity() {
         }
         val secure = secureState.value
         bar.visibility = View.VISIBLE
-        denyBtn?.text = tr("拒绝", "Deny")
+        denyBtn?.text = tr(S.ask_activity_deny)
         val tap = req.strength == Risk.Strength.TAP
         confirmBtn?.bind(req.id, secure && !tap, tap || secure || req.allowHold, tap)
     }
@@ -321,9 +322,9 @@ class StrongConfirmActivity : ComponentActivity() {
             val authenticators = BiometricManager.Authenticators.BIOMETRIC_STRONG or
                 BiometricManager.Authenticators.DEVICE_CREDENTIAL
             val subtitle = if (req.pairingCode != null) {
-                tr("配对码 ${req.pairingCode} · ${req.publicClientName ?: req.tokenName}", "Pairing ${req.pairingCode} · ${req.publicClientName ?: req.tokenName}")
+                tr(S.strong_confirm_activity_pairing, req.pairingCode, req.publicClientName ?: req.tokenName)
             } else {
-                tr("令牌「${req.tokenName}」· ${req.commandName}", "Token \"${req.tokenName}\" · ${req.commandName}")
+                tr(S.strong_confirm_activity_token, req.tokenName, req.commandName)
             }
             val promptTitle = if (req.risks.size > 1) {
                 req.risks.joinToString(" + ") { it.title }
@@ -342,17 +343,17 @@ class StrongConfirmActivity : ComponentActivity() {
                 }
 
                 override fun onAuthenticationFailed() {
-                    statusMessageState.value = tr("验证未通过，请重试", "Verification did not match; try again")
+                    statusMessageState.value = tr(S.strong_confirm_activity_verification_did_not_match_try)
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     statusMessageState.value = errString.toString().ifBlank {
-                        tr("已取消验证（代码 $errorCode）", "Verification cancelled (code $errorCode)")
+                        tr(S.strong_confirm_activity_verification_cancelled_code, errorCode)
                     }
                 }
             })
         } catch (t: Throwable) {
-            statusMessageState.value = tr("无法启动系统验证：${t.message}", "Cannot start system verification: ${t.message}")
+            statusMessageState.value = tr(S.strong_confirm_activity_cannot_start_system_verification, t.message)
         }
     }
 
@@ -386,12 +387,12 @@ class StrongConfirmActivity : ComponentActivity() {
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                 ) {
                     Text(
-                        tr("这个确认请求已处理或已过期", "This confirmation request is already handled or expired"),
+                        tr(S.strong_confirm_activity_this_confirmation_request_is_already),
                         fontSize = 16.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
                     SoftButton(onClick = { finish() }, modifier = Modifier.fillMaxWidth()) {
-                        Text(tr("关闭", "Close"))
+                        Text(tr(S.ask_activity_close))
                     }
                 }
             } else {
@@ -410,8 +411,8 @@ class StrongConfirmActivity : ComponentActivity() {
                         val headerTitle = when {
                             req.risk == Risk.HIGH_RISK -> req.commandName
                             Risk.LEVEL_UP in req.risks && req.targetLevel?.startsWith("row:") == true -> (com.kilon.agentvscreen.api.Policy.row(req.targetLevel.removePrefix("row:"))?.title ?: req.targetLevel).let {
-                                tr("${req.tokenName} 请求允许「$it」", "${req.tokenName} asks to allow \"$it\"") }
-                            Risk.LEVEL_UP in req.risks -> tr("${req.tokenName} 请求提升至「${levelLabel(req.targetLevel ?: Tokens.FREE)}」", "${req.tokenName} asks for \"${levelLabel(req.targetLevel ?: Tokens.FREE)}\"")
+                                tr(S.strong_confirm_activity_asks_to_allow, req.tokenName, it) }
+                            Risk.LEVEL_UP in req.risks -> tr(S.strong_confirm_activity_asks_for, req.tokenName, levelLabel(req.targetLevel ?: Tokens.FREE))
                             req.risks.size > 1 -> req.risks.joinToString(" + ") { it.title }
                             else -> req.risk.title
                         }
@@ -424,7 +425,7 @@ class StrongConfirmActivity : ComponentActivity() {
                         IconButton(onClick = { showHelp = true }) {
                             Icon(
                                 Icons.AutoMirrored.Filled.HelpOutline,
-                                contentDescription = tr("说明", "Help"),
+                                contentDescription = tr(S.strong_confirm_activity_help),
                                 tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             )
                         }
@@ -441,8 +442,8 @@ class StrongConfirmActivity : ComponentActivity() {
                                 .padding(horizontal = 14.dp, vertical = 10.dp),
                         ) {
                             Text(
-                                if (req.allowHold) tr("建议设置锁屏密码，确认会更安全", "Set a screen lock PIN or biometric for stronger confirmations")
-                                else tr("公网相关确认必须先设置手机锁屏密码，不支持长按确认。", "Public access confirmations require a phone screen lock (PIN/biometric) and do not allow hold-to-confirm."),
+                                if (req.allowHold) tr(S.strong_confirm_activity_set_a_screen_lock_pin)
+                                else tr(S.strong_confirm_activity_public_access_confirmations_require_a),
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = MiuixTheme.colorScheme.onSurface,
@@ -474,7 +475,7 @@ class StrongConfirmActivity : ComponentActivity() {
                                 verticalArrangement = Arrangement.spacedBy(4.dp),
                             ) {
                                 Text(
-                                    tr("核对配对码", "Verify pairing code"),
+                                    tr(S.strong_confirm_activity_verify_pairing_code),
                                     fontSize = 12.sp,
                                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                 )
@@ -497,42 +498,39 @@ class StrongConfirmActivity : ComponentActivity() {
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Text(
-                                        tr(
-                                            "来自 ${req.clientVerifiedDomain}（已核实）",
-                                            "From ${req.clientVerifiedDomain} (verified)",
-                                        ),
+                                        tr(S.strong_confirm_activity_from_verified, req.clientVerifiedDomain),
                                         fontSize = 13.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = Color(0xFF15803D),
                                     )
                                 }
                                 InfoLine(
-                                    label = tr("客户端", "Client"),
+                                    label = tr(S.strong_confirm_activity_client),
                                     value = req.publicClientName ?: req.tokenName,
                                 )
                             } else {
                                 InfoLine(
-                                    label = tr("客户端", "Client"),
+                                    label = tr(S.strong_confirm_activity_client),
                                     value = req.publicClientName ?: req.tokenName,
                                 )
                                 Text(
-                                    tr("名称由对方自填，未核实", "Name is self-reported, not verified"),
+                                    tr(S.strong_confirm_activity_name_is_self_reported_not),
                                     fontSize = 12.sp,
                                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                 )
                             }
                             InfoLine(
-                                label = tr("来源地址", "Source address"),
-                                value = req.sourceAddress?.takeIf { it.isNotBlank() } ?: tr("未知", "Unknown"),
+                                label = tr(S.strong_confirm_activity_source_address),
+                                value = req.sourceAddress?.takeIf { it.isNotBlank() } ?: tr(S.settings_unknown),
                             )
                             InfoLine(
-                                label = tr("回调域名", "Redirect host"),
+                                label = tr(S.strong_confirm_activity_redirect_host),
                                 value = req.redirectHost ?: "-",
                             )
                             val opts = req.selectableScopes.filter { it in Tokens.PUBLIC_LEVELS }.ifEmpty { listOf(Tokens.LOOK) }
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 Text(
-                                    tr("权限档位（公网接入不开放系统操作）", "Permission level (system actions are never available over public MCP)"),
+                                    tr(S.strong_confirm_activity_permission_level_system_actions_are),
                                     fontSize = 12.sp,
                                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                 )
@@ -561,43 +559,43 @@ class StrongConfirmActivity : ComponentActivity() {
                             }
                         } else if (req.risk == Risk.PUBLIC_ENABLE) {
                             InfoLine(
-                                label = tr("操作", "Action"),
+                                label = tr(S.strong_confirm_activity_action),
                                 value = req.commandName,
                             )
                             if (req.detail.isNotBlank()) {
                                 InfoLine(
-                                    label = tr("说明", "Details"),
+                                    label = tr(S.strong_confirm_activity_details),
                                     value = req.detail,
                                 )
                             }
                         } else {
                             if (req.risks.size > 1) {
                                 InfoLine(
-                                    label = tr("同时确认以下操作", "Also confirming"),
+                                    label = tr(S.strong_confirm_activity_also_confirming),
                                     value = req.risks.joinToString(" + ") { it.title },
                                 )
                             }
                             InfoLine(
-                                label = tr("agent", "Agent"),
-                                value = req.tokenName + (Tokens.byId(req.tokenId)?.let { tr("（${levelLabel(it.level)}）", " (${levelLabel(it.level)})") } ?: ""),
+                                label = tr(S.strong_confirm_activity_agent),
+                                value = req.tokenName + (Tokens.byId(req.tokenId)?.let { tr(S.public_guide_text, levelLabel(it.level)) } ?: ""),
                             )
                             InfoLine(
-                                label = tr("客户端", "Client"),
+                                label = tr(S.strong_confirm_activity_client),
                                 value = StrongConfirm.clientLabel(req.client),
                             )
                             InfoLine(
-                                label = tr("操作", "Action"),
+                                label = tr(S.strong_confirm_activity_action),
                                 value = req.commandName,
                             )
                             req.screenLabel?.takeIf { it.isNotBlank() }?.let { lbl ->
                                 InfoLine(
-                                    label = tr("画面上的文字", "Text on screen"),
+                                    label = tr(S.strong_confirm_activity_text_on_screen),
                                     value = com.kilon.agentvscreen.cmd.ScreenText.quote(lbl, maxLen = 40),
                                 )
                             }
                             if (req.detail.isNotBlank()) {
                                 InfoLine(
-                                    label = tr("说明", "Details"),
+                                    label = tr(S.strong_confirm_activity_details),
                                     value = req.detail,
                                 )
                             }
@@ -605,7 +603,7 @@ class StrongConfirmActivity : ComponentActivity() {
                         if (req.ranges.size > 1) {
                             val picked = selectedRangeState.value
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(tr("许可范围", "Allow for"), fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                                Text(tr(S.strong_confirm_activity_allow_for), fontSize = 12.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     req.ranges.forEach { r ->
                                         val on = picked == r
@@ -633,7 +631,7 @@ class StrongConfirmActivity : ComponentActivity() {
                         }
                         if (!secure && !req.allowHold) {
                             Text(
-                                tr("此操作必须先设置手机锁屏密码，不支持长按确认。", "This action requires a screen lock PIN/biometric and does not allow hold-to-confirm."),
+                                tr(S.strong_confirm_activity_this_action_requires_a_screen),
                                 fontSize = 13.sp,
                                 color = MiuixTheme.colorScheme.error,
                             )
@@ -646,25 +644,16 @@ class StrongConfirmActivity : ComponentActivity() {
         if (showHelp) {
             GlassDialog(
                 onDismissRequest = { showHelp = false },
-                title = { DialogTitle(tr("为什么需要强确认", "Why strong confirmation is required")) },
+                title = { DialogTitle(tr(S.strong_confirm_activity_why_strong_confirmation_is_required)) },
                 text = {
                     Text(
-                        tr(
-                            "确认只能在主屏上由真实触摸完成，副屏上的 agent 无法点击或看到此页面：\n" +
-                                "• 支付、接入新 agent、放宽权限、开启公网接入、临时免确认支付：需指纹或锁屏密码（未设锁屏时长按 3 秒）；\n" +
-                                "• 其他操作（不可撤销操作、敏感操作、“每次确认”的应用等）：单击“允许”，可选择本轮任务内或今天内同类操作不再确认；\n" +
-                                "• 已授予的许可可在 接入 › agent 详情 中随时撤销。",
-                            "Confirmation can only be given by real touch on the main screen; an agent on the background screen can neither tap nor see this page:\n" +
-                                "• Payments, connecting a new agent, widening permissions, enabling public access, no confirmation for payments: fingerprint or screen-lock PIN (a 3-second hold without a screen lock);\n" +
-                                "• Other actions (irreversible, sensitive, apps set to confirm every time…): one tap on Allow, optionally for the same kind of action this turn or today;\n" +
-                                "• Granted permissions can be revoked any time under Connect › the agent.",
-                        ),
+                        tr(S.strong_confirm_activity_confirmation_can_only_be_given),
                         fontSize = 14.sp,
                         lineHeight = 21.sp,
                     )
                 },
                 confirmButton = {
-                    LinkButton(onClick = { showHelp = false }) { Text(tr("知道了", "OK")) }
+                    LinkButton(onClick = { showHelp = false }) { Text(tr(S.app_ok)) }
                 },
             )
         }
@@ -682,9 +671,9 @@ class StrongConfirmActivity : ComponentActivity() {
     private fun levelHint(l: String): String = com.kilon.agentvscreen.ui.levelHint(l)
 
     private fun scopeLabel(s: String): String = when (s) {
-        "look" -> tr("只看", "look only")
-        "operate" -> tr("可操作", "operate")
-        else -> tr("全部", "system")
+        "look" -> tr(S.security_look_only)
+        "operate" -> tr(S.security_operate)
+        else -> tr(S.strong_confirm_activity_system)
     }
 }
 
@@ -802,14 +791,14 @@ internal class StrongConfirmButtonView(
     }
 
     private fun labelText(): String = when {
-        !enabledAction -> tr("需设锁屏密码", "Screen lock required")
-        tapMode -> tr("允许", "Allow")
-        biometricMode -> tr("确认", "Confirm")
+        !enabledAction -> tr(S.strong_confirm_activity_screen_lock_required)
+        tapMode -> tr(S.ask_activity_allow)
+        biometricMode -> tr(S.strong_confirm_activity_confirm)
         holding -> {
             val leftSec = (((1f - holdProgress) * StrongConfirm.HOLD_CONFIRM_MS) / 1000f).coerceAtLeast(0.1f)
-            tr("继续按住 %.1fs".format(leftSec), "Keep holding %.1fs".format(leftSec))
+            tr(S.strong_confirm_activity_keep_holding, "%.1f".format(leftSec))
         }
-        else -> tr("按住确认（3秒）", "Hold 3s to confirm")
+        else -> tr(S.strong_confirm_activity_hold_3s_to_confirm)
     }
 
     override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {

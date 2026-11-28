@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.os.Build
@@ -99,11 +100,11 @@ class MainActivity : ComponentActivity(), AppHost {
         }
         getSystemService(ClipboardManager::class.java)?.setPrimaryClip(clip)
         if (sensitive) {
-            say(tr("已复制：$label", "Copied: $label"))
+            say(tr(S.main_activity_copied, label))
         } else {
             val flat = text.replace(Regex("\\s+"), " ").trim()
             val preview = if (flat.length > 40) flat.take(40) + "…" else flat
-            say(tr("已复制：$label（$preview）", "Copied: $label ($preview)"))
+            say(tr(S.main_activity_copied_2, label, preview))
         }
     }
 
@@ -113,10 +114,10 @@ class MainActivity : ComponentActivity(), AppHost {
     override fun grantShizuku() {
         fun inManager() {
             ShizukuManager.openShizukuApp(this)
-            say(tr("Shizuku 没有弹出授权框：在 Shizuku 的“授权应用”里打开 Agent-VScreen，再回来", "Shizuku showed no dialog: turn Agent-VScreen on under \"Authorized apps\" in Shizuku, then come back"))
+            say(tr(S.main_activity_shizuku_showed_no_dialog_turn))
         }
         when (ShizukuManager.requestPermission()) {
-            ShizukuBackend.Ask.ALREADY -> say(tr("Shizuku 已授权", "Shizuku is authorized"))
+            ShizukuBackend.Ask.ALREADY -> say(tr(S.main_activity_shizuku_is_authorized))
             ShizukuBackend.Ask.NO_BINDER -> { ShizukuManager.openShizukuApp(this); say(ShizukuManager.missingBinderHint()) }
             ShizukuBackend.Ask.DENIED_ON_RECORD, ShizukuBackend.Ask.FAILED -> inManager()
             // A dialog should show. A denial (the user's Deny or Shizuku's "adb permission limited") gets both

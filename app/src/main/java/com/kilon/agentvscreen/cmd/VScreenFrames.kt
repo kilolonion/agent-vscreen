@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.graphics.Bitmap
@@ -95,13 +96,13 @@ internal fun selectFrames(
         val room = (max - 1).coerceAtLeast(1)
         val kept = if (sortedActs.size > room) sortedActs.takeLast(room) else sortedActs
         leftOut = sortedActs.size - kept.size
-        pick(start).tag.append(tr("开头", "start"))
+        pick(start).tag.append(tr(S.vscreen_frames_start))
         kept.forEach { a ->
             val p = pick(idxAt(a.atMs - 1))
             val n = sortedActs.indexOf(a) + 1
             p.marks += a; p.nums += n
             if (p.tag.isNotEmpty()) p.tag.append(" · ")
-            p.tag.append(tr("动作$n 前 ", "before action $n ")).append(caption(a.label))
+            p.tag.append(tr(S.vscreen_frames_before_action, n)).append(caption(a.label))
         }
         // 1.3 beta8: the rest of the room goes first to what each action led to (the last frame before the next
         // action, or the end), not to frames spread evenly (a blinking cursor took those places).
@@ -115,7 +116,7 @@ internal fun selectFrames(
             // 2.0.0-beta16 (Item 6): no clear visual change in this stretch; keep only start + end when there are no actions.
             if (kept.isEmpty() && picks.size < max) {
                 val end = idxAt(to)
-                if (end != start) pick(end).tag.append(tr("结尾", "end"))
+                if (end != start) pick(end).tag.append(tr(S.vscreen_frames_end))
             }
         } else {
             val rest = clearInside.filter { it !in picks }
@@ -127,7 +128,7 @@ internal fun selectFrames(
     }
     val selected = picks.entries.take(max).map { (idx, p) ->
         if (p.tag.isEmpty()) sortedActs.lastOrNull { it.atMs <= p.frame.atMs }?.let { a ->
-            p.tag.append(tr("动作${sortedActs.indexOf(a) + 1} 后 +${s1(p.frame.atMs - a.atMs)}", "action ${sortedActs.indexOf(a) + 1} +${s1(p.frame.atMs - a.atMs)}"))
+            p.tag.append(tr(S.vscreen_frames_action, sortedActs.indexOf(a) + 1, s1(p.frame.atMs - a.atMs)))
         }
         SelectedFrame(idx, p.frame, p.tag.toString(), p.marks.toList(), p.nums.toList())
     }
@@ -212,28 +213,22 @@ internal fun formatFramesSummary(
     every: Long?,
 ): String = buildString {
     if (every == null && clearChanges == 0) {
-        val shownPart = if (actions == 0 && shownCount == 2) tr("首尾 2 张", "start and end (2)") else tr("$shownCount 张", "$shownCount")
-        append(tr(
-            "这段画面没有明显变化（光标、细小动画这类小变动不算），$actions 个动作，给出$shownPart",
-            "no clear change in the picture (cursors and tiny animations don't count), $actions actions; showing $shownPart",
-        ))
-        if (leftOut > 0) append(tr("；前 $leftOut 个动作没放进来，用 --from 往前看或加大 --count", "; the first $leftOut actions are not shown: look earlier with --from or raise --count"))
-        if (actions > 0) append(tr("。圈和编号是动作的位置，画在动作之前的那张上；它带来的变化看下一张", ". Rings and numbers are where actions touched, drawn on the frame just before each; what it led to is the next frame"))
+        val shownPart = if (actions == 0 && shownCount == 2) tr(S.vscreen_frames_start_and_end_2) else tr(S.vscreen_frames_text, shownCount)
+        append(tr(S.vscreen_frames_no_clear_change_in_the, actions, shownPart))
+        if (leftOut > 0) append(tr(S.vscreen_frames_the_first_actions_are_not, leftOut))
+        if (actions > 0) append(tr(S.vscreen_frames_rings_and_numbers_are_where))
         append('\n')
         return@buildString
     }
-    append(tr(
-        "这段录到 $distinct 张不同的画面、$actions 个动作（有明显变化才计入，最快约每 0.15 秒一张；更短的闪动可能没录到），给出 $shownCount 张",
-        "$distinct different pictures and $actions actions in it (only clear changes count, at most about one per 0.15 s; shorter flashes may be missing); showing $shownCount",
-    ))
-    if (every != null) append(tr("，每 ${s1(every)} 取一张（和上一张一样的不重复）", ", one every ${s1(every)} (repeats left out)"))
-    if (leftOut > 0) append(tr("；前 $leftOut 个动作没放进来，用 --from 往前看或加大 --count", "; the first $leftOut actions are not shown: look earlier with --from or raise --count"))
-    append(tr("。圈和编号是动作的位置，画在动作之前的那张上；它带来的变化看下一张\n", ". Rings and numbers are where actions touched, drawn on the frame just before each; what it led to is the next frame\n"))
+    append(tr(S.vscreen_frames_different_pictures_and_actions_in, distinct, actions, shownCount))
+    if (every != null) append(tr(S.vscreen_frames_one_every_repeats_left_out, s1(every)))
+    if (leftOut > 0) append(tr(S.vscreen_frames_the_first_actions_are_not, leftOut))
+    append(tr(S.vscreen_frames_rings_and_numbers_are_where_2))
 }
 
 /** `frames [--last 30s | --from T [--to T]] [--count N] [--every D] [--big]`. */
 internal fun VScreenOffloadHandler.framesCmd(sid: String?, args: OffloadArgs): NativeOffloadResult {
-    val s = sid ?: throw ActionError("NO_SESSION", tr("没有会话（请求头 X-VScreen-Session）", "No session (header X-VScreen-Session)"))
+    val s = sid ?: throw ActionError("NO_SESSION", tr(S.vscreen_act_no_session_header_x_vscreen))
     val now = System.currentTimeMillis()
     fun at(v: String, name: String): Long {
         Regex("^(\\d{1,2}):(\\d{2})(?::(\\d{2})(?:\\.(\\d+))?)?$").matchEntire(v.trim())?.let { m ->
@@ -244,7 +239,7 @@ internal fun VScreenOffloadHandler.framesCmd(sid: String?, args: OffloadArgs): N
             }
             return cal.timeInMillis.let { if (it > now + 60_000L) it - 86_400_000L else it }
         }
-        return now - parseDuration(v.removePrefix("-"), 0L).also { if (it <= 0L) throw ActionError("INVALID_ARGS", tr("--$name 写成多久以前（30s、2m）或钟点（14:03:10）", "write --$name as how long ago (30s, 2m) or a clock time (14:03:10)")) }
+        return now - parseDuration(v.removePrefix("-"), 0L).also { if (it <= 0L) throw ActionError("INVALID_ARGS", tr(S.vscreen_frames_write_as_how_long_ago, name)) }
     }
     val detail = Detail.of(args)
     val layout = Layout.of(args)
@@ -255,22 +250,22 @@ internal fun VScreenOffloadHandler.framesCmd(sid: String?, args: OffloadArgs): N
     val win = synchronized(lastWindows) { lastWindows[s] }
     val lastArg = args.get("last")
     val (from, to, said) = when {
-        lastArg != null && lastArg != "window" -> parseDuration(lastArg, 30_000L).let { ms -> Triple(now - ms, now, tr("最近 ${spoken(ms)}", "the last ${spokenEn(ms)}")) }
-        args.get("from") != null -> Triple(at(args.get("from")!!, "from"), args.get("to")?.let { at(it, "to") } ?: now, tr("指定的时间段", "the stretch asked for"))
-        win != null -> Triple(win[0], win[1], tr("上一次返回的【这段时间】", "the [Meanwhile] of the last reply"))
-        else -> Triple(now - 30_000L, now, tr("最近 30 秒（还没有上一次返回）", "the last 30 s (no earlier reply yet)"))
+        lastArg != null && lastArg != "window" -> parseDuration(lastArg, 30_000L).let { ms -> Triple(now - ms, now, tr(S.vscreen_frames_the_last, spoken(ms), spokenEn(ms))) }
+        args.get("from") != null -> Triple(at(args.get("from")!!, "from"), args.get("to")?.let { at(it, "to") } ?: now, tr(S.vscreen_frames_the_stretch_asked_for))
+        win != null -> Triple(win[0], win[1], tr(S.vscreen_frames_the_meanwhile_of_the_last))
+        else -> Triple(now - 30_000L, now, tr(S.vscreen_frames_the_last_30_s_no))
     }
-    if (to <= from) throw ActionError("INVALID_ARGS", tr("--to 要晚于 --from", "--to must be later than --from"))
-    return BackgroundOperation.agentAction(s, null, isRead = true, describe = tr("回看录像", "look back at the recording")) { d ->
+    if (to <= from) throw ActionError("INVALID_ARGS", tr(S.vscreen_frames_to_must_be_later_than))
+    return BackgroundOperation.agentAction(s, null, isRead = true, describe = tr(S.vscreen_frames_look_back_at_the_recording)) { d ->
         val kept = VScreenRecorder.frames(d.displayId, 0L, Long.MAX_VALUE)
         val sb = StringBuilder()
-        if (kept.isEmpty()) return@agentAction text(tr("这块副屏还没有录像（画面变了才录；设置里的“后台录制”关着时只留最近 15 秒）", "This screen has no recording yet (frames are kept when the picture changes; with \"Background recording\" off only the last 15 s are kept)"))
+        if (kept.isEmpty()) return@agentAction text(tr(S.vscreen_frames_this_screen_has_no_recording))
         val oldest = kept.first().atMs
         val side = detail.cellSide
         val picked = pickCells(d.displayId, maxOf(from, oldest), to, count, side, every)
-        if (picked.cells.isEmpty()) return@agentAction text(tr("这段时间里没有录像", "No recording in that stretch"))
-        sb.append(tr("回看 $said：${clock(from)} → ${clock(to)}（${s1(to - from)}，最后一刻是 ${Report.ago(to, now)}）\n", "Looking back at $said: ${clock(from)} → ${clock(to)} (${s1(to - from)}, ending ${Report.ago(to, now)})\n"))
-        if (from < oldest) sb.append(tr("开头早于最早的录像（${clock(oldest)}），从那里开始\n", "The start is before the oldest frame kept (${clock(oldest)}); starting there\n"))
+        if (picked.cells.isEmpty()) return@agentAction text(tr(S.vscreen_frames_no_recording_in_that_stretch))
+        sb.append(tr(S.vscreen_frames_looking_back_at_ending, said, clock(from), clock(to), s1(to - from), Report.ago(to, now)))
+        if (from < oldest) sb.append(tr(S.vscreen_frames_the_start_is_before_the, clock(oldest)))
         sb.append(formatFramesSummary(picked.distinct, picked.clearChanges, picked.actions, picked.cells.size, picked.leftOut, every))
         val (fw, fh) = VScreenRecorder.frameSize(d.displayId) ?: (d.width to d.height)
         val landscape = fw > fh
@@ -282,7 +277,7 @@ internal fun VScreenOffloadHandler.framesCmd(sid: String?, args: OffloadArgs): N
         val pages = picked.cells.chunked(per)
         val first = (page - 1) * LookBudget.MAX_PICS
         var bytes = 0L; var shown = 0
-        if (first >= pages.size) { picked.cells.forEach { it.bmp.recycle() }; throw ActionError("INVALID_ARGS", tr("这段只有 ${(pages.size + LookBudget.MAX_PICS - 1) / LookBudget.MAX_PICS} 页（--page）", "This stretch has only ${(pages.size + LookBudget.MAX_PICS - 1) / LookBudget.MAX_PICS} page(s) (--page)")) }
+        if (first >= pages.size) { picked.cells.forEach { it.bmp.recycle() }; throw ActionError("INVALID_ARGS", tr(S.vscreen_frames_this_stretch_has_only_page, (pages.size + LookBudget.MAX_PICS - 1) / LookBudget.MAX_PICS)) }
         pages.forEachIndexed { pi, page ->
             if (pi < first || shown >= LookBudget.MAX_PICS || bytes >= LookBudget.MAX_BYTES) return@forEachIndexed
             val cols = minOf(cols0, page.size)
@@ -294,7 +289,7 @@ internal fun VScreenOffloadHandler.framesCmd(sid: String?, args: OffloadArgs): N
             drawCells(c, 0, 0, page, usedCols, cw, ch, fw, fh, now, first = pi * per + 1, marks = marks)
             val ref = savePic(s, out, "frames", detail.use); out.recycle()
             shown++; bytes += ref?.let { r -> ShotStore.refs(r).firstOrNull()?.let { ShotStore.file(context, it)?.length() } } ?: 0L
-            sb.append(tr("第 ${pi + 1} 张图 ", "picture ${pi + 1} ")).append(ref ?: tr("（没存下来）", "(not saved)")).append('\n')
+            sb.append(tr(S.vscreen_frames_picture, pi + 1)).append(ref ?: tr(S.vscreen_frames_not_saved)).append('\n')
             page.forEachIndexed { k, cell ->
                 val n = pi * per + k + 1
                 sb.append("  $n  ${clock(cell.t)}  ${Report.ago(cell.t, now)}").append(if (cell.tag.isNotEmpty()) "  ${cell.tag}" else "").append('\n')
@@ -304,10 +299,8 @@ internal fun VScreenOffloadHandler.framesCmd(sid: String?, args: OffloadArgs): N
         }
         picked.cells.forEach { it.bmp.recycle() }
         val rest = pages.size - first - shown
-        if (rest > 0) sb.append(tr("还有 $rest 张图没给（每次最多 ${LookBudget.MAX_PICS} 张、约 ${LookBudget.MAX_BYTES / 1_000_000} MB）：同样的参数加 --page ${page + 1} 取下一批，或 --detail low 让每张更小\n",
-            "$rest more pictures not sent (at most ${LookBudget.MAX_PICS} pictures, about ${LookBudget.MAX_BYTES / 1_000_000} MB, at a time): the same options with --page ${page + 1} for the next ones, or --detail low for smaller ones\n"))
-        sb.append(tr("录像保留：最近 3 分钟每张都留，3–10 分钟前每秒一张；现在最早一张是 ${Report.ago(oldest, now)}。更密：--every 0.3s；更长：--last 2m；某一段：--from 14:03:10 --to 14:03:30；看得更清楚：--detail high；排法：--layout single|strip|3x4",
-            "Kept: every frame of the last 3 minutes, one a second for 3–10 minutes ago; the oldest now is ${Report.ago(oldest, now)}. Denser: --every 0.3s; longer: --last 2m; a given stretch: --from 14:03:10 --to 14:03:30; clearer: --detail high; layout: --layout single|strip|3x4"))
+        if (rest > 0) sb.append(tr(S.vscreen_frames_more_pictures_not_sent_at, rest, LookBudget.MAX_PICS, LookBudget.MAX_BYTES / 1_000_000, page + 1))
+        sb.append(tr(S.vscreen_frames_kept_every_frame_of_the, Report.ago(oldest, now)))
         NativeOffloadResult(0, sb.toString() + "\n", null, org.json.JSONObject().put("from_ms", from).put("to_ms", to).put("frames", data))
     }
 }

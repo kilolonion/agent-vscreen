@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import com.kilon.agentvscreen.core.BackgroundOperation
 import com.kilon.agentvscreen.tr
@@ -68,64 +69,57 @@ object Readiness {
     )
 
     fun evaluate(i: Inputs): List<Item> = buildList {
-        if (!i.serviceOn) add(Item("service_off", true, tr("用户关闭了 Agent-VScreen（用户的选择，不是故障）：请用户在 App 右上角的电源键里打开", "The user turned Agent-VScreen off (their choice, not a fault): ask them to turn it on with the power button at the top of the app")))
+        if (!i.serviceOn) add(Item("service_off", true, tr(S.readiness_the_user_turned_agent_vscreen)))
         when (i.privilege) {
             // 1.3: with Shizuku there, the next command reconnects by itself: a warning, not a block.
             // 1.4.0-beta4: only a channel that failed is reported. A connection that is merely not open (the service
             // was hidden or stopped, nothing has run yet) is the normal resting state: the next command opens it. It
             // was reported as "down … fix not_connected", and agents asked users to repair a service that was only off.
             "READY" -> if (i.connection == "ERROR")
-                add(Item("not_connected", false, tr("副屏服务刚才没有响应，下一条命令会自动重连，不用用户做什么", "The screen service did not answer just now; the next command reconnects by itself, nothing for the user to do")))
+                add(Item("not_connected", false, tr(S.readiness_the_screen_service_did_not)))
             // 1.4.2-beta3: Shizuku or root, whichever the user chose, says why in its own words.
             else -> add(Item("no_privilege", true, Privileged.notReadyHint()))
         }
-        if (i.userStopped) add(Item("user_stopped", true, tr("用户按了“停止 AI”，只有用户能解除", "The user pressed \"Stop AI\"; only the user can lift it")))
+        if (i.userStopped) add(Item("user_stopped", true, tr(S.vscreen_screen_commands_the_user_pressed_stop_ai)))
         if (i.serviceOn && i.serviceAlive && !i.foreground)
-            add(Item("not_foreground_service", false, i.liveWhy ?: tr("服务不是前台服务，后台可能被冻结；用户打开一次 App 就会补上", "The service is not a foreground service and may be frozen in the background; opening the app once fixes it")))
+            add(Item("not_foreground_service", false, i.liveWhy ?: tr(S.readiness_the_service_is_not_a)))
         else if (i.frozen)
-            add(Item("frozen_in_background", false, i.liveWhy ?: tr("系统最近在后台冻结过 Agent-VScreen：需要用户在系统的后台管理里允许它后台活动", "The system recently froze Agent-VScreen in the background: the user must allow background activity in the system's background management")))
+            add(Item("frozen_in_background", false, i.liveWhy ?: tr(S.readiness_the_system_recently_froze_agent)))
         if (i.remoteMode != "off" && !i.remoteUp)
-            add(Item("remote_down", false, tr("其它设备访问打开了，但 Tailscale 现在没连上：其它设备上的 agent 连不进来", "Access from other devices is on but Tailscale is not connected now: agents on other devices cannot get in") +
-                (i.remoteWhy?.let { tr("（$it）", " ($it)") } ?: "")))
+            add(Item("remote_down", false, tr(S.readiness_access_from_other_devices_is) +
+                (i.remoteWhy?.let { tr(S.public_guide_text, it) } ?: "")))
         if (i.a11yOn == false)
-            add(Item("no_accessibility", false, tr("无障碍服务当前未连接（刚启动时系统可能还在绑定，几秒后会更新）：元素列表只有 OCR 文字（图标按钮没有文字、中文输入只能走剪贴板粘贴）。需要更稳时，请用户在 系统设置 › 无障碍 › 已安装的应用 › Agent-VScreen 打开。",
-                "The accessibility service is not connected (right after start the system may still be binding it; it updates in a few seconds): element lists have OCR text only (icon buttons have no text, non-ASCII typing goes through clipboard paste). For more reliability, ask the user to turn it on in Settings › Accessibility › Installed apps › Agent-VScreen.")))
+            add(Item("no_accessibility", false, tr(S.readiness_the_accessibility_service_is_not)))
         else if (i.a11ySeesScreen == false)
-            add(Item("accessibility_cannot_see_display", false, tr("无障碍已开启，但系统没有把副屏窗口交给它：控件树为空，元素列表只有 OCR 文字和截图。", "Accessibility is on, but the system does not give it the screen's windows: the widget tree is empty and element lists have only OCR text and screenshots.")))
+            add(Item("accessibility_cannot_see_display", false, tr(S.readiness_accessibility_is_on_but_the)))
         if (!i.powerProblems.isNullOrEmpty()) {
-            val p = i.powerProblems.joinToString(tr("、", ", "))
+            val p = i.powerProblems.joinToString(tr(S.automation_list_sep))
             val srcName = Privileged.name()
-            add(Item("background_network", false, tr("Agent-VScreen 切到后台后系统可能切断它的网络（$p），模型请求会报 connection abort。", "The system may cut Agent-VScreen's network in the background ($p); model requests may fail with connection abort. ") +
-                (if (i.privilege == "READY") tr("fix background_network 可用 $srcName 自动加白名单（改系统设置，先征得用户同意）。", "fix background_network can add the exemptions via $srcName (changes system settings; ask the user first).")
-                 else tr("请用户手动设置：${com.kilon.agentvscreen.core.VScreenPower.manualSteps()}", "Ask the user to set by hand: ${com.kilon.agentvscreen.core.VScreenPower.manualSteps()}"))))
+            add(Item("background_network", false, tr(S.readiness_the_system_may_cut_agent, p) +
+                (if (i.privilege == "READY") tr(S.readiness_fix_background_network_can_add, srcName)
+                 else tr(S.readiness_ask_the_user_to_set, com.kilon.agentvscreen.core.VScreenPower.manualSteps()))))
         }
         if (i.ownFocus == false)
-            add(Item("no_display_focus", false, tr("副屏没有独立输入焦点（需要 Android 14+）：key back/enter 可能送不到；无效时直接 tap 页面上的返回/搜索按钮。", "The screen has no input focus of its own (needs Android 14+): key back/enter may not arrive; if they do nothing, tap the page's back / search buttons.")))
+            add(Item("no_display_focus", false, tr(S.readiness_the_screen_has_no_input)))
         if (i.shellOwned == false) {
             val srcName = Privileged.name()
-            add(Item("app_owned_display", false, tr("$srcName 副屏服务不可用，只能用 App 自建副屏：系统可能把应用开到主屏。请用户在设置里重新连接后台操作。", "The $srcName screen service is unavailable, so only the app's own screen can be used: the system may open apps on the main screen. Ask the user to reconnect background operation in settings.")))
+            add(Item("app_owned_display", false, tr(S.readiness_the_screen_service_is_unavailable, srcName)))
         }
         val mlCrashed = com.kilon.agentvscreen.core.VScreenOcr.ENGINE_MLKIT in i.ocrCrashedEngines
         val pdCrashed = com.kilon.agentvscreen.core.VScreenOcr.ENGINE_PADDLE in i.ocrCrashedEngines
         if (mlCrashed && pdCrashed) {
-            add(Item("ocr_unavailable", false, tr("OCR 不可用：PP-OCRv6 与 ML Kit 在自检时均崩溃，本版本已禁用；画面上的文字仅能靠无障碍和截图识别（运行 diag 或升级应用后重试）",
-                "OCR is unavailable: both PP-OCRv6 and ML Kit crashed during self-test and are disabled for this version; text on screen relies on accessibility and screenshots only (run diag or update the app to retry)")))
+            add(Item("ocr_unavailable", false, tr(S.readiness_ocr_is_unavailable_both_pp)))
         } else if (mlCrashed) {
-            add(Item("ocr_degraded", false, tr("ML Kit 在自检时崩溃，本版本已禁用，改由 PP-OCRv6 接手（运行 diag 或升级应用后重试）",
-                "ML Kit crashed during self-test and is disabled for this version; PP-OCRv6 took over (run diag or update the app to retry)")))
+            add(Item("ocr_degraded", false, tr(S.readiness_ml_kit_crashed_during_self)))
         } else if (pdCrashed) {
-            add(Item("ocr_degraded", false, tr("PP-OCRv6 在自检时崩溃，本版本已禁用，改由 ML Kit 接手（运行 diag 或升级应用后重试）",
-                "PP-OCRv6 crashed during self-test and is disabled for this version; ML Kit took over (run diag or update the app to retry)")))
+            add(Item("ocr_degraded", false, tr(S.readiness_pp_ocrv6_crashed_during_self)))
         }
         if (i.unhealthyWatchdogs.isNotEmpty()) {
             val names = i.unhealthyWatchdogs.joinToString(", ")
             add(Item(
                 "watchdog_unhealthy",
                 false,
-                tr(
-                    "后台循环异常停止或触发熔断（$names），部分后台能力可能失活；请查看 diag 并重启服务",
-                    "Background loop stopped or tripped ($names); some background features may be inactive; inspect diag and restart the service",
-                ),
+                tr(S.readiness_background_loop_stopped_or_tripped, names),
             ))
         }
     }

@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
@@ -56,7 +57,7 @@ object WaitingPill {
         if (n == 0 || AppFront.visible) hide() else show(c, n)
     }
 
-    private fun text(n: Int) = tr("$n 项待处理  ›", "$n items need you  ›")
+    private fun text(n: Int) = tr(S.waiting_pill_items_need_you, n)
 
     private fun show(c: Context, n: Int) {
         view?.let { if (shownCount != n) { it.text = text(n); shownCount = n }; return }

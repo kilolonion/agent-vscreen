@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.api.Policy
 import com.kilon.agentvscreen.api.Tokens
 import com.kilon.agentvscreen.core.BackgroundOperation.ActionError
@@ -14,36 +15,33 @@ import com.kilon.agentvscreen.tr
  * when a command meets a class set to Not allowed, so asking ahead and running into the limit end the same way.
  */
 internal fun VScreenOffloadHandler.elevateCmd(args: OffloadArgs): NativeOffloadResult {
-    val call = Call.current() ?: throw ActionError("NO_SESSION", tr("没有调用方信息", "No caller"))
+    val call = Call.current() ?: throw ActionError("NO_SESSION", tr(S.vscreen_elevate_no_caller))
     val raw = args.positional.joinToString(" ").trim()
     val why = args.get("why")?.trim().orEmpty()
-    if (raw.isEmpty()) throw ActionError("INVALID_ARGS", tr("要写明申请什么：一个类别（${rowNames()}）或一个档位（${levelNames()}）",
-        "Say what you ask for: a class (${rowNames()}) or a level (${levelNames()})"))
-    if (why.isEmpty()) throw ActionError("INVALID_ARGS", tr("要用 --why \"…\" 写明原因，用户在确认卡上会看到", "Give the reason with --why \"…\"; the user sees it on the card"))
-    if (why.length > 120) throw ActionError("INVALID_ARGS", tr("原因最多 120 个字（收到 ${why.length}）", "The reason has at most 120 characters (got ${why.length})"))
+    if (raw.isEmpty()) throw ActionError("INVALID_ARGS", tr(S.vscreen_elevate_say_what_you_ask_for, rowNames(), levelNames()))
+    if (why.isEmpty()) throw ActionError("INVALID_ARGS", tr(S.vscreen_elevate_give_the_reason_with_why))
+    if (why.length > 120) throw ActionError("INVALID_ARGS", tr(S.vscreen_elevate_the_reason_has_at_most, why.length))
     val prefer = args.get("for")?.let { k ->
         StrongConfirm.Range.entries.firstOrNull { it.key == k && it != StrongConfirm.Range.ONCE }
-            ?: throw ActionError("INVALID_ARGS", tr("--for 只能是 round、today 或 always（收到 $k）", "--for is round, today or always (got $k)"))
+            ?: throw ActionError("INVALID_ARGS", tr(S.vscreen_elevate_for_is_round_today_or, k))
     } ?: StrongConfirm.Range.ROUND
-    val tok = Tokens.byId(call.tokenId) ?: throw ActionError("SCOPE_DENIED", tr("这个令牌已失效", "This token is no longer valid"))
+    val tok = Tokens.byId(call.tokenId) ?: throw ActionError("SCOPE_DENIED", tr(S.vscreen_elevate_this_token_is_no_longer))
     val public = tok.publicOnly || call.source == Call.Source.PUBLIC
 
     val row = Policy.ROWS.firstOrNull { it.key == raw || it.zh == raw || it.en.equals(raw, true) }
     val level = if (row == null) Tokens.LEVELS.firstOrNull { it == raw || Policy.levelTitle(it) == raw } else null
-    if (row == null && level == null) throw ActionError("INVALID_ARGS", tr("不认识「$raw」。类别：${rowNames()}；档位：${levelNames()}",
-        "Unknown \"$raw\". Classes: ${rowNames()}; levels: ${levelNames()}"))
+    if (row == null && level == null) throw ActionError("INVALID_ARGS", tr(S.vscreen_elevate_unknown_classes_levels, raw, rowNames(), levelNames()))
 
     row?.let { r -> com.kilon.agentvscreen.host.Permissions.refusal(r.key, public)?.let { throw ActionError("SCOPE_DENIED", it) } }
-    if (level == Policy.CUSTOM) throw ActionError("INVALID_ARGS", tr("「自定义」不是可以申请的档位；请申请具体的类别", "Custom is not a level you can ask for; ask for a class"))
-    if (public && level != null && level !in Tokens.PUBLIC_LEVELS) throw ActionError("SCOPE_DENIED", tr(
-        "公网 MCP 不开放系统操作，这是固定的边界，不能申请", "System actions are never available over public MCP; this cannot be asked for"))
+    if (level == Policy.CUSTOM) throw ActionError("INVALID_ARGS", tr(S.vscreen_elevate_custom_is_not_a_level))
+    if (public && level != null && level !in Tokens.PUBLIC_LEVELS) throw ActionError("SCOPE_DENIED", tr(S.vscreen_elevate_system_actions_are_never_available))
 
     // Already covered: say so instead of asking the user for nothing.
     val now = StrongConfirm.clock()
     val missing: List<String> = if (row != null) listOf(row.key).filter { StrongConfirm.effectiveAct(tok, it, now) != Policy.clamp(it, Policy.Act.ALLOW) }
         else Policy.table(level!!, emptyMap(), tok.publicOnly).filter { (k, a) -> a.rank > StrongConfirm.effectiveAct(tok, k, now).rank }.keys.toList()
-    val what = row?.title ?: tr("「${Policy.levelTitle(level!!)}」档位", "the ${Policy.levelTitle(level!!)} level")
-    if (missing.isEmpty()) return text(tr("$what 已经在许可范围内，不用申请。", "$what is already allowed; nothing to ask."))
+    val what = row?.title ?: tr(S.vscreen_elevate_the_level, Policy.levelTitle(level!!))
+    if (missing.isEmpty()) return text(tr(S.vscreen_elevate_is_already_allowed_nothing_to, what))
 
     val target = if (row != null) "row:${row.key}" else level!!
     val risks = buildList {
@@ -52,11 +50,11 @@ internal fun VScreenOffloadHandler.elevateCmd(args: OffloadArgs): NativeOffloadR
     }
     val got = StrongConfirm.requireForRisks(context, call, risks, "elevate", targetLevel = target, detail = why, prefer = prefer)
     val range = when (got) {
-        StrongConfirm.Range.ALWAYS -> tr("永久（已写入这个 agent 的权限表）", "permanently (saved in this agent's table)")
-        StrongConfirm.Range.TODAY -> tr("今天内", "for today")
-        else -> tr("本轮任务内（超过任务轮次时长没有新命令即收回）", "for this turn (taken back once no command arrives for a turn length)")
+        StrongConfirm.Range.ALWAYS -> tr(S.vscreen_elevate_permanently_saved_in_this_agent)
+        StrongConfirm.Range.TODAY -> tr(S.vscreen_elevate_for_today)
+        else -> tr(S.vscreen_elevate_for_this_turn_taken_back)
     }
-    return text(tr("用户已批准：$what，$range。", "The user approved $what, $range."))
+    return text(tr(S.vscreen_elevate_the_user_approved, what, range))
 }
 
 private fun rowNames() = Policy.ROWS.filter { it.key != Policy.MONEY }.joinToString("、") { "${it.key}=${it.zh}" }

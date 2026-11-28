@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.app.Notification
@@ -67,7 +68,7 @@ class HostService : Service() {
                 .onFailure {
                     // Android 12+ refuses to start a foreground service from the background (e.g. the process was
                     // restarted by the system). Opening the app starts it again (MainActivity.onResume).
-                    Liveness.foregroundFailed(tr("后台启动服务被系统拒绝：${it.javaClass.simpleName}", "The system refused to start the service in the background: ${it.javaClass.simpleName}"))
+                    Liveness.foregroundFailed(tr(S.host_service_the_system_refused_to_start, it.javaClass.simpleName))
                     AppLogger.warning("HostService", "start: ${it.message}")
                     startFromShell(ctx.applicationContext)
                 }
@@ -185,7 +186,7 @@ class HostService : Service() {
                         if (sleepNow) {
                             AppLogger.info("HostService", "nothing needs the service: hidden again")
                             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                BackgroundOperation.stopAndRelease(tr("已完成，自动隐藏", "Done, hidden automatically"))
+                                BackgroundOperation.stopAndRelease(tr(S.host_service_done_hidden_automatically))
                             }
                             stopSelf()
                             break
@@ -284,20 +285,20 @@ class HostService : Service() {
         val nm = getSystemService(NotificationManager::class.java) ?: return
         if (!stopped) { nm.cancel(STOP_NOTE_ID); return }
         if (nm.getNotificationChannel(STOP_CHANNEL) == null)
-            nm.createNotificationChannel(NotificationChannel(STOP_CHANNEL, tr("agent 已停止", "Agent stopped"), NotificationManager.IMPORTANCE_DEFAULT))
+            nm.createNotificationChannel(NotificationChannel(STOP_CHANNEL, tr(S.host_service_agent_stopped), NotificationManager.IMPORTANCE_DEFAULT))
         val allow = PendingIntent.getBroadcast(this, 3, Intent(this, NoteActions::class.java).setAction(ACTION_ALLOW), PendingIntent.FLAG_IMMUTABLE)
         val open = PendingIntent.getActivity(this, 4, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE, com.kilon.agentvscreen.ui.MainDisplay.options())
         val at = BackgroundOperation.state.value.stoppedAt.takeIf { it > 0 }?.let { java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(it)) }
         val n = NotificationCompat.Builder(this, STOP_CHANNEL)
             .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
-            .setContentTitle(tr("已停止 agent", "Agent stopped") + (at?.let { tr("（$it）", " ($it)") } ?: ""))
-            .setContentText(tr("agent 的操作将被拒绝，点“解除停止”后恢复", "The agent's actions are refused until you tap \"Resume agent\""))
-            .setStyle(NotificationCompat.BigTextStyle().bigText(tr("你已在悬浮窗点击“停止 agent”。解除前，agent 的所有操作都会被拒绝，并提示它向你确认。要让 agent 继续，请点下方“解除停止”。", "You tapped \"Stop agent\" on the floating window. Until you lift it, every action of the agent is refused and it is told to check with you. To let the agent continue, tap \"Resume agent\" below.")))
+            .setContentTitle(tr(S.look_agent_stopped) + (at?.let { tr(S.public_guide_text, it) } ?: ""))
+            .setContentText(tr(S.host_service_the_agent_s_actions_are))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(tr(S.host_service_you_tapped_stop_agent_on)))
             .setContentIntent(open)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setColor(0xFFE5484D.toInt())
-            .addAction(0, tr("解除停止", "Resume agent"), allow)
+            .addAction(0, tr(S.overview_resume_agent), allow)
             .build()
         com.kilon.agentvscreen.host.quiet("HostService:132") { nm.notify(STOP_NOTE_ID, n) }
     }
@@ -361,7 +362,7 @@ class HostService : Service() {
     private fun notification(): Notification {
         val nm = getSystemService(NotificationManager::class.java)
         if (nm?.getNotificationChannel(CHANNEL) == null)
-            nm?.createNotificationChannel(NotificationChannel(CHANNEL, tr("Agent-VScreen 服务", "Agent-VScreen service"), NotificationManager.IMPORTANCE_LOW))
+            nm?.createNotificationChannel(NotificationChannel(CHANNEL, tr(S.host_service_agent_vscreen_service), NotificationManager.IMPORTANCE_LOW))
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE, com.kilon.agentvscreen.ui.MainDisplay.options())
         val stop = PendingIntent.getBroadcast(this, 1, Intent(this, NoteActions::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
         val err = server?.lastError ?: Liveness.problem()
@@ -371,20 +372,20 @@ class HostService : Service() {
         val b = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(com.kilon.agentvscreen.R.drawable.ic_stat)
             .setContentTitle(when {
-                s.userStopped -> tr("Agent-VScreen · agent 已停止", "Agent-VScreen · agent stopped")
-                s.windowHidden && s.displayId != null -> tr("Agent-VScreen · agent 正在后台工作（小窗已隐藏）", "Agent-VScreen · agent working in the background (mini window hidden)")
-                ServiceControl.awakeOnDemand(this) -> tr("Agent-VScreen · 按需运行中，空闲后自动停止", "Agent-VScreen · running on demand, stops when idle")
-                else -> tr("Agent-VScreen 服务运行中", "Agent-VScreen service running")
+                s.userStopped -> tr(S.host_service_agent_vscreen_agent_stopped)
+                s.windowHidden && s.displayId != null -> tr(S.host_service_agent_vscreen_agent_working_in)
+                ServiceControl.awakeOnDemand(this) -> tr(S.host_service_agent_vscreen_running_on_demand)
+                else -> tr(S.host_service_agent_vscreen_service_running)
             })
             .setContentText(err ?: "$where · CLI / HTTP / MCP")
             .setContentIntent(open)
             .setOngoing(true)
         if (s.windowHidden && s.displayId != null)
-            b.addAction(0, tr("显示小窗", "Show window"), PendingIntent.getBroadcast(this, 5, Intent(this, NoteActions::class.java).setAction(ACTION_SHOW_WINDOW), PendingIntent.FLAG_IMMUTABLE))
-        else b.addAction(0, tr("查看副屏", "View screen"), PendingIntent.getActivity(this, 2, com.kilon.agentvscreen.ui.Surface.liveIntent(this), PendingIntent.FLAG_IMMUTABLE, com.kilon.agentvscreen.ui.MainDisplay.options()))
+            b.addAction(0, tr(S.host_service_show_window), PendingIntent.getBroadcast(this, 5, Intent(this, NoteActions::class.java).setAction(ACTION_SHOW_WINDOW), PendingIntent.FLAG_IMMUTABLE))
+        else b.addAction(0, tr(S.host_service_view_screen), PendingIntent.getActivity(this, 2, com.kilon.agentvscreen.ui.Surface.liveIntent(this), PendingIntent.FLAG_IMMUTABLE, com.kilon.agentvscreen.ui.MainDisplay.options()))
         // 1.3.0: the button says what it does to remote access: with the built-in Tailscale on, hiding stops it.
         val remote = Tailnet.Mode.BUILTIN == com.kilon.agentvscreen.api.ApiConfig.tailnetMode
-        return b.addAction(0, if (remote) tr("关闭（远程断开）", "Off (remote goes offline)") else tr("关闭", "Off"), stop).build()
+        return b.addAction(0, if (remote) tr(S.host_service_off_remote_goes_offline) else tr(S.overview_off), stop).build()
     }
 }
 

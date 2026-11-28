@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -57,7 +58,7 @@ import org.json.JSONObject
  * the app (`use 名字`); when an agent asked for the lesson, the agent gets the steps as the answer.
  * 1.4.0-beta11: the REVIEW pane of the one screen page (was its own page, TeachActivity).
  */
-private fun defaultName(r: Teach.Result): String = (r.name ?: r.purpose?.take(16) ?: tr("示教", "routine") + "-" +
+private fun defaultName(r: Teach.Result): String = (r.name ?: r.purpose?.take(16) ?: tr(S.teach_review_routine) + "-" +
         java.text.SimpleDateFormat("HHmm", java.util.Locale.ROOT).format(java.util.Date())).trim().replace(Regex("\\s+"), "-")
 
 @Composable
@@ -76,22 +77,22 @@ internal fun ReviewPane(r: Teach.Result, screenGone: Boolean, onLeave: () -> Uni
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(24.dp)).padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(tr("保存刚才的示教", "Save this routine"), fontSize = 21.sp, fontWeight = FontWeight.Bold)
-                    ask?.let { Text(tr("「${it.tokenName}」请求示教：${it.title}", "\"${it.tokenName}\" asked you to show: ${it.title}"), fontSize = 14.sp, color = MaterialTheme.colorScheme.primary) }
-                    Text((r.app ?: tr("没认出应用", "app not recognised")) + " · " + steps(r.lines.size),
+                    Text(tr(S.teach_review_save_this_routine), fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                    ask?.let { Text(tr(S.teach_review_asked_you_to_show, it.tokenName, it.title), fontSize = 14.sp, color = MaterialTheme.colorScheme.primary) }
+                    Text((r.app ?: tr(S.teach_review_app_not_recognised)) + " · " + steps(r.lines.size),
                         fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     // 1.4.0-beta11: nobody waits for it (no request, or the request ended while recording): say where it goes.
-                    if (ask == null) Text(tr("没有 agent 在等待这段示教。保存后归你所有，所有 agent 都可以 use。", "No agent is waiting for this routine. It is saved as your own, and every agent can use it."),
+                    if (ask == null) Text(tr(S.teach_review_no_agent_is_waiting_for),
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 OutlinedTextField(name, { name = it.replace(Regex("\\s+"), "-").take(32) }, Modifier.fillMaxWidth(), singleLine = true,
-                    label = { Text(tr("名称（agent 用 use 名称 调用）", "Name (agents call it with use <name>)")) }, shape = RoundedCornerShape(18.dp))
-                if (r.lines.isEmpty()) Text(tr("没有记到操作。", "Nothing was recorded."), fontSize = 15.sp)
+                    label = { Text(tr(S.teach_review_name_agents_call_it_with)) }, shape = RoundedCornerShape(18.dp))
+                if (r.lines.isEmpty()) Text(tr(S.teach_review_nothing_was_recorded), fontSize = 15.sp)
                 r.lines.forEachIndexed { i, l -> StepRow(i, l, i in keep, i in literal, params = paramOf(r.lines, keep, literal, i),
                     onKeep = { keep = if (i in keep) keep - i else keep + i }, onLiteral = { literal = if (i in literal) literal - i else literal + i },
                     check = checks[i], onCheck = { v -> checks = if (v == null) checks - i else checks + (i to v.take(80)) }) }
                 if (keep.isNotEmpty()) Column(Modifier.fillMaxWidth().glass(RoundedCornerShape(18.dp), lift = false).padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(tr("agent 这样用", "How an agent runs it"), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(tr(S.teach_review_how_an_agent_runs_it), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("act \"use $name" + (1..params).joinToString("") { " <$it>" } + "\"", fontSize = 13.sp, fontFamily = FontFamily.Monospace)
                 }
             }
@@ -99,13 +100,13 @@ internal fun ReviewPane(r: Teach.Result, screenGone: Boolean, onLeave: () -> Uni
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 // 1.4.0-beta11: discarding asks once more (it cannot be undone).
                 TextButton(onClick = { if (sure) { discard(ctx, r); onLeave() } else sure = true }) {
-                    Text(if (sure) tr("确定丢弃？", "Discard for sure?") else tr("丢弃", "Discard"), color = if (sure) Palette.stopped else androidx.compose.ui.graphics.Color.Unspecified)
+                    Text(if (sure) tr(S.asks_discard_for_sure) else tr(S.asks_discard), color = if (sure) Palette.stopped else androidx.compose.ui.graphics.Color.Unspecified)
                 }
                 Spacer(Modifier.weight(1f))
                 // 1.4.0-beta11: 重录 stays on this page (the live pane); without the screen it is off and says why.
-                OutlinedButton(enabled = !screenGone, onClick = onAgain, modifier = Modifier.height(48.dp)) { Text(if (screenGone) tr("副屏已关闭，无法重新录制", "Background screen closed; cannot record again") else tr("重新录制", "Record again")) }
+                OutlinedButton(enabled = !screenGone, onClick = onAgain, modifier = Modifier.height(48.dp)) { Text(if (screenGone) tr(S.fullscreen_activity_background_screen_closed_cannot_record) else tr(S.teach_review_record_again)) }
                 Button(enabled = name.isNotBlank() && keep.isNotEmpty() && r.app != null, onClick = { save(ctx, r, name, steps, params, keep); onLeave() }, modifier = Modifier.height(48.dp)) {
-                    Text(tr("保存", "Save"), fontWeight = FontWeight.SemiBold)
+                    Text(tr(S.automation_save), fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -142,22 +143,22 @@ private fun StepRow(i: Int, l: TeachLine, kept: Boolean, lit: Boolean, params: I
                 l.warn?.let { Text(it, fontSize = 12.sp, color = Palette.stopped) }
                 // 1.4.0-beta11: a check after this step: the run stops here and the agent looks (or puts it right) first.
                 if (kept) {
-                    if (check == null) Text(tr("＋ 添加检查点（agent 复核）", "+ Add a checkpoint (agent verifies)"), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary,
+                    if (check == null) Text(tr(S.teach_review_add_a_checkpoint_agent_verifies), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onCheck(Teach.CHECK_DEFAULT) }.padding(vertical = 2.dp))
                     else Column(Modifier.fillMaxWidth().padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         OutlinedTextField(check, { onCheck(it) }, Modifier.fillMaxWidth(), singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
-                            label = { Text(tr("检查点：", "Checkpoint: ")) }, shape = RoundedCornerShape(14.dp))
-                        Text(tr("去掉这个检查", "Remove this check"), fontSize = 12.sp, color = MaterialTheme.colorScheme.outline,
+                            label = { Text(tr(S.teach_review_checkpoint)) }, shape = RoundedCornerShape(14.dp))
+                        Text(tr(S.teach_review_remove_this_check), fontSize = 12.sp, color = MaterialTheme.colorScheme.outline,
                             modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onCheck(null) }.padding(vertical = 2.dp))
                     }
                 }
-                if (l.kind == "value" && l.typed != null && kept) Text(if (lit) tr("固定设置为「${l.typed}」 · 点按改为由 agent 填写", "Fixed to \"${l.typed}\" · tap to let the agent fill it in")
-                    else tr("每次由 agent 填写（{$params}），本次为「${l.typed}」 · 点按改为固定此值", "Filled in by the agent each time ({$params}), \"${l.typed}\" this time · tap to fix this value"),
+                if (l.kind == "value" && l.typed != null && kept) Text(if (lit) tr(S.teach_review_fixed_to_tap_to_let, l.typed)
+                    else tr(S.teach_review_filled_in_by_the_agent, params, l.typed),
                     fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onLiteral).padding(vertical = 2.dp))
                 if (l.kind == "type" && kept) {
-                    if (l.secret) Text(tr("不会保存密码，调用时由 agent 填写", "The password is not saved; the agent fills it in when calling"), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
-                    else Text(if (lit) tr("固定输入此文字 · 点按改为由 agent 填写", "Always types this text · tap to let the agent fill it in")
-                        else tr("由 agent 每次填（{$params}）· 点这里改成固定输入原文", "Filled by the agent each time ({$params}) · tap to always type the original"),
+                    if (l.secret) Text(tr(S.teach_review_the_password_is_not_saved), fontSize = 12.sp, color = MaterialTheme.colorScheme.primary)
+                    else Text(if (lit) tr(S.teach_review_always_types_this_text_tap)
+                        else tr(S.teach_review_filled_by_the_agent_each, params),
                         fontSize = 12.sp, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onLiteral).padding(vertical = 2.dp))
                 }
             }
@@ -178,7 +179,7 @@ private fun save(ctx: android.content.Context, r: Teach.Result, name: String, st
         Teach.deliver(ctx, r, JSONObject().put("kind", "teach").put("name", name).put("app", app).put("steps", steps)
             .put("params", params).put("described", lines))
     }
-    Toast.makeText(ctx, tr("已存成「$name」", "Saved as \"$name\""), Toast.LENGTH_SHORT).show()
+    Toast.makeText(ctx, tr(S.teach_review_saved_as, name), Toast.LENGTH_SHORT).show()
     Teach.clearResult(ctx)
 }
 

@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import com.kilon.agentvscreen.core.VScreenShell
 import com.kilon.agentvscreen.tr
@@ -33,8 +34,7 @@ object Heal {
     fun accessibility(ctx: Context, restart: Boolean = false): Pair<Boolean, String> {
         if (!Privileged.isReady()) {
             val srcName = Privileged.name()
-            return false to tr("需要先修好 $srcName（fix no_privilege），或请用户在 系统设置 › 无障碍 › 已安装的应用 › Agent-VScreen 手动打开",
-                "Fix $srcName first (fix no_privilege), or ask the user to turn it on in Settings › Accessibility › Installed apps › Agent-VScreen")
+            return false to tr(S.heal_fix_first_fix_no_privilege, srcName)
         }
         val me = comp(ctx)
         val rest = enabledList().filter { it != me }
@@ -46,11 +46,9 @@ object Heal {
         // Writing the list (ours last) also re-binds a crashed service.
         val w = VScreenShell.run(arrayOf("settings", "put", "secure", "enabled_accessibility_services", (rest + me).joinToString(":")))
         VScreenShell.run(arrayOf("settings", "put", "secure", "accessibility_enabled", "1"))
-        if (w.exitCode != 0) return false to tr("无障碍：写系统设置失败（${w.combined.take(80)}），请在 系统设置 › 无障碍 › Agent-VScreen 手动打开",
-            "Accessibility: writing system settings failed (${w.combined.take(80)}); turn it on in Settings › Accessibility › Agent-VScreen")
-        return if (connected(4_000)) true to tr("无障碍已打开（其它无障碍服务保持不变）", "Accessibility turned on (other accessibility services unchanged)")
-        else false to tr("无障碍：已写入设置但 4 秒内没连上，部分系统会拦截，请在 系统设置 › 无障碍 › Agent-VScreen 手动打开一次",
-            "Accessibility: the setting was written but did not connect within 4 s (some systems block it); turn it on once in Settings › Accessibility › Agent-VScreen")
+        if (w.exitCode != 0) return false to tr(S.heal_accessibility_writing_system_settings_fa, w.combined.take(80))
+        return if (connected(4_000)) true to tr(S.heal_accessibility_turned_on_other_accessibil)
+        else false to tr(S.heal_accessibility_the_setting_was_written)
     }
 
     /** Battery exemption and background running, as a user would grant them by hand. */
@@ -66,25 +64,25 @@ object Heal {
      * start of a foreground service is allowed for an exempt app), then start it again and wait until it says it is up.
      */
     fun foreground(ctx: Context): Pair<Boolean, String> {
-        if (Liveness.foreground) return true to tr("服务已是前台服务", "the service is a foreground service")
+        if (Liveness.foreground) return true to tr(S.heal_the_service_is_a_foreground)
         if (Privileged.isReady()) power(ctx)
         HostService.start(ctx.applicationContext)
-        return if (waitFor(4_000) { Liveness.foreground }) true to tr("已把服务重新启动为前台服务", "restarted the service as a foreground service")
-        else false to tr("系统不让后台启动前台服务：请用户打开一次 Agent-VScreen", "the system won't start a foreground service from the background: ask the user to open Agent-VScreen once")
+        return if (waitFor(4_000) { Liveness.foreground }) true to tr(S.heal_restarted_the_service_as_a)
+        else false to tr(S.heal_the_system_won_t_start)
     }
 
     /** 1.4.0-beta13: the built-in Tailscale node is on but not connected. Restart it and wait for it to connect. */
     fun remote(ctx: Context): Pair<Boolean, String> {
         if (com.kilon.agentvscreen.api.ApiConfig.tailnetMode != Tailnet.Mode.BUILTIN)
-            return false to tr("用的是系统里的 Tailscale：请用户打开 Tailscale 应用连上", "this uses the system's Tailscale: ask the user to open the Tailscale app and connect")
-        if (Tailnet.phase(ctx) == Tailnet.Phase.CONNECTED) return true to tr("Tailscale 已连接", "Tailscale is connected")
+            return false to tr(S.heal_this_uses_the_system_s)
+        if (Tailnet.phase(ctx) == Tailnet.Phase.CONNECTED) return true to tr(S.heal_tailscale_is_connected)
         Tailnet.restart(ctx.applicationContext)
-        if (waitFor(20_000) { Tailnet.phase(ctx) == Tailnet.Phase.CONNECTED }) return true to tr("已重启内置 Tailscale，现在连上了", "restarted the built-in Tailscale; it is connected now")
+        if (waitFor(20_000) { Tailnet.phase(ctx) == Tailnet.Phase.CONNECTED }) return true to tr(S.heal_restarted_the_built_in_tailscale)
         val line = runCatching { Tailnet.line(ctx) }.getOrNull()
         return false to when (Tailnet.phase(ctx)) {
-            Tailnet.Phase.NEEDS_LOGIN, Tailnet.Phase.EXPIRED -> tr("需要用户重新登录 Tailscale：打开 Agent-VScreen › 接入", "the user must sign in to Tailscale again: open Agent-VScreen › Connect")
-            Tailnet.Phase.NEEDS_APPROVAL -> tr("等管理员在 Tailscale 后台批准这台设备", "waiting for the tailnet admin to approve this device")
-            else -> tr("重启后 20 秒内没连上（${line ?: "原因不明"}）：手机开着别的 VPN 时请用户看 接入 页的引导", "not connected 20 s after a restart (${line ?: "no detail"}): if another VPN is on, ask the user to follow the guide on the Connect page")
+            Tailnet.Phase.NEEDS_LOGIN, Tailnet.Phase.EXPIRED -> tr(S.heal_the_user_must_sign_in)
+            Tailnet.Phase.NEEDS_APPROVAL -> tr(S.heal_waiting_for_the_tailnet_admin)
+            else -> tr(S.heal_not_connected_20_s_after, line ?: "原因不明", line ?: "no detail")
         }
     }
 
@@ -95,11 +93,11 @@ object Heal {
      */
     fun sound(): Pair<Boolean, String> {
         val M = com.kilon.agentvscreen.core.VScreenMute
-        val r = M.repair(keepIntended = true) ?: return false to tr("需要 ${Privileged.name()} 已连接", "${Privileged.name()} must be connected")
-        if (r.fixed.isEmpty() && r.failed.isEmpty()) return true to tr("没有被留下静音的应用", "no app was left silent")
-        val names = r.fixed.joinToString(tr("、", ", ")) { it.pkg }
-        return r.failed.isEmpty() to (tr("恢复了 ${r.fixed.size} 个应用的声音（$names），要在应用里重新点一次播放", "gave sound back to ${r.fixed.size} apps ($names); playback must be started again in the app") +
-            (if (r.failed.isNotEmpty()) tr("；${r.failed.size} 个没恢复（${r.failed.joinToString { it.pkg }}）", "; ${r.failed.size} could not be restored (${r.failed.joinToString { it.pkg }})") else "") +
-            (if (r.denied) tr("。系统拒绝修改：小米 / 红米请用户打开“USB 调试（安全设置）”", ". The system refused: on Xiaomi / Redmi ask the user to turn on \"USB debugging (Security settings)\"") else ""))
+        val r = M.repair(keepIntended = true) ?: return false to tr(S.vscreen_sound_cmd_must_be_connected, Privileged.name())
+        if (r.fixed.isEmpty() && r.failed.isEmpty()) return true to tr(S.heal_no_app_was_left_silent)
+        val names = r.fixed.joinToString(tr(S.automation_list_sep)) { it.pkg }
+        return r.failed.isEmpty() to (tr(S.heal_gave_sound_back_to_apps, r.fixed.size, names) +
+            (if (r.failed.isNotEmpty()) tr(S.heal_could_not_be_restored, r.failed.size, r.failed.joinToString { it.pkg }) else "") +
+            (if (r.denied) tr(S.heal_the_system_refused_on_xiaomi) else ""))
     }
 }

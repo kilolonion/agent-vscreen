@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import com.kilon.agentvscreen.host.Audit
 import com.kilon.agentvscreen.host.quiet
@@ -314,7 +315,7 @@ internal class AuthFailLimiter(
         return ApiServer.Resp.err(
             429,
             "RATE_LIMITED",
-            tr("验证失败次数太多，$secs 秒后再试", "Too many failed verifications; try again in $secs s"),
+            tr(S.http_core_too_many_failed_verifications_try, secs),
         )
     }
 
@@ -356,11 +357,8 @@ internal class AuthFailLimiter(
                     com.kilon.agentvscreen.core.VScreenHandoff.alert(
                         ctx,
                         if (channel == "public") 7391 else 7390,
-                        tr("有设备在反复尝试连接 Agent-VScreen", "A device keeps trying to connect to Agent-VScreen"),
-                        tr(
-                            "$who 一分钟内 $n 次验证失败，已暂停接受它的请求 ${HttpCore.LOCK_MS / 60_000} 分钟。不是你的设备的话，在 其它设备 里关掉远程访问或重置令牌",
-                            "$who failed verification $n times within a minute; its requests are refused for ${HttpCore.LOCK_MS / 60_000} minutes. If it is not your device, turn off remote access or reset the token under Other devices",
-                        ),
+                        tr(S.http_core_a_device_keeps_trying_to),
+                        tr(S.http_core_failed_verification_times_within_a, who, n, HttpCore.LOCK_MS / 60_000),
                         com.kilon.agentvscreen.host.Needs.open(ctx, com.kilon.agentvscreen.host.Needs.Page.CONNECT, 2),
                     )
                 }

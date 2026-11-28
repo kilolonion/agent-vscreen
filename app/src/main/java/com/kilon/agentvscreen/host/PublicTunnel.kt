@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import com.kilon.agentvscreen.tr
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -149,7 +150,7 @@ internal object TunnelProbe {
         code == 200 && runCatching { JSONObject(body).optString("resource") }.getOrNull() == "$base/mcp"
 
     /** A failure to connect that is not specific to a provider. */
-    fun commonError(e: Throwable): TunnelSelfTest.Failed = TunnelSelfTest.Failed(tr("自检请求没有完成", "The self-test did not complete"),
-        tr("从手机访问公网地址失败。若开着代理 VPN，它可能拦下了这次请求（不代表外部访问不了）；也可以在电脑浏览器打开 地址/.well-known/oauth-protected-resource 看是否返回内容。", "The phone could not reach its public address. A proxy VPN may have stopped this request (outside access may still work); you can also open address/.well-known/oauth-protected-resource in a browser on a computer."),
+    fun commonError(e: Throwable): TunnelSelfTest.Failed = TunnelSelfTest.Failed(tr(S.public_tunnel_the_self_test_did_not),
+        tr(S.public_tunnel_the_phone_could_not_reach),
         "${e.javaClass.simpleName}: ${e.message}")
 }

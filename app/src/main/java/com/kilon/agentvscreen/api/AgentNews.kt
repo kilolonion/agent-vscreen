@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.api
 
+import com.kilon.agentvscreen.S
+import com.kilon.agentvscreen.trPair
 import com.kilon.agentvscreen.BuildConfig
 import com.kilon.agentvscreen.tr
 
@@ -78,7 +80,7 @@ object AgentNews {
     fun nameOf(code: Int): String =
         com.kilon.agentvscreen.Changes.versionNameOf(code)
             ?: NAMES.filterKeys { it <= code }.maxByOrNull { it.key }?.value
-            ?: tr("更早的版本", "an earlier version")
+            ?: tr(S.agent_news_an_earlier_version)
 
     /**
      * The notice, or null when this agent's note is current or it saw the notice a moment ago.
@@ -94,14 +96,14 @@ object AgentNews {
         if (abilities.isEmpty() && changeItems.isEmpty()) return null
         if (!AgentLedger.nudgeDue(tokenId, freshStretch)) return null
         val lines = buildList {
-            changeItems.forEach { (_, item) -> add("- ${item.title}${tr("：", ": ")}${item.detail}") }
+            changeItems.forEach { (_, item) -> add("- ${item.title}${tr(S.agent_guide_colon)}${item.detail}") }
             abilities.mapNotNull { a -> a.news.takeIf { it.isNotEmpty() }?.let { "- $it" } }.forEach { add(it) }
         }
-        val was = if (ack <= 0) tr("你确认过的版本未知", "the version your note is for is unknown") else tr("你的说明是 ${nameOf(ack)} 时记下的", "your note is from ${nameOf(ack)}")
+        val was = if (ack <= 0) tr(S.agent_news_the_version_your_note_is) else tr(S.agent_news_your_note_is_from, nameOf(ack))
         val remembered = if (via == Abilities.Via.CLI) "vscreen remembered \"<存在哪里>\"" else "remembered <存在哪里>"
         val rememberedEn = if (via == Abilities.Via.CLI) "vscreen remembered \"<where>\"" else "remembered <where>"
         val memBase = if (local) ApiConfig.baseUrl else null
-        return tr(
+        return trPair(
             "【Agent-VScreen 已更新到 ${BuildConfig.VERSION_NAME}，$was】\n" +
                 (if (lines.isNotEmpty()) "用法上的变化：\n${lines.joinToString("\n")}\n" else "") +
                 (if (abilities.isNotEmpty()) "能力有新增或变化（${abilities.joinToString("、") { it.id }}）。请把你长期记忆或 skill 里关于 Agent-VScreen 的说明整段换成下面这段（原样保存，不要改写成摘要）：\n「${AgentGuide.memoryFor(via, memBase)}」\n"

@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.trPair
 import android.content.Context
 import com.kilon.agentvscreen.api.Tokens
 import com.kilon.agentvscreen.cmd.Call
@@ -42,7 +43,7 @@ enum class Risk(
         RATE -> 0L
     }
 
-    val title: String get() = tr(zh, en)
+    val title: String get() = trPair(zh, en)
 
     /**
      * Feedback 3: two strengths. A fingerprint (or screen-lock PIN) only where the user widens what an agent may do or

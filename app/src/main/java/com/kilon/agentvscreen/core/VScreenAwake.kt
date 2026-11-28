@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.app.AlarmManager
@@ -78,7 +79,7 @@ object VScreenAwake {
                         screenOff = true
                         InputReach.invalidate()
                         syncScreenLock()
-                        kick(tr("熄屏", "screen off"))
+                        kick(tr(S.vscreen_awake_screen_off))
                     }
                     Intent.ACTION_SCREEN_ON -> {
                         screenOff = false
@@ -86,7 +87,7 @@ object VScreenAwake {
                         releaseLock()
                         syncScreenLock()
                     }
-                    ACTION_TICK -> kick(tr("定时", "timer"))
+                    ACTION_TICK -> kick(tr(S.vscreen_awake_timer))
                 }
             }
         }
@@ -120,14 +121,14 @@ object VScreenAwake {
                         InputReach.invalidate(key.displayId)
                         lastDisplayId = key.displayId
                     }
-                    reconcile(tr("状态变化", "state changed"))
+                    reconcile(tr(S.vscreen_awake_state_changed))
                 }.onFailure { AppLogger.warning(TAG, "lifecycle observer: ${it.message}") }
             }
         }
     }
 
     /** Synchronize screen wake lock and keeper immediately with current state (also invoked by the reactive collector). */
-    internal fun reconcile(why: String = tr("状态变化", "state changed")) {
+    internal fun reconcile(why: String = tr(S.vscreen_awake_state_changed)) {
         syncScreenLock()
         if (needed()) kick(why) else {
             releaseLock()
@@ -154,22 +155,19 @@ object VScreenAwake {
         if (st == Display.STATE_ON) return null
         // 2.0.1-beta1: with the phone screen off and no work pending (a read between turns), the display is not woken:
         // waking it can light the phone. The reply says the picture is from before it slept.
-        if (screenOff && !BackgroundOperation.needsAwake()) return tr(
-            "手机熄屏中，副屏也已休眠（${stateName(st)}），只看不动的命令不会唤醒它：画面是休眠前的。要操作时发 act 或 launch 会自动唤醒",
-            "The phone screen is off and the screen is asleep too (${stateName(st)}); a read-only command does not wake it, so the picture is from before it slept. act or launch wakes it when you need to operate",
-        )
-        if (!canWakeAlone(d)) return tr("副屏处于休眠（状态 ${stateName(st)}），这台手机上它和主屏一起休眠，单独唤醒会点亮主屏，所以没唤醒：画面可能不动", "The screen is asleep (state ${stateName(st)}); on this phone it sleeps with the main screen and waking it alone would light the main screen, so it was not woken: the picture may not move") + keepScreenHint()
+        if (screenOff && !BackgroundOperation.needsAwake()) return tr(S.vscreen_awake_the_phone_screen_is_off, stateName(st))
+        if (!canWakeAlone(d)) return tr(S.vscreen_awake_the_screen_is_asleep_state, stateName(st)) + keepScreenHint()
         require(d.displayId != Display.DEFAULT_DISPLAY) { "VScreenAwake must never run input on display 0" }
-        if (!wakeBudget.allow(SystemClock.elapsedRealtime())) return tr("副屏唤醒过于频繁，已暂停发键", "Repeated display wake suppressed")
+        if (!wakeBudget.allow(SystemClock.elapsedRealtime())) return tr(S.vscreen_awake_repeated_display_wake_suppressed)
         val ok = runCatching { VScreenShell.run(arrayOf("input", "-d", d.displayId.toString(), "keyevent", "KEYCODE_WAKEUP"), 4_000L).exitCode == 0 }.getOrDefault(false)
         val t0 = SystemClock.elapsedRealtime()
         while (ok && SystemClock.elapsedRealtime() - t0 < 2_000L && stateOf(d) != Display.STATE_ON) Thread.sleep(100)
         val on = stateOf(d) == Display.STATE_ON
         wakes++
-        lastWake = "${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())} " + tr("${if (on) "已唤醒" else "唤醒失败"}（原状态 ${stateName(st)}${if (screenOff) "，主屏熄屏中" else ""}）", "${if (on) "woken" else "wake failed"} (was ${stateName(st)}${if (screenOff) ", phone screen off" else ""})")
+        lastWake = "${java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT).format(java.util.Date())} " + tr(S.vscreen_awake_was, if (on) "已唤醒" else "唤醒失败", stateName(st), if (screenOff) "，主屏熄屏中" else "", if (on) "woken" else "wake failed", if (screenOff) ", phone screen off" else "")
         AppLogger.info(TAG, "display ${d.displayId}: $lastWake")
         if (on) { d.requestFreshFrame(); d.awaitFrameAfter(SystemClock.elapsedRealtime(), 400) }
-        return if (on) tr("副屏刚才休眠了（${stateName(st)}${if (screenOff) "，手机熄屏中" else ""}），已唤醒", "The screen had gone to sleep (${stateName(st)}${if (screenOff) ", phone screen off" else ""}); woken") else tr("副屏休眠（${stateName(st)}），唤醒没成功：画面可能不动", "The screen is asleep (${stateName(st)}) and waking it failed: the picture may not move")
+        return if (on) tr(S.vscreen_awake_the_screen_had_gone_to, stateName(st), if (screenOff) "，手机熄屏中" else "", if (screenOff) ", phone screen off" else "") else tr(S.vscreen_awake_the_screen_is_asleep_and, stateName(st))
     }
 
     private fun stateName(s: Int) = when (s) {
@@ -302,14 +300,14 @@ object VScreenAwake {
     @Suppress("DEPRECATION")
     internal fun wakePhoneForInputDisplay(displayId: Int): String? {
         if (VScreenStore.phoneScreenMode.value != VScreenStore.PhoneScreenMode.WAKE_WHEN_NEEDED) {
-            return tr("当前未开启“需要时点亮”", "Wake-when-needed mode is not enabled")
+            return tr(S.vscreen_awake_wake_when_needed_mode_is)
         }
         if (com.kilon.agentvscreen.host.ThermalGuard.limited) {
-            return tr("手机当前处于过热降负载状态，暂停自动点亮屏幕", "Phone is thermally throttled; automatic screen wake is paused")
+            return tr(S.vscreen_awake_phone_is_thermally_throttled_automatic)
         }
-        val ctx = appContext ?: return tr("服务未初始化，无法点亮屏幕", "Service not initialized; cannot wake the screen")
+        val ctx = appContext ?: return tr(S.vscreen_awake_service_not_initialized_cannot_wake)
         if (!phoneWakeBudget.allow(monoClockMs())) {
-            return tr("短时间内点亮屏幕过于频繁，已暂停自动点亮，请稍后再试或手动点亮屏幕", "Screen was woken too frequently; automatic wake paused, retry later or turn the screen on manually")
+            return tr(S.vscreen_awake_screen_was_woken_too_frequently)
         }
         val wakeFlags = PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP
         val wakeHeld = synchronized(this) {
@@ -323,7 +321,7 @@ object VScreenAwake {
             lock?.isHeld == true
         }
         if (!wakeHeld) {
-            return tr("未能获取亮屏锁点亮主屏", "Failed to acquire wake lock to light the main screen")
+            return tr(S.vscreen_awake_failed_to_acquire_wake_lock)
         }
         screenWokeCount++
         AppLogger.info(TAG, "woke phone screen for input on display $displayId (count=$screenWokeCount)")
@@ -357,14 +355,14 @@ object VScreenAwake {
             }
         }
         if (ready) return null
-        return tr("已尝试点亮主屏，但 2 秒内副屏输入仍未恢复可交互", "Attempted to wake the main screen, but virtual display input did not become interactive within 2 s")
+        return tr(S.vscreen_awake_attempted_to_wake_the_main)
     }
 
     private const val SCREEN_LOCK_MS = 2 * 60_000L
 
     /** One line for agents when a screen slept with the phone: what the user can do about it. */
     internal fun keepScreenHint(): String = if (VScreenStore.keepScreenOnEnabled) "" else
-        tr("。可请用户在设置里把“熄屏时”改为“任务中保持亮屏”或“需要时点亮”", ". The user can set \"When screen is off\" in Settings to \"Keep on during tasks\" or \"Wake when needed\"")
+        tr(S.vscreen_awake_the_user_can_set_when)
 
     /** Test-only hook to simulate main-screen off/on transitions in unit tests. */
     internal fun setScreenOffForTest(off: Boolean) {
@@ -418,18 +416,9 @@ object VScreenAwake {
             .put(
                 "note",
                 when {
-                    d != null && !canWakeAlone(d) -> tr(
-                        "这台手机上副屏随主屏休眠：熄屏后后台任务会停住，亮屏后继续",
-                        "On this phone the screen sleeps with the main screen: background tasks pause while the screen is off and go on when it is on",
-                    ) + (if (mode != VScreenStore.PhoneScreenMode.ALLOW_SLEEP) tr("；已开启任务中保持亮屏（${mode.key}）", "; keep-screen-on is active (${mode.key})") else keepScreenHint())
-                    inputReach == InputReach.Reach.BLOCKED.key -> tr(
-                        "主屏熄屏时系统禁止副屏接收触摸输入；元素点击、滚动与输入可改走无障碍通道，手势或坐标操作需要亮屏或开启“需要时点亮”",
-                        "While the phone screen is off, the system blocks touch input on the background display; element taps, scrolls, and typing can use accessibility, while gestures or coordinate taps require the screen on or 'Wake when needed'",
-                    )
-                    else -> tr(
-                        "熄屏时副屏单独保持唤醒（每 15 秒检查，熄屏时另有定时器），主屏不会被点亮",
-                        "While the phone screen is off the background screen is kept awake on its own (checked every 15 s, plus a timer while off); the main screen is not lit",
-                    )
+                    d != null && !canWakeAlone(d) -> tr(S.vscreen_awake_on_this_phone_the_screen) + (if (mode != VScreenStore.PhoneScreenMode.ALLOW_SLEEP) tr(S.vscreen_awake_keep_screen_on_is_active, mode.key) else keepScreenHint())
+                    inputReach == InputReach.Reach.BLOCKED.key -> tr(S.vscreen_awake_while_the_phone_screen_is)
+                    else -> tr(S.vscreen_awake_while_the_phone_screen_is_2)
                 },
             )
     }

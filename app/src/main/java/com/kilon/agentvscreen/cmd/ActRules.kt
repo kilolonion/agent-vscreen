@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.core.BackgroundOperation.ActionError
 import com.kilon.agentvscreen.tr
 import org.json.JSONObject
@@ -120,7 +121,7 @@ internal class RuleLive(
         lastFiredElapsedMs = nowElapsedMs
         observations.clear()
         if (fired >= spec.times && off == null) {
-            off = tr("触发次数已用完（${spec.times} 次）", "trigger limit reached (${spec.times}x)")
+            off = tr(S.act_rules_trigger_limit_reached_x, spec.times)
         }
     }
 
@@ -154,14 +155,11 @@ internal data class RuleFired(
     fun line(nowMs: Long): String {
         val ago = Report.ago(atEpochMs, nowMs)
         val where = when (contextKind) {
-            ContextKind.BEFORE_STEP -> tr("第 $duringStep 步开始前", "before step $duringStep")
-            ContextKind.DURING_WAIT -> tr("第 $duringStep 步等待中", "during step $duringStep wait")
-            ContextKind.WATCHING -> tr("观察中", "while watching")
+            ContextKind.BEFORE_STEP -> tr(S.act_rules_before_step, duringStep)
+            ContextKind.DURING_WAIT -> tr(S.act_rules_during_step_wait, duringStep)
+            ContextKind.WATCHING -> tr(S.act_rules_while_watching)
         }
-        return tr(
-            "规则 $rule：看到 $condRaw → $stepRaw（$where，$ago）",
-            "Rule $rule: saw $condRaw → $stepRaw ($where, $ago)",
-        )
+        return tr(S.act_rules_rule_saw, rule, condRaw, stepRaw, where, ago)
     }
 
     fun json(): JSONObject = JSONObject()
@@ -183,10 +181,7 @@ internal object ActRules {
         if (raws.size > MAX_RULES) {
             throw ActionError(
                 "BAD_RULE",
-                tr(
-                    "一条 act 最多写 $MAX_RULES 条 --on 规则（收到 ${raws.size} 条）",
-                    "An act takes at most $MAX_RULES --on rules (got ${raws.size})",
-                ),
+                tr(S.act_rules_an_act_takes_at_most, MAX_RULES, raws.size),
             )
         }
         return raws.map { parseRule(it) }
@@ -200,14 +195,11 @@ internal object ActRules {
 internal fun parseRule(raw: String): RuleSpec {
     fun bad(why: String): Nothing = throw ActionError(
         "BAD_RULE",
-        tr(
-            "规则“$raw”写法不对：$why。整条 act 没有执行。写法：--on \"<条件> => <tap|key back|scroll|wait 时长>[ x1..x3]\"",
-            "Bad rule \"$raw\": $why. Nothing in this act ran. Syntax: --on \"<cond> => <tap|key back|scroll|wait duration>[ x1..x3]\"",
-        ),
+        tr(S.act_rules_bad_rule_nothing_in_this, raw, why),
     )
 
     val trimmed = raw.trim()
-    if (trimmed.isEmpty()) bad(tr("规则为空", "rule is empty"))
+    if (trimmed.isEmpty()) bad(tr(S.act_rules_rule_is_empty))
 
     // Find `=>` outside quotes.
     val arrowPositions = ArrayList<Int>()
@@ -225,14 +217,14 @@ internal fun parseRule(raw: String): RuleSpec {
         }
         i++
     }
-    if (arrowPositions.isEmpty()) bad(tr("缺少 =>（写成 条件 => 一步）", "missing => (write <cond> => <step>)"))
-    if (arrowPositions.size > 1) bad(tr("一条规则只能有一个 =>", "a rule may contain only one =>"))
+    if (arrowPositions.isEmpty()) bad(tr(S.act_rules_missing_write_cond_step))
+    if (arrowPositions.size > 1) bad(tr(S.act_rules_a_rule_may_contain_only))
 
     val arrow = arrowPositions[0]
     val condRaw = trimmed.substring(0, arrow).trim()
     val rhsRaw = trimmed.substring(arrow + 2).trim()
-    if (condRaw.isEmpty()) bad(tr("=> 左边缺少条件", "missing condition before =>"))
-    if (rhsRaw.isEmpty()) bad(tr("=> 右边缺少步骤", "missing step after =>"))
+    if (condRaw.isEmpty()) bad(tr(S.act_rules_missing_condition_before))
+    if (rhsRaw.isEmpty()) bad(tr(S.act_rules_missing_step_after))
 
     // Reuse Steps condition parsing (single condition, no `or` / `|`).
     val conds = try {
@@ -241,17 +233,17 @@ internal fun parseRule(raw: String): RuleSpec {
         bad(e.message ?: e.code)
     }
     if (conds.size != 1) {
-        bad(tr("规则条件只能写单个条件，不能用 or 连接", "a rule takes a single condition without or"))
+        bad(tr(S.act_rules_a_rule_takes_a_single))
     }
     val cond = conds[0]
     if (cond.kind == CondKind.STABLE || cond.kind == CondKind.STILL) {
-        bad(tr("条件不能是 ${cond.kind.key}（太容易成立）", "condition cannot be ${cond.kind.key} (matches too easily)"))
+        bad(tr(S.act_rules_condition_cannot_be_matches_too, cond.kind.key))
     }
 
     // Disallow multiple steps separated by `;` / newline.
     val splitSteps = Steps.split(rhsRaw)
     if (splitSteps.size != 1) {
-        bad(tr("规则右边只能写一步，不能用 ; 写多步", "rule right-hand side must be a single step (no ;)"))
+        bad(tr(S.act_rules_rule_right_hand_side_must))
     }
 
     // Extract optional trailing `x<N>` count (outside quotes).
@@ -273,7 +265,7 @@ internal fun parseRule(raw: String): RuleSpec {
             val nStr = countMatch.groupValues[2]
             val n = nStr.toIntOrNull()
             if (n == null || n !in 1..ActRules.MAX_TIMES) {
-                bad(tr("触发次数只能是 x1 到 x${ActRules.MAX_TIMES}（收到 x$nStr）", "repeat count must be x1 to x${ActRules.MAX_TIMES} (got x$nStr)"))
+                bad(tr(S.act_rules_repeat_count_must_be_x1, ActRules.MAX_TIMES, nStr))
             }
             times = n
             stepRaw = beforeCount.trim()
@@ -287,10 +279,10 @@ internal fun parseRule(raw: String): RuleSpec {
         bad(e.message ?: e.code)
     }
     if (step.loop != Loop.NONE) {
-        bad(tr("规则里不能用闭环手势（hold / seek）", "closed-loop gestures (hold / seek) are not allowed in rules"))
+        bad(tr(S.act_rules_closed_loop_gestures_hold_seek))
     }
     if (step.until != null) {
-        bad(tr("规则里的一步不能带 until", "a rule step cannot include until"))
+        bad(tr(S.act_rules_a_rule_step_cannot_include))
     }
     val stepAllowed = when (step.kind) {
         StepKind.TAP -> true
@@ -301,10 +293,7 @@ internal fun parseRule(raw: String): RuleSpec {
     }
     if (!stepAllowed) {
         bad(
-            tr(
-                "规则只允许 tap、key back、scroll、wait <时长>，不允许 ${step.kind.key}${if (step.kind == StepKind.KEY) " ${step.text.orEmpty()}" else ""}",
-                "rules only allow tap, key back, scroll, and wait <duration>; ${step.kind.key}${if (step.kind == StepKind.KEY) " ${step.text.orEmpty()}" else ""} is not allowed",
-            )
+            tr(S.act_rules_rules_only_allow_tap_key, step.kind.key, if (step.kind == StepKind.KEY) " ${step.text.orEmpty()}" else "")
         )
     }
     return RuleSpec(cond = cond, step = step, times = times)

@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import com.kilon.agentvscreen.S
 import androidx.compose.foundation.border
 
 import androidx.compose.material.icons.filled.Check
@@ -144,20 +145,20 @@ fun OverviewTab(bottom: Dp) {
     }
     val lastApp = appOf(tasks.firstOrNull()?.pkg).first
     val title = when (home) {
-        Home.ACTING -> s.agentTitle ?: (lastApp?.let { tr("正在${it}中操作", "Working in $it") } ?: Palette.word(mode))
-        Home.IDLE -> if (off) tr("服务已关闭", "Service off") else if (s.userStopped) tr("已停止 agent", "Agent stopped") else tr("待机", "Standby")
-        Home.BROKEN -> tr("需要你处理", "Needs you")
-        Home.FIRST -> tr("连接 agent", "Connect an agent")
+        Home.ACTING -> s.agentTitle ?: (lastApp?.let { tr(S.overview_working_in, it) } ?: Palette.word(mode))
+        Home.IDLE -> if (off) tr(S.overview_service_off) else if (s.userStopped) tr(S.look_agent_stopped) else tr(S.overview_standby)
+        Home.BROKEN -> tr(S.overview_needs_you)
+        Home.FIRST -> tr(S.overview_connect_an_agent)
     }
     val eyebrow = when (home) {
         Home.ACTING -> Palette.word(mode) + (s.ownerSessionId?.let { " · " + com.kilon.agentvscreen.api.Agents.nameOfSession(it) } ?: "")
-        Home.IDLE -> if (app.serviceOn) tr("agent 可随时连接", "Agents can connect any time") else ServiceControl.title(ctx)
-        Home.BROKEN -> tr("agent 当前无法使用副屏", "Agents cannot use the background screen now")
-        Home.FIRST -> tr("尚无 agent 使用记录", "No agent has used it yet")
+        Home.IDLE -> if (app.serviceOn) tr(S.overview_agents_can_connect_any_time) else ServiceControl.title(ctx)
+        Home.BROKEN -> tr(S.overview_agents_cannot_use_the_background)
+        Home.FIRST -> tr(S.overview_no_agent_has_used_it)
     }
 
     MiuixPage(title, back = false, bottom = bottom, lead = { folded -> StatusPill(eyebrow, mode, home, folded) }, marqueeTitle = home == Home.ACTING, actions = {
-        IconButton(onClick = { shield = true }, modifier = Modifier.padding(end = 12.dp)) { Icon(Icons.Filled.PowerSettingsNew, tr("服务", "Service")) }
+        IconButton(onClick = { shield = true }, modifier = Modifier.padding(end = 12.dp)) { Icon(Icons.Filled.PowerSettingsNew, tr(S.overview_service)) }
     }) {
         NeedsGroup()
         val stage = @Composable { m: Modifier ->
@@ -177,16 +178,15 @@ fun OverviewTab(bottom: Dp) {
             val agentsNow by com.kilon.agentvscreen.api.AgentLedger.agents.collectAsState()
             if (home != Home.FIRST && agentsNow.values.any { it.lastCallAt > 0 } && agentsNow.values.none { it.remembered }) {
                 Card(Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth().clickable { nav.tab(TAB_CONNECT) }, insideMargin = PaddingValues(16.dp)) {
-                    Text(tr("下一步：让 agent 保存能力说明", "Next: have the agent save the ability note"), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                    Text(tr("已连接，但未确认保存能力说明。未保存时，新对话中的 agent 可能不知道可以使用本机。点按查看是哪个 agent。",
-                        "Connected, but it has not confirmed where it saved the ability note. Without it, new conversations may not know they can use this phone. Tap to see which agent."),
+                    Text(tr(S.overview_next_have_the_agent_save), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Text(tr(S.overview_connected_but_it_has_not),
                         fontSize = 13.sp, lineHeight = 19.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                 }
             }
             if (home != Home.FIRST) {
                 NextUp(beat, app.tick)
                 if (tasks.isNotEmpty()) {
-                    SectionHeader(tr("最近", "Just now"), tr("全部记录", "All records")) { nav.tab(TAB_RECORDS) }
+                    SectionHeader(tr(S.overview_just_now), tr(S.overview_all_records)) { nav.tab(TAB_RECORDS) }
                     Card(Modifier.padding(horizontal = 12.dp).fillMaxWidth(), insideMargin = PaddingValues(0.dp)) {
                         tasks.forEach { t -> TaskRow(t) { nav.go(Route.Task(t.id)) } }
                     }
@@ -250,16 +250,16 @@ private fun StageWords(s: BackgroundOperation.State, mode: Mode, last: TaskLog.T
     val c = MiuixTheme.colorScheme
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (live && icon != null) { AppBadge(icon, 22.dp); Spacer(Modifier.width(8.dp)) }
-        Text(if (live) (app ?: tr("副屏", "Screen")) + " · ${s.screenWidth}×${s.screenHeight}" else tr("副屏已暂停（省电）", "Background screen paused (power saving)"),
+        Text(if (live) (app ?: tr(S.overview_screen)) + " · ${s.screenWidth}×${s.screenHeight}" else tr(S.overview_background_screen_paused_power_saving),
             fontSize = 13.sp, color = c.onSurfaceVariantSummary, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
-    AnimatedContent(if (live) humanAction(LocalContext.current, s.action ?: Palette.word(mode)) else if (off) tr("服务已关闭，agent 无法连接", "The service is off; agents cannot connect") else tr("待机，agent 使用时自动创建", "Standby; created when an agent uses it"),
+    AnimatedContent(if (live) humanAction(LocalContext.current, s.action ?: Palette.word(mode)) else if (off) tr(S.overview_the_service_is_off_agents) else tr(S.overview_standby_created_when_an_agent),
         transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(160)) }, label = "step") { t ->
         Text(t, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis)
     }
     val line = when {
-        live && last?.running == true -> tr("第 ${last.commands} 步 · 已用 ${took(last)}", "Step ${last.commands} · ${took(last)}")
-        last != null -> tr("上次：", "Last: ") + taskTitle(last, appOf(last.pkg).first) + " · " + taskOutcome(last).first
+        live && last?.running == true -> tr(S.overview_step, last.commands, took(last))
+        last != null -> tr(S.overview_last) + taskTitle(last, appOf(last.pkg).first) + " · " + taskOutcome(last).first
         else -> ""
     }
     if (line.isNotEmpty()) Text(line, fontSize = 12.sp, color = c.onSurfaceVariantSummary, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -273,22 +273,22 @@ private fun StageActions(s: BackgroundOperation.State, live: Boolean, open: () -
     var picking by remember { mutableStateOf(false) }
     if (picking) AppPickerDialog(onDismiss = { picking = false }) { a ->
         picking = false
-        host.say(tr("正在副屏打开 ${a.label}…", "Opening ${a.label} on the background screen…"))
+        host.say(tr(S.overview_opening_on_the_background_screen, a.label))
         Thread({
             com.kilon.agentvscreen.core.ManualScreen.open(ctx.applicationContext, a.pkg)
-                .onSuccess { host.say(it); open() }.onFailure { host.say(it.message ?: tr("打开失败", "Could not open it")) }
+                .onSuccess { host.say(it); open() }.onFailure { host.say(it.message ?: tr(S.overview_could_not_open_it)) }
         }, "vscreen-manual-open").apply { isDaemon = true }.start()
     }
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (off) { RoundAction(Icons.Filled.PowerSettingsNew, tr("打开服务", "Turn on"), c.primary) { power() }; return@Row }
+        if (off) { RoundAction(Icons.Filled.PowerSettingsNew, tr(S.overview_turn_on), c.primary) { power() }; return@Row }
         // 1.4.2: the user opens an app on the screen themselves (no agent needed) when nothing runs on it.
-        if (!live) RoundAction(Icons.Filled.Apps, tr("打开应用", "Open app"), c.primary) { picking = true }
-        RoundAction(Icons.Filled.PanTool, tr("接管", "Take over"), c.primary, enabled = live && !s.userStopped) {
+        if (!live) RoundAction(Icons.Filled.Apps, tr(S.overview_open_app), c.primary) { picking = true }
+        RoundAction(Icons.Filled.PanTool, tr(S.fullscreen_activity_take_over), c.primary, enabled = live && !s.userStopped) {
             s.ownerSessionId?.let { BackgroundOperation.beginTakeover(it) }; open()
         }
-        if (s.userStopped) RoundAction(Icons.Filled.PlayArrow, tr("解除停止", "Resume agent"), c.primary) { BackgroundOperation.userResume() }
-        else RoundAction(Icons.Filled.Stop, tr("停止", "Stop"), Palette.stopped, enabled = live) { BackgroundOperation.userStop() }
-        if (s.displayId != null && !live) RoundAction(Icons.Filled.Fullscreen, tr("查看画面", "View"), c.primary) { open() }
+        if (s.userStopped) RoundAction(Icons.Filled.PlayArrow, tr(S.overview_resume_agent), c.primary) { BackgroundOperation.userResume() }
+        else RoundAction(Icons.Filled.Stop, tr(S.connect_stop), Palette.stopped, enabled = live) { BackgroundOperation.userStop() }
+        if (s.displayId != null && !live) RoundAction(Icons.Filled.Fullscreen, tr(S.overview_view), c.primary) { open() }
     }
 }
 
@@ -351,16 +351,16 @@ private fun FixCard(problems: List<Readiness.Item>, setupLeft: Boolean) {
     val host = LocalHost.current
     val first = problems.firstOrNull()
     val (title, body) = when {
-        app.liveProblem != null && first == null && !setupLeft -> tr("后台运行受限", "Background running is restricted") to app.liveProblem!!
+        app.liveProblem != null && first == null && !setupLeft -> tr(S.overview_background_running_is_restricted) to app.liveProblem!!
         first != null -> when (first.code) {
-            "no_accessibility" -> tr("无障碍已关闭", "Accessibility is off")
-            "accessibility_cannot_see_display" -> tr("无障碍无法读取副屏", "Accessibility cannot read the background screen")
-            "no_privilege" -> tr("${com.kilon.agentvscreen.host.Privileged.name()} 尚未就绪", "${com.kilon.agentvscreen.host.Privileged.name()} is not ready")
-            "service_off" -> tr("服务已关闭", "The service is off")
-            "frozen_in_background" -> tr("系统已冻结后台运行", "Background running frozen by the system")
-            else -> tr("有一项需要处理", "Something needs you")
+            "no_accessibility" -> tr(S.overview_accessibility_is_off)
+            "accessibility_cannot_see_display" -> tr(S.overview_accessibility_cannot_read_the_background)
+            "no_privilege" -> tr(S.overview_is_not_ready, com.kilon.agentvscreen.host.Privileged.name())
+            "service_off" -> tr(S.overview_the_service_is_off)
+            "frozen_in_background" -> tr(S.overview_background_running_frozen_by_the)
+            else -> tr(S.overview_something_needs_you)
         } to first.text
-        else -> tr("还差 ${app.left} 项配置", if (app.left == 1) "1 setup step left" else "${app.left} setup steps left") to tr("完成配置后，agent 才能使用副屏", "Agents can use the background screen once setup is done")
+        else -> (if (app.left == 1) tr(S.overview_setup_step_left_one, app.left) else tr(S.overview_setup_steps_left, app.left)) to tr(S.overview_agents_can_use_the_background)
     }
     var busy by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(20.dp)) {
@@ -385,11 +385,11 @@ private fun FixCard(problems: List<Readiness.Item>, setupLeft: Boolean) {
                     "service_off" -> { ServiceControl.turnOn(ctx, "home fix"); app.serviceOn = true; app.bump() }
                     null -> if (app.liveProblem != null && !setupLeft) {
                         val opened = com.kilon.agentvscreen.host.Liveness.openBackgroundSettings(ctx)
-                        host.say(tr("已打开“$opened”：允许自启动、关联启动和后台活动", "Opened \"$opened\": allow auto-start, start by other apps and background activity"))
+                        host.say(tr(S.overview_opened_allow_auto_start_start, opened))
                     } else nav.go(Route.Setup)
                     else -> nav.go(Route.Setup)
                 }
-            }) { Text(if (busy) tr("正在修复…", "Fixing…") else tr("修复", "Fix")) }
+            }) { Text(if (busy) tr(S.overview_fixing) else tr(S.overview_fix)) }
         }
     }
 }
@@ -401,8 +401,8 @@ private fun FirstUse(setupLeft: Boolean) {
     val c = MiuixTheme.colorScheme
     Card(Modifier.fillMaxWidth(), insideMargin = PaddingValues(20.dp)) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Text(tr("将 agent 连接到这台手机", "Connect an agent to this phone"), fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
-            Text(tr("连接后，agent 会在后台副屏中操作应用，不占用你正在使用的主屏。", "Once connected, the agent operates apps on the background screen, not on the screen you are using."),
+            Text(tr(S.overview_connect_an_agent_to_this), fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+            Text(tr(S.overview_once_connected_the_agent_operates),
                 fontSize = 14.sp, lineHeight = 21.sp, color = c.onSurfaceVariantSummary)
             // 1.4.0-beta10 (rainbow: is there a guide for new users?): the steps follow what has really happened, read
             // from the phone: permissions, an agent connected (its first call), the agent saved the note (remembered).
@@ -410,10 +410,10 @@ private fun FirstUse(setupLeft: Boolean) {
             val connected = agents.values.any { it.lastCallAt > 0 }
             val saved = agents.values.any { it.remembered }
             val steps = listOf(
-                tr("授权", "Permissions") to tr("Shizuku（或 Root）和无障碍：让它能在后台开一块副屏", "Shizuku (or root) and accessibility: so it can open a background screen"),
-                tr("接入一个 agent", "Connect an agent") to tr("填写名称，复制接入消息并发给 agent", "Name it, copy the setup message, send it to the agent"),
-                tr("首次连接", "First connection") to tr("agent 按接入消息完成配置后会自动连接", "Once the agent follows the setup message, it connects automatically"),
-                tr("已保存能力说明", "Ability note saved") to tr("新对话中的 agent 也知道可以使用本机", "New conversations will know they can use this phone"),
+                tr(S.overview_permissions) to tr(S.overview_shizuku_or_root_and_accessibility),
+                tr(S.overview_connect_an_agent_2) to tr(S.overview_name_it_copy_the_setup),
+                tr(S.overview_first_connection) to tr(S.overview_once_the_agent_follows_the),
+                tr(S.connect_ability_note_saved) to tr(S.overview_new_conversations_will_know_they),
             )
             val cur = when { setupLeft -> 0; !connected -> 1; !saved -> 3; else -> 4 }
             steps.forEachIndexed { i, (t, sub) ->
@@ -427,7 +427,7 @@ private fun FirstUse(setupLeft: Boolean) {
                 }
             }
             PrimaryButton(onClick = { nav.go(if (setupLeft) Route.Setup else Route.NewAgent) }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (setupLeft) tr("去授权", "Grant permissions") else tr("接入新的 agent", "Connect a new agent"))
+                Text(if (setupLeft) tr(S.overview_grant_permissions) else tr(S.connect_connect_a_new_agent))
             }
         }
     }
@@ -458,13 +458,13 @@ private fun NeedsGroup() {
     AnimatedVisibility(n > 0, enter = slideInVertically(tween(380)) { -it / 3 } + fadeIn(tween(300)) + expandVertically(tween(380)),
         exit = fadeOut(tween(220)) + shrinkVertically(tween(320))) {
         Column {
-            SmallTitle(tr("待处理 · $n", "Waiting for you · $n"))
+            SmallTitle(tr(S.overview_waiting_for_you, n))
             // 2.0.0-beta6 (6.1): strong confirmation never approves inline — tapping only opens StrongConfirmActivity.
             strongPending.firstOrNull()?.let { sc ->
                 NeedCard(
-                    tr("需要强确认：${sc.risk.title}", "Strong confirmation: ${sc.risk.title}"),
-                    tr("令牌「${sc.tokenName}」· ${com.kilon.agentvscreen.host.StrongConfirm.clientLabel(sc.client)} · ${sc.commandName}", "Token \"${sc.tokenName}\" · ${com.kilon.agentvscreen.host.StrongConfirm.clientLabel(sc.client)} · ${sc.commandName}"),
-                    tr("去确认", "Review"),
+                    tr(S.overview_strong_confirmation, sc.risk.title),
+                    tr(S.overview_token, sc.tokenName, com.kilon.agentvscreen.host.StrongConfirm.clientLabel(sc.client), sc.commandName),
+                    tr(S.overview_review),
                     { StrongConfirmActivity.open(ctx, sc.id) },
                 )
             }
@@ -474,21 +474,21 @@ private fun NeedsGroup() {
                 asks.firstOrNull()?.let { a -> Box(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) { HomeAskCard(a, asks.size) } }
             }
             review?.let { r ->
-                NeedCard(ReviewWords.title(r), ReviewWords.who(r), tr("去保存", "Review and save"), { ReviewWords.open(ctx) },
-                    if (sureDiscard) tr("确定丢弃？", "Discard for sure?") else tr("丢弃", "Discard")) { if (sureDiscard) ReviewWords.discard(ctx, r) else sureDiscard = true }
+                NeedCard(ReviewWords.title(r), ReviewWords.who(r), tr(S.asks_review_and_save), { ReviewWords.open(ctx) },
+                    if (sureDiscard) tr(S.asks_discard_for_sure) else tr(S.asks_discard)) { if (sureDiscard) ReviewWords.discard(ctx, r) else sureDiscard = true }
             }
             given.forEach { g ->
                 val app = remember(g.pkg) { com.kilon.agentvscreen.core.VScreenOwnership.label(ctx, g.pkg) }
                 val who = com.kilon.agentvscreen.api.Agents.nameOfSession(g.session)
-                NeedCard(tr("$app 已由你接管", "$app is under your control"),
+                NeedCard(tr(S.overview_is_under_your_control, app),
                     when (g.why) {
-                        "user" -> tr("你已在主屏打开此应用。完成后点“交还 agent”，「$who」将从当前页面继续。", "You opened this app on the main screen. Tap Hand back to agent when done, and \"$who\" continues from the current page.")
-                        else -> tr("「$who」已交由你操作；完成后点“交还 agent”，将从当前页面继续。", "\"$who\" handed it to you. Tap Hand back to agent when done; it continues from the current page.")
+                        "user" -> tr(S.overview_you_opened_this_app_on, who)
+                        else -> tr(S.overview_handed_it_to_you_tap, who)
                     },
-                    tr("交还 agent", "Hand back to agent"), {
+                    tr(S.fullscreen_activity_hand_back_to_agent), {
                         Thread { val line = com.kilon.agentvscreen.core.VScreenOwnership.handBack(ctx.applicationContext, g.pkg, "app"); host.say(line) }.start()
                     },
-                    tr("打开", "Open")) {
+                    tr(S.overview_open)) {
                     ctx.packageManager.getLaunchIntentForPackage(g.pkg)?.let { MainDisplay.start(ctx, it.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 }
             }
@@ -497,10 +497,10 @@ private fun NeedsGroup() {
                 val owner = s.ownerSessionId ?: w.owner
                 val holder = com.kilon.agentvscreen.api.Agents.nameOfSession(owner)
                 val left = com.kilon.agentvscreen.api.Turns.leftMs(owner)
-                NeedCard(tr("「$who」正在等待使用副屏", "\"$who\" is waiting for the background screen"),
-                    tr("「$holder」正在使用副屏。", "\"$holder\" is using the background screen. ") + (left?.let { tr("它安静 ${(it + 59_999) / 60_000} 分钟内就会让出，「$who」会自己再试。", "It gives way within ${(it + 59_999) / 60_000} min of quiet; \"$who\" retries by itself.") }
-                        ?: tr("当前命令执行完成后释放副屏。", "The background screen is released after the current command finishes.")),
-                    if (left != null) tr("优先「$who」", "Prioritize \"$who\"") else null, { Thread { com.kilon.agentvscreen.api.Turns.finish(owner) }.start() })
+                NeedCard(tr(S.overview_is_waiting_for_the_background, who),
+                    tr(S.overview_is_using_the_background_screen, holder) + (left?.let { tr(S.overview_it_gives_way_within_min, (it + 59_999) / 60_000, who) }
+                        ?: tr(S.overview_the_background_screen_is_released)),
+                    if (left != null) tr(S.overview_prioritize, who) else null, { Thread { com.kilon.agentvscreen.api.Turns.finish(owner) }.start() })
             }
         }
     }
@@ -532,13 +532,13 @@ private fun NextUp(beat: Int, tick: Int) {
     LaunchedEffect(beat / 5, tick) { books = withContext(Dispatchers.IO) { runCatching { val now = System.currentTimeMillis(); Wake.list(ctx).filter { it.on && it.pending(now) != null } }.getOrDefault(emptyList()) } }
     val watches = remember(beat, tick) { VScreenRules.list().filter { !it.stopped } }
     if (books.isEmpty() && watches.isEmpty()) return
-    SmallTitle(tr("即将开始", "Upcoming"))
+    SmallTitle(tr(S.overview_upcoming))
     Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         books.forEach { e ->
             val next = e.pending(System.currentTimeMillis())
-            NextCard(tr("预约", "Scheduled"), next?.let { ServiceControl.hhmm(it) } ?: "--:--", e.spec.describe()) { nav.go(Route.Schedules) }
+            NextCard(tr(S.overview_scheduled), next?.let { ServiceControl.hhmm(it) } ?: "--:--", e.spec.describe()) { nav.go(Route.Schedules) }
         }
-        watches.forEach { l -> NextCard(tr("监视中", "Watching"), l.status, l.spec.name) { nav.tab(TAB_RECORDS) } }
+        watches.forEach { l -> NextCard(tr(S.overview_watching), l.status, l.spec.name) { nav.tab(TAB_RECORDS) } }
     }
 }
 
@@ -565,7 +565,7 @@ private fun ShieldSheet(show: Boolean, close: () -> Unit) {
     val host = LocalHost.current
     val st = remember(show, app.tick) { if (show) com.kilon.agentvscreen.host.ThermalGuard.sampleNow(); ServiceControl.now(ctx) }
     val awake = remember(show, app.tick) { HostService.isAlive }
-    OverlayBottomSheet(show = show, title = tr("服务", "Service"), onDismissRequest = close) {
+    OverlayBottomSheet(show = show, title = tr(S.overview_service), onDismissRequest = close) {
         Column(Modifier.padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(ServiceControl.title(ctx) + (ServiceControl.sub(ctx)?.let { " · $it" } ?: ""), fontSize = 13.sp,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 12.dp))
@@ -573,7 +573,7 @@ private fun ShieldSheet(show: Boolean, close: () -> Unit) {
                 if (to != ServiceControl.State.BLOCKED && com.kilon.agentvscreen.host.ThermalGuard.locked && !com.kilon.agentvscreen.host.ThermalGuard.resumeFromPowerSheet()) { host.say(com.kilon.agentvscreen.host.ThermalGuard.reason()); return }
                 // 1.3.0: a flip back within 1.5 s is ignored (each flip restarts the Tailscale node).
                 val now = android.os.SystemClock.elapsedRealtime()
-                if (now - lastFlip < 1_500L) { host.say(tr("请稍后再切换", "Please wait before switching again")); return }
+                if (now - lastFlip < 1_500L) { host.say(tr(S.overview_please_wait_before_switching_again)); return }
                 lastFlip = now
                 when (to) {
                     ServiceControl.State.ON -> ServiceControl.turnOn(ctx, "sheet")
@@ -582,15 +582,15 @@ private fun ShieldSheet(show: Boolean, close: () -> Unit) {
                 }
                 app.serviceOn = com.kilon.agentvscreen.host.Prefs.serviceOn(ctx); app.bump(); close()
             }
-            ServiceChoice(Icons.Filled.PowerSettingsNew, tr("常驻运行", "Always running"),
-                tr("保持运行，通知栏常驻；本机和其它设备上的 agent 可随时连接", "Keeps running with a persistent notification; agents on this and other devices can connect any time"),
+            ServiceChoice(Icons.Filled.PowerSettingsNew, tr(S.overview_always_running),
+                tr(S.overview_keeps_running_with_a_persistent),
                 st == ServiceControl.State.ON) { pick(ServiceControl.State.ON) }
-            ServiceChoice(Icons.Filled.Bolt, tr("按需启动", "On demand"),
-                if (st == ServiceControl.State.HIDDEN && awake) tr("已由 agent 启动，点按立即停止", "Started by an agent. Tap to stop now.")
-                else tr("平时不运行；本机 agent 发出命令或预约时间到时自动启动，空闲后自动停止", "Not running normally. Starts when a local agent sends a command or a schedule is due, and stops when idle."),
+            ServiceChoice(Icons.Filled.Bolt, tr(S.connect_on_demand),
+                if (st == ServiceControl.State.HIDDEN && awake) tr(S.overview_started_by_an_agent_tap)
+                else tr(S.overview_not_running_normally_starts_when),
                 st == ServiceControl.State.HIDDEN) { pick(ServiceControl.State.HIDDEN) }
-            ServiceChoice(Icons.Filled.Block, tr("关闭", "Off"),
-                tr("全部停止，包括公网和远程访问；离开应用后无后台进程。重新打开后公网访问自动恢复。", "Everything stops, including public and remote access; nothing runs in the background after you leave. Public access resumes when you turn the service on."),
+            ServiceChoice(Icons.Filled.Block, tr(S.overview_off),
+                tr(S.overview_everything_stops_including_public_and),
                 st == ServiceControl.State.BLOCKED, danger = true) { pick(ServiceControl.State.BLOCKED) }
             HostService.server?.lastError?.let { e -> Note(e, Palette.stopped, Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) }
             if (HostService.server?.lastError == null) HostService.server?.portNote?.let { n -> Note(n, MiuixTheme.colorScheme.onSurfaceVariantSummary, Modifier.padding(horizontal = 24.dp, vertical = 8.dp)) }

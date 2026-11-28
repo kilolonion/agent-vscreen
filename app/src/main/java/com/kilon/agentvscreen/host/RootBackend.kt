@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.content.Context
 import android.os.IBinder
 import android.os.Parcel
@@ -79,7 +80,7 @@ object RootBackend {
             ProcessBuilder(suPath()).redirectErrorStream(true).start()
         } catch (t: java.io.IOException) {
             AppLogger.warning(TAG, "no su: ${t.message}")
-            return changed(Phase.NO_SU, tr("这台手机没有 root（找不到 su）", "This phone has no root (su not found)"))
+            return changed(Phase.NO_SU, tr(S.root_backend_this_phone_has_no_root))
         }
         val out = StringBuilder()
         val reader = Thread { runCatching { p.inputStream.bufferedReader().forEachLine { synchronized(out) { out.appendLine(it) } } } }
@@ -93,7 +94,7 @@ object RootBackend {
         val verdict = verdict(exited, if (exited) p.exitValue() else -1, text)
         if (verdict != null) return changed(verdict.first, verdict.second)
         if (!latch.await(BINDER_WAIT_S, TimeUnit.SECONDS) || binder == null) {
-            return changed(Phase.FAILED, tr("root 服务启动了但没连上 App：", "The root service started but did not reach the app: ") + text.lines().takeLast(3).joinToString(" / ").take(300))
+            return changed(Phase.FAILED, tr(S.root_backend_the_root_service_started_but) + text.lines().takeLast(3).joinToString(" / ").take(300))
         }
     }
 
@@ -107,11 +108,11 @@ object RootBackend {
 
     /** null = the service is (being) started; otherwise why not. Pure, for tests. */
     internal fun verdict(exited: Boolean, exit: Int, out: String): Pair<Phase, String>? = when {
-        !exited -> Phase.DENIED to tr("root 管理器没有回应（授权框没处理？）：在 Magisk / KernelSU / APatch 里允许 Agent-VScreen 后再试", "The root manager did not answer (permission prompt left open?): allow Agent-VScreen in Magisk / KernelSU / APatch and try again")
+        !exited -> Phase.DENIED to tr(S.root_backend_the_root_manager_did_not)
         out.contains("AVS started") || out.contains("AVS reused") -> null
-        out.contains("AVS failed") -> Phase.FAILED to tr("root 服务没能启动：", "The root service did not start: ") + out.substringAfter("AVS failed").trim().lines().takeLast(4).joinToString(" / ").take(300)
-        else -> Phase.DENIED to tr("没有拿到 root：root 管理器拒绝了，或这台手机没有 root（su 退出码 $exit）", "No root: the root manager refused, or this phone is not rooted (su exit $exit)") +
-            (out.lines().lastOrNull { it.isNotBlank() }?.let { tr("：", ": ") + it.take(160) } ?: "")
+        out.contains("AVS failed") -> Phase.FAILED to tr(S.root_backend_the_root_service_did_not) + out.substringAfter("AVS failed").trim().lines().takeLast(4).joinToString(" / ").take(300)
+        else -> Phase.DENIED to tr(S.root_backend_no_root_the_root_manager, exit) +
+            (out.lines().lastOrNull { it.isNotBlank() }?.let { tr(S.agent_guide_colon) + it.take(160) } ?: "")
     }
 
     /**
@@ -166,7 +167,7 @@ object RootBackend {
                 if (binder === b) {
                     binder = null
                     AppLogger.warning(TAG, "root service died")
-                    changed(Phase.IDLE, tr("root 服务退出了", "The root service exited"))
+                    changed(Phase.IDLE, tr(S.root_backend_the_root_service_exited))
                     restartAfterDeath()
                 }
             }, 0)
@@ -199,7 +200,7 @@ object RootBackend {
         appCtx?.let { start(it, "service call") }
         latch.await(if (phase == Phase.STARTING || starting.get()) SU_TIMEOUT_S else 1L, TimeUnit.SECONDS)
         return binder?.takeIf { it.isBinderAlive }?.let { Result.success(it) }
-            ?: Result.failure(IllegalStateException(lastError ?: tr("root 服务未连接", "The root service is not connected")))
+            ?: Result.failure(IllegalStateException(lastError ?: tr(S.root_backend_the_root_service_is_not)))
     }
 
     /** Stops the root service: screens released, sound given back, process gone (switching to Shizuku). */

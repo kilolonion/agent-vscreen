@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.cmd
 
+import com.kilon.agentvscreen.S
+import com.kilon.agentvscreen.tr
 import android.content.Context
 import android.graphics.Bitmap
 import java.io.File
@@ -81,7 +83,7 @@ class Note(
     val screenExcerpts: List<String> = emptyList(),
     val systemText: String = text,
 ) {
-    fun line(): String = if (code == null) text else com.kilon.agentvscreen.tr("$code：$text", "$code: $text")
+    fun line(): String = if (code == null) text else tr(S.connect_name_value, code, text)
     fun json(): org.json.JSONObject = org.json.JSONObject()
         .put("code", code ?: org.json.JSONObject.NULL)
         .put("text", text)

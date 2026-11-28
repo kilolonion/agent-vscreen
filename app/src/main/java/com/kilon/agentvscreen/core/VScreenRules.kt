@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.S
 import com.kilon.agentvscreen.tr
 
 import android.app.NotificationChannel
@@ -46,7 +47,7 @@ internal object VScreenRules {
         val agentId: String = com.kilon.agentvscreen.api.Agents.ofSession(sid),
     ) {
         val key: Key get() = Key(agentId, name)
-        fun describe(): String = tr("满足 $cond", "when $cond") + (app?.let { tr("（$it）", " ($it)") } ?: "")
+        fun describe(): String = tr(S.vscreen_rules_when, cond) + (app?.let { tr(S.public_guide_text, it) } ?: "")
     }
 
     class Live(val spec: Spec) {
@@ -55,7 +56,7 @@ internal object VScreenRules {
         val startedAt = System.currentTimeMillis()
         val startedElapsed = SystemClock.elapsedRealtime()
         @Volatile var checks = 0
-        @Volatile var status = tr("启动中", "starting")
+        @Volatile var status = tr(S.vscreen_rules_starting)
         @Volatile var lastValue: String? = null
         @Volatile var fired = 0
         @Volatile var lastFire: String? = null
@@ -70,14 +71,14 @@ internal object VScreenRules {
             return JSONObject().put("name", spec.name).put("agent", spec.agentId).put("condition", spec.describe())
                 .put("every_ms", spec.everyMs)
                 .put("running", !stopped)
-                .put("status", if (stopped) (endReason ?: tr("已结束", "ended")) else status)
+                .put("status", if (stopped) (endReason ?: tr(S.records_ended)) else status)
                 .put("started", fmt.format(java.util.Date(startedAt)))
                 .put("ends_in_min", if (stopped) JSONObject.NULL else ((spec.forMs - (SystemClock.elapsedRealtime() - startedElapsed)) / 60_000L).coerceAtLeast(0))
                 .put("checks", checks).put("fired", fired)
                 .put("last_value", lastValue ?: JSONObject.NULL)
                 .put("last_fire", lastFire ?: JSONObject.NULL)
                 .put("last_fire_at", if (lastFireAt > 0) fmt.format(java.util.Date(lastFireAt)) else JSONObject.NULL)
-                .put("action", JSONArray(listOfNotNull(if (spec.wake) tr("发事件给调用方（events 取）", "sends an event to the caller (collect with events)") else null, if (spec.notify) tr("通知用户", "notifies the user") else null)))
+                .put("action", JSONArray(listOfNotNull(if (spec.wake) tr(S.vscreen_rules_sends_an_event_to_the) else null, if (spec.notify) tr(S.vscreen_rules_notifies_the_user) else null)))
         }
     }
 
@@ -93,7 +94,7 @@ internal object VScreenRules {
     private var seq = 0
     private val agentSeq = HashMap<String, Int>()
     fun nextName(agentId: String = com.kilon.agentvscreen.api.Tokens.MAIN): String = synchronized(live) {
-        val p = tr("盯", "watch")
+        val p = tr(S.vscreen_rules_watch)
         var i = maxOf(seq, agentSeq[agentId] ?: 0) + 1
         while (Key(agentId, "$p$i") in live || ended.any { it.spec.agentId == agentId && it.spec.name == "$p$i" }) i++
         agentSeq[agentId] = i
@@ -115,9 +116,9 @@ internal object VScreenRules {
     fun running(): List<Live> = synchronized(live) { live.values.toList() }
 
     fun start(spec: Spec, host: Host): Live {
-        val ctx = appContext ?: throw IllegalStateException(tr("后台操作未初始化", "Background operation is not initialized"))
+        val ctx = appContext ?: throw IllegalStateException(tr(S.vscreen_rules_background_operation_is_not_initialized))
         val l = synchronized(live) {
-            live[spec.key]?.let { stopInner(it, tr("被同名的新盯守替换", "replaced by a new watch with the same name"), save = false) }
+            live[spec.key]?.let { stopInner(it, tr(S.vscreen_rules_replaced_by_a_new_watch), save = false) }
             register(spec).also { persist() }
         }
         activate(ctx, l, host)
@@ -128,10 +129,10 @@ internal object VScreenRules {
     private fun register(spec: Spec): Live {
         if (com.kilon.agentvscreen.host.ThermalGuard.locked) com.kilon.agentvscreen.host.ThermalGuard.throwStopped()
         if (live.values.count { it.spec.agentId == spec.agentId } >= MAX) {
-            throw IllegalStateException(tr("最多同时盯 $MAX 个条件，先 keep off 一个", "At most $MAX conditions can be watched at once; turn one off with keep off first"))
+            throw IllegalStateException(tr(S.vscreen_rules_at_most_conditions_can_be, MAX))
         }
         if (live.size >= MAX_TOTAL) {
-            throw IllegalStateException(tr("手机上所有 agent 合计最多同时盯 $MAX_TOTAL 个条件：先 keep off 一个，或请用户在 App 里停掉不用的", "At most $MAX_TOTAL watches on the phone across all agents: turn one off with keep off, or ask the user to stop unused ones in the app"))
+            throw IllegalStateException(tr(S.vscreen_rules_at_most_watches_on_the, MAX_TOTAL))
         }
         return Live(spec).also { live[spec.key] = it }
     }
@@ -206,7 +207,7 @@ internal object VScreenRules {
         return restored.size
     }
 
-    fun stop(agentId: String, name: String, reason: String = tr("已按要求停止", "stopped as asked")): Boolean {
+    fun stop(agentId: String, name: String, reason: String = tr(S.vscreen_rules_stopped_as_asked)): Boolean {
         val l = synchronized(live) { live[Key(agentId, name)] } ?: return false
         stopInner(l, reason)
         return true
@@ -221,7 +222,7 @@ internal object VScreenRules {
 
     internal fun discardForHeat(reason: String) { stopAll(reason); persist() }
 
-    fun stopAll(reason: String = tr("已按要求停止", "stopped as asked")): Int {
+    fun stopAll(reason: String = tr(S.vscreen_rules_stopped_as_asked)): Int {
         val all = running()
         all.forEach { stopInner(it, reason) }
         return all.size
@@ -252,27 +253,27 @@ internal object VScreenRules {
         try {
             while (!l.stopped) {
                 if (SystemClock.elapsedRealtime() - l.startedElapsed >= s.forMs) {
-                    stopInner(l, if (l.fired > 0) tr("到时间了（期间触发 ${l.fired} 次）", "time is up (fired ${l.fired} times)") else tr("到时间了，没等到条件", "time is up, the condition never came"))
+                    stopInner(l, if (l.fired > 0) tr(S.vscreen_rules_time_is_up_fired_times, l.fired) else tr(S.vscreen_rules_time_is_up_the_condition))
                     break
                 }
                 val st = BackgroundOperation.state.value
                 val d = BackgroundOperation.previewDisplayFor(s.sid)
                 when {
                     d == null -> l.status = if (st.ownerSessionId != null && st.ownerSessionId != s.sid)
-                        tr("副屏正被另一个会话使用，暂停检查（那边用完、副屏空闲后不会自动回来；需要时在本会话重新操作一次副屏）", "The screen is used by another session, checks paused (they do not resume by themselves when it is free; operate the screen once from this session when needed)")
-                    else tr("副屏已释放，暂停检查（在本会话里重新 launch 后自动继续）", "The screen was released, checks paused (they resume after a new launch in this session)")
-                    st.takeoverSessionId != null -> l.status = tr("用户正在接管副屏，暂停检查", "The user is controlling the screen, checks paused")
+                        tr(S.vscreen_rules_the_screen_is_used_by)
+                    else tr(S.vscreen_rules_the_screen_was_released_checks)
+                    st.takeoverSessionId != null -> l.status = tr(S.vscreen_rules_the_user_is_controlling_the)
                     else -> {
                         if (d.parked) runCatching { BackgroundOperation.unpark(d) }
                         if (s.app != null && (n % maxOf(1, (3_000 / s.everyMs).toInt()) == 0)) appOk = VScreenShell.topPackage(d.displayId) == s.app
                         n++
-                        if (!appOk) l.status = tr("副屏顶部不是 ${s.app}，暂停检查", "The top of the screen is not ${s.app}, checks paused")
+                        if (!appOk) l.status = tr(S.vscreen_rules_the_top_of_the_screen, s.app)
                         else {
                             var failed: String? = null
                             val hit = try { host.check(l, d) } catch (e: InterruptedException) { throw e } catch (t: Throwable) {
-                                failed = tr("检查出错：${t.javaClass.simpleName}: ${t.message?.take(80)}", "Check error: ${t.javaClass.simpleName}: ${t.message?.take(80)}"); null }
+                                failed = tr(S.vscreen_rules_check_error, t.javaClass.simpleName, t.message?.take(80)); null }
                             l.checks++
-                            l.status = failed ?: tr("正在盯", "watching")
+                            l.status = failed ?: tr(S.vscreen_rules_watching)
                             if (hit != null) fire(ctx, l, host, hit)
                         }
                     }
@@ -283,7 +284,7 @@ internal object VScreenRules {
         } catch (_: InterruptedException) {
         } catch (t: Throwable) {
             AppLogger.warning(TAG, "keep ${s.name}: ${t.message}")
-            stopInner(l, tr("出错停止：${t.javaClass.simpleName}: ${t.message?.take(100)}", "stopped on an error: ${t.javaClass.simpleName}: ${t.message?.take(100)}"))
+            stopInner(l, tr(S.vscreen_rules_stopped_on_an_error, t.javaClass.simpleName, t.message?.take(100)))
         }
     }
 
@@ -291,26 +292,23 @@ internal object VScreenRules {
         val s = l.spec
         l.fired++
         l.lastFireAt = System.currentTimeMillis()
-        val parts = arrayListOf(tr("看到：$hit", "seen: $hit"))
+        val parts = arrayListOf(tr(S.vscreen_rules_seen, hit))
         var woke: String? = null
         if (s.wake) {
-            val text = tr("[盯守「${s.name}」看到了] $hit（条件 ${s.cond}）\n\n（这是你之前用 vscreen act --keep wake 设的盯守发出的事件。" +
-                "副屏停在看到时的页面：先 vscreen act 看现在的画面和这段时间发生了什么，再决定下一步。）",
-                "[Watch \"${s.name}\" saw it] $hit (condition ${s.cond})\n\n(This event comes from the watch you set earlier with vscreen act --keep wake. " +
-                "The screen stays on the page where it was seen: run vscreen act first to see the screen now and what happened meanwhile, then decide.)")
+            val text = tr(S.vscreen_rules_watch_saw_it_condition_this, s.name, hit, s.cond)
             woke = runCatching { com.kilon.agentvscreen.api.EventHub.post(ctx, s.sid, "keep", s.name, text) }
-                .getOrElse { tr("失败：${it.message}", "Failed: ${it.message}") }
-            parts += tr("事件：$woke", "event: $woke")
+                .getOrElse { tr(S.vscreen_rules_failed, it.message) }
+            parts += tr(S.vscreen_rules_event, woke)
         }
-        if (s.notify || woke?.let { it == "Rejected" || it.startsWith(tr("失败", "Failed")) } == true) {
-            val okN = VScreenHandoff.alert(ctx, 7300 + (s.name.hashCode() and 0xff), tr("盯守「${s.name}」看到了", "Watch \"${s.name}\" saw it"), parts.joinToString("\n"),
+        if (s.notify || woke?.let { it == "Rejected" || it.startsWith(tr(S.vscreen_rules_failed_2)) } == true) {
+            val okN = VScreenHandoff.alert(ctx, 7300 + (s.name.hashCode() and 0xff), tr(S.vscreen_rules_watch_saw_it, s.name), parts.joinToString("\n"),
                 com.kilon.agentvscreen.host.Needs.open(ctx, com.kilon.agentvscreen.host.Needs.Page.RECORDS, 3))
-            if (!okN) parts += tr("（通知没发出去：", " (notification not sent: ") + (VScreenHandoff.notifyBlocked(ctx) ?: tr("发送失败", "sending failed")) + tr("）", ")")
+            if (!okN) parts += tr(S.vscreen_rules_notification_not_sent) + (VScreenHandoff.notifyBlocked(ctx) ?: tr(S.vscreen_rules_sending_failed)) + tr(S.agent_guide_text_2)
         }
-        l.lastFire = parts.joinToString(tr("；", "; "))
+        l.lastFire = parts.joinToString(tr(S.agent_guide_sep))
         BackgroundOperation.backgroundDone(s.sid)
         AppLogger.info(TAG, "keep ${s.name} fired: ${l.lastFire}")
-        stopInner(l, tr("已看到：${l.lastFire?.take(160)}", "seen: ${l.lastFire?.take(160)}"))
+        stopInner(l, tr(S.vscreen_rules_seen_2, l.lastFire?.take(160)))
     }
 
     // ── keeping it alive: foreground notification + wake lock ─────────────
@@ -331,7 +329,7 @@ internal object VScreenRules {
             }.onFailure { AppLogger.warning(TAG, "startForeground: ${it.message}") }
             pendingAt = 0L
             if (intent?.action == ACTION_STOP) {
-                stopAll(tr("用户在通知里点了全部停止", "The user tapped Stop all in the notification"))
+                stopAll(tr(S.vscreen_rules_the_user_tapped_stop_all))
                 stopSelfSafely(); return START_NOT_STICKY
             }
             if (com.kilon.agentvscreen.host.ThermalGuard.locked || running().isEmpty()) { stopSelfSafely(); return START_NOT_STICKY }
@@ -365,18 +363,18 @@ internal object VScreenRules {
             private fun notification(ctx: Context, list: List<Live>): android.app.Notification {
                 val nm = ctx.getSystemService(NotificationManager::class.java)
                 if (nm?.getNotificationChannel(CHANNEL) == null)
-                    nm?.createNotificationChannel(NotificationChannel(CHANNEL, tr("副屏盯守", "Screen watches"), NotificationManager.IMPORTANCE_LOW))
+                    nm?.createNotificationChannel(NotificationChannel(CHANNEL, tr(S.vscreen_rules_screen_watches), NotificationManager.IMPORTANCE_LOW))
                 val stop = PendingIntent.getService(ctx, 1, Intent(ctx, RuleService::class.java).setAction(ACTION_STOP),
                     PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-                val body = list.joinToString("\n") { tr("「${it.spec.name}」${it.spec.describe()}", "\"${it.spec.name}\" ${it.spec.describe()}") }
+                val body = list.joinToString("\n") { tr(S.vscreen_rules_text, it.spec.name, it.spec.describe()) }
                 return NotificationCompat.Builder(ctx, CHANNEL)
                     .setSmallIcon(android.R.drawable.ic_menu_view)
-                    .setContentTitle(tr("副屏正在盯 ${list.size} 个条件", "The screen is watching ${list.size} conditions"))
+                    .setContentTitle(tr(S.vscreen_rules_the_screen_is_watching_conditions, list.size))
                     .setContentText(body.lineSequence().first())
                     .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                     .setOngoing(true)
                     .setContentIntent(com.kilon.agentvscreen.host.Needs.open(ctx, com.kilon.agentvscreen.host.Needs.Page.HOME, 4))
-                    .addAction(0, tr("全部停止", "Stop all"), stop)
+                    .addAction(0, tr(S.vscreen_rules_stop_all), stop)
                     .build()
             }
 

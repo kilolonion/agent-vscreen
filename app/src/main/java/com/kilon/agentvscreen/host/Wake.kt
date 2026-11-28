@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.host
 
+import com.kilon.agentvscreen.S
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
@@ -73,14 +74,14 @@ object Wake {
             return if (date != null) "$date " + times.joinToString(",") { hm(it) } else ""
         }
         fun describe(): String {
-            if (date != null) return tr("仅 ${date.monthValue}-${date.dayOfMonth} ", "only on ${date.monthValue}-${date.dayOfMonth} ") + times.joinToString(",") { "%02d:%02d".format(it / 60, it % 60) } + tr("（一次）", " (once)")
+            if (date != null) return tr(S.wake_only_on, date.monthValue, date.dayOfMonth) + times.joinToString(",") { "%02d:%02d".format(it / 60, it % 60) } + tr(S.wake_once)
             val dayText = when (days) {
-                0x7F -> tr("每天", "daily"); 0x1F -> tr("工作日", "weekdays"); 0x60 -> tr("周末", "weekends")
+                0x7F -> tr(S.wake_daily); 0x1F -> tr(S.wake_weekdays); 0x60 -> tr(S.wake_weekends)
                 // 1.4.0-beta8: named days read like the other kinds (were left as "mon,wed,fri").
-                else -> DayOfWeek.entries.filter { runsOn(it) }.joinToString(tr("、", ",")) { tr("周" + "一二三四五六日"[it.ordinal], it.name.take(3).lowercase()) }
+                else -> DayOfWeek.entries.filter { runsOn(it) }.joinToString(tr(S.wake_day_sep)) { tr(WAKE_DAY_TEXT[it.ordinal]) }
             }
             fun hm(m: Int) = "%02d:%02d".format(m / 60, m % 60)
-            return if (everyMin > 0) "$dayText " + tr("每 ${everyMin} 分钟", "every $everyMin min") + (if (fromMin > 0 || toMin < 1440) " ${hm(fromMin)}–${hm(toMin)}" else "")
+            return if (everyMin > 0) "$dayText " + tr(S.wake_every_min, everyMin) + (if (fromMin > 0 || toMin < 1440) " ${hm(fromMin)}–${hm(toMin)}" else "")
             else "$dayText " + times.joinToString(",") { hm(it) }
         }
     }
@@ -125,47 +126,47 @@ object Wake {
             "today", "今天" -> today
             "tomorrow", "明天" -> today.plusDays(1)
             "once", "一次" -> if ((times.firstOrNull() ?: 0) > now.hour * 60 + now.minute) today else today.plusDays(1)
-            else -> DATE_YMD.find(word)?.let { m -> runCatching { LocalDate.of(m.groupValues[1].toInt(), m.groupValues[2].toInt(), m.groupValues[3].toInt()) }.getOrNull() ?: throw BadSpec(tr("没有 $word 这一天", "there is no day $word")) }
-                ?: DATE_MD.find(word)?.let { m -> runCatching { LocalDate.of(today.year, m.groupValues[1].toInt(), m.groupValues[2].toInt()) }.getOrNull()?.let { d -> if (d.isBefore(today)) d.plusYears(1) else d } ?: throw BadSpec(tr("没有 $word 这一天", "there is no day $word")) }
+            else -> DATE_YMD.find(word)?.let { m -> runCatching { LocalDate.of(m.groupValues[1].toInt(), m.groupValues[2].toInt(), m.groupValues[3].toInt()) }.getOrNull() ?: throw BadSpec(tr(S.wake_there_is_no_day, word)) }
+                ?: DATE_MD.find(word)?.let { m -> runCatching { LocalDate.of(today.year, m.groupValues[1].toInt(), m.groupValues[2].toInt()) }.getOrNull()?.let { d -> if (d.isBefore(today)) d.plusYears(1) else d } ?: throw BadSpec(tr(S.wake_there_is_no_day, word)) }
         }
     }
 
     private fun parseTimes(words: List<String>): List<Int> {
         val times = words.joinToString(",").split(',').filter { it.isNotBlank() }.map { t ->
-            hhmm(t)?.takeIf { it < 1440 } ?: throw BadSpec(tr("时间写成 HH:MM（收到 $t）", "write times as HH:MM (got $t)"))
+            hhmm(t)?.takeIf { it < 1440 } ?: throw BadSpec(tr(S.wake_write_times_as_hh_mm, t))
         }.distinct().sorted()
-        if (times.isEmpty()) throw BadSpec(tr("没写时间", "no time given"))
-        if (times.size > 24) throw BadSpec(tr("一条最多 24 个时间点", "at most 24 times per entry"))
+        if (times.isEmpty()) throw BadSpec(tr(S.wake_no_time_given))
+        if (times.size > 24) throw BadSpec(tr(S.wake_at_most_24_times_per))
         return times
     }
 
     fun parse(text: String, nowMs: Long = System.currentTimeMillis(), zone: ZoneId = ZoneId.systemDefault()): Spec {
         val words = text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.toMutableList()
-        if (words.isEmpty()) throw BadSpec(tr("没写时间", "no time given"))
+        if (words.isEmpty()) throw BadSpec(tr(S.wake_no_time_given))
         // A one-off: a day word, then times (no repeat, no days of the week).
         if (words.size >= 2 && (words[0].lowercase() in setOf("today", "tomorrow", "once", "今天", "明天", "一次") || DATE_MD.matches(words[0]) || DATE_YMD.matches(words[0]))) {
             val times = parseTimes(words.drop(1))
             val date = oneDay(words[0], times, nowMs, zone)!!
             val lastAt = ZonedDateTime.of(date.year, date.monthValue, date.dayOfMonth, times.last() / 60, times.last() % 60, 0, 0, zone).toInstant().toEpochMilli()
-            if (lastAt <= nowMs) throw BadSpec(tr("${words[0]} ${times.joinToString(",") { "%02d:%02d".format(it / 60, it % 60) }} 已经过去了", "${words[0]} ${times.joinToString(",") { "%02d:%02d".format(it / 60, it % 60) }} is already past"))
+            if (lastAt <= nowMs) throw BadSpec(tr(S.wake_is_already_past, words[0], times.joinToString(",") { "%02d:%02d".format(it / 60, it % 60) }))
             return Spec(0x7F, times, date = date)
         }
         val d = days(words.first())?.also { words.removeAt(0) } ?: 0x7F
-        if (words.isEmpty()) throw BadSpec(tr("只有日期没有时间", "days without a time"))
+        if (words.isEmpty()) throw BadSpec(tr(S.wake_days_without_a_time))
         if (words.first().lowercase() in setOf("every", "每")) {
-            val n = words.getOrNull(1) ?: throw BadSpec(tr("every 后面写间隔，例如 every 2h", "every needs an interval, e.g. every 2h"))
-            val m = Regex("^(\\d+)(m|min|h)$").find(n.lowercase()) ?: throw BadSpec(tr("间隔写成 30m 或 2h（收到 $n）", "write the interval as 30m or 2h (got $n)"))
+            val n = words.getOrNull(1) ?: throw BadSpec(tr(S.wake_every_needs_an_interval_e))
+            val m = Regex("^(\\d+)(m|min|h)$").find(n.lowercase()) ?: throw BadSpec(tr(S.wake_write_the_interval_as_30m, n))
             val count = m.groupValues[1].toIntOrNull()?.takeIf { it <= 1440 } ?: 0
             val every = count * if (m.groupValues[2] == "h") 60 else 1
-            if (every < MIN_EVERY_MIN || every > 24 * 60) throw BadSpec(tr("间隔要在 ${MIN_EVERY_MIN} 分钟到 24 小时之间", "the interval must be between $MIN_EVERY_MIN minutes and 24 hours"))
+            if (every < MIN_EVERY_MIN || every > 24 * 60) throw BadSpec(tr(S.wake_the_interval_must_be_between, MIN_EVERY_MIN))
             var from = 0; var to = 24 * 60
             var i = 2
             while (i < words.size) {
-                val k = words[i].lowercase(); val v = words.getOrNull(i + 1)?.let { hhmm(it) } ?: throw BadSpec(tr("$k 后面写 HH:MM", "$k needs HH:MM"))
-                when (k) { "from", "从" -> from = v; "to", "到" -> to = v; else -> throw BadSpec(tr("看不懂 $k（只有 from / to）", "unknown word $k (only from / to)")) }
+                val k = words[i].lowercase(); val v = words.getOrNull(i + 1)?.let { hhmm(it) } ?: throw BadSpec(tr(S.wake_needs_hh_mm, k))
+                when (k) { "from", "从" -> from = v; "to", "到" -> to = v; else -> throw BadSpec(tr(S.wake_unknown_word_only_from_to, k)) }
                 i += 2
             }
-            if (from >= to) throw BadSpec(tr("from 要早于 to", "from must be before to"))
+            if (from >= to) throw BadSpec(tr(S.wake_from_must_be_before_to))
             return Spec(d, emptyList(), every, from, to)
         }
         return Spec(d, parseTimes(words))
@@ -308,10 +309,10 @@ object Wake {
             val k = Key(agentId, n)
             val others = entries.filter { it.key != k }
             if (others.count { it.agentId == agentId } >= MAX_ENTRIES) {
-                throw IllegalStateException(tr("最多 $MAX_ENTRIES 条预约：先 schedule off 一条", "At most $MAX_ENTRIES schedules: remove one with schedule off first"))
+                throw IllegalStateException(tr(S.wake_at_most_schedules_remove_one, MAX_ENTRIES))
             }
             if (others.size >= MAX_TOTAL) {
-                throw IllegalStateException(tr("手机上所有 agent 合计最多 $MAX_TOTAL 条预约：先 schedule off 一条，或请用户在 App 里删掉不用的", "At most $MAX_TOTAL schedules on the phone across all agents: remove one with schedule off, or ask the user to delete unused ones in the app"))
+                throw IllegalStateException(tr(S.wake_at_most_schedules_on_the, MAX_TOTAL))
             }
             Entry(n, stored, spec, f, session, by, System.currentTimeMillis(), agentId).also { entries.clear(); entries.addAll(others + it) }
         }
@@ -329,7 +330,7 @@ object Wake {
         val spec = parse(text)
         val k = Key(agentId, name)
         val e = synchronized(lock) {
-            val old = entries.firstOrNull { it.key == k } ?: throw BadSpec(tr("这个预约已经不在了", "this schedule is gone"))
+            val old = entries.firstOrNull { it.key == k } ?: throw BadSpec(tr(S.wake_this_schedule_is_gone))
             val n = Entry(name, spec.canonical().ifEmpty { text.trim() }, spec, forMin.coerceIn(1, MAX_FOR_MIN), old.session, old.by, old.at, old.agentId)
             n.on = on; n.last = old.last
             if (spec == old.spec && n.forMin == old.forMin) n.opened = old.opened
@@ -426,10 +427,10 @@ object Wake {
             val did = ArrayList<String>()
             if (Privileged.isReady()) {
                 val r = runCatching { com.kilon.agentvscreen.core.VScreenShell.run(arrayOf("cmd", "deviceidle", "tempwhitelist", "-d", holdMs.toString(), ctx.packageName), 6_000L) }.getOrNull()
-                did += if (r?.exitCode == 0) tr("临时省电豁免 ${holdMs / 60_000} 分钟", "temporary power allowlist for ${holdMs / 60_000} min") else tr("临时省电豁免没成功", "temporary power allowlist failed")
+                did += if (r?.exitCode == 0) tr(S.wake_temporary_power_allowlist_for_min, holdMs / 60_000) else tr(S.wake_temporary_power_allowlist_failed)
                 quiet("wake-power") { com.kilon.agentvscreen.core.VScreenPower.heal(ctx, "wake") }
                 val s = BackgroundOperation.state.value
-                if (s.connection.name == "ERROR" && !s.needsExplicitReconnect) quiet("wake-connect") { BackgroundOperation.connect(); did += tr("重新连接了后台连接", "reconnected the background connection") }
+                if (s.connection.name == "ERROR" && !s.needsExplicitReconnect) quiet("wake-connect") { BackgroundOperation.connect(); did += tr(S.wake_reconnected_the_background_connection) }
             }
             BackgroundOperation.refreshStatus()
             val items = Readiness.now(ctx)
@@ -439,10 +440,10 @@ object Wake {
             synchronized(lock) { due.forEach { it.last = check } }
             save(ctx)
             val clock = java.text.SimpleDateFormat("HH:mm", java.util.Locale.ROOT)
-            fun windowNames(group: List<Entry>) = group.joinToString(tr("、", ", ")) { "${it.name} ${clock.format(java.util.Date(it.opened))}" }
-            fun eventText(whenText: String) = if (ok) tr("预约窗口 $whenText 已就绪：服务在运行，Shizuku 可用。", "Window $whenText is ready: the service is running and Shizuku is available.") +
-                    items.joinToString("") { tr("（提醒：${it.text}）", " (note: ${it.text})") }
-                else tr("预约窗口 $whenText 前的检查没通过：", "The check before window $whenText failed: ") + items.filter { it.blocking }.joinToString(tr("；", "; ")) { it.text }
+            fun windowNames(group: List<Entry>) = group.joinToString(tr(S.automation_list_sep)) { "${it.name} ${clock.format(java.util.Date(it.opened))}" }
+            fun eventText(whenText: String) = if (ok) tr(S.wake_window_is_ready_the_service, whenText) +
+                    items.joinToString("") { tr(S.wake_note, it.text) }
+                else tr(S.wake_the_check_before_window_failed, whenText) + items.filter { it.blocking }.joinToString(tr(S.agent_guide_sep)) { it.text }
             due.groupBy { it.session }.forEach { (session, group) ->
                 quiet("wake-event") { com.kilon.agentvscreen.api.EventHub.post(ctx, session, "wake", group.first().name, eventText(windowNames(group))) }
             }
@@ -454,13 +455,12 @@ object Wake {
                 val on = android.app.PendingIntent.getBroadcast(ctx, 7704, Intent(ctx, NoteActions::class.java).setAction(HostService.ACTION_ON), android.app.PendingIntent.FLAG_IMMUTABLE)
                 if (items.any { it.blocking && it.code == "service_off" })
                     com.kilon.agentvscreen.core.VScreenHandoff.alert(ctx, 7702,
-                        tr("agent 预约的 $whenText 到了，但服务是关闭的", "The agent's booking $whenText is due, but the service is off"),
-                        tr("这次 agent 无法使用手机。如需使用，请现在打开服务；如果只是不想让服务常驻通知栏，可在电源键中选择“按需启动”，预约到时仍会启动服务。",
-                            "The agent cannot use the phone this time. To allow it, turn the service on now. To keep the service out of the notification shade, choose On demand with the power button; schedules still start the service."),
-                        tap, listOf(tr("现在打开服务", "Turn on now") to on))
+                        tr(S.wake_the_agent_s_booking_is, whenText),
+                        tr(S.wake_the_agent_cannot_use_the),
+                        tap, listOf(tr(S.wake_turn_on_now) to on))
                 else com.kilon.agentvscreen.core.VScreenHandoff.alert(ctx, 7702,
-                    tr("agent 预约的 $whenText 快到了，但还有问题要你处理", "The agent's booking $whenText is due, but something needs you"),
-                    items.filter { it.blocking }.joinToString("\n") { it.text } + tr("\n点这里打开 Agent-VScreen 处理。", "\nTap to open Agent-VScreen."), tap)
+                    tr(S.wake_the_agent_s_booking_is_2, whenText),
+                    items.filter { it.blocking }.joinToString("\n") { it.text } + tr(S.wake_tap_to_open_agent_vscreen), tap)
             }
             AppLogger.info(TAG, "window $whenText: ready=$ok ${items.joinToString(",") { it.code }} did=$did")
         }, "vscreen-wake").apply { isDaemon = true }.start()
@@ -510,3 +510,5 @@ class WakeReceiver : BroadcastReceiver() {
         Wake.poke(context.applicationContext)
     }
 }
+
+private val WAKE_DAY_TEXT = intArrayOf(S.wake_day_mon, S.wake_day_tue, S.wake_day_wed, S.wake_day_thu, S.wake_day_fri, S.wake_day_sat, S.wake_day_sun)

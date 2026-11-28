@@ -1,5 +1,7 @@
 package com.kilon.agentvscreen.core
 
+import com.kilon.agentvscreen.S
+import com.kilon.agentvscreen.trPair
 import com.kilon.agentvscreen.tr
 
 import android.graphics.Bitmap
@@ -108,21 +110,18 @@ internal object VScreenOcr {
         if (err == THERMAL_LIMIT || (err == null && com.kilon.agentvscreen.host.ThermalGuard.ocrPaused)) return thermalLine()
         BackgroundOperation.appContextOrNull()?.let { recoverIfNeeded(it) }
         if (mlkitCrashed && paddleCrashed) {
-            return tr("文字识别不可用：PP-OCRv6 与 ML Kit 在自检时均崩溃，本版本已禁用。下面的元素只来自无障碍，画面上的字可能没列出来，以截图为准；vscreen diag 可重新自检，并告诉用户",
-                "Text recognition is unavailable: both PP-OCRv6 and ML Kit crashed during self-test and are disabled for this version. The elements below come from accessibility only and words on the picture may be missing; trust the screenshot, run vscreen diag to retry self-test, and tell the user")
+            return tr(S.vscreen_ocr_text_recognition_is_unavailable_both)
         }
         val e = err ?: fastError ?: return null
-        val acc = if (paddleCrashed) tr("自检时进程崩溃，本版本已禁用", "crashed during self-test, disabled for this version") else VScreenPaddleOcr.loadError()
-        val mlNote = if (mlkitCrashed) tr("ML Kit 自检时进程崩溃，本版本已禁用", "ML Kit crashed during self-test, disabled for this version") else tr("ML Kit 也失败（${e.take(140)}）", "ML Kit failed too (${e.take(140)})")
-        return tr("文字识别不可用：" + (acc?.let { "PP-OCRv6 不可用（${it.take(140)}）；" } ?: "") + "$mlNote。下面的元素只来自无障碍，画面上的字可能没列出来，以截图为准；vscreen diag 看详情，并告诉用户",
+        val acc = if (paddleCrashed) tr(S.vscreen_ocr_crashed_during_self_test_disabled) else VScreenPaddleOcr.loadError()
+        val mlNote = if (mlkitCrashed) tr(S.vscreen_ocr_ml_kit_crashed_during_self) else tr(S.vscreen_ocr_ml_kit_failed_too, e.take(140))
+        return trPair("文字识别不可用：" + (acc?.let { "PP-OCRv6 不可用（${it.take(140)}）；" } ?: "") + "$mlNote。下面的元素只来自无障碍，画面上的字可能没列出来，以截图为准；vscreen diag 看详情，并告诉用户",
             "Text recognition is unavailable: " + (acc?.let { "PP-OCRv6 unavailable (${it.take(140)}); " } ?: "") + "$mlNote. The elements below come from accessibility only and words on the picture may be missing; trust the screenshot, see vscreen diag, and tell the user")
     }
     @Volatile private var accurateCache: Result? = null
 
     const val THERMAL_LIMIT = "THERMAL_LIMIT"
-    fun thermalLine(): String = tr(
-        "手机发热，为降温暂停了文字识别：下面的元素只来自无障碍，画面上的字可能没列出来，以截图为准。不是故障，手机凉下来后自动恢复；少发命令、别让用户以为坏了",
-        "The phone is hot, so text recognition is paused to cool it down: the elements below come from accessibility only and words on the picture may be missing; trust the screenshot. Not a fault: it comes back by itself when the phone cools; send fewer commands meanwhile")
+    fun thermalLine(): String = tr(S.vscreen_ocr_the_phone_is_hot_so)
 
     private fun reusable(c: Result?, displayId: Int, frame: Bitmap, version: Long): Boolean {
         if (c == null || c.displayId != displayId || c.error != null) return false
@@ -416,29 +415,20 @@ internal object VScreenOcr {
         val ctx = BackgroundOperation.appContextOrNull()
         if (ctx != null) recoverIfNeeded(ctx)
         val base = when {
-            mlkitCrashed && paddleCrashed -> tr(
-                "OCR 不可用（PP-OCRv6 与 ML Kit 在自检时均崩溃，本版本已禁用；运行 diag 或升级应用后重试）",
-                "OCR unavailable (both PP-OCRv6 and ML Kit crashed in self-test and are disabled for this version; run diag or update the app to retry)"
-            )
+            mlkitCrashed && paddleCrashed -> tr(S.vscreen_ocr_ocr_unavailable_both_pp_ocrv6)
             mlkitCrashed -> {
                 val accOk = ctx != null && VScreenPaddleOcr.available(ctx)
-                if (accOk) tr(
-                    "${VScreenPaddleOcr.ENGINE}（ML Kit 自检崩溃，本版本已禁用，由 PP-OCRv6 接手全部识别）",
-                    "${VScreenPaddleOcr.ENGINE} (ML Kit crashed in self-test and is disabled for this version; PP-OCRv6 handles all recognition)"
-                ) else tr(
+                if (accOk) tr(S.vscreen_ocr_ml_kit_crashed_in_self, VScreenPaddleOcr.ENGINE) else trPair(
                     "OCR 不可用（ML Kit 自检崩溃已在本版本禁用" + (VScreenPaddleOcr.loadError()?.let { "；PP-OCRv6 加载失败：$it" } ?: "；PP-OCRv6 不可用") + "）",
                     "OCR unavailable (ML Kit crashed in self-test and is disabled for this version" + (VScreenPaddleOcr.loadError()?.let { "; PP-OCRv6 failed to load: $it" } ?: "; PP-OCRv6 unavailable") + ")"
                 )
             }
-            paddleCrashed -> ENGINE + tr(
-                "（PP-OCRv6 自检崩溃，本版本已禁用，由 ML Kit 接手）",
-                " (PP-OCRv6 crashed in self-test and is disabled for this version; ML Kit took over)"
-            )
-            accurateEnabled() -> tr("${VScreenPaddleOcr.ENGINE}；滚动等快速路径用 $ENGINE；后台感知（state 的 now.words）也用精确引擎", "${VScreenPaddleOcr.ENGINE}; fast paths such as scrolling use $ENGINE; background perception (now.words in state) uses the accurate engine too") +
-                (if (accurateMs > 0L) tr("（约 ${accurateMs}ms/次，慢时降低频率）", " (about ${accurateMs}ms each, less often when slow)") else "")
-            else -> ENGINE + (VScreenPaddleOcr.loadError()?.let { tr("（PP-OCRv6 加载失败：$it）", " (PP-OCRv6 failed to load: $it)") } ?: "")
+            paddleCrashed -> ENGINE + tr(S.vscreen_ocr_pp_ocrv6_crashed_in_self)
+            accurateEnabled() -> tr(S.vscreen_ocr_fast_paths_such_as_scrolling, VScreenPaddleOcr.ENGINE, ENGINE) +
+                (if (accurateMs > 0L) tr(S.vscreen_ocr_about_ms_each_less_often, accurateMs) else "")
+            else -> ENGINE + (VScreenPaddleOcr.loadError()?.let { tr(S.vscreen_ocr_pp_ocrv6_failed_to_load, it) } ?: "")
         }
-        return base + (selfTestReport?.takeIf { "FAILED" in it || "WRONG" in it || "CRASHED" in it }?.let { tr("；自检：", "; self-test: ") + it.replace("\n", "; ") } ?: "")
+        return base + (selfTestReport?.takeIf { "FAILED" in it || "WRONG" in it || "CRASHED" in it }?.let { tr(S.vscreen_ocr_self_test) + it.replace("\n", "; ") } ?: "")
     }
 
     /**
@@ -453,7 +443,7 @@ internal object VScreenOcr {
         val ctx = BackgroundOperation.appContextOrNull()
         if (ctx != null) recoverIfNeeded(ctx)
         if (mlkitCrashed && paddleCrashed) {
-            val msg = tr("OCR 不可用：PP-OCRv6 与 ML Kit 在自检时均崩溃，本版本已禁用", "OCR unavailable: both PP-OCRv6 and ML Kit crashed in self-test and are disabled for this version")
+            val msg = tr(S.vscreen_ocr_ocr_unavailable_both_pp_ocrv6_2)
             fastError = msg
             return Result(emptyList(), displayId, version, 0L, msg)
         }
@@ -486,16 +476,16 @@ internal object VScreenOcr {
                     engine = VScreenPaddleOcr.ENGINE).also { accurateCache = it }
             } catch (t: Throwable) {
                 if (mlkitCrashed) {
-                    val msg = tr("PP-OCRv6 失败（${t.javaClass.simpleName}: ${t.message}），且 ML Kit 已因自检崩溃禁用", "PP-OCRv6 failed (${t.javaClass.simpleName}: ${t.message}), and ML Kit is disabled after self-test crash")
+                    val msg = tr(S.vscreen_ocr_pp_ocrv6_failed_and_ml, t.javaClass.simpleName, t.message)
                     AppLogger.warning(TAG, msg)
                     fastError = msg
                     return Result(emptyList(), displayId, version, SystemClock.elapsedRealtime() - t0, msg)
                 }
-                fallback = tr("PP-OCRv6 失败（${t.javaClass.simpleName}: ${t.message}），已改用 ML Kit", "PP-OCRv6 failed (${t.javaClass.simpleName}: ${t.message}), switched to ML Kit")
+                fallback = tr(S.vscreen_ocr_pp_ocrv6_failed_switched_to, t.javaClass.simpleName, t.message)
                 AppLogger.warning(TAG, fallback)
             }
         } else if (mlkitCrashed) {
-            val msg = tr("OCR 不可用：ML Kit 已因自检崩溃禁用，且 PP-OCRv6 不可用", "OCR unavailable: ML Kit is disabled after self-test crash and PP-OCRv6 is unavailable")
+            val msg = tr(S.vscreen_ocr_ocr_unavailable_ml_kit_is)
             fastError = msg
             return Result(emptyList(), displayId, version, 0L, msg)
         }
@@ -572,7 +562,7 @@ internal object VScreenOcr {
 
     private fun recognizeFast(displayId: Int, frame: Bitmap, version: Long): Result {
         if (mlkitCrashed) {
-            val msg = tr("ML Kit 在自检时崩溃，本版本已禁用", "ML Kit crashed in self-test and is disabled for this version")
+            val msg = tr(S.vscreen_ocr_ml_kit_crashed_in_self_2)
             fastError = msg
             return Result(emptyList(), displayId, version, 0L, msg)
         }
