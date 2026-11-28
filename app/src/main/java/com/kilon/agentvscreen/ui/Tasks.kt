@@ -108,6 +108,8 @@ fun TaskFrame(name: String?, modifier: Modifier, corner: Dp = 8.dp) {
     val img by produceState<ImageBitmap?>(null, name) {
         value = withContext(Dispatchers.IO) { name?.let { TaskLog.frameFile(it) }?.let { f -> decodeFit(f.path, 360)?.asImageBitmap() } }
     }
+    // 2.0.1-beta2 (rainbow: blank tiles beside one or two frames): a missing frame keeps its column empty, no tile.
+    if (name == null) { Spacer(modifier); return }
     Box(modifier.clip(RoundedCornerShape(corner)).background(MiuixTheme.colorScheme.surfaceContainerHigh)) {
         img?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
     }
@@ -217,11 +219,11 @@ fun TaskPage(id: Long) {
     var preview by remember { mutableStateOf<Pair<List<String>, Int>?>(null) }
     var step by remember { mutableStateOf<JSONObject?>(null) }
     MiuixPage(taskTitle(t, app), marqueeTitle = true, subtitle = hhmm(t.start) + " · " + com.kilon.agentvscreen.api.Agents.nameOfSession(t.session)) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(Modifier.padding(horizontal = Edge.text, vertical = 8.dp)) {
             Text(word, fontSize = 14.sp, color = if (good) Palette.takeover else Palette.stopped)
             Text(" · " + steps(t.commands) + " · " + took(t) + (app?.let { " · $it" } ?: ""), fontSize = 14.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
         }
-        if (t.frames.isNotEmpty()) Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (t.frames.isNotEmpty()) Row(Modifier.padding(horizontal = Edge.card, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             (0 until 4).forEach { i ->
                 val f = t.frames.getOrNull(i)
                 TaskFrame(f, Modifier.weight(1f).aspectRatio(0.45f).clickable(enabled = f != null) { preview = t.frames to i }, 12.dp)

@@ -53,7 +53,6 @@ import com.kilon.agentvscreen.host.PublicAccess
 import com.kilon.agentvscreen.tr
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
@@ -160,8 +159,7 @@ private fun GuideField(label: String, saved: String?, onSave: (String) -> String
     }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (saved != null) Text("✓ " + saved, fontSize = 13.sp, color = Palette.takeover)
-        TextField(value = v, onValueChange = { v = it; problem = null }, label = label, useLabelAsPlaceholder = true, singleLine = true,
-            modifier = Modifier.fillMaxWidth())
+        AvsField(value = v, onValueChange = { v = it; problem = null }, placeholder = label)
         problem?.let { Text(it, fontSize = 12.5.sp, lineHeight = 18.sp, color = MiuixTheme.colorScheme.error) }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SoftButton(onClick = {

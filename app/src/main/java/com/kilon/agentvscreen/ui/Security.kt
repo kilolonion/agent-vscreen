@@ -71,7 +71,7 @@ internal fun NewTokenDialog(base: String, copy: (String, String) -> Unit, close:
     if (m == null) GlassDialog(onDismissRequest = close, title = { Text(tr("新建令牌", "New token")) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                top.yukonga.miuix.kmp.basic.TextField(value = name, onValueChange = { name = it.take(24) }, label = tr("给谁用（如 电脑上的助手）", "Who it is for (e.g. desktop assistant)"), useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth())
+                AvsField(value = name, onValueChange = { name = it.take(24) }, placeholder = tr("给谁用（如 电脑上的助手）", "Who it is for (e.g. desktop assistant)"))
                 Tokens.LEVELS.filter { it != com.kilon.agentvscreen.api.Policy.CUSTOM }.forEach { lv ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         top.yukonga.miuix.kmp.basic.RadioButton(selected = level == lv, onClick = { level = lv })
@@ -128,9 +128,11 @@ fun RemoteSafety() {
         }
         Switch(checked = signed, onCheckedChange = { signed = it; ApiConfig.remoteSigned = it; Audit.security("remote_signed", it.toString()) })
     }
-    top.yukonga.miuix.kmp.basic.TextField(value = peers, onValueChange = { peers = it; ApiConfig.tailnetPeers = it.split(',', '\n', ' ').map { p -> p.trim().lowercase() }.filter { p -> p.isNotEmpty() }.toSet() }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-        label = tr("只允许这些设备（设备名、登录名或 100.x 地址，逗号分开；留空 = 所有设备）", "Only these devices (names, logins or 100.x addresses, comma separated; empty = every device)"))
-    top.yukonga.miuix.kmp.basic.TextField(value = suffix, onValueChange = { suffix = it; ApiConfig.tailnetSuffix = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
-        label = tr("自建控制服务器的域名后缀（可选，如 tail.example.com）", "Name suffix of a self-hosted control server (optional, e.g. tail.example.com)"))
+    // 2.0.1-beta2: a short title and a short placeholder; what goes in is said under the field.
+    AvsField(value = peers, onValueChange = { peers = it; ApiConfig.tailnetPeers = it.split(',', '\n', ' ').map { p -> p.trim().lowercase() }.filter { p -> p.isNotEmpty() }.toSet() },
+        title = tr("只允许这些设备", "Only these devices"), placeholder = tr("留空 = 所有设备", "Blank = every device"), modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+    Small(tr("设备名、登录名或 100.x 地址，逗号分开", "Device names, logins or 100.x addresses, comma separated"))
+    AvsField(value = suffix, onValueChange = { suffix = it; ApiConfig.tailnetSuffix = it },
+        title = tr("自建控制服务器域名后缀", "Self-hosted control server suffix"), placeholder = tr("可选，如 tail.example.com", "Optional, e.g. tail.example.com"), modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
 }
 

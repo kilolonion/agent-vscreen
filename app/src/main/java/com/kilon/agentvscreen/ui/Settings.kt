@@ -63,7 +63,6 @@ import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.icon.extended.Refresh
@@ -89,48 +88,12 @@ fun SettingsTab(bottom: Dp) {
     val host = LocalHost.current
     val scope = rememberCoroutineScope()
     val s by BackgroundOperation.state.collectAsState()
-    val ts by com.kilon.agentvscreen.host.Tailnet.status.collectAsState()
-    val tokens by Tokens.list.collectAsState()
     val rules by com.kilon.agentvscreen.core.VScreenStore.rules.collectAsState()
     var eventDialog by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<Updates.Outcome?>(null) }
 
     MiuixPage(tr("设置", "Settings"), back = false, bottom = bottom) {
-        val pubOn by com.kilon.agentvscreen.host.PublicAccess.enabledFlow.collectAsState()
-
-        // Who can reach the phone: the phone in the middle, each way in as a line, lit when it works.
-        SmallTitle(tr("接入", "Connections"))
-        Card(Modifier.padding(horizontal = 12.dp).fillMaxWidth(), insideMargin = PaddingValues(18.dp)) {
-            val ways = remember(ts, app.serviceOn, app.tick) { com.kilon.agentvscreen.host.Access.ways(ctx) }
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ways.forEachIndexed { i, w ->
-                    WayLine(w, onClick = { if (i == 0) nav.go(Route.Connect) else nav.go(Route.Remote) })
-                }
-                if (ways.size == 1) WayLine(null, onClick = { nav.go(Route.Remote) })
-                val pubChannel by com.kilon.agentvscreen.host.PublicAccess.channelFlow.collectAsState()
-                val tunnelState = pubChannel.tunnel?.status?.collectAsState()?.value?.state
-                WayLine(
-                    com.kilon.agentvscreen.host.Access.Way(
-                        name = tr("云端（公网 MCP）", "Cloud (Public MCP)"),
-                        state = when {
-                            !pubOn -> tr("默认关闭 · ${pubChannel.title}", "Off · ${pubChannel.title}")
-                            tunnelState == com.kilon.agentvscreen.host.TunnelState.CONNECTED -> tr("已开启", "On")
-                            tunnelState == com.kilon.agentvscreen.host.TunnelState.ERROR -> tr("连接失败", "Failed")
-                            tunnelState != null -> tr("启动中…", "Starting…")
-                            ts.funnel == "on" -> tr("已开启", "On")
-                            ts.funnel == "cert" -> tr("申请证书中…", "Fetching cert…")
-                            ts.funnel == "error" -> tr("启动失败", "Failed")
-                            else -> tr("启动中…", "Starting…")
-                        },
-                        ok = pubOn && (if (tunnelState != null) tunnelState == com.kilon.agentvscreen.host.TunnelState.CONNECTED else ts.funnel == "on"),
-                        inUse = false,
-                    ),
-                    onClick = { nav.go(Route.PublicAccess) },
-                )
-                // 1.4.0-beta8: connecting an agent is the 接入 tab now; here only the tokens.
-                SoftButton(onClick = { nav.go(Route.Tokens) }, modifier = Modifier.fillMaxWidth()) { Text(tr("令牌 ${tokens.size}", "Tokens ${tokens.size}")) }
-            }
-        }
+        // 2.0.1-beta2 (rainbow): every way in (this phone, Tailscale, cloud, tokens) lives on the 接入 tab only.
 
         // 2.0.0-beta8 (feedback 2): how much an agent may do is set per agent (接入 › the agent); here only what is about
         // apps, and the table of levels to read.
@@ -198,14 +161,6 @@ fun SettingsTab(bottom: Dp) {
                 onSelectedIndexChange = { i -> ApiConfig.quietMinutes = opts[i]; quiet = opts[i] })
         }
 
-        Group(tr("识别与录制", "Recognition and recording")) {
-            SwitchPreference(checked = s.accurateOcr, onCheckedChange = { BackgroundOperation.setAccurateOcr(it) },
-                title = tr("精确文字识别", "Accurate text recognition"), summary = tr("PP-OCRv6，本机离线运行", "PP-OCRv6, offline on this phone"))
-            DetectorPreference()
-            SwitchPreference(checked = s.recording, onCheckedChange = { BackgroundOperation.setRecording(it) },
-                title = tr("后台录制", "Background recording"), summary = tr("保存副屏画面，用于回放和排查", "Keeps background-screen video for replay and troubleshooting"))
-        }
-
         Group(tr("通用", "General")) {
             ArrowPreference(title = tr("首次配置", "Setup"), endActions = {
                 Value(if (app.items.isEmpty()) "…" else if (app.allOk) tr("已就绪", "Ready") else tr("还差 ${app.left} 项", "${app.left} left"),
@@ -227,7 +182,7 @@ fun SettingsTab(bottom: Dp) {
                 summary = pvSummary,
                 onSelectedIndexChange = { i -> val v = com.kilon.agentvscreen.host.Privileged.Via.entries[i]
                     if (v != pv.via) scope.launch(Dispatchers.IO) { com.kilon.agentvscreen.host.Privileged.choose(ctx, v) } })
-            val names = listOf(tr("跟随系统", "System"), "中文", "English")
+            val names = listOf(tr("跟随系统", "System"), "中文", "English", "日本語")
             OverlayDropdownPreference(items = names, selectedIndex = I18n.Lang.entries.indexOf(I18n.choice), title = "语言 / Language",
                 onSelectedIndexChange = { i ->
                     if (I18n.Lang.entries[i] != I18n.choice) {
@@ -242,6 +197,14 @@ fun SettingsTab(bottom: Dp) {
                 selectedIndex = if (I18n.agentLang == I18n.AGENT_AUTO) 1 else 0,
                 title = tr("给 agent 的回复语言", "Language of replies to agents"),
                 onSelectedIndexChange = { i -> I18n.agentLang = if (i == 1) I18n.AGENT_AUTO else I18n.AGENT_EN })
+        }
+
+        Group(tr("识别与录制", "Recognition and recording")) {
+            SwitchPreference(checked = s.accurateOcr, onCheckedChange = { BackgroundOperation.setAccurateOcr(it) },
+                title = tr("精确文字识别", "Accurate text recognition"), summary = tr("PP-OCRv6，本机离线运行", "PP-OCRv6, offline on this phone"))
+            DetectorPreference()
+            SwitchPreference(checked = s.recording, onCheckedChange = { BackgroundOperation.setRecording(it) },
+                title = tr("后台录制", "Background recording"), summary = tr("保存副屏画面，用于回放和排查", "Keeps background-screen video for replay and troubleshooting"))
         }
 
         Group(tr("更新", "Updates")) {
@@ -287,7 +250,7 @@ fun SettingsTab(bottom: Dp) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(tr("盯守看到条件时，事件默认只放进队列。填一个应用的包名，事件会另外广播给它；留空就不广播。", "When a watch sees its condition, the event is only queued by default. With a package here it is also broadcast to that app; empty means none."),
                         fontSize = 13.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                    TextField(value = target, onValueChange = { target = it.trim() }, label = tr("包名", "Package"), useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    AvsField(value = target, onValueChange = { target = it.trim() }, placeholder = tr("包名", "Package"))
                 }
             },
             confirmButton = { LinkButton(onClick = { ApiConfig.eventTarget = target.ifEmpty { null }; eventDialog = false; app.bump() }) { Text(tr("保存", "Save")) } },
@@ -298,25 +261,6 @@ fun SettingsTab(bottom: Dp) {
 }
 
 /** What a check found: the new version with its notes and a download, already the newest, or why it failed. */
-/** One way in: a dot (green when it works), its name and state; tap opens where it is set up. */
-@Composable
-private fun WayLine(w: com.kilon.agentvscreen.host.Access.Way?, onClick: () -> Unit) {
-    val c = MiuixTheme.colorScheme
-    val tint = when { w == null -> c.onSurfaceVariantSummary; w.ok -> Palette.takeover; else -> Palette.stopped }
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(tint.copy(alpha = 0.13f)), contentAlignment = Alignment.Center) {
-            Box(Modifier.size(10.dp).clip(CircleShape).background(tint))
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-            Text(w?.name ?: tr("其它设备", "Other devices"), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-            Text(w?.let { it.state + if (it.inUse) tr(" · 刚用过", " · used lately") else "" } ?: tr("没开 · 经 Tailscale 从电脑或服务器连进来", "Off · from a computer or server through Tailscale"),
-                fontSize = 12.5.sp, color = c.onSurfaceVariantSummary, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
-        Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = c.onSurfaceVariantSummary, modifier = Modifier.size(20.dp))
-    }
-}
-
 /** A level to choose: lit and ringed when chosen. */
 @Composable
 private fun LevelCard(title: String, sub: String, on: Boolean, modifier: Modifier, onClick: () -> Unit) {

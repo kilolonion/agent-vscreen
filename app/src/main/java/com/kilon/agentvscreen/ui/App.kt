@@ -480,8 +480,11 @@ fun MiuixPage(
     back: Boolean = true,
     bottom: Dp = 0.dp,
     subtitle: String = "",
-    /** Top-left of the bar when there is no back arrow (the home page's state pill). */
-    lead: (@Composable () -> Unit)? = null,
+    /**
+     * Top-left of the bar when there is no back arrow (the home page's state pill). It is given how far the large
+     * title has folded into the bar (0..1), so it can step aside for the folded title (2.0.1-beta2).
+     */
+    lead: (@Composable (folded: () -> Float) -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {},
     marqueeTitle: Boolean = false,
     resetScrollKey: Any? = null,
@@ -508,7 +511,7 @@ fun MiuixPage(
                 val navigation: @Composable () -> Unit = {
                     if (back) IconButton(onClick = { nav.back() }, modifier = Modifier.padding(start = 16.dp)) {
                         Icon(MiuixIcons.Back, tr("返回", "Back"))
-                    } else lead?.invoke()
+                    } else lead?.invoke { bar.state.collapsedFraction }
                 }
                 val barColor = if (blurNow) Color.Transparent else surface
                 if (marqueeTitle) TaskTitleBar(title, subtitle, bar, barColor, navigation, actions)

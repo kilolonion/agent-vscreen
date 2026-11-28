@@ -56,7 +56,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
@@ -356,8 +355,8 @@ fun NewAgentPage() {
 
         if (step == 0) {
             Group(tr("名称", "Name")) {
-                TextField(value = name, onValueChange = { name = it.take(24) }, label = tr("例如：通用助手（$suggested）", "e.g. General assistant ($suggested)"),
-                    useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp))
+                AvsField(value = name, onValueChange = { name = it.take(24) }, placeholder = tr("例如：通用助手（$suggested）", "e.g. General assistant ($suggested)"),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp))
             }
             Group(tr("权限档位", "Permission level")) {
                 com.kilon.agentvscreen.api.Tokens.LEVELS.forEach { lv ->
@@ -402,9 +401,8 @@ fun NewAgentPage() {
                     Text(tr("Tailscale 连接", "Tailscale connection"), fontSize = 16.sp, fontWeight = FontWeight.Medium)
                     Text(remoteBase ?: tr("先连好 Tailscale，才能复制给其它设备的内容", "Connect Tailscale first to copy what the other device needs"),
                         fontSize = 14.sp, fontFamily = if (remoteBase != null) FontFamily.Monospace else null, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Dot(if (remoteReady) Palette.takeover else Palette.stopped, 7.dp)
-                        Text("  " + remember(ts, mode, remoteBase) { Tailnet.line(ctx) }, fontSize = 13.sp, color = if (remoteReady) Palette.takeover else Palette.stopped, maxLines = 1,
+                    DotLine(if (remoteReady) Palette.takeover else Palette.stopped, dot = 7.dp, firstLine = 19.dp) {
+                        Text(remember(ts, mode, remoteBase) { Tailnet.line(ctx) }, fontSize = 13.sp, lineHeight = 19.sp, color = if (remoteReady) Palette.takeover else Palette.stopped, maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     }
                 }
@@ -746,7 +744,7 @@ fun AgentPage(id: String) {
             }
         }
         Group(tr("名称", "Name")) {
-            TextField(value = n, onValueChange = { n = it.take(24) }, label = tr("名称", "Name"), useLabelAsPlaceholder = true, singleLine = true,
+            AvsField(value = n, onValueChange = { n = it.take(24) }, placeholder = tr("名称", "Name"),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp))
             val can = n.isNotBlank() && n.trim() != com.kilon.agentvscreen.api.Agents.name(id)
             Text(tr("保存名字", "Save name"), fontSize = 15.sp, color = if (can) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
@@ -810,8 +808,8 @@ private fun AgentNow(id: String) {
     val s by BackgroundOperation.state.collectAsState()
     val using = mine(s.ownerSessionId) && s.displayId != null
     Group(tr("当前状态", "Now")) {
-        if (using) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Dot(Palette.brand); Text(tr("  正在用副屏", "  Using the screen now"), fontSize = 15.sp)
+        if (using) DotLine(Palette.brand, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+            Text(tr("正在用副屏", "Using the screen now"), fontSize = 15.sp, lineHeight = 22.sp)
         }
         if (waits > 0) ArrowPreference(title = tr("待处理 $waits 项", "$waits waiting for you"), summary = tr("显示在首页顶部", "At the top of the home page"), onClick = { nav.tab(0) })
         FoldedRows(books) { e ->
@@ -859,10 +857,11 @@ fun InfoCard(color: Color, title: String, body: String = "") {
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp).clip(RoundedCornerShape(16.dp))
             .background(color.copy(alpha = 0.12f).compositeOver(MiuixTheme.colorScheme.surfaceContainer)).padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) { Dot(color); Text("  $title", fontSize = 15.sp, fontWeight = FontWeight.SemiBold) }
-        if (body.isNotEmpty()) SelectionContainer { Text(body, fontSize = 13.sp, lineHeight = 19.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary) }
+        DotLine(color) {
+            Text(title, fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold)
+            if (body.isNotEmpty()) SelectionContainer { Text(body, fontSize = 13.sp, lineHeight = 19.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(top = 4.dp)) }
+        }
     }
 }
 
@@ -990,10 +989,10 @@ fun RemotePage() {
         var ctl by remember { mutableStateOf(ApiConfig.tailnetControlUrl ?: "") }
         val problem = ApiConfig.controlUrlProblem(ctl)
         Column(Modifier.padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            TextField(value = ctl, onValueChange = { ctl = it }, label = tr("控制服务器（留空用 Tailscale）", "Control server (blank = Tailscale)"), useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth())
+            AvsField(value = ctl, onValueChange = { ctl = it }, title = tr("控制服务器", "Control server"), placeholder = tr("留空 = Tailscale 官方", "Blank = Tailscale's own"))
             Text(problem ?: ApiConfig.normalizeControlUrl(ctl)?.let { tr("将使用 $it", "Will use $it") } ?: tr("使用 Tailscale 官方服务器", "Using Tailscale's own server"),
                 fontSize = 12.sp, color = if (problem != null) Palette.stopped else MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 12.dp))
-            TextField(value = key, onValueChange = { key = it }, label = tr("auth key（可选，代替网页登录）", "Auth key (optional, instead of the web login)"), useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth())
+            AvsField(value = key, onValueChange = { key = it }, title = tr("auth key（可选）", "Auth key (optional)"), placeholder = tr("代替网页登录", "Instead of the web login"))
             Text(tr("每个服务器的登录分开保存，换回原来的服务器不用重新登录。内置节点不接管手机上网，所以没有出口节点这一项。", "Each server keeps its own login, so switching back needs no new login. The built-in node does not carry the phone's own traffic, so there is no exit node option."),
                 fontSize = 12.sp, lineHeight = 17.sp, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 12.dp))
             PrimaryButton(onClick = {

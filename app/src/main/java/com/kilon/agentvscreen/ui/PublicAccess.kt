@@ -46,7 +46,6 @@ import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Copy
 import top.yukonga.miuix.kmp.preference.ArrowPreference
@@ -253,13 +252,10 @@ fun PublicPairingCodeCard() {
             endActions = { Value(if (byCode) tr("收起", "Hide") else tr("展开", "Show")) },
             onClick = { byCode = !byCode },
         )
-        if (byCode) TextField(
+        if (byCode) AvsField(
             value = codeInput,
             onValueChange = { codeInput = it; errorMsg = null },
-            label = tr("8 位配对码（如 ABCD-EFGH）", "8-character pairing code (e.g. ABCD-EFGH)"),
-            useLabelAsPlaceholder = true,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
+            placeholder = tr("8 位配对码，如 ABCD-EFGH", "8-character code, e.g. ABCD-EFGH"),
         )
         if (byCode) errorMsg?.let { err ->
             Text(err, fontSize = 12.5.sp, lineHeight = 18.sp, color = MiuixTheme.colorScheme.error)

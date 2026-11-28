@@ -1,5 +1,6 @@
 package com.kilon.agentvscreen.ui
 
+import top.yukonga.miuix.kmp.basic.SmallTitle
 import androidx.compose.ui.Alignment
 
 import androidx.compose.foundation.layout.widthIn
@@ -134,7 +135,7 @@ fun RecordsTab(bottom: Dp) {
     val now = remember(shown) { shown.filter { it is Line.T && it.t.running } }
     val past = remember(shown, now) { (shown - now.toSet()) }
     MiuixLazyPage(tr("记录", "Records"), back = false, bottom = bottom, actions = {
-        if (whoList.size > 1) Row(Modifier.padding(end = 12.dp).clip(RoundedCornerShape(50)).background(if (who != null) MiuixTheme.colorScheme.primary.copy(alpha = 0.14f) else MiuixTheme.colorScheme.surfaceContainer)
+        if (whoList.size > 1) Row(Modifier.padding(end = Edge.text - Edge.slot).clip(RoundedCornerShape(50)).background(if (who != null) MiuixTheme.colorScheme.primary.copy(alpha = 0.14f) else MiuixTheme.colorScheme.surfaceContainer)
             .clickable { picking = true }.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(who?.let { com.kilon.agentvscreen.api.Agents.name(it) } ?: tr("所有 agent", "Every agent"), fontSize = 13.sp,
                 color = if (who != null) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface, maxLines = 1, softWrap = false,
@@ -143,7 +144,7 @@ fun RecordsTab(bottom: Dp) {
         }
     }) {
         item(key = "chips") {
-            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = Edge.text, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(Filter.ALL to tr("全部", "All"), Filter.TASKS to tr("任务", "Tasks"), Filter.ASKS to tr("提问", "Questions"),
                     Filter.PLANS to tr("预约与盯守", "Plans"), Filter.LESSONS to tr("经验", "Kept")).forEach { (f, label) ->
                     FilterChip(label, filter == f) { filter = f }
@@ -163,7 +164,7 @@ fun RecordsTab(bottom: Dp) {
                     }
                 }
                 if (now.isNotEmpty()) {
-                    item(key = "now") { Text(tr("进行中", "Under way"), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MiuixTheme.colorScheme.primary, modifier = Modifier.padding(start = 18.dp, top = 8.dp, bottom = 4.dp)) }
+                    item(key = "now") { SmallTitle(tr("进行中", "Under way")) }
                     items(now.size, key = { i -> "now:" + lineKey(now[i]) }) { i -> val l = now[i] as Line.T
                         Box(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) { TaskCard(l.t) { nav.go(Route.Task(l.t.id)) } } }
                 }
@@ -173,7 +174,7 @@ fun RecordsTab(bottom: Dp) {
                 past.forEach { l -> val d = dayOf(l.at); if (d != day) { day = d; rows += d }; rows += l }
                 items(rows.size, key = { i -> rows[i].let { r -> if (r is String) "day:$r" else lineKey(r as Line) } }) { i ->
                     when (val r = rows[i]) {
-                        is String -> Text(r, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(start = 18.dp, top = 12.dp, bottom = 4.dp))
+                        is String -> SmallTitle(r)
                         is Line.T -> Box(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) { TaskCard(r.t) { nav.go(Route.Task(r.t.id)) } }
                         is Line.A -> Box(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) {
                             val a = r.o.optString("answer")

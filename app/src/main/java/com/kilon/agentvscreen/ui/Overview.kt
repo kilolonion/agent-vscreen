@@ -156,7 +156,7 @@ fun OverviewTab(bottom: Dp) {
         Home.FIRST -> tr("还没有 agent 用过", "No agent has used it yet")
     }
 
-    MiuixPage(title, back = false, bottom = bottom, lead = { StatusPill(eyebrow, mode, home) }, marqueeTitle = home == Home.ACTING, actions = {
+    MiuixPage(title, back = false, bottom = bottom, lead = { folded -> StatusPill(eyebrow, mode, home, folded) }, marqueeTitle = home == Home.ACTING, actions = {
         IconButton(onClick = { shield = true }, modifier = Modifier.padding(end = 12.dp)) { Icon(Icons.Filled.PowerSettingsNew, tr("服务", "Service")) }
     }) {
         NeedsGroup()
@@ -186,10 +186,7 @@ fun OverviewTab(bottom: Dp) {
             if (home != Home.FIRST) {
                 NextUp(beat, app.tick)
                 if (tasks.isNotEmpty()) {
-                    Row(Modifier.fillMaxWidth().padding(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        SmallTitle(tr("最近", "Just now"), modifier = Modifier.weight(1f))
-                        LinkButton(onClick = { nav.tab(TAB_RECORDS) }) { Text(tr("全部记录", "All records")) }
-                    }
+                    SectionHeader(tr("最近", "Just now"), tr("全部记录", "All records")) { nav.tab(TAB_RECORDS) }
                     Card(Modifier.padding(horizontal = 12.dp).fillMaxWidth(), insideMargin = PaddingValues(0.dp)) {
                         tasks.forEach { t -> TaskRow(t) { nav.go(Route.Task(t.id)) } }
                     }
@@ -303,10 +300,18 @@ private val PKG = Regex("\\b[a-z][a-z0-9_]*(\\.[a-z0-9_]+){2,}\\b")
 
 /** The line above the title, as a small pill with the state's colour (it used to float alone under the big title). */
 @Composable
-private fun StatusPill(text: String, mode: Mode, home: Home) {
+private fun StatusPill(text: String, mode: Mode, home: Home, folded: () -> Float = { 0f }) {
     val c = MiuixTheme.colorScheme
     val dot = when (home) { Home.ACTING -> Palette.of(mode); Home.BROKEN -> Palette.stopped; else -> c.onSurfaceVariantSummary.copy(alpha = 0.6f) }
-    Row(Modifier.padding(start = 20.dp).clip(RoundedCornerShape(50)).background(c.surfaceContainer).padding(horizontal = 12.dp, vertical = 6.dp),
+    // 2.0.1-beta2 (rainbow: scrolled down, the pill squeezed the folded title to "待…"): once the title folds into
+    // the bar, the pill steps down to its dot and the title gets the room.
+    val small by remember { androidx.compose.runtime.derivedStateOf { folded() > 0.5f } }
+    if (small) {
+        Box(Modifier.padding(start = Edge.text - Edge.slot + 12.dp).size(8.dp).clip(CircleShape).background(dot))
+        return
+    }
+    // 2.0.1-beta2 (rainbow: the pill sat indented from the big title): its edge is on the title's line (Edge).
+    Row(Modifier.padding(start = Edge.text - Edge.slot).clip(RoundedCornerShape(50)).background(c.surfaceContainer).padding(horizontal = 12.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(8.dp).clip(CircleShape).background(dot))
         Spacer(Modifier.width(8.dp))
