@@ -211,13 +211,19 @@ class PublicPairingCodeTest {
         assertEquals(PublicOAuth.ClaimResult.NotFound, PublicOAuth.claimPairingByCode(ctx, "AAAA-BBBB", openActivity = false))
 
         val cid = registerClient("GraceClient")
-        // No lock screen: no card is shown, the request stays queued, and a manual claim says why.
-        PublicOAuth.deviceSecureCheck = { false }
+        // Fill every card slot so this request waits in the queue without a card.
+        for (i in 1..PublicOAuth.MAX_PENDING_PAIRINGS_GLOBAL) {
+            assertEquals(200, pubServer.route(req("GET", authorizeUrl(cid, "fill$i"), src = "198.51.100.$i")).status)
+        }
         val r = pubServer.route(req("GET", authorizeUrl(cid), src = "203.0.113.9"))
         val code = extractCode(r)
-        assertTrue(StrongConfirm.pending.value.isEmpty())
+        assertTrue(StrongConfirm.pending.value.none { it.sourceAddress == "203.0.113.9" })
+
+        // No lock screen -> NoLockscreen
+        PublicOAuth.deviceSecureCheck = { false }
         assertEquals(PublicOAuth.ClaimResult.NoLockscreen, PublicOAuth.claimPairingByCode(ctx, code, openActivity = false))
         PublicOAuth.deviceSecureCheck = { true }
+        StrongConfirm.pending.value.toList().forEach { assertTrue(StrongConfirm.deny(ctx, it.id)) }
 
         // Claim 5 seconds before the 5-minute TTL -> gets at least CLAIM_MIN_CONFIRM_MS (60s) grace window.
         fakeNow += PublicOAuth.PAIRING_TTL_MS - 5_000L
@@ -234,9 +240,7 @@ class PublicPairingCodeTest {
         assertTrue(StrongConfirm.approve(ctx, cid1, StrongConfirm.BY_BIOMETRIC, Tokens.LOOK))
 
         // Unclaimed code expired after PAIRING_TTL_MS returns Expired.
-        PublicOAuth.deviceSecureCheck = { false }
         val r2 = pubServer.route(req("GET", authorizeUrl(cid, "exp"), src = "203.0.113.11"))
-        PublicOAuth.deviceSecureCheck = { true }
         val code2 = extractCode(r2)
         fakeNow += PublicOAuth.PAIRING_TTL_MS + 1_000L
         assertEquals(PublicOAuth.ClaimResult.Expired, PublicOAuth.claimPairingByCode(ctx, code2, openActivity = false))
