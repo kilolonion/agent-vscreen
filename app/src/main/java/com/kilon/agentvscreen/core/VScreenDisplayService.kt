@@ -1338,7 +1338,7 @@ class VScreenDisplayService : Binder {
 
     companion object {
         /** Parallel `cmd appops get` reads in a full sound scan ([Sound.scanAll]). */
-        internal const val SCAN_WORKERS = 8
+        private const val SCAN_WORKERS = 8 // private: public Int constants here are binder call codes (V142Beta6Test)
         internal fun attributionPackageForUid(uid: Int): String? = if (uid == 0) null else SHELL_PKG
         const val DESCRIPTOR = "com.kilon.agentvscreen.core.VScreenDisplayService"
         const val CREATE = FIRST_CALL_TRANSACTION
