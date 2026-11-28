@@ -1,6 +1,9 @@
 package com.kilon.agentvscreen.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material3.Icon
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -110,7 +113,7 @@ fun SectionHeader(title: String, action: String? = null, onAction: (() -> Unit)?
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(action, fontSize = 14.sp, color = c.primary)
-            androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.KeyboardArrowRight, null,
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null,
                 tint = c.primary, modifier = Modifier.size(18.dp))
         }
     }
