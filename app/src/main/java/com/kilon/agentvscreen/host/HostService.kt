@@ -108,6 +108,21 @@ class HostService : Service() {
             return srv
         }
 
+        @Volatile private var lastHeal = 0L
+
+        /**
+         * 2.0.1-beta1: make sure agents can connect now, in every mode but Off: the app came to the front, a local
+         * agent's wake broadcast arrived, or the app was updated. Creates the server if needed, and binds it again
+         * when its port does not answer (see [ApiServer.heal]). Off the main thread, at most every 5 s.
+         */
+        fun healServer(ctx: Context, why: String) {
+            val app = ctx.applicationContext
+            if (ServiceControl.now(app) == ServiceControl.State.BLOCKED || ThermalGuard.locked) return
+            val now = android.os.SystemClock.elapsedRealtime()
+            synchronized(this) { if (now - lastHeal < 5_000L) return; lastHeal = now }
+            Thread({ quiet("server-heal") { ensureServer(app).heal(why) } }, "vscreen-server-heal").apply { isDaemon = true }.start()
+        }
+
         fun dropServer() = synchronized(this) { server?.onChange = null; server?.stop(); server = null }
 
         /** A request arrived while the service sleeps: wake it and wait up to 8 s for it (false: off, or it did not come). */

@@ -148,10 +148,16 @@ object VScreenAwake {
      * caller's notes when something was done or could not be done; null when it was awake. Never throws.
      */
     fun ensure(d: VScreenDisplay): String? {
-        if (com.kilon.agentvscreen.host.ThermalGuard.limited || (screenOff && !BackgroundOperation.needsAwake())) return null
+        if (com.kilon.agentvscreen.host.ThermalGuard.limited) return null
         if (d.released || d.parked) return null
         val st = stateOf(d) ?: return null
         if (st == Display.STATE_ON) return null
+        // 2.0.1-beta1: with the phone screen off and no work pending (a read between turns), the display is not woken:
+        // waking it can light the phone. The reply says the picture is from before it slept.
+        if (screenOff && !BackgroundOperation.needsAwake()) return tr(
+            "手机熄屏中，副屏也已休眠（${stateName(st)}），只看不动的命令不会唤醒它：画面是休眠前的。要操作时发 act 或 launch 会自动唤醒",
+            "The phone screen is off and the screen is asleep too (${stateName(st)}); a read-only command does not wake it, so the picture is from before it slept. act or launch wakes it when you need to operate",
+        )
         if (!canWakeAlone(d)) return tr("副屏处于休眠（状态 ${stateName(st)}），这台手机上它和主屏一起休眠，单独唤醒会点亮主屏，所以没唤醒：画面可能不动", "The screen is asleep (state ${stateName(st)}); on this phone it sleeps with the main screen and waking it alone would light the main screen, so it was not woken: the picture may not move") + keepScreenHint()
         require(d.displayId != Display.DEFAULT_DISPLAY) { "VScreenAwake must never run input on display 0" }
         if (!wakeBudget.allow(SystemClock.elapsedRealtime())) return tr("副屏唤醒过于频繁，已暂停发键", "Repeated display wake suppressed")

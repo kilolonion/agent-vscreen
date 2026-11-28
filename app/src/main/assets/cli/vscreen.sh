@@ -315,7 +315,10 @@ if [ $pr -eq 28 ]; then
   case "$URL" in
     http://127.0.0.1:*|http://localhost:*)
       if command -v am >/dev/null 2>&1; then
-        _wb=$(am broadcast -n com.kilon.agentvscreen/.host.WakeReceiver -a com.kilon.agentvscreen.WAKE 2>&1)
+        # 2.0.1-beta1: name our own Android user. Without --user, am sends to the "current" user, which an app's
+        # terminal is not allowed to do (permission denial), so the wake never arrived from inside an app.
+        _wu=$(id -u 2>/dev/null); case "$_wu" in ''|*[!0-9]*) _wu=0 ;; esac; _wu=$((_wu / 100000))
+        _wb=$(am broadcast --user "$_wu" -n com.kilon.agentvscreen/.host.WakeReceiver -a com.kilon.agentvscreen.WAKE 2>&1)
         case "$_wb" in *'data="blocked"'*)
           echo "vscreen: NOT_READY «用户关闭了 Agent-VScreen，叫不醒它。这是用户的选择，不是故障，不用修：请用户在 App 右上角的电源键里选“常驻”或“按需”。|The user turned Agent-VScreen off, so it cannot be woken. That is their choice, not a fault, and needs no repair: ask them to choose Always on or On demand with the power button at the top of the app.»" >&2
           exit 3 ;;

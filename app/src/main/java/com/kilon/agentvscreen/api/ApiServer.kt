@@ -331,6 +331,30 @@ class ApiServer(private val ctx: Context) {
         tr("端口刚刚被放开", "The port was just released")
     }
 
+    /**
+     * 2.0.1-beta1 (test: on demand, after an app update, agents met a refused connection on every port, even after the
+     * user opened the app; switching to Always on fixed it): "running" only said our own socket was open, not that the
+     * port agents connect to answered (behind the Gate it is another process). This asks the port itself.
+     */
+    internal fun reachable(): Boolean {
+        if (!running) return false
+        val p = boundPort.takeIf { it > 0 } ?: return false
+        return runCatching {
+            Socket().use { it.connect(InetSocketAddress(InetAddress.getByName("127.0.0.1"), p), 800) }
+            true
+        }.getOrDefault(false)
+    }
+
+    /** Bind again when nothing answers on the agents' port and no bind is under way. Not on the main thread. */
+    fun heal(why: String): Boolean {
+        if (com.kilon.agentvscreen.host.ThermalGuard.locked || starting) return false
+        if (reachable()) return false
+        val port = ApiConfig.port
+        AppLogger.warning(TAG, "nothing answers on ${boundPort.takeIf { it > 0 } ?: "-"} ($why): binding again on $port")
+        start(port)
+        return true
+    }
+
     fun stop(stopGate: Boolean = true) {
         rebindGen.incrementAndGet()
         starting = false
@@ -821,12 +845,10 @@ class ApiServer(private val ctx: Context) {
             val notice = AgentNews.notice(cur?.tokenId ?: "main", fresh, cur?.via ?: Abilities.Via.CLI, cur == null || cur.source == com.kilon.agentvscreen.cmd.Call.Source.LOCAL)
             // 2.0.0-beta11: the agent's permissions changed since its last reply (host/Permissions).
             val permNote = com.kilon.agentvscreen.host.Permissions.changeNotice(com.kilon.agentvscreen.cmd.Call.current())
-            val res1 = if (permNote != null) res0.copy(output = permNote + "\n" + res0.output) else res0
-            val res = if (notice != null) res1.copy(output = notice + "\n" + res1.output) else res1
-            if (notice != null) return res
             // First call after a long silence (likely a new conversation): one line pointing at the short usage.
-            if (!fresh || argv.first() == "help") return res
-            return res.copy(output = res.output.trimEnd() + tr("\n\n（Agent-VScreen：用法速查 `vscreen guide`；完整说明 `vscreen help all`。）\n", "\n\n(Agent-VScreen: quick usage `vscreen guide`; full reference `vscreen help all`.)\n"))
+            val hint = if (notice == null && fresh && argv.first() != "help")
+                tr("（Agent-VScreen：用法速查 `vscreen guide`；完整说明 `vscreen help all`。）", "(Agent-VScreen: quick usage `vscreen guide`; full reference `vscreen help all`.)") else null
+            return res0.copy(output = withNotices(res0.output, listOfNotNull(notice, permNote), hint))
         }
         finally { Turns.endCommand(session, joinedTurn) }
     }
@@ -1029,6 +1051,26 @@ class ApiServer(private val ctx: Context) {
     internal fun cliVersion() = "${BuildConfig.VERSION_NAME}-${com.kilon.agentvscreen.I18n.code}"
 
     companion object {
+        /**
+         * 2.0.1-beta1 (test: `vscreen status` after an update printed the "what changed" notice before its JSON, and
+         * the agent's parser broke): notices go before a text reply and after the hint line, but INTO a JSON reply,
+         * as `"notices": [...]`, so it stays one valid object.
+         */
+        internal fun withNotices(output: String, before: List<String>, hint: String?): String {
+            if (before.isEmpty() && hint == null) return output
+            val t = output.trim()
+            if (t.startsWith("{") && t.endsWith("}")) {
+                val o = runCatching { org.json.JSONObject(t) }.getOrNull()
+                if (o != null) {
+                    val arr = org.json.JSONArray()
+                    (before + listOfNotNull(hint)).forEach { arr.put(it) }
+                    o.put("notices", arr)
+                    return (if ('\n' in t) o.toString(2) else o.toString()) + "\n"
+                }
+            }
+            val head = before.joinToString("") { it + "\n" }
+            return if (hint == null) head + output else head + output.trimEnd() + "\n\n" + hint + "\n"
+        }
         const val MAX_CONN = HttpCore.MAX_CONN
         const val MAX_HEAD = HttpCore.MAX_HEAD
         const val MAX_BODY = HttpCore.MAX_BODY

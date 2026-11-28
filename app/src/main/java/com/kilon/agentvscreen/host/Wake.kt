@@ -478,6 +478,7 @@ object Wake {
         AppLogger.info(TAG, "woken by a local caller")
         // 1.3 beta4: a hidden service is woken too; a blocked one is not (ServiceControl.wake).
         ServiceControl.wake(ctx, "local agent")
+        HostService.healServer(ctx, "local agent")
     }
 
     /** A booked window is open now (the service should stay awake for it). */

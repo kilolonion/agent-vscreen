@@ -80,6 +80,8 @@ class MainActivity : ComponentActivity(), AppHost {
         // In front now, so a foreground service may start: repair a start the system refused in the background,
         // and retry a port that was taken.
         if (Prefs.serviceOn(this)) HostService.start(this)
+        // 2.0.1-beta1: on demand too: opening the app is how the user is told to fix "not running", so it must.
+        HostService.healServer(this, "app opened")
         com.kilon.agentvscreen.host.Updates.checkDaily(this)
         Overlay.refresh()
         // Shizuku's (or root's) answer can change while we are away: read it again.

@@ -312,22 +312,32 @@ class VScreenDisplayService : Binder {
 
         fun list(): List<String> = synchronized(muted) { muted.keys.toList() }
 
-        /** Shell-free full PLAY_AUDIO scan across all visible users/packages, outputting [PlayAudio.parseScan] format. */
+        /**
+         * Shell-free full PLAY_AUDIO scan across all visible users/packages, outputting [PlayAudio.parseScan] format.
+         * 2.0.1-beta1 (test: `sound list` and `fix` took about 55 s and clients timed out): one `cmd appops get` per
+         * package, a few hundred processes, ran one after another. They are independent reads, so they run
+         * [SCAN_WORKERS] at a time, in the same order in the output.
+         */
         fun scanAll(): String {
             val users = PlayAudio.parseUsers(runCatching { sh("pm", "list", "users") }.getOrDefault(""))
-            val sb = StringBuilder()
+            val jobs = ArrayList<Triple<Int, String, Int?>>()
             for (u in users) {
                 val uStr = u.toString()
                 val rawPkgs = runCatching { sh("pm", "list", "packages", "-U", "--user", uStr) }
                     .getOrNull()?.takeIf { it.contains("package:") }
                     ?: runCatching { sh("pm", "list", "packages", "--user", uStr) }.getOrDefault("")
-                for ((pkg, uid) in PlayAudio.parsePackages(rawPkgs)) {
-                    sb.append("@@ ").append(u).append(' ').append(pkg)
-                    if (uid != null) sb.append(' ').append(uid)
-                    sb.append('\n')
-                    val out = runCatching { sh(*PlayAudio.readArgv(u, pkg).toTypedArray()) }.getOrDefault("")
-                    sb.append(out).append('\n')
-                }
+                for ((pkg, uid) in PlayAudio.parsePackages(rawPkgs)) jobs += Triple(u, pkg, uid)
+            }
+            val pool = java.util.concurrent.Executors.newFixedThreadPool(SCAN_WORKERS)
+            val outs = try {
+                jobs.map { (u, pkg, _) -> pool.submit<String> { runCatching { sh(*PlayAudio.readArgv(u, pkg).toTypedArray()) }.getOrDefault("") } }
+                    .map { f -> runCatching { f.get(10, java.util.concurrent.TimeUnit.SECONDS) }.getOrDefault("") }
+            } finally { pool.shutdownNow() }
+            val sb = StringBuilder()
+            jobs.forEachIndexed { i, (u, pkg, uid) ->
+                sb.append("@@ ").append(u).append(' ').append(pkg)
+                if (uid != null) sb.append(' ').append(uid)
+                sb.append('\n').append(outs[i]).append('\n')
             }
             return sb.toString()
         }
@@ -1327,6 +1337,8 @@ class VScreenDisplayService : Binder {
     }
 
     companion object {
+        /** Parallel `cmd appops get` reads in a full sound scan ([Sound.scanAll]). */
+        private const val SCAN_WORKERS = 8 // private: public Int constants here are binder call codes (V142Beta6Test)
         internal fun attributionPackageForUid(uid: Int): String? = if (uid == 0) null else SHELL_PKG
         const val DESCRIPTOR = "com.kilon.agentvscreen.core.VScreenDisplayService"
         const val CREATE = FIRST_CALL_TRANSACTION

@@ -184,6 +184,11 @@ class V201IssuesTest {
             listOf("task", "recap"),
             listOf("sound"),
             listOf("sound", "list"),
+            listOf("look"),
+            listOf("look", "0,0,100,100"),
+            listOf("zoom", "0,0,100,100"),
+            listOf("frames"),
+            listOf("spots"),
             listOf("keep"),
             listOf("schedule"),
             listOf("guide"),
@@ -202,10 +207,6 @@ class V201IssuesTest {
             listOf("launch", "com.android.settings"),
             listOf("act"),
             listOf("act", "tap 设置"),
-            listOf("look"),
-            listOf("zoom", "0,0,100,100"),
-            listOf("frames"),
-            listOf("spots"),
             listOf("collect", "--pages", "2"),
             listOf("tasks"),
             listOf("handoff", "out"),
@@ -445,5 +446,21 @@ class V201IssuesTest {
             InputReach.dumpsysRunner = { null }
             VScreenStore.setPhoneScreenMode(VScreenStore.PhoneScreenMode.ALLOW_SLEEP)
         }
+    }
+
+    @Test
+    fun noticesGoIntoJsonRepliesAndBeforeTextReplies() {
+        val json = "{\"version\":\"2.0.1-beta1\",\"ready\":true}\n"
+        val out = com.kilon.agentvscreen.api.ApiServer.withNotices(json, listOf("NEWS"), "HINT")
+        val o = org.json.JSONObject(out.trim())
+        assertEquals("2.0.1-beta1", o.getString("version"))
+        assertTrue(o.getBoolean("ready"))
+        assertEquals("NEWS", o.getJSONArray("notices").getString(0))
+        assertEquals("HINT", o.getJSONArray("notices").getString(1))
+
+        val text = com.kilon.agentvscreen.api.ApiServer.withNotices("OK\n", listOf("NEWS", "PERM"), null)
+        assertEquals("NEWS\nPERM\nOK\n", text)
+        assertEquals("OK\n\nHINT\n", com.kilon.agentvscreen.api.ApiServer.withNotices("OK\n", emptyList(), "HINT"))
+        assertEquals("{not json", com.kilon.agentvscreen.api.ApiServer.withNotices("{not json", emptyList(), null))
     }
 }
