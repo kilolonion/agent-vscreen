@@ -322,11 +322,13 @@ internal object CommandSpec {
     val TRANSPORT_WORDS = setOf("guide", "remembered", "help")
 
     /**
-     * Commands that inspect state without waking or touching the background display.
-     * When a session has no active turn, these do not start a new turn (no screen wake lock, no idle-release reset);
+     * Commands that only read: state, or the picture already on the background display.
+     * When a session has no active turn, these do not start a new turn (no screen wake lock, no idle-release reset,
+     * no waking a sleeping display or phone: the reply says when the picture is from before it slept);
      * when a turn is already active, they extend its quiet window as usual.
-     * Screen-touching commands (`launch`, `act`, `look`, `frames`, `zoom`, `spots`, `collect`, `tasks`, `handoff`, etc.)
-     * always return false.
+     * 2.0.1-beta1 (test: under "wake when needed", one `look` after `done` lit the phone and held it on): reading the
+     * screen (`look`, `zoom`, `frames`, `spots`) is passive too. Commands that act or move things (`launch`, `act`,
+     * `collect`, `tasks`, `handoff`, etc.) always return false.
      */
     internal fun isPassiveReadOnly(argv: List<String>): Boolean {
         val sub = argv.firstOrNull()?.lowercase() ?: return true
@@ -334,6 +336,7 @@ internal object CommandSpec {
         if (argv.drop(1).any { it == "--help" || it == "-h" }) return true
         return when (sub) {
             "status", "diag", "apps", "permissions", "events" -> true
+            "look", "zoom", "frames", "spots" -> true
             "task" -> argv.drop(1).firstOrNull { !it.startsWith("-") }?.lowercase() != "cancel"
             "sound" -> {
                 val a1 = argv.drop(1).firstOrNull { !it.startsWith("-") }?.lowercase()
