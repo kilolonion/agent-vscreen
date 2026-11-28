@@ -1,0 +1,23 @@
+# Texts under ui/ and host/ that only an agent reads (agent replies are always English), so they need no Japanese.
+# One text per line, as build_ja.py --missing prints it.
+"Confirm each time" = runs after the user confirms; "not allowed" = ask first with vscreen elevate, except where marked "cannot be asked for": only the user can change those. The phone checks every command against this.
+Background loop stopped or tripped ({0}); some background features may be inactive; inspect diag and restart the service
+The user denied confirmation on the phone ({0}). This step was not done. Don't try another way; tell the user where you stopped
+The user denied it on the phone: {0}. Not done. Don't try another way; tell the user where you stopped
+The user must confirm this in Agent-VScreen on the phone ({0}). A notification was sent. Once confirmed, resend the exact same command. This step was not done.
+The user must confirm this in Agent-VScreen's strong confirmation page: {0} ({1}). A notification was sent; no answer within {2} s, so this step was not done. Ask the user to tap the notification to open strong confirmation; once confirmed (within {3} minutes), send this command again as it is
+cannot run as is; ask first with vscreen elevate (a command that meets it brings up the same request)
+every needs an interval, e.g. every 2h
+fix background_network can add the exemptions via {0} (changes system settings; ask the user first).
+from must be before to
+not connected 20 s after a restart ({0}): if another VPN is on, ask the user to follow the guide on the Connect page
+runs after the user confirms on the phone each time (CONFIRM_PENDING / NEEDS_CONFIRM while waiting)
+the interval must be between {0} minutes and 24 hours
+the system won't start a foreground service from the background: ask the user to open Agent-VScreen once
+the user must sign in to Tailscale again: open Agent-VScreen › Connect
+there is no day {0}
+this uses the system's Tailscale: ask the user to open the Tailscale app and connect
+unknown word {0} (only from / to)
+vscreen elevate <class|level> --why "reason" (optionally --for round|today|always)
+write the interval as 30m or 2h (got {0})
+write times as HH:MM (got {0})

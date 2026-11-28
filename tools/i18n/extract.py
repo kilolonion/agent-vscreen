@@ -25,6 +25,16 @@ def lit(s,i):
 def ws(s,i):
     while s[i] in ' \n\t\r': i+=1
     return i
+def cat(s,i):
+    # one literal, or several joined with + (the long help texts): their source text glued together
+    parts=[]
+    while True:
+        if s.startswith('"""',i): raise ValueError('raw string')
+        t,i=lit(s,i); parts.append(t); i=ws(s,i)
+        if s[i]=='+':
+            j=ws(s,i+1)
+            if s[j]=='"': i=j; continue
+        return ''.join(parts), i
 res={}
 for root in sys.argv[1:]:
   for dp,_,fs in os.walk(root):
@@ -35,11 +45,12 @@ for root in sys.argv[1:]:
         i=ws(s,m.end())
         if s[i]!='"': continue
         try:
-          zh,i=lit(s,i); i=ws(s,i)
+          zh,i=cat(s,i)
           if s[i]!=',': continue
           i=ws(s,i+1)
           if s[i]!='"': continue
-          en,i=lit(s,i); i=ws(s,i)
+          en,i=cat(s,i)
+          if s[i]==',': i=ws(s,i+1)
           if s[i]!=')': continue
         except Exception as e: continue
         res.setdefault(en,{"zh":zh,"files":set()})["files"].add(os.path.relpath(p,root))

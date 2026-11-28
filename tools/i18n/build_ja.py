@@ -69,17 +69,55 @@ def missing(pairs):
     print(f'{len(left)} of {len(texts)} texts have no Japanese', file=sys.stderr)
 
 
+def texts(*dirs):
+    base = os.path.join(ROOT, 'app', 'src', 'main', 'java', 'com', 'kilon', 'agentvscreen')
+    import subprocess
+    raw = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'extract.py')] +
+                         [os.path.join(base, d) for d in dirs], capture_output=True, text=True, check=True).stdout
+    return {to_template(k) for k in json.loads(raw)}
+
+
+def check(pairs):
+    """CI gate: every user-facing text has Japanese (or is listed in ja-skip.txt as agent-only), and no entry is
+    left keyed on an English text the code no longer has (it would silently stop matching after a copy edit)."""
+    skip_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ja-skip.txt')
+    skip = {l.rstrip('\n').replace('⏎', '\n') for l in open(skip_file, encoding='utf-8') if l.strip() and not l.startswith('#')}
+    shown = texts('ui', 'host')
+    left = sorted(t for t in shown if t not in pairs and t not in skip and re.search('[A-Za-z]{2}', t))
+    live = texts('.')
+    stale = sorted(k for k in pairs if k not in live)
+    dead_skip = sorted(t for t in skip if t not in shown)
+    for t in left: print('no Japanese: ' + t.replace('\n', '⏎'))
+    for t in stale: print('stale ja.tsv entry (its English text is gone): ' + t.replace('\n', '⏎'))
+    for t in dead_skip: print('stale ja-skip.txt line: ' + t.replace('\n', '⏎'))
+    if left or stale or dead_skip:
+        sys.exit('ja.tsv is out of step with the code: after changing an English text, move its Japanese to the new text '
+                 '(or add an agent-only text to ja-skip.txt), then run python3 tools/i18n/build_ja.py')
+    # the generated table must match the TSV
+    want = build(pairs)
+    have = open(OUT, encoding='utf-8').read()
+    if want != have:
+        sys.exit('app/src/main/assets/i18n/ja.json is not rebuilt: run python3 tools/i18n/build_ja.py')
+    print(f'OK: {len(shown)} user-facing texts, {len(skip)} agent-only, Japanese complete')
+
+
+def build(pairs):
+    exact = {en: ja for en, ja in pairs.items() if not HOLE.search(en)}
+    tpl = [[en, ja] for en, ja in sorted(pairs.items()) if HOLE.search(en)]
+    return json.dumps({'exact': dict(sorted(exact.items())), 'tpl': tpl}, ensure_ascii=False, indent=0) + '\n'
+
+
 def main():
     pairs = load()
     if '--missing' in sys.argv:
         missing(pairs); return
-    exact = {en: ja for en, ja in pairs.items() if not HOLE.search(en)}
-    tpl = [[en, ja] for en, ja in sorted(pairs.items()) if HOLE.search(en)]
+    if '--check' in sys.argv:
+        check(pairs); return
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, 'w', encoding='utf-8') as f:
-        json.dump({'exact': dict(sorted(exact.items())), 'tpl': tpl}, f, ensure_ascii=False, indent=0)
-        f.write('\n')
-    print(f'{len(exact)} exact, {len(tpl)} templates -> {os.path.relpath(OUT, ROOT)}')
+        f.write(build(pairs))
+    n = sum(1 for en in pairs if HOLE.search(en))
+    print(f'{len(pairs) - n} exact, {n} templates -> {os.path.relpath(OUT, ROOT)}')
 
 
 if __name__ == '__main__':

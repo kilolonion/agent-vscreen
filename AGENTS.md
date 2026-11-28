@@ -114,6 +114,7 @@ Entry 的语义必须来自模型对真实证据的理解。不得仅依据路�
    - `AgentGuide.guide()` 必须满足 `<= 1500` tokens；`AgentGuide.memoryFor()` 必须满足 `< 1880` 字符（中文）/ `< 4170` 字符（英文）；严禁针对特定第三方应用编写硬编码特判。
 3. **双语与正则红线**：
    - 所有面向用户与 agent 的文案一律使用 `tr("中", "En")`，英文输出严禁出现全角标点（`V200Beta16Test` 守门）。
+   - 日语按英文原文查 `tools/i18n/ja.tsv`：新增或修改 `ui/`、`host/` 里的英文文案时，同步把日语移到新英文下（只给 agent 看的写进 `ja-skip.txt`），再跑 `python3 tools/i18n/build_ja.py`；CI 用 `--check` 守门。
    - `cmd/`、`core/`、`api/` 中的 `Regex("...")` 严禁裸 `{` 或 `}`（Android ICU 会导致类初始化崩溃，`VScreenRegexLintTest` 守门）。
 4. **线程与错误处理红线**：
    - 后台常驻循环必须在内层做好 `try/catch`；禁止在 `while (true)` 循环内把 `Thread.sleep` 包进 `quiet()` 掩盖中断或忙等；禁止在 `Dispatchers.Main` 上运行无异常捕获的无限循环。

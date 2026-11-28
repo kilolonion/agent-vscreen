@@ -1,7 +1,6 @@
 # English text (as the app renders it, {0} {1} for inserted values) <TAB> Japanese. Newlines as ⏎.
 ⏎Agents can no longer replay them with use.	⏎エージェントは use で再実行できなくなります。
 ⏎Tap to open Agent-VScreen.	⏎タップで Agent-VScreen を開きます。
-  Using the screen now	  画面を使用中
  (as shell)	（shell として）
  (cannot be asked for)	（要求できません）
  (dropped {0}× in 10 min)	（10分間に{0}回切断）
@@ -47,7 +46,6 @@
 1 · Address (you add it to the client)	1 · アドレス（クライアントに追加します）
 30 days	30日
 7 days	7日
-8-character pairing code (e.g. ABCD-EFGH)	8文字のペアリングコード（例：ABCD-EFGH）
 ; the newest release on GitHub is {0}	；GitHub の最新リリースは{0}です
 ; {0} could not be restored ({1})	；{0}を復元できませんでした（{1}）
 A VPN on this phone may affect the built-in Tailscale connection. If it keeps failing, try one of these options:	この端末の VPN が内蔵 Tailscale の接続に影響することがあります。失敗が続く場合は次のいずれかを試してください：
@@ -124,7 +122,6 @@ At most {0} schedules on the phone across all agents: remove one with schedule o
 At most {0} schedules: remove one with schedule off first	予約は最大{0}件です。先に schedule off で1件削除してください
 At the top of the home page	ホームの上部
 At times	時々
-Auth key (optional, instead of the web login)	認証キー（任意、Web ログインの代わり）
 Authorized clients are not affected	承認済みのクライアントには影響しません
 Authorized public clients · {0}	承認済みの公開クライアント · {0}
 Authtoken	Authtoken
@@ -223,7 +220,6 @@ Connecting to ngrok is blocked; retrying automatically. If it stays down, check 
 Connecting to {0}…	{0}に接続中…
 Connection methods	接続方法
 Control	コントロール
-Control server (blank = Tailscale)	コントロールサーバー（空欄 = Tailscale）
 Controls main-screen wake and background-screen input when the phone screen turns off:⏎⏎• Allow sleep (default): the main screen sleeps normally and is never woken. When the system blocks touch on the background screen while off, element taps, scrolls, and typing switch to accessibility automatically; coordinate taps and gestures refuse with guidance.⏎• Keep on during tasks: prevents the main screen from timing out (may dim) only while an agent turn is active, and releases immediately when the turn ends, fails, or stops. Pressing the power button still turns the screen off without waking it back up.⏎• Wake when needed: includes Keep on during tasks; additionally, when the screen is off, touch is blocked, and a gesture or coordinate action cannot use accessibility, it briefly wakes the main screen to the lock screen (never unlocking) under rate and thermal limits, then releases when the turn ends.⏎⏎Note: while kept on, the phone does not auto-lock and uses more battery.	端末の画面がオフになったときの、メイン画面の点灯とバックグラウンド画面の入力を制御します：⏎⏎• スリープを許可（既定）：メイン画面は通常どおりスリープし、点灯させません。画面オフ中にシステムがバックグラウンド画面のタッチをブロックした場合、要素のタップ、スクロール、入力は自動でユーザー補助に切り替わり、座標タップやジェスチャーは案内付きで拒否します。⏎• タスク中は点灯を維持：エージェントのターン中だけメイン画面のタイムアウトを防ぎ（暗くなることはあります）、ターンが終了・失敗・停止するとすぐに解除します。電源ボタンを押せば画面はオフになり、再点灯はしません。⏎• 必要なときに点灯：「タスク中は点灯を維持」を含みます。さらに画面オフでタッチがブロックされ、ジェスチャーや座標操作がユーザー補助を使えない場合、頻度と温度の制限内でメイン画面をロック画面まで短時間点灯し（ロック解除はしません）、ターン終了で解除します。⏎⏎注意：点灯を維持している間は自動ロックされず、バッテリーの消費が増えます。
 Cooling	冷却中
 Copied: {0}	コピーしました：{0}
@@ -422,7 +418,6 @@ Mute which app	ミュートするアプリ
 Muting…	ミュート中…
 Name	名前
 Name is self-reported, not verified	名前は自己申告で、検証されていません
-Name suffix of a self-hosted control server (optional, e.g. tail.example.com)	自前のコントロールサーバーの名前の末尾（任意、例：tail.example.com）
 Needs you	対応が必要
 Never connects to Cloudflare	Cloudflare には一切接続しません
 Never connects to ngrok	ngrok には一切接続しません
@@ -496,7 +491,6 @@ Only allow new pairings during a manual window	手動で受付を開いたとき
 Only arm64 phones are supported.	arm64の端末だけに対応しています。
 Only for agents you trust	信頼できるエージェントにだけ
 Only from your own Tailscale network	自分の Tailscale ネットワークからのみ
-Only these devices (names, logins or 100.x addresses, comma separated; empty = every device)	これらの端末のみ（端末名、ログイン名、100.x アドレスをカンマ区切り。空欄 = すべての端末）
 Only you can turn accessibility on, in system settings.	ユーザー補助はシステム設定で本人だけがオンにできます。
 Open	開く
 Open Access controls	Access controls を開く
@@ -1327,3 +1321,34 @@ Only these devices	これらの端末のみ
 Optional, e.g. tail.example.com	任意（例：tail.example.com）
 Self-hosted control server suffix	自前コントロールサーバーのドメインサフィックス
 Using the screen now	バックグラウンド画面を使用中
+1. Once enabled, your phone will have a public address reachable by anyone. This address appears in public certificate logs and may be scanned. Nobody can connect without your confirmation on the phone.	1. オンにすると、端末に誰でもアクセスできる公開アドレスが付きます。このアドレスは公開の証明書ログに載り、スキャンされる可能性があります。端末で確認しない限り、誰も接続できません。
+2. Authorized cloud clients store access credentials. If that service is compromised, an attacker could operate your phone while those credentials remain valid. Turn off or revoke when not in use.	2. 承認したクラウドクライアントはアクセス資格情報を保存します。そのサービスが侵害されると、資格情報が有効な間、攻撃者が端末を操作できる可能性があります。使わないときはオフにするか取り消してください。
+3. Text on the screen may contain malicious instructions written for the agent (such as content in web pages or messages). Payments, sending messages, installs, and similar actions will still require your confirmation on the phone.	3. 画面上の文字には、エージェント向けに書かれた悪意のある指示（Web ページやメッセージ内の内容など）が含まれる場合があります。支払い、メッセージ送信、インストールなどは引き続き端末での確認が必要です。
+4. Pairing defaults to "Easy" (payments, sending and similar still ask) and can be changed before approving; "system" is never exposed to the public internet.	4. ペアリングの既定は「かんたん」（支払いや送信などは確認あり）で、承認前に変更できます。「システム」は公開インターネットには公開されません。
+5. With Cloudflare, HTTPS is decrypted on Cloudflare's servers and forwarded to the phone, so Cloudflare can technically see requests; the tunnel token stays on this phone, refresh it in Cloudflare if it leaks.	5. Cloudflare では HTTPS が Cloudflare のサーバーで復号されてから端末に転送されるため、Cloudflare は技術的にリクエストを見ることができます。トンネルトークンはこの端末にだけ保存されます。漏えいした場合は Cloudflare で更新してください。
+5. With ngrok, HTTPS is decrypted on ngrok's servers and forwarded to the phone, so ngrok can technically see requests; the authtoken stays on this phone, reset it in the ngrok dashboard if it leaks.	5. ngrok では HTTPS が ngrok のサーバーで復号されてから端末に転送されるため、ngrok は技術的にリクエストを見ることができます。authtoken はこの端末にだけ保存されます。漏えいした場合は ngrok のダッシュボードでリセットしてください。
+Allow port 443 in your Tailscale Admin ACL / Funnel policy, then retry.	Tailscale 管理画面の ACL / Funnel ポリシーでポート 443 を許可してから再試行してください。
+Battery {0}, thermal status {1}. Auto-stop is off, so background work is not stopped (throttling and Android system protection remain active).	バッテリー {0}、システムの熱状態 {1}。自動停止はオフのため、バックグラウンド作業は停止しません（負荷の調整と Android の保護は有効です）。
+Confirmation can only be given by real touch on the main screen; an agent on the background screen can neither tap nor see this page:⏎• Payments, connecting a new agent, widening permissions, enabling public access, no confirmation for payments: fingerprint or screen-lock PIN (a 3-second hold without a screen lock);⏎• Other actions (irreversible, sensitive, apps set to confirm every time…): one tap on Allow, optionally for the same kind of action this turn or today;⏎• Granted permissions can be revoked any time under Connect › the agent.	確認はメイン画面での実際のタッチでのみ行えます。バックグラウンド画面のエージェントはこのページをタップすることも見ることもできません：⏎• 支払い、新しいエージェントの接続、権限の拡大、公開アクセスのオン、支払いの確認省略：指紋または画面ロックの PIN（画面ロックがない場合は3秒長押し）⏎• その他の操作（元に戻せない操作、機密性の高い操作、毎回確認に設定したアプリなど）：「許可」を1回タップ。このターン内または今日中は同じ種類の操作を確認なしにできます⏎• 付与した許可は 接続 › エージェント でいつでも取り消せます。
+Cooling requirements met; resume manually in the Home power menu.	冷却条件を満たしました。ホームの電源メニューから手動で再開できます。
+Enable HTTPS Certificates under Tailscale Admin › DNS, then turn public access off and on again.	Tailscale 管理画面 › DNS で HTTPS Certificates を有効にしてから、公開アクセスをオフにして再度オンにしてください。
+Enabling public access and approving cloud clients require biometric or PIN lock confirmation.	公開アクセスのオンとクラウドクライアントの承認には、生体認証または PIN による確認が必要です。
+Finds tappable items without words (icons, ×, switches) on this phone; the agent's element list gains "(no text icon)" entries it can tap by #number.	この端末で文字のないタップ可能な要素（アイコン、×、スイッチ）を見つけます。エージェントの要素リストに「（文字なしアイコン）」が追加され、#番号でタップできます。
+From {0} (verified)	{0} から（確認済み）
+Grant the "funnel" node attribute in Tailscale Admin › Access Controls for this device, then retry.	Tailscale 管理画面 › Access Controls で、この端末に "funnel" ノード属性を付与してから再試行してください。
+HTTPS certificate is ready. Cloud MCP clients can connect below. Auto-closes after 24 h with no authenticated requests and resets to off after app updates.	HTTPS 証明書の準備ができました。下からクラウド MCP クライアントを接続できます。認証済みのリクエストが24時間ないと自動で閉じ、アプリの更新後はオフに戻ります。
+Not ready to resume: {0} (then hold for {1} s before resuming in the Home power menu).	まだ再開できません：{0}（その後{1}秒保ってから、ホームの電源メニューで再開してください）。
+Overheat protection ({0}): battery {1}, thermal status {2}. 	過熱保護（{0}）：バッテリー {1}、システムの熱状態 {2}。
+Pairing code {0} · {1} ({2}). Tap to verify and confirm.	ペアリングコード {0} · {1}（{2}）。タップして確認・承認します。
+Select Built-in Tailscale under Other devices (Tailscale) and sign in first.	先に「他の端末（Tailscale）」で内蔵 Tailscale を選んでサインインしてください。
+Self-hosted control server (Headscale) does not support Funnel; switch back to official Tailscale.	自前のコントロールサーバー（Headscale）は Funnel に対応していません。公式 Tailscale に戻してください。
+Still in danger zone and cannot resume yet; wait for battery below {0} and thermal status below {1}.	まだ危険域にあり再開できません。バッテリーが {0} 未満、熱状態が {1} 未満になるまでお待ちください。
+Switch to the JSON editor and add this at the top level; if nodeAttrs already exists, add only the middle entry.	JSON エディターに切り替えて、最上位にこれを追加してください。nodeAttrs がすでにある場合は、中央の項目だけを追加します。
+Temperature and status are safe; wait about {0} s more before resuming in the Home power menu.	温度と状態は安全です。あと約{0}秒待ってから、ホームの電源メニューで再開してください。
+Thermal protection normal: battery {0}, thermal status {1}.	過熱保護は正常です：バッテリー {0}、システムの熱状態 {1}。
+Token "{0}" · {1} · {2}. Tap to open strong confirmation.	トークン「{0}」 · {1} · {2}。タップして強い確認を開きます。
+Turning off public access does not revoke authorized clients; revoke them below if needed.	公開アクセスをオフにしても承認済みクライアントは取り消されません。必要なら下で取り消してください。
+Waiting for Funnel startup and HTTPS certificate.	Funnel の起動と HTTPS 証明書を待っています。
+When turned off, long-running tasks may overheat the phone: excessive heat, thermal throttling and lag, accelerated battery wear, and in severe cases forced shutdown by the system. Only Android's built-in throttling and thermal shutdown will remain.	オフにすると、長時間のタスクで端末が過熱するおそれがあります：過度の発熱、熱による性能低下とカクつき、バッテリーの劣化の加速、深刻な場合はシステムによる強制シャットダウン。残るのは Android 標準の性能制限と過熱シャットダウンだけです。
+{0} waiting for pairing confirmation. Tap to review.	{0} がペアリングの確認を待っています。タップして確認します。
+• How it opens: each new background screen opens as the small window in the top right corner; tap to enlarge. While the same screen is up, your size and position are kept.⏎⏎• Show floating window: displays the live background screen above other apps.⏎⏎• Show buttons on mini window: on by default; the compact corner window also shows title, fullscreen, close and Stop agent buttons.⏎⏎• Tap mini window to expand: on by default; turn off so tapping the mini window stays compact instead of expanding to center.	• 開き方：新しいバックグラウンド画面ができるたびに、右上のミニウィンドウで開きます。タップで拡大します。同じ画面の間は、調整したサイズと位置が保たれます。⏎⏎• フローティングウィンドウを表示：バックグラウンド画面のライブ映像を他のアプリの上に表示します。⏎⏎• ミニウィンドウにボタンを表示：既定でオン。右上のミニウィンドウにもタイトル、全画面、閉じる、エージェントを停止の各ボタンを表示します。⏎⏎• ミニウィンドウをタップで拡大：既定でオン。オフにすると、タップしても中央に拡大せず、ミニウィンドウのままです。

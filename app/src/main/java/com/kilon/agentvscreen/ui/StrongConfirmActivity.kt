@@ -654,10 +654,10 @@ class StrongConfirmActivity : ComponentActivity() {
                                 "• 支付、接入新 agent、放宽权限、开启公网接入、临时免确认支付：需指纹或锁屏密码（未设锁屏时长按 3 秒）；\n" +
                                 "• 其他操作（不可撤销操作、敏感操作、“每次确认”的应用等）：单击“允许”，可选择本轮任务内或今天内同类操作不再确认；\n" +
                                 "• 已授予的许可可在 接入 › agent 详情 中随时撤销。",
-                            "Only your finger on the phone's main screen can confirm; an agent on its own screen can neither tap nor see this page:\n" +
-                                "• Paying, a new agent, a higher level, public access, payments for a while: fingerprint or screen-lock PIN (a 3-second hold without a screen lock);\n" +
-                                "• Everything else (delete, uninstall, force-stop, an app you set to ask…): one tap on Allow, and you can let the same kind of step through for this run or today;\n" +
-                                "• You can take any allow back under Connect › the agent.",
+                            "Confirmation can only be given by real touch on the main screen; an agent on the background screen can neither tap nor see this page:\n" +
+                                "• Payments, connecting a new agent, widening permissions, enabling public access, no confirmation for payments: fingerprint or screen-lock PIN (a 3-second hold without a screen lock);\n" +
+                                "• Other actions (irreversible, sensitive, apps set to confirm every time…): one tap on Allow, optionally for the same kind of action this turn or today;\n" +
+                                "• Granted permissions can be revoked any time under Connect › the agent.",
                         ),
                         fontSize = 14.sp,
                         lineHeight = 21.sp,
